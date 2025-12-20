@@ -65,7 +65,7 @@ Feature: Inline Type Annotations
     Given a Python file with content:
       """
       def calculate(x: int, y: int) -> int:
-          result = total * 2
+          result: int = total * 2
           total: int = x + y
           return result
       """
@@ -92,7 +92,7 @@ Feature: Inline Type Annotations
           total = x + y
           return total
       """
-    When ximinez checks the file
+    When ximinez checks the file with --full flag
     Then 3 violations are reported
-    And the output contains "Our TWO chief violations are:"
-    And the output contains "...THREE!"
+    And the output contains "Our TWO chief weapons are:"
+    And the output contains "Our THREE chief weapons are:"

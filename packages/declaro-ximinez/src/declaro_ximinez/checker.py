@@ -247,6 +247,17 @@ def check_function(
         check_undeclared_locals(module, wrapper, scope, filename)
     )
 
+    # Check for duplicate declarations (inline style)
+    if not scope["has_types_block"]:
+        violations.extend(
+            check_duplicate_declarations(module, wrapper, scope, filename)
+        )
+
+        # Check for usage before declaration
+        violations.extend(
+            check_declaration_order(module, wrapper, scope, filename)
+        )
+
     # Track symbol usage (for unused declaration checking)
     if scope["has_types_block"]:
         track_symbol_usage(module, wrapper, scope)
@@ -387,6 +398,155 @@ def check_undeclared_locals(
                 "message": message,
                 "code": "XI003",
             })
+
+    return violations
+
+
+def check_duplicate_declarations(
+    module: cst.Module,
+    wrapper: MetadataWrapper,
+    scope: FunctionScope,
+    filename: str,
+) -> list[Violation]:
+    """Check for duplicate type declarations in inline style.
+
+    Args:
+        module: The parsed CST module.
+        wrapper: Metadata wrapper for position info.
+        scope: The function scope to check.
+        filename: Filename to use in error messages.
+
+    Returns:
+        List of violations for duplicate declarations.
+    """
+    violations: list[Violation] = []
+
+    class DuplicateChecker(cst.CSTVisitor):
+        def __init__(self) -> None:
+            self.in_target_func = False
+            self.declared_names: dict[str, tuple[int, int]] = {}  # name -> first (line, col)
+
+        def visit_FunctionDef(self, node: cst.FunctionDef) -> bool:
+            if node.name.value == scope["name"]:
+                self.in_target_func = True
+                return True
+            elif self.in_target_func:
+                return False
+            return True
+
+        def leave_FunctionDef(self, node: cst.FunctionDef) -> None:
+            if node.name.value == scope["name"]:
+                self.in_target_func = False
+
+        def visit_AnnAssign(self, node: cst.AnnAssign) -> bool:
+            if not self.in_target_func:
+                return True
+
+            if isinstance(node.target, cst.Name):
+                name = node.target.value
+                pos = get_position(node, wrapper)
+
+                if name in self.declared_names:
+                    # Duplicate declaration
+                    violations.append({
+                        "file": filename,
+                        "line": pos["line"],
+                        "col": pos["col"],
+                        "message": f"'{name}' already declared",
+                        "code": "XI008",
+                    })
+                else:
+                    self.declared_names[name] = (pos["line"], pos["col"])
+
+            return True
+
+    wrapper.visit(DuplicateChecker())
+    return violations
+
+
+def check_declaration_order(
+    module: cst.Module,
+    wrapper: MetadataWrapper,
+    scope: FunctionScope,
+    filename: str,
+) -> list[Violation]:
+    """Check for variables used before their declaration in inline style.
+
+    Args:
+        module: The parsed CST module.
+        wrapper: Metadata wrapper for position info.
+        scope: The function scope to check.
+        filename: Filename to use in error messages.
+
+    Returns:
+        List of violations for usage before declaration.
+    """
+    violations: list[Violation] = []
+
+    class OrderChecker(cst.CSTVisitor):
+        def __init__(self) -> None:
+            self.in_target_func = False
+            self.declaration_lines: dict[str, int] = {}  # name -> declaration line
+            self.usage_before_decl: list[tuple[str, int, int]] = []  # (name, line, col)
+
+        def visit_FunctionDef(self, node: cst.FunctionDef) -> bool:
+            if node.name.value == scope["name"]:
+                self.in_target_func = True
+                return True
+            elif self.in_target_func:
+                return False
+            return True
+
+        def leave_FunctionDef(self, node: cst.FunctionDef) -> None:
+            if node.name.value == scope["name"]:
+                self.in_target_func = False
+
+        def visit_AnnAssign(self, node: cst.AnnAssign) -> bool:
+            if not self.in_target_func:
+                return True
+
+            if isinstance(node.target, cst.Name):
+                name = node.target.value
+                pos = get_position(node, wrapper)
+                if name not in self.declaration_lines:
+                    self.declaration_lines[name] = pos["line"]
+
+            return True
+
+        def visit_Name(self, node: cst.Name) -> bool:
+            if not self.in_target_func:
+                return True
+
+            name = node.value
+            # Skip if it's a parameter
+            if name in scope["params"]:
+                return True
+
+            pos = get_position(node, wrapper)
+
+            # If we haven't seen the declaration yet, this might be usage before declaration
+            # We'll check after the full pass
+            if name not in self.declaration_lines:
+                # Store for later checking
+                self.usage_before_decl.append((name, pos["line"], pos["col"]))
+
+            return True
+
+    checker = OrderChecker()
+    wrapper.visit(checker)
+
+    # Now check which usages were before declarations
+    for name, use_line, use_col in checker.usage_before_decl:
+        if name in checker.declaration_lines:
+            decl_line = checker.declaration_lines[name]
+            if use_line < decl_line:
+                violations.append({
+                    "file": filename,
+                    "line": use_line,
+                    "col": use_col,
+                    "message": f"'{name}' used before declaration",
+                    "code": "XI009",
+                })
 
     return violations
 
