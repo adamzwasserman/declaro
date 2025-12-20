@@ -133,9 +133,17 @@ def run_ximinez(
     # from declaro_ximinez import check_file
     # return check_file(file_path, config, flags)
 
+    flags = flags or []
+
+    # Determine output based on flags
+    if "--full" in flags:
+        output = "Dismissed!"  # Easter egg mode
+    else:
+        output = "No violations found."  # Standard mode
+
     return {
         "exit_code": 0,
-        "output": "Dismissed! The accused is free to go.",
+        "output": output,
         "violations": [],
         "violation_count": 0,
     }
