@@ -145,6 +145,7 @@ One declaration. Everything else follows.
 |---------|---------|
 | `declaro-persistum` | Schema-first database toolkit |
 | `declaro-ximinez` | Type enforcement with memorable errors |
+| `declaro-observe` | Event sourcing observability |
 | `declaro-api` | FastAPI integration for functional Python |
 
 ## The Spell

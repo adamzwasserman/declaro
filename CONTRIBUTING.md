@@ -85,6 +85,7 @@ Declaro is a monorepo with multiple packages:
 |---------|---------|
 | `declaro-persistum` | Schema-first database toolkit |
 | `declaro-ximinez` | Type enforcement with memorable errors |
+| `declaro-observe` | Event sourcing observability |
 | `declaro-api` | FastAPI integration for functional Python |
 | `declaro-http` | Functional HTTP client |
 
