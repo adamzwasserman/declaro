@@ -1,47 +1,43 @@
 # declaro-ximinez
 
-**Type enforcement with memorable errors.**
+**Strict type enforcement for Python.**
 
-> Nobody expects the Ximínez Inquisition!
+Part of the [Declaro](https://github.com/adamzwasserman/declaro) functional Python stack.
 
 ## Overview
 
-Ximínez is a preprocessing static type enforcer for Python that delivers uncompromising type safety with a distinctive Monty Python Spanish Inquisition flair.
-
-Its chief weapons are:
+Ximinez is a preprocessing static type enforcer for Python that provides strict type safety:
 
 1. **Mandatory explicit local typing** — every variable must be typed
-2. **Ruthless, unforgettable error messages** — Spanish Inquisition themed
-3. **Declaro integration** — validates model usage against TOML schemas
-4. **Seamless IDE compatibility** — works with mypy, Pyright, Pylance
+2. **Declaro integration** — validates model usage against TOML schemas
+3. **Seamless IDE compatibility** — works with mypy, Pyright, Pylance
 
 ## Two Typing Styles
 
 **Inline (default):**
 
 ```python
-def confess(x: int, y: str) -> float:
-    sins: int = 0
-    penance: float = 0.0
-    return penance
+def process(x: int, y: str) -> float:
+    count: int = 0
+    result: float = 0.0
+    return result
 ```
 
 **Block declaration:**
 
 ```python
-def confess(x: int, y: str) -> float:
+def process(x: int, y: str) -> float:
     types:
-        sins: int = 0
-        penance: float
-        fear: bool = True
+        count: int = 0
+        result: float
 
     # ... code ...
-    return penance
+    return result
 ```
 
 ## Declaro Integration
 
-Ximínez validates that your Python code uses models correctly according to their TOML schema definitions.
+Ximinez validates that your Python code uses models correctly according to their TOML schema definitions.
 
 **TOML Schema:**
 
@@ -59,26 +55,15 @@ name = { type = "str", nullable = true }
 **Python with violation:**
 
 ```python
-username = user["username"]  # No such field!
-```
-
-**Error output:**
-
-```text
-NOBODY expects a model violation!
-
-Our chief violation is:
-- app.py:7:16: 'User' has no field 'username' (did you mean 'name'?)
+username = user["username"]  # Error: no such field
 ```
 
 ## CLI Flags
 
 | Flag | Behaviour |
 |------|-----------|
-| (default) | Full dramatic comedy mode |
+| (default) | Standard output |
 | `--quiet` | Minimal output |
-| `--comfy-chair` | Lenient mode (warnings only) |
-| `--rack` | Strict mode |
 | `--machine` | CI-friendly plain format |
 | `--declaro-schema=PATH` | TOML schema directory |
 
@@ -105,32 +90,14 @@ repos:
       - id: ximinez
 ```
 
-## Error Messages
-
-```text
-NOBODY expects a type violation!
-
-Our chief violation is:
-- src/app.py:42:5: expected 'int', got 'str'
-- src/app.py:47:9: local variable 'count' used without type declaration
-
-...TWO! Our TWO chief violations are fear and surprise!
-```
-
-**No violations:**
-
-```text
-Dismissed! The accused is free to go.
-```
-
 ## Part of the Declaro Stack
 
 | Package | Purpose |
 |---------|---------|
 | `declaro-persistum` | Schema-first database toolkit |
-| **`declaro-ximinez`** | Type enforcement with memorable errors |
+| **`declaro-ximinez`** | Type enforcement |
+| `declaro-observe` | Event sourcing observability |
 | `declaro-api` | FastAPI integration |
-| `declaro-http` | Functional HTTP client |
 
 ---
 

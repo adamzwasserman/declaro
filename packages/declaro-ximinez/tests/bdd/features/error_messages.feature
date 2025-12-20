@@ -1,7 +1,7 @@
-Feature: Spanish Inquisition Error Messages
+Feature: Error Message Formatting
   As a Python developer
-  I want ximinez to report errors in Spanish Inquisition style
-  So that type violations are memorable and impossible to ignore
+  I want ximinez to report errors clearly
+  So that type violations are easy to understand and fix
 
   Scenario: No violations shows dismissal
     Given a Python file with content:
