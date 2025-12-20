@@ -10,14 +10,14 @@ This conversation established the vision and architecture for the Declaro functi
 
 ### 1. Monorepo Structure
 - Single repo `declaro` containing all packages
-- Packages: `declaro-persistum`, `declaro-ximenez`, `declaro-api`
+- Packages: `declaro-persistum`, `declaro-ximinez`, `declaro-api`
 - Reserved `declaro` on PyPI (v0.0.1 published)
 - GitHub repo created: `github.com/adamzwasserman/declaro` (private)
 
 ### 2. Philosophy: Pure Functional Python
 - **No classes** - TypedDicts instead of Pydantic/SQLAlchemy models
 - **Pure functions** - No side effects, no mutation
-- **Explicit types** - Ximenez enforces, TOML defines
+- **Explicit types** - Ximinez enforces, TOML defines
 - **Single source of truth** - TOML schema drives everything
 
 ### 3. Architecture
@@ -27,9 +27,9 @@ TOML Schema (source of truth)
     ↓ generates
 TypedDict definitions
     ↓ used in
-Python code with Ximenez types: blocks
+Python code with Ximinez types: blocks
     ↓ validated by
-Ximenez at pre-commit (variables, functions, AND model usage)
+Ximinez at pre-commit (variables, functions, AND model usage)
 ```
 
 ---
@@ -88,9 +88,9 @@ class View(TypedDict, total=False):
 
 ---
 
-## Ximenez Integration Vision
+## Ximinez Integration Vision
 
-Ximenez = Python type enforcer with Spanish Inquisition themed errors
+Ximinez = Python type enforcer with Spanish Inquisition themed errors
 
 ### Two Typing Styles (Mutually Exclusive per Function)
 
@@ -116,8 +116,8 @@ def confess(x: int, y: str) -> float:
 
 ### Integration with Declaro
 - TOML defines models (structure, relationships, validation)
-- Ximenez enforces types in Python code (variables, functions)
-- At pre-commit, Ximenez ALSO validates model usage matches TOML
+- Ximinez enforces types in Python code (variables, functions)
+- At pre-commit, Ximinez ALSO validates model usage matches TOML
 
 ### Model Validation Examples
 ```
@@ -284,7 +284,7 @@ user = await query.select("users").include("orders").where(id=1).one()
 2. Commit declaro monorepo initial structure
 3. Move declaro_persistum into `packages/declaro-persistum/`
 4. Rename package from `declaro_persistum` to `declaro-persistum`
-5. Start ximenez implementation in `packages/declaro-ximenez/`
+5. Start ximinez implementation in `packages/declaro-ximinez/`
 6. Create `declaro-api` FastAPI plugin skeleton
 
 ---

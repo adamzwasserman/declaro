@@ -18,7 +18,7 @@ Declaro is a collection of tools for developers who believe:
 | Package | Description | Status |
 |---------|-------------|--------|
 | `declaro-persistum` | Schema-first database toolkit | In development |
-| `declaro-ximenez` | Type enforcement with memorable errors | Planned |
+| `declaro-ximinez` | Type enforcement with memorable errors | Planned |
 | `declaro-api` | FastAPI integration | Planned |
 
 ## Installation
@@ -29,7 +29,7 @@ pip install declaro[all]
 
 # Or pick what you need
 pip install declaro-persistum
-pip install declaro-ximenez
+pip install declaro-ximinez
 pip install declaro-api
 ```
 

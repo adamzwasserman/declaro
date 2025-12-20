@@ -144,7 +144,7 @@ One declaration. Everything else follows.
 | Package | Purpose |
 |---------|---------|
 | `declaro-persistum` | Schema-first database toolkit |
-| `declaro-ximenez` | Type enforcement with memorable errors |
+| `declaro-ximinez` | Type enforcement with memorable errors |
 | `declaro-api` | FastAPI integration for functional Python |
 
 ## The Spell

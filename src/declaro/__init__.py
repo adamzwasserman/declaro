@@ -3,7 +3,7 @@ Declaro: The Functional Python Stack
 
 A collection of pure functional tools for Python:
 - declaro-persistum: Schema-first database toolkit
-- declaro-ximenez: Type enforcement with memorable errors
+- declaro-ximinez: Type enforcement with memorable errors
 - declaro-api: FastAPI integration
 
 No classes. No magic. Just functions and data.

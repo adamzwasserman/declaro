@@ -37,12 +37,8 @@ Homepage = "https://github.com/adamzwasserman/declaro"
 Documentation = "https://github.com/adamzwasserman/declaro"
 Repository = "https://github.com/adamzwasserman/declaro"
 
-[project.optional-dependencies]
-persistum = ["declaro-persistum"]
-ximenez = ["declaro-ximenez"]
-api = ["declaro-api"]
-all = [
-    "declaro-persistum",
-    "declaro-ximenez",
-    "declaro-api",
-]
+# Optional dependencies will be added once packages are published to PyPI
+# [project.optional-dependencies]
+# persistum = ["declaro-persistum"]
+# ximinez = ["declaro-ximinez"]
+# api = ["declaro-api"]
