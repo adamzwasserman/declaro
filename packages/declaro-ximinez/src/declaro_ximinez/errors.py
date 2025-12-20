@@ -162,6 +162,25 @@ def format_violations_inquisition(
     ])
 
 
+def format_violations_standard(violations: list[Violation]) -> str:
+    """Format violations in standard professional mode.
+
+    Args:
+        violations: List of violations to format.
+
+    Returns:
+        Clean, professional formatted string.
+    """
+    if not violations:
+        return "No violations found."
+
+    lines = [f"Found {len(violations)} violation(s):"]
+    lines.append("")
+    for v in violations:
+        lines.append(f"  {v['file']}:{v['line']}:{v['col']}: {v['message']}")
+    return "\n".join(lines)
+
+
 def format_violations_quiet(violations: list[Violation]) -> str:
     """Format violations in quiet mode (count and locations only).
 

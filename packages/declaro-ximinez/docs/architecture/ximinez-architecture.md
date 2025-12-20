@@ -232,6 +232,7 @@ Formats violations for output. Multiple output modes supported.
 | (default) | Standard output |
 | `--quiet` | Minimal output – count and locations only |
 | `--machine` | CI-friendly plain format |
+| `--full` | Full output |
 | `--declaro-schema=PATH` | Path to TOML schema directory |
 | `--no-declaro` | Disable Declaro model validation |
 

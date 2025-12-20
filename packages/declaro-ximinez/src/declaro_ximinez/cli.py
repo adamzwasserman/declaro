@@ -9,6 +9,7 @@ from pathlib import Path
 from .config import load_config
 from .checker import check_file
 from .errors import (
+    format_violations_standard,
     format_violations_inquisition,
     format_violations_quiet,
     format_violations_machine,
@@ -27,7 +28,7 @@ def create_parser() -> argparse.ArgumentParser:
     """
     parser = argparse.ArgumentParser(
         prog="ximinez",
-        description="Nobody expects the Ximínez Inquisition! Type enforcement for Python.",
+        description="Type enforcement for Python.",
     )
 
     parser.add_argument(
@@ -46,6 +47,12 @@ def create_parser() -> argparse.ArgumentParser:
         "--machine",
         action="store_true",
         help="CI-friendly plain format",
+    )
+
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Full output",
     )
 
     parser.add_argument(
@@ -147,6 +154,7 @@ def format_output(
     violations: list[Violation],
     quiet: bool = False,
     machine: bool = False,
+    full: bool = False,
     comfy_chair: bool = False,
 ) -> str:
     """Format violations for output.
@@ -155,6 +163,7 @@ def format_output(
         violations: List of violations to format.
         quiet: Use quiet mode.
         machine: Use machine-readable mode.
+        full: Use full output mode.
         comfy_chair: Use comfy chair (warning) mode.
 
     Returns:
@@ -169,26 +178,29 @@ def format_output(
     if comfy_chair:
         return format_comfy_chair(violations)
 
-    # Separate type and model violations
-    type_violations = [v for v in violations if not v["code"].startswith("XIM")]
-    model_violations = [v for v in violations if v["code"].startswith("XIM")]
+    if full:
+        # Full mode - the complete experience
+        type_violations = [v for v in violations if not v["code"].startswith("XIM")]
+        model_violations = [v for v in violations if v["code"].startswith("XIM")]
 
-    parts = []
+        parts = []
 
-    if type_violations:
-        parts.append(format_violations_inquisition(type_violations, "type"))
+        if type_violations:
+            parts.append(format_violations_inquisition(type_violations, "type"))
 
-    if model_violations:
-        if parts:
-            parts.append("")  # Blank line between sections
-        parts.append(format_violations_inquisition(model_violations, "model"))
-        parts.append("")
-        parts.append("The Inquisition has examined your models and found them... heretical.")
+        if model_violations:
+            if parts:
+                parts.append("")
+            parts.append(format_violations_inquisition(model_violations, "model"))
 
-    if not violations:
-        parts.append("Dismissed! The accused is free to go.")
+        if not violations:
+            from .errors import _get_text
+            parts.append(_get_text("dismissed"))
 
-    return "\n".join(parts)
+        return "\n".join(parts)
+
+    # Default: standard professional output
+    return format_violations_standard(violations)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -237,6 +249,7 @@ def main(argv: list[str] | None = None) -> int:
         violations,
         quiet=args.quiet,
         machine=args.machine,
+        full=args.full,
         comfy_chair=args.comfy_chair,
     )
     print(output)

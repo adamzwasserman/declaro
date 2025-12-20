@@ -65,6 +65,7 @@ username = user["username"]  # Error: no such field
 | (default) | Standard output |
 | `--quiet` | Minimal output |
 | `--machine` | CI-friendly plain format |
+| `--full` | Full output |
 | `--declaro-schema=PATH` | TOML schema directory |
 
 ## Configuration
