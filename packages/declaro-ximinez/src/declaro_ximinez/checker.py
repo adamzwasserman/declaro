@@ -270,6 +270,11 @@ def check_function(
         check_style_mixing(module, wrapper, scope, filename, config)
     )
 
+    # Check walrus operator variables
+    violations.extend(
+        check_walrus_operators(module, wrapper, scope, filename)
+    )
+
     # Check Declaro model usage
     if models:
         violations.extend(
@@ -702,6 +707,77 @@ def check_style_mixing(
             return True
 
     wrapper.visit(InlineChecker())
+    return violations
+
+
+def check_walrus_operators(
+    module: cst.Module,
+    wrapper: MetadataWrapper,
+    scope: FunctionScope,
+    filename: str,
+) -> list[Violation]:
+    """Check that walrus operator variables are declared.
+
+    Args:
+        module: The parsed CST module.
+        wrapper: Metadata wrapper for position info.
+        scope: The function scope to check.
+        filename: Filename to use in error messages.
+
+    Returns:
+        List of violations for undeclared walrus operator variables.
+    """
+    violations: list[Violation] = []
+
+    class WalrusChecker(cst.CSTVisitor):
+        def __init__(self) -> None:
+            self.in_target_func = False
+            self.declared_names: set[str] = set()
+
+        def visit_FunctionDef(self, node: cst.FunctionDef) -> bool:
+            if node.name.value == scope["name"]:
+                self.in_target_func = True
+                return True
+            elif self.in_target_func:
+                return False
+            return True
+
+        def leave_FunctionDef(self, node: cst.FunctionDef) -> None:
+            if node.name.value == scope["name"]:
+                self.in_target_func = False
+
+        def visit_AnnAssign(self, node: cst.AnnAssign) -> bool:
+            if not self.in_target_func:
+                return True
+
+            if isinstance(node.target, cst.Name):
+                self.declared_names.add(node.target.value)
+            return True
+
+        def visit_NamedExpr(self, node: cst.NamedExpr) -> bool:
+            if not self.in_target_func:
+                return True
+
+            # NamedExpr is the walrus operator (:=)
+            if isinstance(node.target, cst.Name):
+                name = node.target.value
+                # Check if name is declared in symbols or params
+                if name not in scope["symbols"] and name not in scope["params"] and name not in self.declared_names:
+                    pos = get_position(node, wrapper)
+                    if scope.get("has_types_block"):
+                        message = f"walrus operator variable '{name}' must be declared in types: block"
+                    else:
+                        message = f"walrus operator variable '{name}' used without type declaration"
+                    violations.append({
+                        "file": filename,
+                        "line": pos["line"],
+                        "col": pos["col"],
+                        "message": message,
+                        "code": "XI010",
+                    })
+            return True
+
+    wrapper.visit(WalrusChecker())
     return violations
 
 

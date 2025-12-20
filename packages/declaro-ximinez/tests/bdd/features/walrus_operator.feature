@@ -72,10 +72,9 @@ Feature: Walrus Operator Typing
     Given a Python file with content:
       """
       def check_length(items: list[int]) -> bool:
+          result: bool = False
           if (n := len(items)) > 10:
-              result: bool = True
-          else:
-              result: bool = False
+              result = True
           return result
       """
     When ximinez checks the file
