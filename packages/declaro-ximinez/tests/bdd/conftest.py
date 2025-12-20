@@ -144,6 +144,7 @@ def run_ximinez(
         "stage": config.get("stage", 1),
         "allow_inline_style": config.get("allow_inline_style", True),
         "allow_block_style": config.get("allow_block_style", True),
+        "style_enforcement": config.get("style_enforcement"),
         "declaro_enabled": config.get("declaro_enabled", False),
         "declaro_schema_paths": config.get("declaro_schema_paths", []),
     }
@@ -175,7 +176,8 @@ def run_ximinez(
     elif "--comfy-chair" in flags:
         output = format_comfy_chair(violations)
         exit_code = 0  # Comfy chair never fails
-    elif "--full" in flags:
+    elif "--full" in flags or has_model_violations:
+        # Always use inquisition format for model violations
         output = format_violations_inquisition(violations, violation_type)
     else:
         # Default: use standard professional format

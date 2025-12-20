@@ -33,6 +33,7 @@ from .declaro import (
     validate_query_column,
     validate_insert_fields,
 )
+from .config import parse_file_directive, merge_file_directives
 
 
 def check_file(file_path: Path, config: XiminezConfig) -> CheckResult:
@@ -171,6 +172,10 @@ def check_module(
     violations: list[Violation] = []
     wrapper = MetadataWrapper(module)
 
+    # Parse file-level directives and merge with config
+    directives = parse_file_directive(preprocess_result.original_source)
+    effective_config = merge_file_directives(config, directives)
+
     # Add preprocessing violations (types: block position, duplicates)
     for pv in preprocess_result.violations:
         violations.append({
@@ -192,9 +197,15 @@ def check_module(
     # Collect function scopes, passing preprocess info to detect types: blocks
     scopes = collect_function_scopes(module, preprocess_result)
 
+    # Check module-level style enforcement
+    if config.get("style_enforcement") == "module":
+        violations.extend(
+            check_module_style_enforcement(scopes, filename, effective_config, directives)
+        )
+
     # Check each function
     for scope in scopes:
-        func_violations = check_function(module, wrapper, scope, filename, config, models)
+        func_violations = check_function(module, wrapper, scope, filename, effective_config, models)
         violations.extend(func_violations)
 
     return {
@@ -202,6 +213,53 @@ def check_module(
         "violations": violations,
         "scopes": scopes,
     }
+
+
+def check_module_style_enforcement(
+    scopes: list[FunctionScope],
+    filename: str,
+    config: XiminezConfig,
+    directives: dict[str, str],
+) -> list[Violation]:
+    """Check that all functions use the module-enforced style.
+
+    Args:
+        scopes: List of function scopes.
+        filename: Filename to use in error messages.
+        config: Ximinez configuration (with directives applied).
+        directives: File-level directives.
+
+    Returns:
+        List of violations for style enforcement.
+    """
+    violations: list[Violation] = []
+
+    # Determine enforced style from directives
+    enforced_style = directives.get("style")
+    if not enforced_style:
+        return violations
+
+    for scope in scopes:
+        func_style = scope.get("style", "inline")
+
+        if enforced_style == "block" and func_style != "block":
+            violations.append({
+                "file": filename,
+                "line": 1,  # TODO: get actual line from function def
+                "col": 0,
+                "message": f"'{scope['name']}' uses inline style but module enforces block style",
+                "code": "XI007",
+            })
+        elif enforced_style == "inline" and func_style != "inline":
+            violations.append({
+                "file": filename,
+                "line": 1,  # TODO: get actual line from function def
+                "col": 0,
+                "message": f"'{scope['name']}' uses block style but module enforces inline style",
+                "code": "XI007",
+            })
+
+    return violations
 
 
 def check_function(
@@ -286,6 +344,181 @@ def check_function(
             check_model_access(module, wrapper, scope, filename, models)
         )
 
+    # Check for type mismatches on assignments
+    violations.extend(
+        check_type_mismatch(module, wrapper, scope, filename)
+    )
+
+    return violations
+
+
+def infer_type(
+    node: cst.BaseExpression,
+    scope: FunctionScope,
+) -> str | None:
+    """Infer the type of an expression.
+
+    Args:
+        node: The expression node.
+        scope: The function scope with variable types.
+
+    Returns:
+        The inferred type as a string, or None if unknown.
+    """
+    # Integer literal
+    if isinstance(node, cst.Integer):
+        return "int"
+
+    # Float literal
+    if isinstance(node, cst.Float):
+        return "float"
+
+    # String literal
+    if isinstance(node, (cst.SimpleString, cst.ConcatenatedString, cst.FormattedString)):
+        return "str"
+
+    # Name reference - look up in params or symbols
+    if isinstance(node, cst.Name):
+        name = node.value
+
+        # Check params (params is a dict mapping name -> type)
+        params = scope.get("params", {})
+        if name in params:
+            return params[name]
+
+        # Check symbols
+        symbol = scope.get("symbols", {}).get(name)
+        if symbol:
+            return symbol.get("type_annotation")
+
+        return None
+
+    # Binary operation - infer from operands
+    if isinstance(node, cst.BinaryOperation):
+        left_type = infer_type(node.left, scope)
+        right_type = infer_type(node.right, scope)
+
+        # If both operands are the same type, result is that type
+        if left_type == right_type and left_type is not None:
+            return left_type
+
+        # int + int = int, float + float = float, etc.
+        # For mixed int/float, result is float
+        if {left_type, right_type} == {"int", "float"}:
+            return "float"
+
+        # str + str = str (concatenation)
+        if left_type == "str" and right_type == "str":
+            return "str"
+
+        return left_type or right_type
+
+    # Unary operation
+    if isinstance(node, cst.UnaryOperation):
+        return infer_type(node.expression, scope)
+
+    # Comparison - always bool
+    if isinstance(node, cst.Comparison):
+        return "bool"
+
+    # Boolean operations - always bool
+    if isinstance(node, cst.BooleanOperation):
+        return "bool"
+
+    # IfExp (ternary) - infer from body
+    if isinstance(node, cst.IfExp):
+        return infer_type(node.body, scope)
+
+    # List literal
+    if isinstance(node, cst.List):
+        return "list"
+
+    # Dict literal
+    if isinstance(node, cst.Dict):
+        return "dict"
+
+    # Tuple literal
+    if isinstance(node, cst.Tuple):
+        return "tuple"
+
+    # Set literal
+    if isinstance(node, cst.Set):
+        return "set"
+
+    return None
+
+
+def check_type_mismatch(
+    module: cst.Module,
+    wrapper: MetadataWrapper,
+    scope: FunctionScope,
+    filename: str,
+) -> list[Violation]:
+    """Check for type mismatches on annotated assignments.
+
+    Args:
+        module: The parsed CST module.
+        wrapper: Metadata wrapper for position info.
+        scope: The function scope to check.
+        filename: Filename to use in error messages.
+
+    Returns:
+        List of violations for type mismatches.
+    """
+    violations: list[Violation] = []
+
+    class TypeMismatchChecker(cst.CSTVisitor):
+        def __init__(self) -> None:
+            self.in_target_func = False
+
+        def visit_FunctionDef(self, node: cst.FunctionDef) -> bool:
+            if node.name.value == scope["name"]:
+                self.in_target_func = True
+                return True
+            elif self.in_target_func:
+                return False  # Skip nested functions
+            return True
+
+        def leave_FunctionDef(self, node: cst.FunctionDef) -> None:
+            if node.name.value == scope["name"]:
+                self.in_target_func = False
+
+        def visit_AnnAssign(self, node: cst.AnnAssign) -> bool:
+            if not self.in_target_func:
+                return True
+
+            # Only check if there's a value (not just a declaration)
+            if node.value is None:
+                return True
+
+            # Get the declared type
+            declared_type = None
+            if isinstance(node.annotation.annotation, cst.Name):
+                declared_type = node.annotation.annotation.value
+            elif isinstance(node.annotation.annotation, cst.Subscript):
+                # Handle generic types like list[int]
+                if isinstance(node.annotation.annotation.value, cst.Name):
+                    declared_type = node.annotation.annotation.value.value
+
+            if declared_type is None:
+                return True
+
+            # Infer the type of the value
+            inferred_type = infer_type(node.value, scope)
+
+            if inferred_type is not None and inferred_type != declared_type:
+                pos = get_position(node, wrapper)
+                violations.append({
+                    "file": filename,
+                    "line": pos["line"],
+                    "col": pos["col"],
+                    "message": f"type mismatch: expected '{declared_type}', got '{inferred_type}'",
+                    "code": "XI012",
+                })
+
+            return True
+
+    wrapper.visit(TypeMismatchChecker())
     return violations
 
 
@@ -602,23 +835,25 @@ def track_symbol_usage(
     """
     class UsageTracker(cst.CSTVisitor):
         def __init__(self) -> None:
-            self.in_target_func = False
+            self.func_depth = 0  # Track function nesting level
             self.skip_next_name = False  # Skip name in AnnAssign target
 
         def visit_FunctionDef(self, node: cst.FunctionDef) -> bool:
-            if node.name.value == scope["name"]:
-                self.in_target_func = True
+            if node.name.value == scope["name"] and self.func_depth == 0:
+                self.func_depth = 1
                 return True
-            elif self.in_target_func:
-                return False
+            elif self.func_depth > 0:
+                # In target function, entering a nested function
+                self.func_depth += 1
+                return True  # Continue visiting but track depth
             return True
 
         def leave_FunctionDef(self, node: cst.FunctionDef) -> None:
-            if node.name.value == scope["name"]:
-                self.in_target_func = False
+            if self.func_depth > 0:
+                self.func_depth -= 1
 
         def visit_AnnAssign(self, node: cst.AnnAssign) -> bool:
-            if not self.in_target_func:
+            if self.func_depth != 1:
                 return True
             # For AnnAssign without value (declaration only), skip the target name
             if node.value is None:
@@ -629,7 +864,7 @@ def track_symbol_usage(
             self.skip_next_name = False
 
         def visit_Name(self, node: cst.Name) -> bool:
-            if not self.in_target_func:
+            if self.func_depth != 1:  # Only track uses in the target function, not nested
                 return True
             if self.skip_next_name:
                 self.skip_next_name = False
@@ -940,6 +1175,7 @@ def check_model_access(
     class ModelAccessChecker(cst.CSTVisitor):
         def __init__(self) -> None:
             self.in_target_func = False
+            self.dict_vars: dict[str, set[str]] = {}  # Track dict literal keys
 
         def visit_FunctionDef(self, node: cst.FunctionDef) -> bool:
             if node.name.value == scope["name"]:
@@ -952,6 +1188,73 @@ def check_model_access(
         def leave_FunctionDef(self, node: cst.FunctionDef) -> None:
             if node.name.value == scope["name"]:
                 self.in_target_func = False
+
+        def check_field_access_type(
+            self,
+            subscript_node: cst.Subscript,
+            declared_type: str | None,
+        ) -> cst.Subscript:
+            """Check if subscript access matches declared type."""
+            if not isinstance(subscript_node.value, cst.Name):
+                return subscript_node
+
+            var_name = subscript_node.value.value
+            if var_name not in model_vars:
+                return subscript_node
+
+            model = model_vars[var_name]
+            for slice_item in subscript_node.slice:
+                if isinstance(slice_item.slice, cst.Index):
+                    index = slice_item.slice.value
+                    if isinstance(index, cst.SimpleString):
+                        field_name = index.value[1:-1]
+
+                        # Check type mismatch for valid fields
+                        if field_name in model["fields"] and declared_type:
+                            field_info = model["fields"][field_name]
+                            field_type = field_info.get("type", "")
+
+                            if field_type and field_type != declared_type:
+                                pos = get_position(subscript_node, wrapper)
+                                violation = validate_field_type(
+                                    model, field_name, declared_type,
+                                    filename, pos["line"], pos["col"]
+                                )
+                                if violation:
+                                    violations.append(violation)
+
+            return subscript_node
+
+        def visit_Assign(self, node: cst.Assign) -> bool:
+            if not self.in_target_func:
+                return True
+
+            # Check for var = model["field"] pattern
+            if isinstance(node.value, cst.Subscript):
+                # Get the target variable name
+                for target in node.targets:
+                    if isinstance(target.target, cst.Name):
+                        target_name = target.target.value
+                        # Look up declared type
+                        symbol = scope.get("symbols", {}).get(target_name)
+                        if symbol:
+                            declared_type = symbol.get("type_annotation")
+                            self.check_field_access_type(node.value, declared_type)
+
+            # Track dict literals for insert validation
+            if isinstance(node.value, cst.Dict):
+                for target in node.targets:
+                    if isinstance(target.target, cst.Name):
+                        target_name = target.target.value
+                        # Extract dict keys
+                        keys = set()
+                        for element in node.value.elements:
+                            if isinstance(element, cst.DictElement):
+                                if isinstance(element.key, cst.SimpleString):
+                                    keys.add(element.key.value[1:-1])
+                        self.dict_vars[target_name] = keys
+
+            return True
 
         def visit_Subscript(self, node: cst.Subscript) -> bool:
             if not self.in_target_func:
@@ -994,6 +1297,29 @@ def check_model_access(
                                     violations.append(violation)
             return True
 
+        def extract_table_from_chain(self, call_node: cst.Call) -> str | None:
+            """Extract table name from a query chain like query.select("users").where()"""
+            current = call_node
+
+            while current:
+                if isinstance(current.func, cst.Attribute):
+                    attr_name = current.func.attr.value
+
+                    if attr_name == "select":
+                        if current.args and isinstance(current.args[0].value, cst.SimpleString):
+                            return current.args[0].value.value[1:-1]
+
+                    # Follow the chain: call.func.value is the receiver
+                    receiver = current.func.value
+                    if isinstance(receiver, cst.Call):
+                        current = receiver
+                    else:
+                        break
+                else:
+                    break
+
+            return None
+
         def visit_Call(self, node: cst.Call) -> bool:
             if not self.in_target_func:
                 return True
@@ -1002,30 +1328,72 @@ def check_model_access(
             if isinstance(node.func, cst.Attribute):
                 attr_name = node.func.attr.value
 
-                # Handle query.select("table")
-                if attr_name == "select":
-                    if node.args and isinstance(node.args[0].value, cst.SimpleString):
-                        table_name = node.args[0].value.value[1:-1]
-                        # Store for .where() checking
-                        # (simplified - would need more context tracking)
-
-                # Handle .where(field=value)
+                # Handle .where(field=value) or .insert(table, data)
                 if attr_name == "where":
-                    for arg in node.args:
-                        if arg.keyword:
-                            col_name = arg.keyword.value
-                            # We'd need to track the table from select()
-                            # For now, check against all models
+                    # Extract table name from the method chain
+                    table_name = self.extract_table_from_chain(node)
+
+                    if table_name:
+                        # Find model for this table
+                        target_model = None
+                        for model in models.values():
+                            if model["table"] == table_name:
+                                target_model = model
+                                break
+
+                        if target_model:
+                            for arg in node.args:
+                                if arg.keyword:
+                                    col_name = arg.keyword.value
+                                    if col_name not in target_model["fields"]:
+                                        pos = get_position(node, wrapper)
+                                        violation = validate_query_column(
+                                            models, table_name, col_name,
+                                            filename, pos["line"], pos["col"]
+                                        )
+                                        if violation:
+                                            violations.append(violation)
+
+                # Handle query.insert("table", data)
+                elif attr_name == "insert":
+                    if len(node.args) >= 2:
+                        # First arg is table name
+                        table_arg = node.args[0].value
+                        if isinstance(table_arg, cst.SimpleString):
+                            table_name = table_arg.value[1:-1]
+
+                            # Find model for this table
+                            target_model = None
                             for model in models.values():
-                                if col_name not in model["fields"]:
+                                if model["table"] == table_name:
+                                    target_model = model
+                                    break
+
+                            if target_model:
+                                # Second arg should be data dict
+                                data_arg = node.args[1].value
+                                provided_fields: set[str] = set()
+
+                                if isinstance(data_arg, cst.Name):
+                                    # Look up tracked dict variable
+                                    var_name = data_arg.value
+                                    if var_name in self.dict_vars:
+                                        provided_fields = self.dict_vars[var_name]
+                                elif isinstance(data_arg, cst.Dict):
+                                    # Inline dict literal
+                                    for element in data_arg.elements:
+                                        if isinstance(element, cst.DictElement):
+                                            if isinstance(element.key, cst.SimpleString):
+                                                provided_fields.add(element.key.value[1:-1])
+
+                                # Validate required fields
+                                if provided_fields:
                                     pos = get_position(node, wrapper)
-                                    violation = validate_query_column(
-                                        models, model["table"], col_name,
+                                    insert_violations = validate_insert_fields(
+                                        target_model, provided_fields,
                                         filename, pos["line"], pos["col"]
                                     )
-                                    if violation:
-                                        violations.append(violation)
-                                        break
+                                    violations.extend(insert_violations)
 
             return True
 

@@ -296,7 +296,8 @@ def validate_query_column(
         return None
 
     # Column not found - suggest similar
-    suggestion = suggest_similar(column_name, list(model["fields"].keys()))
+    # Use higher max_distance to catch partial matches like username -> name
+    suggestion = suggest_similar(column_name, list(model["fields"].keys()), max_distance=5)
 
     message = f"'{table_name}' table has no column '{column_name}'"
     if suggestion:
@@ -333,6 +334,10 @@ def validate_insert_fields(
     violations: list[Violation] = []
 
     for field_name, field in model["fields"].items():
+        # Skip auto-generated fields (id, uuid types)
+        if field_name == "id" or field.get("type") == "uuid":
+            continue
+
         if not field["nullable"] and field_name not in provided_fields:
             # Check if it has a default (we'd need to track this in schema)
             violations.append({

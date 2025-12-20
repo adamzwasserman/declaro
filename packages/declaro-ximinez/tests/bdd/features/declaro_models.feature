@@ -117,8 +117,8 @@ Feature: Declaro Model Validation
     When ximinez checks the file
     Then 2 violations are reported
     And the output contains "NOBODY expects a model violation!"
-    And the output contains "Our chief violation is:"
-    And the output contains "...TWO!"
+    And the output contains "Our CHIEF weapon:"
+    And the output contains "Our TWO chief weapons are:"
 
   Scenario: Query builder field validation
     Given a Python file with content:

@@ -161,20 +161,23 @@ def collect_function_scopes(
 
     scopes: list[FunctionScope] = []
 
-    # Build a map of types: block by indentation level
-    types_blocks_by_indent: dict[int, list] = {}
+    # Build a list of types: blocks that haven't been matched yet
+    # Each entry is (indent_len, block)
+    unmatched_blocks: list[tuple[int, object]] = []
     if preprocess_result:
         for block in preprocess_result.types_blocks:
             indent_len = len(block.indent)
-            if indent_len not in types_blocks_by_indent:
-                types_blocks_by_indent[indent_len] = []
-            types_blocks_by_indent[indent_len].append(block)
+            unmatched_blocks.append((indent_len, block))
+    # Sort by line number so we match in order
+    unmatched_blocks.sort(key=lambda x: x[1].start_line)
 
     class FunctionCollector(cst.CSTVisitor):
         def __init__(self) -> None:
             self.current_indent = 0
 
         def visit_FunctionDef(self, node: cst.FunctionDef) -> bool:
+            nonlocal unmatched_blocks
+
             scope = create_scope(node.name.value)
 
             # Extract params
@@ -185,13 +188,16 @@ def collect_function_scopes(
             scope["return_type"] = extract_return_type(node)
 
             # Check if this function had a types: block based on indent matching
+            # Only match the first unmatched block at the correct indent level
             has_types_block = False
             body_indent = self.current_indent + 4  # Assumes 4-space indent
 
-            if body_indent in types_blocks_by_indent:
-                has_types_block = True
-                # Extract symbols from the types: block declarations
-                for block in types_blocks_by_indent[body_indent]:
+            matched_idx = None
+            for idx, (indent_len, block) in enumerate(unmatched_blocks):
+                if indent_len == body_indent:
+                    has_types_block = True
+                    matched_idx = idx
+                    # Extract symbols from the types: block declarations
                     for decl_text, decl_line in block.declarations:
                         # Parse declaration: "name: type" or "name: type = value"
                         match = re.match(r'\s*(\w+)\s*:\s*([^=]+)', decl_text)
@@ -199,17 +205,11 @@ def collect_function_scopes(
                             var_name = match.group(1)
                             var_type = match.group(2).strip()
                             declare_symbol(scope, var_name, var_type, decl_line, 0)
-            elif preprocess_result and preprocess_result.types_blocks:
-                # Fallback: for simple single-function files
-                if len(preprocess_result.types_blocks) > 0:
-                    has_types_block = True
-                    block = preprocess_result.types_blocks[0]
-                    for decl_text, decl_line in block.declarations:
-                        match = re.match(r'\s*(\w+)\s*:\s*([^=]+)', decl_text)
-                        if match:
-                            var_name = match.group(1)
-                            var_type = match.group(2).strip()
-                            declare_symbol(scope, var_name, var_type, decl_line, 0)
+                    break  # Only match the first one
+
+            # Remove matched block from unmatched list
+            if matched_idx is not None:
+                unmatched_blocks.pop(matched_idx)
 
             if has_types_block:
                 scope["has_types_block"] = True
