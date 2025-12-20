@@ -1,0 +1,23 @@
+[todos]
+description = "Todo items"
+
+[todos.columns.id]
+type = "uuid"
+primary_key = true
+default = "gen_random_uuid()"
+
+[todos.columns.title]
+type = "text"
+nullable = false
+
+[todos.columns.completed]
+type = "boolean"
+default = "false"
+
+[todos.columns.created_at]
+type = "timestamptz"
+default = "now()"
+
+[todos.columns.updated_at]
+type = "timestamptz"
+default = "now()"

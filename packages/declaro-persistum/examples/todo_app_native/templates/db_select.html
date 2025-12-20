@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Database Selection - declaro_persistum Demo</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #34495e 0%, #2c3e50 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        header {
+            background: linear-gradient(135deg, #34495e 0%, #2c3e50 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        header h1 { font-size: 1.8rem; margin-bottom: 5px; }
+        header p { opacity: 0.8; font-size: 0.9rem; }
+        .current-db {
+            background: #f8f9fa;
+            padding: 16px 20px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .current-db .label { color: #666; }
+        .current-db .value { font-weight: 600; color: #2c3e50; }
+        .db-options { padding: 20px; }
+        .db-option {
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 16px;
+            transition: border-color 0.2s;
+        }
+        .db-option:hover { border-color: #9b59b6; }
+        .db-option.disabled { opacity: 0.5; pointer-events: none; }
+        .db-option h3 {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+            color: #2c3e50;
+        }
+        .db-option .icon { font-size: 1.5rem; }
+        .db-option .status {
+            font-size: 0.75rem;
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-left: auto;
+        }
+        .status.available { background: #d4edda; color: #155724; }
+        .status.unavailable { background: #f8d7da; color: #721c24; }
+        .db-option p { color: #666; font-size: 0.9rem; margin-bottom: 12px; }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; font-size: 0.85rem; color: #666; margin-bottom: 4px; }
+        .form-group input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 0.95rem;
+        }
+        .form-row { display: flex; gap: 12px; }
+        .form-row .form-group { flex: 1; }
+        button {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(155, 89, 182, 0.4);
+        }
+        button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .back-link {
+            display: block;
+            text-align: center;
+            padding: 16px;
+            color: #666;
+            text-decoration: none;
+            border-top: 1px solid #eee;
+        }
+        .back-link:hover { background: #f8f9fa; }
+        #db-result {
+            padding: 0 20px 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Database Selection</h1>
+            <p>Choose your database backend - same app code works on all!</p>
+        </header>
+
+        <div class="current-db">
+            <span class="label">Current database:</span>
+            <span class="value">{{ current_db.display_name }}</span>
+        </div>
+
+        <div class="db-options">
+            <!-- SQLite -->
+            <div class="db-option {% if not sqlite_available %}disabled{% endif %}">
+                <h3>
+                    <span class="icon">📁</span>
+                    SQLite
+                    <span class="status {% if sqlite_available %}available{% else %}unavailable{% endif %}">
+                        {{ "Ready" if sqlite_available else "Not installed" }}
+                    </span>
+                </h3>
+                <p>Local file database. No setup required.</p>
+                <form hx-post="/db/sqlite" hx-target="#db-result" hx-swap="innerHTML">
+                    <div class="form-group">
+                        <label>Database Path</label>
+                        <input type="text" name="database_path" value="{{ sqlite_default_path }}">
+                    </div>
+                    <button type="submit" {% if not sqlite_available %}disabled{% endif %}>
+                        Use SQLite
+                    </button>
+                </form>
+            </div>
+
+            <!-- PostgreSQL -->
+            <div class="db-option {% if not postgres_available %}disabled{% endif %}">
+                <h3>
+                    <span class="icon">🐘</span>
+                    PostgreSQL
+                    <span class="status {% if postgres_available %}available{% else %}unavailable{% endif %}">
+                        {{ "Driver ready" if postgres_available else "asyncpg not installed" }}
+                    </span>
+                </h3>
+                <p>Production-ready relational database.</p>
+                <form hx-post="/db/postgres" hx-target="#db-result" hx-swap="innerHTML">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Host</label>
+                            <input type="text" name="host" value="localhost">
+                        </div>
+                        <div class="form-group">
+                            <label>Port</label>
+                            <input type="number" name="port" value="5432">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>User</label>
+                            <input type="text" name="user" value="postgres">
+                        </div>
+                        <div class="form-group">
+                            <label>Password</label>
+                            <input type="password" name="password">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Database</label>
+                        <input type="text" name="database" value="declarotodo">
+                    </div>
+                    <button type="submit" {% if not postgres_available %}disabled{% endif %}>
+                        Connect to PostgreSQL
+                    </button>
+                </form>
+            </div>
+
+            <!-- Turso Embedded (pyturso) -->
+            <div class="db-option {% if not turso_embedded_available %}disabled{% endif %}">
+                <h3>
+                    <span class="icon">🦀</span>
+                    Turso Embedded
+                    <span class="status {% if turso_embedded_available %}available{% else %}unavailable{% endif %}">
+                        {{ "pyturso ready" if turso_embedded_available else "pyturso not installed" }}
+                    </span>
+                </h3>
+                <p>Rust-based SQLite with vector search. Local file database.</p>
+                <form hx-post="/db/turso_embedded" hx-target="#db-result" hx-swap="innerHTML">
+                    <div class="form-group">
+                        <label>Database Path</label>
+                        <input type="text" name="database_path" value="{{ turso_embedded_default_path }}">
+                    </div>
+                    <button type="submit" {% if not turso_embedded_available %}disabled{% endif %}>
+                        Use Turso Embedded
+                    </button>
+                </form>
+            </div>
+
+            <!-- Turso Cloud (libsql) -->
+            <div class="db-option {% if not turso_cloud_available %}disabled{% endif %}">
+                <h3>
+                    <span class="icon">☁️</span>
+                    Turso Cloud
+                    <span class="status {% if turso_cloud_available %}available{% else %}unavailable{% endif %}">
+                        {{ "libsql ready" if turso_cloud_available else "libsql not installed" }}
+                    </span>
+                </h3>
+                <p>Edge-hosted SQLite. Great for serverless.</p>
+                <form hx-post="/db/turso_cloud" hx-target="#db-result" hx-swap="innerHTML">
+                    <div class="form-group">
+                        <label>Database URL</label>
+                        <input type="text" name="url" placeholder="libsql://your-db.turso.io">
+                    </div>
+                    <div class="form-group">
+                        <label>Auth Token</label>
+                        <input type="password" name="auth_token" placeholder="Optional">
+                    </div>
+                    <button type="submit" {% if not turso_cloud_available %}disabled{% endif %}>
+                        Connect to Turso Cloud
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div id="db-result"></div>
+
+        <a href="/" class="back-link">← Back to Todo App</a>
+    </div>
+</body>
+</html>

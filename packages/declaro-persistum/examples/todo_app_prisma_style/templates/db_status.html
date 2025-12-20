@@ -1,0 +1,30 @@
+<div class="db-result {% if success %}success{% else %}error{% endif %}" style="
+    padding: 16px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    {% if success %}
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+    {% else %}
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+    {% endif %}
+">
+    <strong>{% if success %}✓{% else %}✗{% endif %} {{ db_name }}</strong><br>
+    <span style="font-size: 0.9rem;">{{ message }}</span>
+    {% if success %}
+    <div style="margin-top: 12px;">
+        <a href="/" style="
+            display: inline-block;
+            padding: 8px 16px;
+            background: #155724;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 0.9rem;
+        ">Go to Todo App →</a>
+    </div>
+    {% endif %}
+</div>

@@ -1,0 +1,17 @@
+<li class="todo-item {{ 'completed' if todo['completed'] else '' }}"
+    id="todo-{{ todo['id'] }}">
+    <div class="todo-checkbox"
+         hx-put="/todos/{{ todo['id'] }}/toggle"
+         hx-target="#todo-{{ todo['id'] }}"
+         hx-swap="outerHTML"
+         hx-on::after-request="htmx.trigger('#todo-count', 'refresh')">
+    </div>
+    <span class="todo-title">{{ todo['title'] }}</span>
+    <button class="delete-btn"
+            hx-delete="/todos/{{ todo['id'] }}"
+            hx-target="#todo-{{ todo['id'] }}"
+            hx-swap="outerHTML"
+            hx-on::after-request="htmx.trigger('#todo-count', 'refresh')">
+        ×
+    </button>
+</li>

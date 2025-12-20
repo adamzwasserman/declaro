@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Todo App (Jinja2) - declaro_persistum Demo</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 2rem;
+            margin-bottom: 5px;
+        }
+
+        header p {
+            opacity: 0.8;
+            font-size: 0.9rem;
+        }
+
+        .input-section {
+            padding: 20px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        button {
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .todo-list {
+            list-style: none;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .todo-item {
+            display: flex;
+            align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid #f0f0f0;
+            transition: background 0.2s;
+        }
+
+        .todo-item:hover {
+            background: #f8f9fa;
+        }
+
+        .todo-item.completed .todo-title {
+            text-decoration: line-through;
+            color: #999;
+        }
+
+        .todo-checkbox {
+            width: 24px;
+            height: 24px;
+            border: 2px solid #ddd;
+            border-radius: 50%;
+            margin-right: 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .todo-checkbox:hover {
+            border-color: #667eea;
+        }
+
+        .todo-item.completed .todo-checkbox {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-color: #667eea;
+        }
+
+        .todo-checkbox::after {
+            content: '✓';
+            color: white;
+            font-size: 14px;
+            opacity: 0;
+        }
+
+        .todo-item.completed .todo-checkbox::after {
+            opacity: 1;
+        }
+
+        .todo-title {
+            flex: 1;
+            font-size: 1rem;
+            color: #333;
+        }
+
+        .delete-btn {
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            background: #ff6b6b;
+            border-radius: 6px;
+            font-size: 1.2rem;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .todo-item:hover .delete-btn {
+            opacity: 1;
+        }
+
+        .delete-btn:hover {
+            background: #ee5a5a;
+            transform: none;
+            box-shadow: none;
+        }
+
+        footer {
+            padding: 16px 20px;
+            background: #f8f9fa;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .empty-state {
+            padding: 60px 20px;
+            text-align: center;
+            color: #999;
+        }
+
+        .empty-state svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .htmx-indicator {
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .htmx-request .htmx-indicator {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📝 Todo App</h1>
+            <p>Django-style queries + declaro_persistum + HTMX</p>
+        </header>
+
+        <div class="input-section">
+            <form class="input-group"
+                  hx-post="/todos"
+                  hx-target="#todo-list"
+                  hx-swap="afterbegin"
+                  hx-on::after-request="this.reset(); htmx.trigger('#todo-count', 'refresh')">
+                <input type="text"
+                       name="title"
+                       placeholder="What needs to be done?"
+                       required
+                       autocomplete="off">
+                <button type="submit">Add</button>
+            </form>
+        </div>
+
+        <ul id="todo-list" class="todo-list">
+            {% if todos %}
+                {% for todo in todos %}
+                    {% include "partials/todo_item.html" %}
+                {% endfor %}
+            {% else %}
+                <li class="empty-state">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                    </svg>
+                    <p>No todos yet. Add one above!</p>
+                </li>
+            {% endif %}
+        </ul>
+
+        <footer>
+            <div id="todo-count"
+                 hx-get="/todos/count"
+                 hx-trigger="load, refresh">
+                {% set active_count = todos|selectattr('completed', 'equalto', 0)|list|length %}
+                {{ active_count }} item{{ 's' if active_count != 1 else '' }} left
+            </div>
+            <div>Django-style queries</div>
+        </footer>
+    </div>
+</body>
+</html>
