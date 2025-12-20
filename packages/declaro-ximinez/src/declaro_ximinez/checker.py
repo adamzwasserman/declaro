@@ -5,17 +5,20 @@ from __future__ import annotations
 from pathlib import Path
 
 import libcst as cst
+from libcst._exceptions import ParserSyntaxError
 from libcst.metadata import MetadataWrapper, PositionProvider
 
 from .types import Violation, FunctionScope, CheckResult, XiminezConfig
 from .parser import (
     parse_file,
     parse_source,
+    ParseResult,
     collect_function_scopes,
     extract_function_params,
     extract_return_type,
     get_position,
 )
+from .preprocessor import PreprocessResult
 from .symbols import (
     lookup_symbol,
     mark_symbol_used,
@@ -35,7 +38,7 @@ def check_file(file_path: Path, config: XiminezConfig) -> CheckResult:
         CheckResult with violations and scope info.
     """
     try:
-        module = parse_file(file_path)
+        parse_result = parse_file(file_path)
     except SyntaxError as e:
         return {
             "file": str(file_path),
@@ -48,8 +51,20 @@ def check_file(file_path: Path, config: XiminezConfig) -> CheckResult:
             }],
             "scopes": [],
         }
+    except ParserSyntaxError as e:
+        return {
+            "file": str(file_path),
+            "violations": [{
+                "file": str(file_path),
+                "line": getattr(e, "lines", (1,))[0] if hasattr(e, "lines") else 1,
+                "col": 0,
+                "message": str(e),
+                "code": "XI000",
+            }],
+            "scopes": [],
+        }
 
-    return check_module(module, str(file_path), config)
+    return check_module(parse_result, str(file_path), config)
 
 
 def check_source(source: str, filename: str, config: XiminezConfig) -> CheckResult:
@@ -64,7 +79,7 @@ def check_source(source: str, filename: str, config: XiminezConfig) -> CheckResu
         CheckResult with violations and scope info.
     """
     try:
-        module = parse_source(source)
+        parse_result = parse_source(source)
     except SyntaxError as e:
         return {
             "file": filename,
@@ -77,30 +92,63 @@ def check_source(source: str, filename: str, config: XiminezConfig) -> CheckResu
             }],
             "scopes": [],
         }
+    except ParserSyntaxError as e:
+        return {
+            "file": filename,
+            "violations": [{
+                "file": filename,
+                "line": getattr(e, "lines", (1,))[0] if hasattr(e, "lines") else 1,
+                "col": 0,
+                "message": str(e),
+                "code": "XI000",
+            }],
+            "scopes": [],
+        }
 
-    return check_module(module, filename, config)
+    return check_module(parse_result, filename, config)
 
 
 def check_module(
-    module: cst.Module,
+    parse_result: ParseResult,
     filename: str,
     config: XiminezConfig,
 ) -> CheckResult:
     """Check a parsed module for type violations.
 
     Args:
-        module: The parsed CST module.
+        parse_result: The parsed result with CST module and preprocessing info.
         filename: Filename to use in error messages.
         config: Ximinez configuration.
 
     Returns:
         CheckResult with violations and scope info.
     """
+    module = parse_result.module
+    preprocess_result = parse_result.preprocess_result
+
     violations: list[Violation] = []
     wrapper = MetadataWrapper(module)
 
-    # Collect function scopes
-    scopes = collect_function_scopes(module)
+    # Add preprocessing violations (types: block position, duplicates)
+    for pv in preprocess_result.violations:
+        violations.append({
+            "file": filename,
+            "line": pv.line,
+            "col": pv.col,
+            "message": pv.message,
+            "code": pv.code,
+        })
+
+    # If there are preprocessing violations, stop here - the structure is invalid
+    if violations:
+        return {
+            "file": filename,
+            "violations": violations,
+            "scopes": [],
+        }
+
+    # Collect function scopes, passing preprocess info to detect types: blocks
+    scopes = collect_function_scopes(module, preprocess_result)
 
     # Check each function
     for scope in scopes:
@@ -155,8 +203,9 @@ def check_function(
         check_undeclared_locals(module, wrapper, scope, filename)
     )
 
-    # Check for unused declarations (in block style)
+    # Track symbol usage (for unused declaration checking)
     if scope["has_types_block"]:
+        track_symbol_usage(module, wrapper, scope)
         violations.extend(
             check_unused_declarations(scope, filename)
         )
@@ -207,7 +256,7 @@ def check_untyped_params(
 
             return False  # Don't check nested functions in this pass
 
-    module.walk(ParamChecker())
+    wrapper.visit(ParamChecker())
     return violations
 
 
@@ -271,16 +320,21 @@ def check_undeclared_locals(
             return True
 
     checker = LocalChecker()
-    module.walk(checker)
+    wrapper.visit(checker)
 
     # Report violations for assignments without prior annotation
     for name, (line, col) in checker.assigned_names.items():
         if name not in scope["symbols"] and name not in scope["params"]:
+            # Use different message depending on whether function has types: block
+            if scope.get("has_types_block"):
+                message = f"'{name}' not declared in types: block"
+            else:
+                message = f"local variable '{name}' used without type declaration"
             violations.append({
                 "file": filename,
                 "line": line,
                 "col": col,
-                "message": f"local variable '{name}' used without type declaration",
+                "message": message,
                 "code": "XI003",
             })
 
@@ -314,6 +368,59 @@ def check_unused_declarations(
     return violations
 
 
+def track_symbol_usage(
+    module: cst.Module,
+    wrapper: MetadataWrapper,
+    scope: FunctionScope,
+) -> None:
+    """Track which declared symbols are actually used in the function.
+
+    Args:
+        module: The parsed CST module.
+        wrapper: Metadata wrapper for position info.
+        scope: The function scope to update with usage info.
+    """
+    class UsageTracker(cst.CSTVisitor):
+        def __init__(self) -> None:
+            self.in_target_func = False
+            self.skip_next_name = False  # Skip name in AnnAssign target
+
+        def visit_FunctionDef(self, node: cst.FunctionDef) -> bool:
+            if node.name.value == scope["name"]:
+                self.in_target_func = True
+                return True
+            elif self.in_target_func:
+                return False
+            return True
+
+        def leave_FunctionDef(self, node: cst.FunctionDef) -> None:
+            if node.name.value == scope["name"]:
+                self.in_target_func = False
+
+        def visit_AnnAssign(self, node: cst.AnnAssign) -> bool:
+            if not self.in_target_func:
+                return True
+            # For AnnAssign without value (declaration only), skip the target name
+            if node.value is None:
+                self.skip_next_name = True
+            return True
+
+        def leave_AnnAssign(self, node: cst.AnnAssign) -> None:
+            self.skip_next_name = False
+
+        def visit_Name(self, node: cst.Name) -> bool:
+            if not self.in_target_func:
+                return True
+            if self.skip_next_name:
+                self.skip_next_name = False
+                return True
+            # Mark the symbol as used if it's in scope
+            mark_symbol_used(scope, node.value)
+            return True
+
+    wrapper.visit(UsageTracker())
+
+
 def check_style_mixing(
     module: cst.Module,
     wrapper: MetadataWrapper,
@@ -338,11 +445,13 @@ def check_style_mixing(
     if not scope["has_types_block"]:
         return violations
 
-    # If we have a types: block, check for inline annotations in the body
+    # If we have a types: block, check for inline annotations that have values
+    # (assignments). The types: block declarations are converted to AnnAssign
+    # without values, so any AnnAssign WITH a value is an inline annotation.
     class InlineChecker(cst.CSTVisitor):
         def __init__(self) -> None:
             self.in_target_func = False
-            self.past_types_block = False
+            self.first_non_decl_seen = False
 
         def visit_FunctionDef(self, node: cst.FunctionDef) -> bool:
             if node.name.value == scope["name"]:
@@ -356,8 +465,21 @@ def check_style_mixing(
             if node.name.value == scope["name"]:
                 self.in_target_func = False
 
+        def visit_SimpleStatementLine(self, node: cst.SimpleStatementLine) -> bool:
+            if not self.in_target_func:
+                return True
+            # Check if this line contains something other than AnnAssign or Expr (docstring)
+            for stmt in node.body:
+                if not isinstance(stmt, (cst.AnnAssign, cst.Expr)):
+                    self.first_non_decl_seen = True
+            return True
+
         def visit_AnnAssign(self, node: cst.AnnAssign) -> bool:
-            if self.in_target_func and self.past_types_block:
+            if not self.in_target_func:
+                return True
+
+            # If we've seen a non-declaration statement, this is a late inline annotation
+            if self.first_non_decl_seen:
                 if isinstance(node.target, cst.Name):
                     pos = get_position(node, wrapper)
                     violations.append({
@@ -369,5 +491,5 @@ def check_style_mixing(
                     })
             return True
 
-    module.walk(InlineChecker())
+    wrapper.visit(InlineChecker())
     return violations

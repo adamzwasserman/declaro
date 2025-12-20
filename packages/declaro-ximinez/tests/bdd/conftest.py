@@ -125,25 +125,63 @@ def run_ximinez(
 ) -> XiminezResult:
     """
     Run ximinez on a file and return the result.
-
-    This is a stub that will be replaced with actual implementation.
-    For now, it returns a mock result for test development.
     """
-    # TODO: Replace with actual ximinez implementation
-    # from declaro_ximinez import check_file
-    # return check_file(file_path, config, flags)
+    from declaro_ximinez.checker import check_file
+    from declaro_ximinez.errors import (
+        format_violations_standard,
+        format_violations_inquisition,
+        format_violations_quiet,
+        format_violations_machine,
+        format_comfy_chair,
+        _get_text,
+    )
 
     flags = flags or []
 
-    # Determine output based on flags
-    if "--full" in flags:
-        output = "Dismissed!"  # Easter egg mode
+    # Convert test config to ximinez config format
+    ximinez_config = {
+        "enabled": config.get("enabled", True),
+        "stage": config.get("stage", 1),
+        "allow_inline_style": config.get("allow_inline_style", True),
+        "allow_block_style": config.get("allow_block_style", True),
+        "declaro_enabled": config.get("declaro_enabled", False),
+        "declaro_schema_paths": config.get("declaro_schema_paths", []),
+    }
+
+    # Run the actual checker
+    result = check_file(file_path, ximinez_config)
+    violations = result["violations"]
+    violation_count = len(violations)
+
+    # Determine exit code
+    # Exit code 2 for parse errors (XI000)
+    has_parse_error = any(v.get("code") == "XI000" for v in violations)
+    if has_parse_error:
+        exit_code = 2
+    elif violations:
+        exit_code = 1
     else:
-        output = "No violations found."  # Standard mode
+        exit_code = 0
+
+    # Format output based on flags
+    if "--machine" in flags:
+        output = format_violations_machine(violations)
+    elif "--quiet" in flags:
+        output = format_violations_quiet(violations)
+    elif "--comfy-chair" in flags:
+        output = format_comfy_chair(violations)
+        exit_code = 0  # Comfy chair never fails
+    elif "--full" in flags:
+        if violations:
+            output = format_violations_inquisition(violations, "type")
+        else:
+            output = _get_text("dismissed")
+    else:
+        output = format_violations_standard(violations)
 
     return {
-        "exit_code": 0,
+        "exit_code": exit_code,
         "output": output,
-        "violations": [],
-        "violation_count": 0,
+        "violations": violations,
+        "violation_count": violation_count,
     }

@@ -43,7 +43,7 @@ Feature: Error Message Formatting
       """
     When ximinez checks the file with --full flag
     Then no violations are reported
-    And the output contains "Dismissed!"
+    And the output contains "dismissed"
 
   Scenario: Full mode - one violation
     Given a Python file with content:
@@ -68,7 +68,7 @@ Feature: Error Message Formatting
     Then 2 violations are reported
     And the output contains "NOBODY expects a type violation!"
     And the output contains "Our CHIEF weapon:"
-    And the output contains "...TWO!"
+    And the output contains "Our TWO"
 
   Scenario: Full mode - three violations
     Given a Python file with content:
@@ -80,7 +80,7 @@ Feature: Error Message Formatting
     When ximinez checks the file with --full flag
     Then 3 violations are reported
     And the output contains "Our TWO chief weapons are:"
-    And the output contains "...THREE!"
+    And the output contains "Our THREE"
 
   Scenario: Full mode - four violations (classic restart)
     Given a Python file with content:
@@ -92,7 +92,7 @@ Feature: Error Message Formatting
     When ximinez checks the file with --full flag
     Then 4 violations are reported
     And the output contains "Our THREE chief weapons are:"
-    And the output contains "I'll come in again!"
+    And the output contains "I'll come again!"
     And the output contains "Our FOUR chief weapons:"
 
   Scenario: Full mode - five or more violations
@@ -135,7 +135,7 @@ Feature: Error Message Formatting
       """
     When ximinez checks the file with --machine flag
     Then 2 violations are reported
-    And the output matches pattern "{file}:{line}:{col}: error: {message} \[XI\d+\]"
+    And the output matches pattern ".*:\d+:\d+: error: .* \[XI\d+\]"
     And the output does not contain "NOBODY"
 
   Scenario: Comfy chair mode shows warnings

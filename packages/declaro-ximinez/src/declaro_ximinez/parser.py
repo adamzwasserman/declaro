@@ -3,43 +3,56 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import dataclass
 
 import libcst as cst
 from libcst.metadata import MetadataWrapper, PositionProvider
 
 from .types import FunctionScope, Position
 from .symbols import create_scope, declare_symbol
+from .preprocessor import preprocess_file, preprocess_source as preprocess, PreprocessResult
 
 
-def parse_file(file_path: Path) -> cst.Module:
-    """Parse a Python file into a CST.
+@dataclass
+class ParseResult:
+    """Result of parsing a file with preprocessing."""
+
+    module: cst.Module
+    preprocess_result: PreprocessResult
+
+
+def parse_file(file_path: Path) -> ParseResult:
+    """Parse a Python file into a CST, preprocessing types: blocks.
 
     Args:
         file_path: Path to the Python file.
 
     Returns:
-        The parsed CST module.
+        ParseResult with CST module and preprocessing metadata.
 
     Raises:
         SyntaxError: If the file cannot be parsed.
     """
-    source = file_path.read_text()
-    return cst.parse_module(source)
+    preprocess_result = preprocess_file(file_path)
+    module = cst.parse_module(preprocess_result.source)
+    return ParseResult(module=module, preprocess_result=preprocess_result)
 
 
-def parse_source(source: str) -> cst.Module:
-    """Parse Python source code into a CST.
+def parse_source(source: str) -> ParseResult:
+    """Parse Python source code into a CST, preprocessing types: blocks.
 
     Args:
         source: Python source code string.
 
     Returns:
-        The parsed CST module.
+        ParseResult with CST module and preprocessing metadata.
 
     Raises:
         SyntaxError: If the source cannot be parsed.
     """
-    return cst.parse_module(source)
+    preprocess_result = preprocess(source)
+    module = cst.parse_module(preprocess_result.source)
+    return ParseResult(module=module, preprocess_result=preprocess_result)
 
 
 def get_position(node: cst.CSTNode, wrapper: MetadataWrapper) -> Position:
@@ -131,78 +144,36 @@ def extract_return_type(func: cst.FunctionDef) -> str | None:
     return extract_type_annotation(func.returns)
 
 
-def is_types_block(stmt: cst.BaseStatement) -> bool:
-    """Check if a statement is a types: block.
-
-    Args:
-        stmt: The statement to check.
-
-    Returns:
-        True if this is a types: block.
-    """
-    # types: block looks like:
-    # types:
-    #     x: int
-    #     y: str
-    #
-    # In CST this is a SimpleStatementLine with an Expr containing a Name "types"
-    # followed by an IndentedBlock... but that's not valid Python!
-    #
-    # Actually, types: needs to be implemented as a special syntax extension
-    # or we parse it as a labeled statement. For now, we'll look for:
-    # if TYPE_CHECKING: block with special comment, or a custom pattern.
-    #
-    # TODO: Implement types: block detection - this is a syntax extension
-    return False
-
-
-def find_types_block(func: cst.FunctionDef) -> cst.BaseStatement | None:
-    """Find a types: block in a function body.
-
-    Args:
-        func: The function definition node.
-
-    Returns:
-        The types: block statement if found, None otherwise.
-    """
-    body = func.body
-    if not isinstance(body, cst.IndentedBlock):
-        return None
-
-    for stmt in body.body:
-        if is_types_block(stmt):
-            return stmt
-
-    return None
-
-
-def extract_types_block_declarations(
-    block: cst.BaseStatement,
-) -> list[tuple[str, str, bool, Position]]:
-    """Extract variable declarations from a types: block.
-
-    Args:
-        block: The types: block statement.
-
-    Returns:
-        List of (name, type, has_initializer, position) tuples.
-    """
-    # TODO: Implement once types: block syntax is defined
-    return []
-
-
-def collect_function_scopes(module: cst.Module) -> list[FunctionScope]:
+def collect_function_scopes(
+    module: cst.Module,
+    preprocess_result: PreprocessResult | None = None,
+) -> list[FunctionScope]:
     """Collect all function scopes from a module.
 
     Args:
         module: The parsed CST module.
+        preprocess_result: Optional preprocessing result with types: block info.
 
     Returns:
         List of function scopes with their declarations.
     """
+    import re
+
     scopes: list[FunctionScope] = []
 
+    # Build a map of types: block by indentation level
+    types_blocks_by_indent: dict[int, list] = {}
+    if preprocess_result:
+        for block in preprocess_result.types_blocks:
+            indent_len = len(block.indent)
+            if indent_len not in types_blocks_by_indent:
+                types_blocks_by_indent[indent_len] = []
+            types_blocks_by_indent[indent_len].append(block)
+
     class FunctionCollector(cst.CSTVisitor):
+        def __init__(self) -> None:
+            self.current_indent = 0
+
         def visit_FunctionDef(self, node: cst.FunctionDef) -> bool:
             scope = create_scope(node.name.value)
 
@@ -213,18 +184,47 @@ def collect_function_scopes(module: cst.Module) -> list[FunctionScope]:
             # Extract return type
             scope["return_type"] = extract_return_type(node)
 
-            # Check for types: block
-            types_block = find_types_block(node)
-            if types_block:
+            # Check if this function had a types: block based on indent matching
+            has_types_block = False
+            body_indent = self.current_indent + 4  # Assumes 4-space indent
+
+            if body_indent in types_blocks_by_indent:
+                has_types_block = True
+                # Extract symbols from the types: block declarations
+                for block in types_blocks_by_indent[body_indent]:
+                    for decl_text, decl_line in block.declarations:
+                        # Parse declaration: "name: type" or "name: type = value"
+                        match = re.match(r'\s*(\w+)\s*:\s*([^=]+)', decl_text)
+                        if match:
+                            var_name = match.group(1)
+                            var_type = match.group(2).strip()
+                            declare_symbol(scope, var_name, var_type, decl_line, 0)
+            elif preprocess_result and preprocess_result.types_blocks:
+                # Fallback: for simple single-function files
+                if len(preprocess_result.types_blocks) > 0:
+                    has_types_block = True
+                    block = preprocess_result.types_blocks[0]
+                    for decl_text, decl_line in block.declarations:
+                        match = re.match(r'\s*(\w+)\s*:\s*([^=]+)', decl_text)
+                        if match:
+                            var_name = match.group(1)
+                            var_type = match.group(2).strip()
+                            declare_symbol(scope, var_name, var_type, decl_line, 0)
+
+            if has_types_block:
                 scope["has_types_block"] = True
                 scope["style"] = "block"
-                # Extract declarations from types: block
-                # TODO: implement
             else:
                 scope["style"] = "inline"
 
             scopes.append(scope)
+            self.current_indent += 4
             return True  # Continue visiting nested functions
 
-    module.walk(FunctionCollector())
+        def leave_FunctionDef(self, node: cst.FunctionDef) -> None:
+            self.current_indent -= 4
+
+    # Use MetadataWrapper for visiting
+    wrapper = MetadataWrapper(module)
+    wrapper.visit(FunctionCollector())
     return scopes
