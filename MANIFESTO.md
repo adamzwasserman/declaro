@@ -88,23 +88,46 @@ Every cache is a bug waiting to happen. Every memoized result is a stale answer 
 
 If you need performance, measure first. Then optimize the hot path. Don't scatter state across your entire codebase for a cache hit you might never need.
 
-## Declarative Over Imperative
+## Declarative Interfaces, Imperative Internals
 
-Imperative code tells the computer **how** to do something. Declarative code tells it **what** you want.
+Imperative code is inevitable. At some point, the CPU executes instructions. The database runs queries. Bytes hit the network. **Imperative code is not the enemy.**
+
+**Imperative interfaces are the enemy.**
+
+When a library forces you to orchestrate its operations—manage its connections, call its methods in the right order, handle its state transitions—it has failed at being a library. It has exported its implementation to you. That's not encapsulation. That's Big State wearing a trench coat.
+
+A **true library** is a black box with a declarative interface:
+- You state WHAT you want
+- It figures out HOW to do it
+- You never touch its internals
+
+```python
+# Imperative interface - YOU manage the library's concerns
+session = Session()
+try:
+    user = session.query(User).filter_by(id=1).first()
+    user.name = "new"
+    session.commit()
+except:
+    session.rollback()
+finally:
+    session.close()
+
+# Declarative interface - you state intent, library handles the rest
+user = await query.select("users").where(id=1).one()
+await query.update("users").where(id=1).set(name="new")
+```
+
+The imperative code still exists—inside the library. But the interface is declarative. You declare what you want. The library delivers.
 
 ```toml
-# Declarative: what you want
+# Schema declaration - the ultimate declarative interface
 [user]
 table = "users"
 
 [user.fields]
 id = { type = "uuid" }
 email = { type = "str", validate = ["email"] }
-```
-
-```python
-# Imperative: how to do it (hidden inside declaro)
-# You never write this. We do.
 ```
 
 TOML defines the schema. The system derives:
