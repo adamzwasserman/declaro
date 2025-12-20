@@ -17,7 +17,7 @@ Feature: Inline Type Annotations
       """
     When ximinez checks the file
     Then no violations are reported
-    And the output contains "Dismissed! The accused is free to go."
+    And the output contains "No violations found."
 
   Scenario: Missing parameter type annotation
     Given a Python file with content:

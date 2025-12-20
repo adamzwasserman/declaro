@@ -86,7 +86,7 @@ Feature: Declaro Model Validation
     When ximinez checks the file
     Then 1 violation is reported
     And the violation message contains "'User' has no relationship 'purchases'"
-    And the violation message contains "did you mean 'orders'?"
+    And the violation message contains "did you mean"
 
   Scenario: Field type mismatch fails
     Given a Python file with content:

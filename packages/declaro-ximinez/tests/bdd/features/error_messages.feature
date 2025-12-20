@@ -43,7 +43,7 @@ Feature: Error Message Formatting
       """
     When ximinez checks the file with --full flag
     Then no violations are reported
-    And the output contains "dismissed"
+    And the output contains "Dismissed!"
 
   Scenario: Full mode - one violation
     Given a Python file with content:
@@ -163,7 +163,17 @@ Feature: Error Message Formatting
     Then the exit code is 2
 
   Scenario: Model violations in full mode
-    Given ximinez is configured with declaro schema path "schema/"
+    Given a TOML schema file "schema/user.toml" with content:
+      """
+      [user]
+      table = "users"
+
+      [user.fields]
+      id = { type = "uuid" }
+      email = { type = "str" }
+      name = { type = "str", nullable = true }
+      """
+    And ximinez is configured with declaro schema path "schema/"
     And a Python file with content:
       """
       def get_username(user: User) -> str:
@@ -186,4 +196,5 @@ Feature: Error Message Formatting
       """
     When ximinez checks the file
     Then the exit code is 2
-    And the output contains "Could not load schema from: nonexistent/"
+    And the output contains "Could not load schema from:"
+    And the output contains "nonexistent"

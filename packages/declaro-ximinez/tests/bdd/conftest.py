@@ -163,6 +163,10 @@ def run_ximinez(
     else:
         exit_code = 0
 
+    # Determine violation type (model vs type) for inquisition formatter
+    has_model_violations = any(v.get("code", "").startswith("XIM") for v in violations)
+    violation_type = "model" if has_model_violations else "type"
+
     # Format output based on flags
     if "--machine" in flags:
         output = format_violations_machine(violations)
@@ -172,11 +176,9 @@ def run_ximinez(
         output = format_comfy_chair(violations)
         exit_code = 0  # Comfy chair never fails
     elif "--full" in flags:
-        if violations:
-            output = format_violations_inquisition(violations, "type")
-        else:
-            output = _get_text("dismissed")
+        output = format_violations_inquisition(violations, violation_type)
     else:
+        # Default: use standard professional format
         output = format_violations_standard(violations)
 
     return {

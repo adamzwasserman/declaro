@@ -77,13 +77,30 @@ def check_file(file_path: Path, config: XiminezConfig) -> CheckResult:
     if config.get("declaro_enabled"):
         schema_paths = config.get("declaro_schema_paths", [])
         for schema_path in schema_paths:
-            # Resolve relative to file's directory
-            full_path = file_path.parent / schema_path
+            # Use path as-is if it looks like an absolute path, otherwise resolve relative to file
+            path_obj = Path(schema_path)
+            if path_obj.is_absolute():
+                full_path = path_obj
+            else:
+                full_path = file_path.parent / schema_path
             if full_path.exists():
                 try:
                     models.update(load_schema(full_path))
                 except FileNotFoundError:
                     pass
+            else:
+                # Schema path not found - return error
+                return {
+                    "file": str(file_path),
+                    "violations": [{
+                        "file": str(file_path),
+                        "line": 1,
+                        "col": 0,
+                        "message": f"Could not load schema from: {schema_path}",
+                        "code": "XI000",  # Use parse error code for exit 2
+                    }],
+                    "scopes": [],
+                }
 
     return check_module(parse_result, str(file_path), config, models)
 

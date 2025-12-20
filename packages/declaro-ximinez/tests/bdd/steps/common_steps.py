@@ -41,10 +41,12 @@ def config_module_style_enforcement(ximinez_config: XiminezConfig):
 
 
 @given(parsers.parse('ximinez is configured with declaro schema path "{path}"'))
-def config_declaro_schema(ximinez_config: XiminezConfig, path: str):
+def config_declaro_schema(ximinez_config: XiminezConfig, temp_dir: Path, path: str):
     """Configure ximinez with declaro schema path."""
     ximinez_config["declaro_enabled"] = True
-    ximinez_config["declaro_schema_paths"] = [path]
+    # Store both the relative path and the temp_dir for path resolution
+    full_path = temp_dir / path
+    ximinez_config["declaro_schema_paths"] = [str(full_path)]
 
 
 # ============================================================================
