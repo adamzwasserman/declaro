@@ -275,6 +275,11 @@ def check_function(
         check_walrus_operators(module, wrapper, scope, filename)
     )
 
+    # Check comprehension variables
+    violations.extend(
+        check_comprehension_variables(module, wrapper, scope, filename)
+    )
+
     # Check Declaro model usage
     if models:
         violations.extend(
@@ -778,6 +783,113 @@ def check_walrus_operators(
             return True
 
     wrapper.visit(WalrusChecker())
+    return violations
+
+
+def check_comprehension_variables(
+    module: cst.Module,
+    wrapper: MetadataWrapper,
+    scope: FunctionScope,
+    filename: str,
+) -> list[Violation]:
+    """Check that comprehension loop variables are declared.
+
+    Args:
+        module: The parsed CST module.
+        wrapper: Metadata wrapper for position info.
+        scope: The function scope to check.
+        filename: Filename to use in error messages.
+
+    Returns:
+        List of violations for undeclared comprehension variables.
+    """
+    violations: list[Violation] = []
+
+    class ComprehensionChecker(cst.CSTVisitor):
+        def __init__(self) -> None:
+            self.in_target_func = False
+            self.declared_names: set[str] = set()
+
+        def visit_FunctionDef(self, node: cst.FunctionDef) -> bool:
+            if node.name.value == scope["name"]:
+                self.in_target_func = True
+                return True
+            elif self.in_target_func:
+                return False
+            return True
+
+        def leave_FunctionDef(self, node: cst.FunctionDef) -> None:
+            if node.name.value == scope["name"]:
+                self.in_target_func = False
+
+        def visit_AnnAssign(self, node: cst.AnnAssign) -> bool:
+            if not self.in_target_func:
+                return True
+
+            if isinstance(node.target, cst.Name):
+                self.declared_names.add(node.target.value)
+            return True
+
+        def _check_comp_for(self, comp_for: cst.CompFor, pos_node: cst.CSTNode) -> None:
+            """Check comprehension for clause variables."""
+            if not self.in_target_func:
+                return
+
+            # Handle target - can be Name, Tuple, etc.
+            targets = self._extract_names(comp_for.target)
+            for name in targets:
+                if name not in scope["symbols"] and name not in scope["params"] and name not in self.declared_names:
+                    pos = get_position(pos_node, wrapper)
+                    if scope.get("has_types_block"):
+                        message = f"comprehension variable '{name}' must be declared in types: block"
+                    else:
+                        message = f"comprehension variable '{name}' used without type declaration"
+                    violations.append({
+                        "file": filename,
+                        "line": pos["line"],
+                        "col": pos["col"],
+                        "message": message,
+                        "code": "XI011",
+                    })
+
+            # Check nested for clauses
+            if comp_for.inner_for_in:
+                self._check_comp_for(comp_for.inner_for_in, pos_node)
+
+        def _extract_names(self, node: cst.BaseExpression) -> list[str]:
+            """Extract variable names from a target expression."""
+            names = []
+            if isinstance(node, cst.Name):
+                names.append(node.value)
+            elif isinstance(node, cst.Tuple):
+                for elem in node.elements:
+                    if isinstance(elem.value, cst.Name):
+                        names.append(elem.value.value)
+                    elif isinstance(elem.value, cst.Tuple):
+                        names.extend(self._extract_names(elem.value))
+            return names
+
+        def visit_ListComp(self, node: cst.ListComp) -> bool:
+            if self.in_target_func:
+                self._check_comp_for(node.for_in, node)
+            return True
+
+        def visit_SetComp(self, node: cst.SetComp) -> bool:
+            if self.in_target_func:
+                self._check_comp_for(node.for_in, node)
+            return True
+
+        def visit_DictComp(self, node: cst.DictComp) -> bool:
+            if self.in_target_func:
+                self._check_comp_for(node.for_in, node)
+            return True
+
+        def visit_GeneratorExp(self, node: cst.GeneratorExp) -> bool:
+            if self.in_target_func:
+                self._check_comp_for(node.for_in, node)
+            return True
+
+    wrapper.visit(ComprehensionChecker())
     return violations
 
 
