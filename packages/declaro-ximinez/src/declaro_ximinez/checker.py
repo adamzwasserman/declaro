@@ -8,7 +8,7 @@ import libcst as cst
 from libcst._exceptions import ParserSyntaxError
 from libcst.metadata import MetadataWrapper, PositionProvider
 
-from .types import Violation, FunctionScope, CheckResult, XiminezConfig
+from .types import Violation, FunctionScope, CheckResult, XiminezConfig, Model
 from .parser import (
     parse_file,
     parse_source,
@@ -24,6 +24,14 @@ from .symbols import (
     mark_symbol_used,
     get_undeclared_symbols,
     get_unused_symbols,
+)
+from .declaro import (
+    load_schema,
+    validate_field_access,
+    validate_relationship_access,
+    validate_field_type,
+    validate_query_column,
+    validate_insert_fields,
 )
 
 
@@ -64,7 +72,20 @@ def check_file(file_path: Path, config: XiminezConfig) -> CheckResult:
             "scopes": [],
         }
 
-    return check_module(parse_result, str(file_path), config)
+    # Load Declaro schema if enabled
+    models: dict[str, Model] = {}
+    if config.get("declaro_enabled"):
+        schema_paths = config.get("declaro_schema_paths", [])
+        for schema_path in schema_paths:
+            # Resolve relative to file's directory
+            full_path = file_path.parent / schema_path
+            if full_path.exists():
+                try:
+                    models.update(load_schema(full_path))
+                except FileNotFoundError:
+                    pass
+
+    return check_module(parse_result, str(file_path), config, models)
 
 
 def check_source(source: str, filename: str, config: XiminezConfig) -> CheckResult:
@@ -105,13 +126,14 @@ def check_source(source: str, filename: str, config: XiminezConfig) -> CheckResu
             "scopes": [],
         }
 
-    return check_module(parse_result, filename, config)
+    return check_module(parse_result, filename, config, {})
 
 
 def check_module(
     parse_result: ParseResult,
     filename: str,
     config: XiminezConfig,
+    models: dict[str, Model] | None = None,
 ) -> CheckResult:
     """Check a parsed module for type violations.
 
@@ -119,10 +141,13 @@ def check_module(
         parse_result: The parsed result with CST module and preprocessing info.
         filename: Filename to use in error messages.
         config: Ximinez configuration.
+        models: Declaro models loaded from schema (optional).
 
     Returns:
         CheckResult with violations and scope info.
     """
+    if models is None:
+        models = {}
     module = parse_result.module
     preprocess_result = parse_result.preprocess_result
 
@@ -152,7 +177,7 @@ def check_module(
 
     # Check each function
     for scope in scopes:
-        func_violations = check_function(module, wrapper, scope, filename, config)
+        func_violations = check_function(module, wrapper, scope, filename, config, models)
         violations.extend(func_violations)
 
     return {
@@ -168,6 +193,7 @@ def check_function(
     scope: FunctionScope,
     filename: str,
     config: XiminezConfig,
+    models: dict[str, Model] | None = None,
 ) -> list[Violation]:
     """Check a single function for type violations.
 
@@ -177,6 +203,7 @@ def check_function(
         scope: The function scope to check.
         filename: Filename to use in error messages.
         config: Ximinez configuration.
+        models: Declaro models loaded from schema (optional).
 
     Returns:
         List of violations found in this function.
@@ -214,6 +241,12 @@ def check_function(
     violations.extend(
         check_style_mixing(module, wrapper, scope, filename, config)
     )
+
+    # Check Declaro model usage
+    if models:
+        violations.extend(
+            check_model_access(module, wrapper, scope, filename, models)
+        )
 
     return violations
 
@@ -492,4 +525,144 @@ def check_style_mixing(
             return True
 
     wrapper.visit(InlineChecker())
+    return violations
+
+
+def check_model_access(
+    module: cst.Module,
+    wrapper: MetadataWrapper,
+    scope: FunctionScope,
+    filename: str,
+    models: dict[str, Model],
+) -> list[Violation]:
+    """Check for invalid Declaro model field/relationship access.
+
+    Args:
+        module: The parsed CST module.
+        wrapper: Metadata wrapper for position info.
+        scope: The function scope to check.
+        filename: Filename to use in error messages.
+        models: Declaro models loaded from schema.
+
+    Returns:
+        List of violations for invalid model access.
+    """
+    violations: list[Violation] = []
+
+    # Build map of variable name -> model type from function params
+    model_vars: dict[str, Model] = {}
+
+    # Check params for model types
+    for param_name, param_type in scope["params"].items():
+        # Match model names (e.g., User, Order) - case insensitive match
+        model_name = param_type.lower()
+        if model_name in models:
+            model_vars[param_name] = models[model_name]
+
+    # Also check declared types in scope
+    for sym_name, symbol in scope["symbols"].items():
+        type_ann = symbol.get("type_annotation", "")
+        # Extract base type (e.g., "list[Order]" -> "order")
+        base_type = type_ann.lower().rstrip("s")  # Simple pluralization
+        for model_name, model in models.items():
+            if model_name.lower() in base_type:
+                model_vars[sym_name] = model
+                break
+
+    if not model_vars:
+        return violations
+
+    class ModelAccessChecker(cst.CSTVisitor):
+        def __init__(self) -> None:
+            self.in_target_func = False
+
+        def visit_FunctionDef(self, node: cst.FunctionDef) -> bool:
+            if node.name.value == scope["name"]:
+                self.in_target_func = True
+                return True
+            elif self.in_target_func:
+                return False
+            return True
+
+        def leave_FunctionDef(self, node: cst.FunctionDef) -> None:
+            if node.name.value == scope["name"]:
+                self.in_target_func = False
+
+        def visit_Subscript(self, node: cst.Subscript) -> bool:
+            if not self.in_target_func:
+                return True
+
+            # Check for model["field"] pattern
+            if isinstance(node.value, cst.Name):
+                var_name = node.value.value
+                if var_name in model_vars:
+                    model = model_vars[var_name]
+                    # Get the subscript key
+                    for slice_item in node.slice:
+                        if isinstance(slice_item.slice, cst.Index):
+                            index = slice_item.slice.value
+                            if isinstance(index, cst.SimpleString):
+                                # Extract string value (remove quotes)
+                                field_name = index.value[1:-1]
+                                pos = get_position(node, wrapper)
+
+                                # Check if it's a valid field or relationship
+                                if field_name in model["fields"]:
+                                    continue  # Valid field access
+                                if field_name in model["relationships"]:
+                                    continue  # Valid relationship access
+
+                                # Not found - determine if it looks like a relationship or field
+                                # Simple heuristic: if name ends with 's' (plural), treat as relationship
+                                if field_name.endswith('s') and len(field_name) > 2:
+                                    # Likely a relationship access (plural name pattern)
+                                    violation = validate_relationship_access(
+                                        model, field_name, filename, pos["line"], pos["col"]
+                                    )
+                                else:
+                                    # Default to field access error
+                                    violation = validate_field_access(
+                                        model, field_name, filename, pos["line"], pos["col"]
+                                    )
+
+                                if violation:
+                                    violations.append(violation)
+            return True
+
+        def visit_Call(self, node: cst.Call) -> bool:
+            if not self.in_target_func:
+                return True
+
+            # Check for query.select("table").where(field=value) pattern
+            if isinstance(node.func, cst.Attribute):
+                attr_name = node.func.attr.value
+
+                # Handle query.select("table")
+                if attr_name == "select":
+                    if node.args and isinstance(node.args[0].value, cst.SimpleString):
+                        table_name = node.args[0].value.value[1:-1]
+                        # Store for .where() checking
+                        # (simplified - would need more context tracking)
+
+                # Handle .where(field=value)
+                if attr_name == "where":
+                    for arg in node.args:
+                        if arg.keyword:
+                            col_name = arg.keyword.value
+                            # We'd need to track the table from select()
+                            # For now, check against all models
+                            for model in models.values():
+                                if col_name not in model["fields"]:
+                                    pos = get_position(node, wrapper)
+                                    violation = validate_query_column(
+                                        models, model["table"], col_name,
+                                        filename, pos["line"], pos["col"]
+                                    )
+                                    if violation:
+                                        violations.append(violation)
+                                        break
+
+            return True
+
+    wrapper.visit(ModelAccessChecker())
     return violations

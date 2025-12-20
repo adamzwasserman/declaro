@@ -131,7 +131,7 @@ def validate_field_access(
 
     # Field not found - suggest similar
     all_names = list(model["fields"].keys()) + list(model["relationships"].keys())
-    suggestion = suggest_similar(field_name, all_names)
+    suggestion = suggest_similar(field_name, all_names, max_distance=5)
 
     message = f"'{model['name'].title()}' has no field '{field_name}'"
     if suggestion:
@@ -173,7 +173,7 @@ def validate_relationship_access(
         return None
 
     # Not found - suggest similar
-    suggestion = suggest_similar(rel_name, list(model["relationships"].keys()))
+    suggestion = suggest_similar(rel_name, list(model["relationships"].keys()), max_distance=10)
 
     message = f"'{model['name'].title()}' has no relationship '{rel_name}'"
     if suggestion:
