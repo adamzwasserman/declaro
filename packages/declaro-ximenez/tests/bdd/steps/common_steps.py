@@ -52,27 +52,35 @@ def config_declaro_schema(ximenez_config: XimenezConfig, path: str):
 # ============================================================================
 
 
-@given(parsers.parse('a Python file with content:\n"""\n{content}\n"""'))
+@given("a Python file with content:")
 def create_python_file_step(
     temp_dir: Path,
     python_file_content: dict,
-    content: str,
+    docstring: str,
 ):
-    """Create a Python file with the given content."""
-    file_path = create_python_file(temp_dir, content)
-    python_file_content["content"] = content
+    """Create a Python file with the given content.
+
+    The 'docstring' parameter is automatically populated by pytest-bdd
+    with the docstring content following the step.
+    """
+    file_path = create_python_file(temp_dir, docstring)
+    python_file_content["content"] = docstring
     python_file_content["path"] = str(file_path)
 
 
-@given(parsers.parse('a TOML schema file "{path}" with content:\n"""\n{content}\n"""'))
+@given(parsers.parse('a TOML schema file "{path}" with content:'))
 def create_schema_file_step(
     temp_dir: Path,
     schema_files: dict,
     path: str,
-    content: str,
+    docstring: str,
 ):
-    """Create a TOML schema file."""
-    file_path = create_schema_file(temp_dir, path, content)
+    """Create a TOML schema file.
+
+    The 'docstring' parameter is automatically populated by pytest-bdd
+    with the docstring content following the step.
+    """
+    file_path = create_schema_file(temp_dir, path, docstring)
     schema_files[path] = str(file_path)
 
 
