@@ -161,4 +161,6 @@ Just functions and data.
 
 ---
 
-*"If you need a debugger, your code is too clever."*
+*Declaro ergo fit.*
+
+"I declare, therefore it becomes."
