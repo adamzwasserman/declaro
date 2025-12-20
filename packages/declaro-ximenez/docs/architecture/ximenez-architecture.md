@@ -174,9 +174,11 @@ def get_user_info(user: User) -> str:
 ```text
 NOBODY expects a model violation!
 
-Our TWO chief violations are:
+Our chief violation is:
 - app.py:7:16: 'User' has no field 'username' (did you mean 'name'?)
 - app.py:8:26: 'User' has no relationship 'purchases' (did you mean 'orders'?)
+
+...TWO! Our TWO chief violations are fear and surprise!
 ```
 
 ### 5.4 Query Builder Validation
@@ -283,73 +285,88 @@ Fully implements the Spanish Inquisition-themed error reporting specification (s
 
 ### 7.1 Core Principle
 
-All error reporting follows Cardinal Ximénez's enumeration pattern: confident count declaration, incremental discovery, dramatic restarts, and escalating absurdity for high violation counts.
+All error reporting follows Cardinal Ximénez's enumeration pattern: **always off by one**. Confidently announce a count, then list one more than announced, realize the mistake, restart with correction. This is the core joke.
 
 ### 7.2 Message Structure
 
-**Single Violation:**
+**One Violation (announces chief, lists one — baseline):**
 
 ```text
 NOBODY expects a type violation!
 
 Our chief violation is:
-- {location}: {message}
+- {violation 1}
 ```
 
-**Two Violations:**
+**Two Violations (announces ONE, lists TWO):**
+
+```text
+NOBODY expects a type violation!
+
+Our chief violation is:
+- {violation 1}
+- {violation 2}
+
+...TWO! Our TWO chief violations are fear and surprise!
+```
+
+**Three Violations (announces TWO, lists THREE):**
 
 ```text
 NOBODY expects a type violation!
 
 Our TWO chief violations are:
-- {location}: {message}
-- {location}: {message}
+- {violation 1}
+- {violation 2}
+- {violation 3}
+
+...THREE! Our THREE chief violations are fear, surprise, and ruthless efficiency!
 ```
 
-**Three Violations:**
+**Four Violations (announces THREE, lists FOUR — classic restart):**
 
 ```text
 NOBODY expects a type violation!
 
 Our THREE chief violations are:
-- {location}: {message}
-- {location}: {message}
-- {location}: {message}
-...and a fanatical devotion to the Pope.
-```
+- {violation 1}
+- {violation 2}
+- {violation 3}
+- {violation 4}
 
-**Four Violations (Classic Restart):**
+...FOUR! Amongst our violations...
+I'll come in again.
 
-```text
 NOBODY expects a type violation!
 
-Our THREE chief violations are:
-- {location}: {message}
-- {location}: {message}
-- {location}: {message}
-...FOUR! Our FOUR chief violations are:
+Our FOUR chief violations are:
 - {all four violations}
 ...and a fanatical devotion to the Pope.
 ```
 
-**Five or More Violations (Escalating Chaos):**
+**Five or More Violations (escalating chaos):**
 
 ```text
 NOBODY expects a type violation!
 
-Amongst our violations are such elements as:
-- {first three violations}
-...I'll come in again.
+Our FOUR chief violations are:
+- {violation 1}
+- {violation 2}
+- {violation 3}
+- {violation 4}
+- {violation 5}
 
-NOBODY expects a type violation!
+...FIVE! Our FIVE... no...
 
-Our FIVE chief violations are:
+Amongst our violations are such diverse elements as:
 - {first five violations}
-...SIX! Our SIX...
+...I'll come in again.
 
 Cardinal Biggles, read the charges.
 
-{remaining violations listed plainly, one per line}
+{remaining violations listed plainly}
+
+...and an almost fanatical devotion to the Pope.
 ```
 
 ### 7.3 Model Violation Messages (NEW)

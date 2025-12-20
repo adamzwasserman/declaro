@@ -110,9 +110,11 @@ repos:
 ```text
 NOBODY expects a type violation!
 
-Our TWO chief violations are:
+Our chief violation is:
 - src/app.py:42:5: expected 'int', got 'str'
 - src/app.py:47:9: local variable 'count' used without type declaration
+
+...TWO! Our TWO chief violations are fear and surprise!
 ```
 
 **No violations:**
