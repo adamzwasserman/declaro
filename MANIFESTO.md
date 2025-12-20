@@ -1,38 +1,120 @@
 # The Declaro Manifesto
 
-## Core Beliefs
+> **Keep YOUR state out of MY code.**
 
-### 1. Data is just data
-- Dicts and TypedDicts, not objects with hidden state
-- No `__init__` magic, no descriptors, no metaclasses
-- If you can't `json.dumps()` it, it's too clever
+## The Enemy: Big State
 
-### 2. Functions transform data
-- Pure functions: same input, same output, always
-- No mutation of arguments
-- No side effects hidden behind method calls
+Every stateful library is a Trojan horse. You import a function, but you inherit state you didn't ask for—connection pools, caches, registries, singletons. The library's internal state becomes your problem. Its bugs become your bugs. Its assumptions become your constraints.
 
-### 3. State corruption is impossible when there is no state
-- A class is a petri dish for state corruption
-- A dict is just data
-- Objects are state wrapped in methods pretending to be data
+**Big State** is the pattern of libraries that export their internal state management to users. It's ORMs with "attached" and "detached" objects. It's connection managers with hidden retry logic. It's cache invalidation as someone else's policy applied to your data.
 
-### 4. Types should be explicit and declared upfront
-- No implicit `Any`
-- No type inference where clarity matters
-- Block declarations over scattered annotations
+Declaro exists because we're tired of debugging other people's state.
 
-### 5. Testability is not a feature—it's a consequence of purity
-- Pure functions are trivially testable
-- No mocks needed for stateless code
-- Same input, same output, in CI and on your laptop
+## The Lie of Object-Oriented Programming
 
-### 6. Encapsulation and polymorphism don't require classes
-- Closures provide mathematically perfect encapsulation
-- Structural typing provides polymorphism without inheritance
-- Function composition replaces class hierarchies
+Java didn't invent OOP. It bastardized it.
 
-### 7. If you need a debugger, your code is too clever
+Smalltalk's vision was message-passing between autonomous agents. What we got was **Class-Oriented Programming (COP)**—a taxonomy of nouns with methods bolted on. COP gives you:
+
+- **Inheritance hierarchies** that become prisons
+- **Encapsulation theater** (private members accessible via `_underscore_convention`)
+- **State corruption** because every object is a petri dish for mutation
+
+A class is not an abstraction. It's a liability. Every method is a potential mutation site. Every instance is state you now own.
+
+## Pure Functions: The Original Abstraction
+
+Pure functions provide everything OOP promised and never delivered:
+
+### Encapsulation
+- Classes: `user._email = "hacked"` works—"private" is just a naming convention
+- Closures: Mathematically perfect encapsulation. Variables are truly inaccessible.
+
+### Polymorphism
+- Classes: Require interface inheritance, abstract base classes, ceremony
+- Functions: Structural compatibility. If the types match, it works. Duck typing without the quacking.
+
+### Reuse
+- Classes: Rigid inheritance trees, the fragile base class problem, favor-composition-over-inheritance articles written for 30 years
+- Functions: Compose. Chain. Pipe. No inheritance needed.
+
+### Testability
+- Classes: Mocks, fixtures, setup/teardown, test databases, dependency injection frameworks
+- Pure functions: `assert f(input) == expected_output`. Done.
+
+## Data is Just Data
+
+```python
+# Not this (state wrapped in methods pretending to be data)
+class User(BaseModel):
+    email: str
+
+    @validator("email")
+    def validate_email(cls, v):
+        ...
+
+# This (data is data, functions transform it)
+User = TypedDict("User", {"email": str})
+
+def validate_user(user: dict) -> list[Error]:
+    return check_email(user.get("email", ""))
+```
+
+If you can't `json.dumps()` it, it's too clever.
+
+## Failure Recovery Over Failure Avoidance
+
+The Java philosophy: Prevent failure at all costs. Checked exceptions. Defensive programming. Wrap everything in try-catch.
+
+The Erlang philosophy: Let it crash. Recover fast. Supervision trees. The system heals itself.
+
+Declaro follows Erlang. We don't try to prevent every possible error. We make state so minimal and functions so pure that recovery is trivial. When something breaks:
+
+1. You know exactly what input caused it
+2. You can reproduce it instantly
+3. You fix the function
+4. No state to clean up, no caches to invalidate, no sessions to reconnect
+
+## The Performance Lie
+
+"But objects are faster because they cache state!"
+
+Every cache is a bug waiting to happen. Every memoized result is a stale answer in disguise. The performance argument for OOP is actually an argument against it:
+
+- Cache invalidation is one of the two hard problems in computer science
+- Most "performance" code is premature optimization
+- A cache miss in production is worse than no cache at all
+- Stateless functions are embarrassingly parallelizable
+
+If you need performance, measure first. Then optimize the hot path. Don't scatter state across your entire codebase for a cache hit you might never need.
+
+## Declarative Over Imperative
+
+Imperative code tells the computer **how** to do something. Declarative code tells it **what** you want.
+
+```toml
+# Declarative: what you want
+[user]
+table = "users"
+
+[user.fields]
+id = { type = "uuid" }
+email = { type = "str", validate = ["email"] }
+```
+
+```python
+# Imperative: how to do it (hidden inside declaro)
+# You never write this. We do.
+```
+
+TOML defines the schema. The system derives:
+- TypedDicts for Python typing
+- Validation functions
+- Database migrations
+- OpenAPI specifications
+- Query builders
+
+One declaration. Everything else follows.
 
 ## The Stack
 
@@ -48,6 +130,12 @@
 DECLARO = "I declare"
 ```
 
-One declaration. Schema, types, validation, persistence—all derived from it.
+You declare your intent. We handle the rest.
 
-No classes. No magic. Just functions and data.
+No classes. No hidden state. No magic.
+
+Just functions and data.
+
+---
+
+*"If you need a debugger, your code is too clever."*
