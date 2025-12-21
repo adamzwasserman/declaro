@@ -27,6 +27,7 @@ from .symbols import (
 )
 from .declaro import (
     load_schema,
+    load_models_from_paths,
     validate_field_access,
     validate_relationship_access,
     validate_field_type,
@@ -258,6 +259,7 @@ def check_file(file_path: Path, config: XiminezConfig) -> CheckResult:
     # Load Declaro schema if enabled
     models: dict[str, Model] = {}
     if config.get("declaro_enabled"):
+        # Load from TOML schema files
         schema_paths = config.get("declaro_schema_paths", [])
         for schema_path in schema_paths:
             # Use path as-is if it looks like an absolute path, otherwise resolve relative to file
@@ -284,6 +286,23 @@ def check_file(file_path: Path, config: XiminezConfig) -> CheckResult:
                     }],
                     "scopes": [],
                 }
+
+        # Load from Pydantic model paths (Python modules with @table decorators)
+        model_paths = config.get("declaro_model_paths", [])
+        if model_paths:
+            # Resolve relative paths
+            resolved_paths: list[str] = []
+            for model_path in model_paths:
+                path_obj = Path(model_path)
+                if path_obj.is_absolute():
+                    resolved_paths.append(str(path_obj))
+                else:
+                    resolved_paths.append(str(file_path.parent / model_path))
+            try:
+                models.update(load_models_from_paths(resolved_paths))
+            except Exception:
+                # Skip failed imports, continue with other models
+                pass
 
     return check_module(parse_result, str(file_path), config, models)
 

@@ -2,11 +2,220 @@
 
 from __future__ import annotations
 
+import importlib.util
+import sys
 import tomllib
 from pathlib import Path
+from typing import Any
 
 from .types import Model, ModelField, ModelRelationship, Violation
 from .errors import suggest_similar
+
+
+# SQL type to Python type mapping for ximinez
+SQL_TO_PYTHON_TYPE: dict[str, str] = {
+    "text": "str",
+    "varchar": "str",
+    "char": "str",
+    "integer": "int",
+    "bigint": "int",
+    "smallint": "int",
+    "serial": "int",
+    "bigserial": "int",
+    "real": "float",
+    "double precision": "float",
+    "float": "float",
+    "boolean": "bool",
+    "bool": "bool",
+    "uuid": "uuid",
+    "timestamptz": "datetime",
+    "timestamp": "datetime",
+    "date": "date",
+    "time": "time",
+    "decimal": "Decimal",
+    "numeric": "Decimal",
+    "bytea": "bytes",
+    "jsonb": "dict",
+    "json": "dict",
+}
+
+
+def pydantic_model_to_model(pydantic_cls: type) -> Model | None:
+    """Convert a Pydantic model decorated with @table to a Model TypedDict.
+
+    Args:
+        pydantic_cls: A Pydantic model class with __tablename__ attribute.
+
+    Returns:
+        Model TypedDict, or None if not a valid table model.
+    """
+    table_name = getattr(pydantic_cls, "__tablename__", None)
+    if table_name is None:
+        return None
+
+    fields: dict[str, ModelField] = {}
+    relationships: dict[str, ModelRelationship] = {}
+
+    # Import needed for introspection
+    try:
+        from declaro_persistum.introspection import (
+            extract_declaro_meta,
+            python_type_to_sql,
+            is_nullable_type,
+        )
+    except ImportError:
+        # Fallback if persistum not available - use basic introspection
+        return _basic_pydantic_to_model(pydantic_cls, table_name)
+
+    # Get type annotations
+    annotations = getattr(pydantic_cls, "__annotations__", {})
+
+    # Parse fields from Pydantic model
+    for field_name, field_info in pydantic_cls.model_fields.items():
+        annotation = annotations.get(field_name)
+        meta = extract_declaro_meta(field_info)
+
+        # Determine SQL type and convert to Python type
+        sql_type = meta.get("db_type") or python_type_to_sql(annotation)
+        python_type = SQL_TO_PYTHON_TYPE.get(sql_type, "str")
+
+        # Check nullability
+        nullable = meta.get("nullable")
+        if nullable is None:
+            nullable = is_nullable_type(annotation)
+
+        # Check for relationship (foreign key)
+        references = meta.get("references")
+        if references:
+            # This is a foreign key field - create relationship
+            target_table, _ = references.split(".")
+            relationships[field_name] = {
+                "name": field_name,
+                "type": "belongs_to",
+                "target": target_table,
+                "foreign_key": field_name,
+            }
+
+        fields[field_name] = {
+            "name": field_name,
+            "type": python_type,
+            "nullable": nullable,
+            "validate": [],  # Could parse Pydantic validators
+        }
+
+    return {
+        "name": pydantic_cls.__name__,
+        "table": table_name,
+        "fields": fields,
+        "relationships": relationships,
+    }
+
+
+def _basic_pydantic_to_model(pydantic_cls: type, table_name: str) -> Model:
+    """Basic conversion without declaro_persistum dependency."""
+    fields: dict[str, ModelField] = {}
+
+    annotations = getattr(pydantic_cls, "__annotations__", {})
+
+    for field_name in pydantic_cls.model_fields:
+        annotation = annotations.get(field_name)
+
+        # Basic type mapping
+        python_type = "str"
+        if annotation:
+            origin = getattr(annotation, "__origin__", None)
+            if origin is None:
+                type_name = getattr(annotation, "__name__", str(annotation))
+                python_type = type_name.lower() if type_name in ("str", "int", "float", "bool") else "str"
+
+        fields[field_name] = {
+            "name": field_name,
+            "type": python_type,
+            "nullable": False,
+            "validate": [],
+        }
+
+    return {
+        "name": pydantic_cls.__name__,
+        "table": table_name,
+        "fields": fields,
+        "relationships": {},
+    }
+
+
+def load_models_from_module(module_path: Path) -> dict[str, Model]:
+    """Load all @table decorated Pydantic models from a Python module.
+
+    Args:
+        module_path: Path to Python file containing Pydantic models.
+
+    Returns:
+        Dictionary mapping model names to Model objects.
+
+    Raises:
+        FileNotFoundError: If module path doesn't exist.
+        ImportError: If module cannot be imported.
+    """
+    if not module_path.exists():
+        raise FileNotFoundError(f"Module path not found: {module_path}")
+
+    # Import the module dynamically
+    spec = importlib.util.spec_from_file_location(module_path.stem, module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load module: {module_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_path.stem] = module
+
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:
+        raise ImportError(f"Error executing module {module_path}: {e}") from e
+
+    models: dict[str, Model] = {}
+
+    # Find all classes with __tablename__ (Pydantic models decorated with @table)
+    for name in dir(module):
+        obj = getattr(module, name)
+        if isinstance(obj, type) and hasattr(obj, "__tablename__"):
+            model = pydantic_model_to_model(obj)
+            if model:
+                models[model["name"]] = model
+
+    return models
+
+
+def load_models_from_paths(paths: list[str]) -> dict[str, Model]:
+    """Load models from multiple module paths.
+
+    Args:
+        paths: List of paths to Python modules or directories.
+
+    Returns:
+        Dictionary mapping model names to Model objects.
+    """
+    all_models: dict[str, Model] = {}
+
+    for path_str in paths:
+        path = Path(path_str)
+        if not path.exists():
+            continue
+
+        if path.is_file() and path.suffix == ".py":
+            models = load_models_from_module(path)
+            all_models.update(models)
+        elif path.is_dir():
+            for py_file in path.glob("**/*.py"):
+                if py_file.name.startswith("_"):
+                    continue
+                try:
+                    models = load_models_from_module(py_file)
+                    all_models.update(models)
+                except (ImportError, Exception):
+                    # Skip modules that can't be imported
+                    continue
+
+    return all_models
 
 
 def load_schema(schema_path: Path) -> dict[str, Model]:
