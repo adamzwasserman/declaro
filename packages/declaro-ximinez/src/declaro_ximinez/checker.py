@@ -36,6 +36,188 @@ from .declaro import (
 from .config import parse_file_directive, merge_file_directives
 
 
+class MultiPassAnalyzer:
+    """Multi-pass type analyzer for a function scope.
+
+    Implements the 4-pass analysis specified in the architecture:
+    1. Declaration collection - Gather all type declarations
+    2. Usage verification - Verify declarations are used correctly
+    3. Type compatibility - Check assignment type compatibility
+    4. Coverage - Ensure no undeclared locals
+
+    Usage:
+        analyzer = MultiPassAnalyzer(module, wrapper, scope, filename, config, models)
+        violations = analyzer.analyze()
+    """
+
+    def __init__(
+        self,
+        module: cst.Module,
+        wrapper: MetadataWrapper,
+        scope: FunctionScope,
+        filename: str,
+        config: XiminezConfig,
+        models: dict[str, Model] | None = None,
+    ) -> None:
+        """Initialize the multi-pass analyzer.
+
+        Args:
+            module: The parsed CST module.
+            wrapper: Metadata wrapper for position info.
+            scope: The function scope to analyze.
+            filename: Filename for error messages.
+            config: Ximinez configuration.
+            models: Declaro models (optional).
+        """
+        self.module = module
+        self.wrapper = wrapper
+        self.scope = scope
+        self.filename = filename
+        self.config = config
+        self.models = models or {}
+        self.violations: list[Violation] = []
+
+    def analyze(self) -> list[Violation]:
+        """Run all analysis passes and return violations.
+
+        Returns:
+            List of all violations found across all passes.
+        """
+        # Pass 1: Declaration collection (already done in collect_function_scopes)
+        # The scope already has symbols populated from types: blocks and inline annotations
+
+        # Pass 2: Usage verification
+        self._pass_usage_verification()
+
+        # Pass 3: Type compatibility
+        self._pass_type_compatibility()
+
+        # Pass 4: Coverage (no undeclared locals)
+        self._pass_coverage()
+
+        # Additional checks (style, model access)
+        self._check_style_constraints()
+        self._check_model_access()
+
+        return self.violations
+
+    def _pass_usage_verification(self) -> None:
+        """Pass 2: Verify declaration usage patterns.
+
+        Checks:
+        - Declared variables are used (block style)
+        - Variables not used before declaration (inline style)
+        - Duplicate declarations (inline style)
+        """
+        if self.scope["has_types_block"]:
+            # Block style: track usage and check for unused declarations
+            track_symbol_usage(self.module, self.wrapper, self.scope)
+            self.violations.extend(
+                check_unused_declarations(self.scope, self.filename)
+            )
+        else:
+            # Inline style: check declaration order and duplicates
+            self.violations.extend(
+                check_duplicate_declarations(
+                    self.module, self.wrapper, self.scope, self.filename
+                )
+            )
+            self.violations.extend(
+                check_declaration_order(
+                    self.module, self.wrapper, self.scope, self.filename
+                )
+            )
+
+    def _pass_type_compatibility(self) -> None:
+        """Pass 3: Check assignment and operation type compatibility.
+
+        Checks:
+        - Annotated assignment types match inferred types
+        """
+        self.violations.extend(
+            check_type_mismatch(
+                self.module, self.wrapper, self.scope, self.filename
+            )
+        )
+
+    def _pass_coverage(self) -> None:
+        """Pass 4: Ensure no undeclared local variables.
+
+        Checks:
+        - All local variables have declarations
+        - All parameters have type annotations
+        - Walrus operator variables are declared
+        - Comprehension variables are declared
+        - Function has return type
+        """
+        # Check return type
+        if self.scope["return_type"] is None:
+            self.violations.append({
+                "file": self.filename,
+                "line": 1,  # TODO: get actual line from function def
+                "col": 0,
+                "message": f"missing return type annotation for function '{self.scope['name']}'",
+                "code": "XI001",
+            })
+
+        # Check parameter types
+        self.violations.extend(
+            check_untyped_params(
+                self.module, self.wrapper, self.scope, self.filename
+            )
+        )
+
+        # Check undeclared locals
+        self.violations.extend(
+            check_undeclared_locals(
+                self.module, self.wrapper, self.scope, self.filename
+            )
+        )
+
+        # Check walrus operator variables
+        self.violations.extend(
+            check_walrus_operators(
+                self.module, self.wrapper, self.scope, self.filename
+            )
+        )
+
+        # Check comprehension variables
+        self.violations.extend(
+            check_comprehension_variables(
+                self.module, self.wrapper, self.scope, self.filename
+            )
+        )
+
+    def _check_style_constraints(self) -> None:
+        """Check style-related constraints.
+
+        Checks:
+        - No mixing of inline and block styles in same function
+        """
+        self.violations.extend(
+            check_style_mixing(
+                self.module, self.wrapper, self.scope, self.filename, self.config
+            )
+        )
+
+    def _check_model_access(self) -> None:
+        """Check Declaro model access patterns.
+
+        Checks:
+        - Valid field access
+        - Valid relationship access
+        - Type compatibility with model fields
+        - Query builder validation
+        - Insert field validation
+        """
+        if self.models:
+            self.violations.extend(
+                check_model_access(
+                    self.module, self.wrapper, self.scope, self.filename, self.models
+                )
+            )
+
+
 def check_file(file_path: Path, config: XiminezConfig) -> CheckResult:
     """Check a Python file for type violations.
 
@@ -272,6 +454,12 @@ def check_function(
 ) -> list[Violation]:
     """Check a single function for type violations.
 
+    Uses the MultiPassAnalyzer to run all analysis passes:
+    1. Declaration collection (done in collect_function_scopes)
+    2. Usage verification
+    3. Type compatibility
+    4. Coverage
+
     Args:
         module: The parsed CST module.
         wrapper: Metadata wrapper for position info.
@@ -283,73 +471,8 @@ def check_function(
     Returns:
         List of violations found in this function.
     """
-    violations: list[Violation] = []
-
-    # Check for missing return type
-    if scope["return_type"] is None:
-        violations.append({
-            "file": filename,
-            "line": 1,  # TODO: get actual line from function def
-            "col": 0,
-            "message": f"missing return type annotation for function '{scope['name']}'",
-            "code": "XI001",
-        })
-
-    # Check for untyped parameters
-    violations.extend(
-        check_untyped_params(module, wrapper, scope, filename)
-    )
-
-    # Check for undeclared locals
-    violations.extend(
-        check_undeclared_locals(module, wrapper, scope, filename)
-    )
-
-    # Check for duplicate declarations (inline style)
-    if not scope["has_types_block"]:
-        violations.extend(
-            check_duplicate_declarations(module, wrapper, scope, filename)
-        )
-
-        # Check for usage before declaration
-        violations.extend(
-            check_declaration_order(module, wrapper, scope, filename)
-        )
-
-    # Track symbol usage (for unused declaration checking)
-    if scope["has_types_block"]:
-        track_symbol_usage(module, wrapper, scope)
-        violations.extend(
-            check_unused_declarations(scope, filename)
-        )
-
-    # Check for style mixing
-    violations.extend(
-        check_style_mixing(module, wrapper, scope, filename, config)
-    )
-
-    # Check walrus operator variables
-    violations.extend(
-        check_walrus_operators(module, wrapper, scope, filename)
-    )
-
-    # Check comprehension variables
-    violations.extend(
-        check_comprehension_variables(module, wrapper, scope, filename)
-    )
-
-    # Check Declaro model usage
-    if models:
-        violations.extend(
-            check_model_access(module, wrapper, scope, filename, models)
-        )
-
-    # Check for type mismatches on assignments
-    violations.extend(
-        check_type_mismatch(module, wrapper, scope, filename)
-    )
-
-    return violations
+    analyzer = MultiPassAnalyzer(module, wrapper, scope, filename, config, models)
+    return analyzer.analyze()
 
 
 def infer_type(
