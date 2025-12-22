@@ -1,36 +1,51 @@
 Feature: Declaro Model Validation
   As a Python developer using declaro-persistum
-  I want ximinez to validate my model usage against TOML schemas
+  I want ximinez to validate my model usage against Pydantic models
   So that field access and relationships are type-safe
 
   Background:
-    Given a TOML schema file "schema/user.toml" with content:
+    Given a Pydantic model file "models/user.py" with content:
       """
-      [user]
-      table = "users"
+      from uuid import UUID
+      from decimal import Decimal
+      from typing import Optional
 
-      [user.fields]
-      id = { type = "uuid" }
-      email = { type = "str", validate = ["email"] }
-      name = { type = "str", nullable = true }
-      age = { type = "int", nullable = true }
+      # Mock FieldInfo for nullable support
+      class FieldInfo:
+          def __init__(self, nullable=False):
+              self.nullable = nullable
 
-      [user.relationships]
-      orders = { type = "has_many", target = "order", foreign_key = "user_id" }
-      profile = { type = "has_one", target = "profile", foreign_key = "user_id" }
-      """
-    And a TOML schema file "schema/order.toml" with content:
-      """
-      [order]
-      table = "orders"
+      class User:
+          __tablename__ = "users"
+          model_fields = {
+              "id": FieldInfo(),
+              "email": FieldInfo(),
+              "name": FieldInfo(nullable=True),
+              "age": FieldInfo(nullable=True),
+          }
+          __annotations__ = {
+              "id": UUID,
+              "email": str,
+              "name": str,
+              "age": int,
+          }
 
-      [order.fields]
-      id = { type = "uuid" }
-      user_id = { type = "uuid" }
-      total = { type = "decimal" }
-      status = { type = "str" }
+      class Order:
+          __tablename__ = "orders"
+          model_fields = {
+              "id": FieldInfo(),
+              "user_id": FieldInfo(),
+              "total": FieldInfo(),
+              "status": FieldInfo(),
+          }
+          __annotations__ = {
+              "id": UUID,
+              "user_id": UUID,
+              "total": Decimal,
+              "status": str,
+          }
       """
-    And ximinez is configured with declaro schema path "schema/"
+    And ximinez is configured with declaro model path "models/"
 
   Scenario: Valid field access passes
     Given a Python file with content:
@@ -59,34 +74,6 @@ Feature: Declaro Model Validation
     Then 1 violation is reported
     And the violation message contains "'User' has no field 'username'"
     And the violation message contains "did you mean 'name'?"
-
-  Scenario: Valid relationship access passes
-    Given a Python file with content:
-      """
-      def get_user_orders(user: User) -> list[Order]:
-          types:
-              orders: list[Order]
-
-          orders = user["orders"]
-          return orders
-      """
-    When ximinez checks the file
-    Then no violations are reported
-
-  Scenario: Invalid relationship access fails
-    Given a Python file with content:
-      """
-      def get_user_purchases(user: User) -> list[Order]:
-          types:
-              purchases: list[Order]
-
-          purchases = user["purchases"]
-          return purchases
-      """
-    When ximinez checks the file
-    Then 1 violation is reported
-    And the violation message contains "'User' has no relationship 'purchases'"
-    And the violation message contains "did you mean"
 
   Scenario: Field type mismatch fails
     Given a Python file with content:

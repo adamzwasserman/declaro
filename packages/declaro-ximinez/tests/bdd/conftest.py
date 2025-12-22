@@ -19,7 +19,7 @@ class XiminezConfig(TypedDict, total=False):
     style_enforcement: str | None  # None, "inline", "block"
     paths: list[str]
     declaro_enabled: bool
-    declaro_schema_paths: list[str]
+    declaro_model_paths: list[str]
     declaro_strict_models: bool
 
 
@@ -50,14 +50,14 @@ def ximinez_config() -> XiminezConfig:
         "style_enforcement": None,
         "paths": ["."],
         "declaro_enabled": False,
-        "declaro_schema_paths": [],
+        "declaro_model_paths": [],
         "declaro_strict_models": False,
     }
 
 
 @pytest.fixture
-def schema_files(temp_dir: Path) -> dict[str, str]:
-    """Storage for TOML schema files created during tests."""
+def model_files(temp_dir: Path) -> dict[str, str]:
+    """Storage for Pydantic model files created during tests."""
     return {}
 
 
@@ -91,8 +91,8 @@ def create_python_file(temp_dir: Path, content: str, filename: str = "test_file.
     return file_path
 
 
-def create_schema_file(temp_dir: Path, relative_path: str, content: str) -> Path:
-    """Create a TOML schema file."""
+def create_model_file(temp_dir: Path, relative_path: str, content: str) -> Path:
+    """Create a Python file with Pydantic models."""
     file_path = temp_dir / relative_path
     file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_text(content)
@@ -146,7 +146,7 @@ def run_ximinez(
         "allow_block_style": config.get("allow_block_style", True),
         "style_enforcement": config.get("style_enforcement"),
         "declaro_enabled": config.get("declaro_enabled", False),
-        "declaro_schema_paths": config.get("declaro_schema_paths", []),
+        "declaro_model_paths": config.get("declaro_model_paths", []),
     }
 
     # Run the actual checker

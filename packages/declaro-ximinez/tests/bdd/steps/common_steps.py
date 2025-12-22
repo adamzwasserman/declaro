@@ -11,7 +11,7 @@ from ..conftest import (
     XiminezConfig,
     XiminezResult,
     create_python_file,
-    create_schema_file,
+    create_model_file,
     run_ximinez,
     parse_violations,
 )
@@ -40,13 +40,13 @@ def config_module_style_enforcement(ximinez_config: XiminezConfig):
     ximinez_config["style_enforcement"] = "module"
 
 
-@given(parsers.parse('ximinez is configured with declaro schema path "{path}"'))
-def config_declaro_schema(ximinez_config: XiminezConfig, temp_dir: Path, path: str):
-    """Configure ximinez with declaro schema path."""
+@given(parsers.parse('ximinez is configured with declaro model path "{path}"'))
+def config_declaro_models(ximinez_config: XiminezConfig, temp_dir: Path, path: str):
+    """Configure ximinez with declaro model path."""
     ximinez_config["declaro_enabled"] = True
     # Store both the relative path and the temp_dir for path resolution
     full_path = temp_dir / path
-    ximinez_config["declaro_schema_paths"] = [str(full_path)]
+    ximinez_config["declaro_model_paths"] = [str(full_path)]
 
 
 # ============================================================================
@@ -70,20 +70,20 @@ def create_python_file_step(
     python_file_content["path"] = str(file_path)
 
 
-@given(parsers.parse('a TOML schema file "{path}" with content:'))
-def create_schema_file_step(
+@given(parsers.parse('a Pydantic model file "{path}" with content:'))
+def create_model_file_step(
     temp_dir: Path,
-    schema_files: dict,
+    model_files: dict,
     path: str,
     docstring: str,
 ):
-    """Create a TOML schema file.
+    """Create a Python file with Pydantic models.
 
     The 'docstring' parameter is automatically populated by pytest-bdd
     with the docstring content following the step.
     """
-    file_path = create_schema_file(temp_dir, path, docstring)
-    schema_files[path] = str(file_path)
+    file_path = create_model_file(temp_dir, path, docstring)
+    model_files[path] = str(file_path)
 
 
 @given("the file has an unused import")

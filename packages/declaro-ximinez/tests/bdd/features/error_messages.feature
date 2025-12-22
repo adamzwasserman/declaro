@@ -163,17 +163,20 @@ Feature: Error Message Formatting
     Then the exit code is 2
 
   Scenario: Model violations in full mode
-    Given a TOML schema file "schema/user.toml" with content:
+    Given a Pydantic model file "models/user.py" with content:
       """
-      [user]
-      table = "users"
+      from uuid import UUID
 
-      [user.fields]
-      id = { type = "uuid" }
-      email = { type = "str" }
-      name = { type = "str", nullable = true }
+      class User:
+          __tablename__ = "users"
+          model_fields = {"id": None, "email": None, "name": None}
+          __annotations__ = {
+              "id": UUID,
+              "email": str,
+              "name": str,
+          }
       """
-    And ximinez is configured with declaro schema path "schema/"
+    And ximinez is configured with declaro model path "models/"
     And a Python file with content:
       """
       def get_username(user: User) -> str:
@@ -186,15 +189,3 @@ Feature: Error Message Formatting
     When ximinez checks the file with --full flag
     Then 1 violation is reported
     And the output contains "NOBODY expects a model violation!"
-
-  Scenario: Schema not found returns exit code 2
-    Given ximinez is configured with declaro schema path "nonexistent/"
-    And a Python file with content:
-      """
-      def get_user(user: User) -> str:
-          return user["name"]
-      """
-    When ximinez checks the file
-    Then the exit code is 2
-    And the output contains "Could not load schema from:"
-    And the output contains "nonexistent"

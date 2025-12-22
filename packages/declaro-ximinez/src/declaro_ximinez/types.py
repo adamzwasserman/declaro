@@ -62,7 +62,6 @@ class XiminezConfig(TypedDict, total=False):
     style_enforcement: Literal["module", "function"] | None
     paths: list[str]
     declaro_enabled: bool
-    declaro_schema_paths: list[str]
     declaro_model_paths: list[str]  # Python module paths with @table models
     declaro_strict_models: bool
 

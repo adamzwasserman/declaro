@@ -1,12 +1,22 @@
-"""Declaro model validation for declaro-ximinez."""
+"""Declaro model validation for declaro-ximinez.
+
+Models are defined as Pydantic classes with @table decorator:
+
+    from pydantic import BaseModel
+    from declaro_persistum import table, field
+
+    @table("users")
+    class User(BaseModel):
+        id: UUID = field(primary=True)
+        email: str = field(unique=True)
+        name: str | None = None
+"""
 
 from __future__ import annotations
 
 import importlib.util
 import sys
-import tomllib
 from pathlib import Path
-from typing import Any
 
 from .types import Model, ModelField, ModelRelationship, Violation
 from .errors import suggest_similar
@@ -116,9 +126,11 @@ def _basic_pydantic_to_model(pydantic_cls: type, table_name: str) -> Model:
     fields: dict[str, ModelField] = {}
 
     annotations = getattr(pydantic_cls, "__annotations__", {})
+    model_fields = pydantic_cls.model_fields
 
-    for field_name in pydantic_cls.model_fields:
+    for field_name in model_fields:
         annotation = annotations.get(field_name)
+        field_info = model_fields.get(field_name) if isinstance(model_fields, dict) else None
 
         # Basic type mapping
         python_type = "str"
@@ -128,10 +140,15 @@ def _basic_pydantic_to_model(pydantic_cls: type, table_name: str) -> Model:
                 type_name = getattr(annotation, "__name__", str(annotation))
                 python_type = type_name.lower() if type_name in ("str", "int", "float", "bool") else "str"
 
+        # Check nullable from field info
+        nullable = False
+        if field_info is not None:
+            nullable = getattr(field_info, "nullable", False)
+
         fields[field_name] = {
             "name": field_name,
             "type": python_type,
-            "nullable": False,
+            "nullable": nullable,
             "validate": [],
         }
 
@@ -180,7 +197,8 @@ def load_models_from_module(module_path: Path) -> dict[str, Model]:
         if isinstance(obj, type) and hasattr(obj, "__tablename__"):
             model = pydantic_model_to_model(obj)
             if model:
-                models[model["name"]] = model
+                # Use lowercase key for case-insensitive lookup
+                models[model["name"].lower()] = model
 
     return models
 
@@ -216,101 +234,6 @@ def load_models_from_paths(paths: list[str]) -> dict[str, Model]:
                     continue
 
     return all_models
-
-
-def load_schema(schema_path: Path) -> dict[str, Model]:
-    """Load all models from a schema directory.
-
-    Args:
-        schema_path: Path to directory containing TOML schema files.
-
-    Returns:
-        Dictionary mapping model names to Model objects.
-
-    Raises:
-        FileNotFoundError: If schema path doesn't exist.
-    """
-    if not schema_path.exists():
-        raise FileNotFoundError(f"Schema path not found: {schema_path}")
-
-    models: dict[str, Model] = {}
-
-    for toml_file in schema_path.glob("**/*.toml"):
-        file_models = load_schema_file(toml_file)
-        models.update(file_models)
-
-    return models
-
-
-def load_schema_file(file_path: Path) -> dict[str, Model]:
-    """Load models from a single TOML schema file.
-
-    Args:
-        file_path: Path to the TOML file.
-
-    Returns:
-        Dictionary mapping model names to Model objects.
-    """
-    with open(file_path, "rb") as f:
-        data = tomllib.load(f)
-
-    models: dict[str, Model] = {}
-
-    for name, config in data.items():
-        if not isinstance(config, dict):
-            continue
-
-        model = parse_model(name, config)
-        if model:
-            models[name] = model
-
-    return models
-
-
-def parse_model(name: str, config: dict) -> Model | None:
-    """Parse a model definition from TOML config.
-
-    Args:
-        name: The model name.
-        config: The model configuration dictionary.
-
-    Returns:
-        Parsed Model, or None if invalid.
-    """
-    if "table" not in config:
-        return None
-
-    fields: dict[str, ModelField] = {}
-    relationships: dict[str, ModelRelationship] = {}
-
-    # Parse fields
-    fields_config = config.get("fields", {})
-    for field_name, field_config in fields_config.items():
-        if isinstance(field_config, dict):
-            fields[field_name] = {
-                "name": field_name,
-                "type": field_config.get("type", "str"),
-                "nullable": field_config.get("nullable", False),
-                "validate": field_config.get("validate", []),
-            }
-
-    # Parse relationships
-    rels_config = config.get("relationships", {})
-    for rel_name, rel_config in rels_config.items():
-        if isinstance(rel_config, dict):
-            relationships[rel_name] = {
-                "name": rel_name,
-                "type": rel_config.get("type", "has_one"),
-                "target": rel_config.get("target", ""),
-                "foreign_key": rel_config.get("foreign_key", ""),
-            }
-
-    return {
-        "name": name,
-        "table": config["table"],
-        "fields": fields,
-        "relationships": relationships,
-    }
 
 
 def validate_field_access(
@@ -442,7 +365,7 @@ def types_compatible(schema_type: str, code_type: str) -> bool:
     """Check if schema type is compatible with code type.
 
     Args:
-        schema_type: Type from TOML schema.
+        schema_type: Type from model definition.
         code_type: Type from Python code.
 
     Returns:
