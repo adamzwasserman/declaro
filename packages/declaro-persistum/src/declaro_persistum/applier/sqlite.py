@@ -252,7 +252,7 @@ class SQLiteApplier:
         to_col = details["to_column"]
         return f'ALTER TABLE "{table}" RENAME COLUMN "{from_col}" TO "{to_col}"'
 
-    def _alter_column_sql(self, details: dict[str, Any]) -> str:
+    def _alter_column_sql(self, table: str, details: dict[str, Any]) -> str:
         """
         Generate column alteration SQL.
 
@@ -267,7 +267,7 @@ class SQLiteApplier:
         # table reconstruction: create new, copy data, drop old, rename new
         raise NotImplementedError(
             f"SQLite ALTER COLUMN not directly supported. "
-            f"Column '{col_name}' changes require table reconstruction: {changes}"
+            f"Table '{table}' column '{col_name}' changes require table reconstruction: {changes}"
         )
 
     def _add_index_sql(self, table: str, details: dict[str, Any]) -> str:
