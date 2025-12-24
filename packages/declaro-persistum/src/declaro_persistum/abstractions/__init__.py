@@ -86,6 +86,16 @@ from .enums import (
     remove_enum_value_sql,
     transform_column_for_enum,
 )
+from .pragma_compat import (
+    pragma_table_info,
+    pragma_index_list,
+    pragma_index_info,
+    pragma_foreign_key_list,
+    get_emulation_count,
+    get_native_success_count,
+    get_affected_tables,
+    reset_counters,
+)
 
 __all__ = [
     # Arrays
@@ -157,4 +167,13 @@ __all__ = [
     "transform_column_for_enum",
     "expand_schema_enums",
     "diff_enum_values",
+    # PRAGMA Compatibility (Turso Database Rust)
+    "pragma_table_info",
+    "pragma_index_list",
+    "pragma_index_info",
+    "pragma_foreign_key_list",
+    "get_emulation_count",
+    "get_native_success_count",
+    "get_affected_tables",
+    "reset_counters",
 ]

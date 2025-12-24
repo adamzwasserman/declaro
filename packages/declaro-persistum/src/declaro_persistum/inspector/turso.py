@@ -3,11 +3,20 @@ Turso (libSQL) database inspector implementation.
 
 Turso is SQLite-compatible, so this largely delegates to SQLite logic.
 Uses async connection API matching aiosqlite patterns.
+
+Note: Turso Database (Rust) has limited PRAGMA support, so we use
+the pragma_compat abstraction layer for index_list, index_info, and foreign_key_list.
 """
 
 import re
 from typing import Any, Literal
 
+from declaro_persistum.abstractions.pragma_compat import (
+    pragma_table_info,
+    pragma_index_list,
+    pragma_index_info,
+    pragma_foreign_key_list,
+)
 from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionError
 from declaro_persistum.types import Column, Index, Schema, Table, View
 
@@ -138,8 +147,7 @@ class TursoInspector:
         table_name: str,
     ) -> dict[str, Column]:
         """Get column definitions for a table."""
-        cursor = await connection.execute(f"PRAGMA table_info('{table_name}')")
-        rows = await cursor.fetchall()
+        rows = await pragma_table_info(connection, table_name)
 
         columns: dict[str, Column] = {}
 
@@ -196,8 +204,7 @@ class TursoInspector:
         table_name: str,
     ) -> set[str]:
         """Get columns with unique constraints (single-column only)."""
-        cursor = await connection.execute(f"PRAGMA index_list('{table_name}')")
-        index_rows = await cursor.fetchall()
+        index_rows = await pragma_index_list(connection, table_name)
 
         unique_cols: set[str] = set()
 
@@ -207,8 +214,7 @@ class TursoInspector:
             origin = idx_row[3]
 
             if is_unique and origin != "pk":
-                idx_cursor = await connection.execute(f"PRAGMA index_info('{idx_name}')")
-                idx_info = await idx_cursor.fetchall()
+                idx_info = await pragma_index_info(connection, idx_name)
 
                 if len(idx_info) == 1:
                     unique_cols.add(idx_info[0][2])
@@ -221,8 +227,7 @@ class TursoInspector:
         table_name: str,
     ) -> dict[str, Index]:
         """Get non-auto indexes for a table."""
-        cursor = await connection.execute(f"PRAGMA index_list('{table_name}')")
-        index_rows = await cursor.fetchall()
+        index_rows = await pragma_index_list(connection, table_name)
 
         indexes: dict[str, Index] = {}
 
@@ -234,8 +239,7 @@ class TursoInspector:
             if origin in ("pk", "u"):
                 continue
 
-            idx_cursor = await connection.execute(f"PRAGMA index_info('{idx_name}')")
-            idx_info = await idx_cursor.fetchall()
+            idx_info = await pragma_index_info(connection, idx_name)
             columns = [row[2] for row in idx_info]
 
             index: Index = {"columns": columns}
@@ -265,8 +269,7 @@ class TursoInspector:
         table_name: str,
     ) -> list[dict[str, str]]:
         """Get foreign key constraints for a table."""
-        cursor = await connection.execute(f"PRAGMA foreign_key_list('{table_name}')")
-        rows = await cursor.fetchall()
+        rows = await pragma_foreign_key_list(connection, table_name)
 
         return [
             {
