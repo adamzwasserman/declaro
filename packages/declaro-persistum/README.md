@@ -5,7 +5,7 @@ Pure functional SQL library with declarative schema migrations.
 ## Overview
 
 A replacement for SQLAlchemy ORM and Alembic that uses:
-- **Schema as Data**: TypedDict structures defined in TOML files
+- **Schema as Data**: Pydantic models with `@table` decorator
 - **State Diffing**: Migrations computed by diffing desired state vs actual database state
 - **Pure Functions**: No sessions, no identity maps, no hidden state
 - **Branch-Friendly**: No linear revision chain; each branch carries its own schema state
@@ -27,22 +27,18 @@ pip install declaro_persistum[all]
 
 ## Quick Start
 
-### Define Schema (TOML)
+### Define Schema (Pydantic)
 
-```toml
-# schema/tables/users.toml
-[users]
-primary_key = ["id"]
+```python
+# models/user.py
+from uuid import UUID
+from pydantic import BaseModel
+from declaro_persistum import table, field
 
-[users.columns.id]
-type = "uuid"
-nullable = false
-default = "gen_random_uuid()"
-
-[users.columns.email]
-type = "text"
-nullable = false
-unique = true
+@table("users")
+class User(BaseModel):
+    id: UUID = field(primary=True, default="gen_random_uuid()")
+    email: str = field(unique=True)
 ```
 
 ### Run Migrations
@@ -62,10 +58,7 @@ declaro generate -c postgresql://localhost/mydb > migration.sql
 
 ```python
 from declaro_persistum import ConnectionPool
-from declaro_persistum.query import table, load_default_schema
-
-# Load schema once at startup
-load_default_schema("./schema")
+from declaro_persistum.query import table
 
 # Create a connection pool
 pool = await ConnectionPool.postgresql("postgresql://localhost/mydb")
@@ -148,6 +141,36 @@ Typos caught at build time, not runtime:
 users = table("users")
 users.emial  # AttributeError: Table 'users' has no column 'emial'
 ```
+
+### Enum Support via Literal Types
+
+Use Python's `Literal` type for enum fields - declaro_persistum automatically creates lookup tables with foreign key constraints (avoiding CHECK constraint compatibility issues across backends):
+
+```python
+from typing import Literal
+
+OrderStatus = Literal["pending", "confirmed", "shipped", "delivered"]
+
+@table("orders")
+class Order(BaseModel):
+    id: UUID = field(primary=True)
+    status: OrderStatus = "pending"
+```
+
+This generates:
+```sql
+-- Lookup table (auto-generated)
+CREATE TABLE _dp_enum_orders_status (value TEXT PRIMARY KEY);
+INSERT INTO _dp_enum_orders_status VALUES ('pending'), ('confirmed'), ('shipped'), ('delivered');
+
+-- Orders table with FK constraint
+CREATE TABLE orders (
+    id UUID PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'pending' REFERENCES _dp_enum_orders_status(value)
+);
+```
+
+Adding or removing enum values is handled automatically during migrations.
 
 ### Multiple Query Styles
 

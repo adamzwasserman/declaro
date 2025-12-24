@@ -188,10 +188,10 @@ def set_default_schema(schema: Schema) -> None:
     global _default_schema
     _default_schema = schema
 
-def load_default_schema(schema_dir: str = "./schema") -> None:
-    """Load schema from directory and set as default."""
+def load_default_schema(models_dir: str = "./models") -> None:
+    """Load schema from Pydantic model directory and set as default."""
     global _default_schema
-    _default_schema = load_schema(schema_dir)
+    _default_schema = load_schema_from_models(models_dir)
 
 def table(name: str, schema: Schema | None = None) -> "TableProxy":
     """
@@ -637,9 +637,10 @@ class Enum(TypedDict):
 
 **Files to Create/Modify**:
 - `src/declaro_persistum/types.py` - Add Enum TypedDict
-- `src/declaro_persistum/loader.py` - Load `schema/types/enums.toml`
-- `src/declaro_persistum/applier/postgresql.py` - Generate `CREATE TYPE ... AS ENUM`
-- `src/declaro_persistum/applier/sqlite.py` - Generate `CHECK (col IN (...))`
+- `src/declaro_persistum/pydantic_loader.py` - Detect Literal types for enum values
+- `src/declaro_persistum/abstractions/enums.py` - Generate lookup table + FK constraint
+- `src/declaro_persistum/applier/postgresql.py` - Generate lookup table + FK
+- `src/declaro_persistum/applier/sqlite.py` - Generate lookup table + FK
 - `src/declaro_persistum/applier/turso.py` - Same as SQLite
 - `tests/unit/test_enums.py` - Unit tests
 - `tests/integration/test_enums_*.py` - Integration tests per dialect
@@ -723,7 +724,7 @@ class Procedure(TypedDict, total=False):
 
 **Files to Create/Modify**:
 - `src/declaro_persistum/types.py` - Add Parameter, Procedure TypedDicts
-- `src/declaro_persistum/loader.py` - Load `schema/procedures/*.toml`
+- `src/declaro_persistum/pydantic_loader.py` - Load @procedure decorated classes
 - `src/declaro_persistum/applier/postgresql.py` - Generate CREATE FUNCTION
 - `src/declaro_persistum/applier/sqlite.py` - Raise `NotSupportedError`
 - `tests/unit/test_procedures.py`
@@ -756,7 +757,7 @@ class View(TypedDict, total=False):
 
 **Files to Create/Modify**:
 - `src/declaro_persistum/types.py` - Add View TypedDict
-- `src/declaro_persistum/loader.py` - Load `schema/views/*.toml`
+- `src/declaro_persistum/pydantic_loader.py` - Load @view decorated classes
 - `src/declaro_persistum/applier/postgresql.py` - CREATE [MATERIALIZED] VIEW
 - `src/declaro_persistum/applier/sqlite.py` - CREATE VIEW (warn if materialized)
 - `src/declaro_persistum/inspector/postgresql.py` - Introspect views
@@ -775,9 +776,11 @@ New directory: `src/declaro_persistum/abstractions/`
 #### Task 2.1: Array → Junction Table
 
 **Schema Definition**:
-```toml
-[users.columns.roles]
-type = "array<text>"
+```python
+@table("users")
+class User(BaseModel):
+    id: UUID = field(primary=True)
+    roles: list[str] = field(db_type="array<text>")
 ```
 
 **Generated Schema**:
@@ -807,9 +810,11 @@ CREATE INDEX users_roles_value_idx ON users_roles(value);
 #### Task 2.2: Map → Junction Table
 
 **Schema Definition**:
-```toml
-[products.columns.attributes]
-type = "map<text, text>"
+```python
+@table("products")
+class Product(BaseModel):
+    id: UUID = field(primary=True)
+    attributes: dict[str, str] = field(db_type="map<text, text>")
 ```
 
 **Generated Schema**:
@@ -837,11 +842,15 @@ CREATE TABLE products_attributes (
 #### Task 2.3: Range → Start/End Columns
 
 **Schema Definition**:
-```toml
-[reservations.columns.during]
-type = "range<timestamptz>"
-start_required = false
-end_required = false
+```python
+@table("reservations")
+class Reservation(BaseModel):
+    id: UUID = field(primary=True)
+    during: RangeType[datetime] = field(
+        db_type="range<timestamptz>",
+        start_required=False,
+        end_required=False,
+    )
 ```
 
 **Generated Schema**:
@@ -869,11 +878,15 @@ CREATE TABLE reservations (
 #### Task 2.4: Hierarchy → Closure Table
 
 **Schema Definition**:
-```toml
-[categories.columns.parent_id]
-type = "uuid"
-references = "categories.id"
-closure = true
+```python
+@table("categories")
+class Category(BaseModel):
+    id: UUID = field(primary=True)
+    name: str
+    parent_id: UUID | None = field(
+        references="categories.id",
+        closure=True,
+    )
 ```
 
 **Generated Schema**:
@@ -987,12 +1000,13 @@ New directory: `src/declaro_persistum/observability/`
 
 #### Task 4.2: Slow Query Recording
 
-**Config** (`schema/config.toml`):
-```toml
-[observability]
-enabled = true
-slow_threshold_ms = 500
-retention_hours = 168
+**Config** (Python configuration):
+```python
+observability_config = ObservabilityConfig(
+    enabled=True,
+    slow_threshold_ms=500,
+    retention_hours=168,
+)
 ```
 
 **Files to Create**:
@@ -1026,14 +1040,15 @@ declaro analyze --connection $DATABASE_URL
 
 #### Task 4.4: Auto-Index Creation
 
-**Config**:
-```toml
-[observability.auto_index]
-enabled = true
-mode = "recommend"  # or "auto"
-min_occurrences = 1000
-min_latency_ms = 200
-max_indexes_per_table = 10
+**Config** (Python configuration):
+```python
+auto_index_config = AutoIndexConfig(
+    enabled=True,
+    mode="recommend",  # or "auto"
+    min_occurrences=1000,
+    min_latency_ms=200,
+    max_indexes_per_table=10,
+)
 ```
 
 **Files to Create**:
@@ -1054,11 +1069,15 @@ max_indexes_per_table = 10
 #### Task 5.1: Full-Text Search Abstraction
 
 **Schema Definition**:
-```toml
-[articles.columns.body]
-type = "text"
-search = true
-search_config = { min_word_length = 3, stop_words = "english" }
+```python
+@table("articles")
+class Article(BaseModel):
+    id: UUID = field(primary=True)
+    title: str
+    body: str = field(
+        search=True,
+        search_config={"min_word_length": 3, "stop_words": "english"},
+    )
 ```
 
 **Files to Create**:
@@ -1074,13 +1093,14 @@ search_config = { min_word_length = 3, stop_words = "english" }
 
 #### Task 5.2: Events/Polling Abstraction
 
-**Config**:
-```toml
-[events]
-enabled = true
-poll_interval_ms = 100
-retention_hours = 24
-channels = ["orders", "users"]
+**Config** (Python configuration):
+```python
+events_config = EventsConfig(
+    enabled=True,
+    poll_interval_ms=100,
+    retention_hours=24,
+    channels=["orders", "users"],
+)
 ```
 
 **Files to Create**:
@@ -1121,9 +1141,9 @@ PHASE1_ID=$(bd create "Phase 1: Core Schema Extensions" -t feature -p 1 \
 
 bd create "Add Enum support (types, loader, appliers)" -t task -p 1 \
   -d "1. Add Enum TypedDict to types.py
-      2. Update loader to parse schema/types/enums.toml
-      3. PostgreSQL applier: CREATE TYPE ... AS ENUM
-      4. SQLite/Turso applier: CHECK constraint fallback
+      2. Update pydantic_loader to detect Literal types for enum values
+      3. Create abstractions/enums.py to generate lookup table + FK constraint
+      4. All backends: lookup table + FK (portable pattern)
       5. Add tests: tests/unit/test_enums.py, tests/integration/test_enums_*.py
       Validation: uv run pytest tests/ -k enum -v" \
   --deps parent-child:$PHASE1_ID --json
@@ -1140,7 +1160,7 @@ bd create "Add Trigger support (types, loader, appliers, inspectors)" -t task -p
 
 bd create "Add Stored Procedure support (PostgreSQL only)" -t task -p 1 \
   -d "1. Add Parameter, Procedure TypedDicts to types.py
-      2. Update loader to parse schema/procedures/*.toml
+      2. Load procedures from @procedure decorated classes in Pydantic models
       3. PostgreSQL applier: CREATE FUNCTION
       4. SQLite applier: raise NotSupportedError with helpful message
       5. Add tests
@@ -1149,7 +1169,7 @@ bd create "Add Stored Procedure support (PostgreSQL only)" -t task -p 1 \
 
 bd create "Add View support (regular and materialized)" -t task -p 1 \
   -d "1. Add View TypedDict to types.py
-      2. Update loader to parse schema/views/*.toml
+      2. Load views from @view decorated classes in Pydantic models
       3. PostgreSQL applier: CREATE [MATERIALIZED] VIEW
       4. SQLite applier: CREATE VIEW (warn if materialized requested)
       5. Update inspectors to introspect views
@@ -1272,7 +1292,7 @@ bd create "Add query timing instrumentation" -t task -p 2 \
 
 bd create "Add slow query recording" -t task -p 2 \
   -d "Create: src/declaro_persistum/observability/slow_queries.py
-      Config: [observability] in schema/config.toml
+      Config: ObservabilityConfig (Python)
       Functions:
         - SlowQueryObserver class implementing QueryObserver
         - setup_slow_query_table(conn) -> create declaro_slow_queries table
@@ -1326,7 +1346,7 @@ bd create "Add full-text search abstraction (optional)" -t task -p 3 \
 
 bd create "Add events/polling abstraction (optional)" -t task -p 3 \
   -d "Create: src/declaro_persistum/abstractions/events.py
-      Config: [events] in schema/config.toml
+      Config: EventsConfig (Python)
       Functions: setup_events_table, publish, subscribe (async iterator), cleanup_events
       Schema: declaro_events table with channel, payload, created_at
       Latency: configurable poll interval (10-100ms typical)

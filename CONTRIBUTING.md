@@ -75,7 +75,7 @@ When contributing, please follow these core principles:
 2. **No Hidden State** — if you can't `json.dumps()` it, it's too clever
 3. **Declarative Interfaces** — users say WHAT, library figures out HOW
 4. **Imperative Internals** — implementation details stay inside the library
-5. **TOML as Source of Truth** — schemas declared in TOML, everything derived
+5. **Pydantic as Source of Truth** — schemas declared as Pydantic models with `@table` decorator
 
 ## Package Structure
 

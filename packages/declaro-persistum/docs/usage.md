@@ -18,88 +18,116 @@ pip install declaro_persistum libsql-experimental  # LibSQL (Turso cloud)
 
 ### Schema as Data
 
-Instead of migration files, you declare your desired schema in TOML files. The library compares your declared schema against the actual database and generates the necessary DDL.
+Instead of migration files, you declare your desired schema as Pydantic models with the `@table` decorator. The library compares your declared schema against the actual database and generates the necessary DDL.
 
 ```
-schema/
-├── users.toml
-├── orders.toml
+models/
+├── users.py        # Pydantic models with @table decorator
+├── orders.py
 └── snapshot.toml   # Auto-generated, tracks applied state
 ```
 
 ### State Diffing
 
 ```
-Target Schema (TOML) ──┐
-                       ├──> Diff ──> Operations ──> Apply
-Actual Schema (DB) ────┘
+Target Schema (Pydantic) ──┐
+                           ├──> Diff ──> Operations ──> Apply
+Actual Schema (DB) ────────┘
 ```
 
 No linear migration chain. Works naturally with git branches.
 
 ## Defining Schemas
 
-Create TOML files in your schema directory (default: `./schema`).
+Create Pydantic models with the `@table` decorator in your models directory.
 
 ### Basic Table
 
-```toml
-# schema/users.toml
-[users.columns]
-id = { type = "uuid", primary_key = true, nullable = false }
-email = { type = "text", nullable = false, unique = true }
-name = { type = "text" }
-created_at = { type = "timestamptz", nullable = false, default = "now()" }
+```python
+# models/users.py
+from datetime import datetime
+from uuid import UUID
+from pydantic import BaseModel, Field
+from declaro_persistum import table, field
+
+@table("users")
+class User(BaseModel):
+    id: UUID = field(primary=True)
+    email: str = field(unique=True)
+    name: str | None = None
+    created_at: datetime = field(default="now()")
 ```
 
 ### Foreign Keys
 
-```toml
-# schema/orders.toml
-[orders.columns]
-id = { type = "uuid", primary_key = true, nullable = false }
-user_id = { type = "uuid", nullable = false, references = "users.id", on_delete = "cascade" }
-total = { type = "numeric(10,2)", nullable = false }
-status = { type = "text", nullable = false, default = "'pending'" }
+```python
+# models/orders.py
+from decimal import Decimal
+from uuid import UUID
+from pydantic import BaseModel
+from declaro_persistum import table, field
+
+@table("orders")
+class Order(BaseModel):
+    id: UUID = field(primary=True)
+    user_id: UUID = field(references="users.id", on_delete="cascade")
+    total: Decimal
+    status: str = field(default="'pending'")
 ```
 
 ### Composite Primary Keys
 
-```toml
-# schema/order_items.toml
-[order_items]
-primary_key = ["order_id", "product_id"]
+```python
+# models/order_items.py
+from uuid import UUID
+from pydantic import BaseModel
+from declaro_persistum import table, field
 
-[order_items.columns]
-order_id = { type = "uuid", nullable = false, references = "orders.id" }
-product_id = { type = "uuid", nullable = false, references = "products.id" }
-quantity = { type = "integer", nullable = false }
+@table("order_items")
+class OrderItem(BaseModel):
+    order_id: UUID = field(references="orders.id")
+    product_id: UUID = field(references="products.id")
+    quantity: int
+
+    class Meta:
+        primary_key = ["order_id", "product_id"]
 ```
 
 ### Indexes
 
-```toml
-# schema/users.toml
-[users.columns]
-id = { type = "uuid", primary_key = true }
-email = { type = "text", nullable = false }
-status = { type = "text" }
-deleted_at = { type = "timestamptz" }
+```python
+# models/users.py
+from datetime import datetime
+from uuid import UUID
+from pydantic import BaseModel
+from declaro_persistum import table, field
 
-[users.indexes]
-idx_users_email = { columns = ["email"], unique = true }
-idx_users_status = { columns = ["status"] }
-idx_users_active = { columns = ["status"], where = "deleted_at IS NULL" }
+@table("users")
+class User(BaseModel):
+    id: UUID = field(primary=True)
+    email: str
+    status: str | None = None
+    deleted_at: datetime | None = None
+
+    class Meta:
+        indexes = [
+            {"name": "idx_users_email", "columns": ["email"], "unique": True},
+            {"name": "idx_users_status", "columns": ["status"]},
+            {"name": "idx_users_active", "columns": ["status"], "where": "deleted_at IS NULL"},
+        ]
 ```
 
 ### Views
 
-Define views in `schema/views/` directory:
+Define views using Pydantic models with the `@view` decorator:
 
-```toml
-# schema/views/active_users.toml
-[active_users]
-query = "SELECT id, email, name FROM users WHERE status = 'active'"
+```python
+# models/views.py
+from declaro_persistum import view
+
+@view("active_users")
+class ActiveUsersView:
+    query = "SELECT id, email, name FROM users WHERE status = 'active'"
 ```
 
 #### Materialized Views
@@ -108,24 +136,30 @@ Materialized views are supported on all databases:
 
 **PostgreSQL** - Uses native `CREATE MATERIALIZED VIEW`:
 
-```toml
-# schema/views/user_stats.toml
-[user_stats]
-query = "SELECT COUNT(*) as total, status FROM users GROUP BY status"
-materialized = true
-refresh = "on_demand"  # or "on_commit" (not yet implemented)
+```python
+# models/views.py
+from declaro_persistum import view
+
+@view("user_stats")
+class UserStatsView:
+    query = "SELECT COUNT(*) as total, status FROM users GROUP BY status"
+    materialized = True
+    refresh = "on_demand"  # or "on_commit" (not yet implemented)
 ```
 
 **SQLite / Turso / LibSQL** - Uses table-based emulation:
 
-```toml
-# schema/views/monthly_stats.toml
-[monthly_stats]
-query = "SELECT user_id, COUNT(*) as order_count FROM orders GROUP BY user_id"
-materialized = true
-refresh = "manual"  # or "trigger" or "hybrid"
-depends_on = ["orders"]
-trigger_sources = ["orders"]  # Only for trigger/hybrid refresh
+```python
+# models/views.py
+from declaro_persistum import view
+
+@view("monthly_stats")
+class MonthlyStatsView:
+    query = "SELECT user_id, COUNT(*) as order_count FROM orders GROUP BY user_id"
+    materialized = True
+    refresh = "manual"  # or "trigger" or "hybrid"
+    depends_on = ["orders"]
+    trigger_sources = ["orders"]  # Only for trigger/hybrid refresh
 ```
 
 The emulation creates a regular table plus metadata in `_dp_materialized_views`.
@@ -155,21 +189,23 @@ The emulation creates a regular table plus metadata in `_dp_materialized_views`.
 
 Views are automatically ordered in migrations based on their dependencies. Use `depends_on` to declare what tables or views a view references:
 
-```toml
-# schema/views/user_stats.toml
-[user_stats]
-query = "SELECT user_id, COUNT(*) as order_count FROM orders GROUP BY user_id"
-materialized = true
-depends_on = ["orders"]  # View depends on orders table
+```python
+# models/views.py
+@view("user_stats")
+class UserStatsView:
+    query = "SELECT user_id, COUNT(*) as order_count FROM orders GROUP BY user_id"
+    materialized = True
+    depends_on = ["orders"]  # View depends on orders table
 ```
 
 For views that reference other views:
 
-```toml
-# schema/views/top_users.toml
-[top_users]
-query = "SELECT * FROM user_stats WHERE order_count > 10"
-depends_on = ["user_stats"]  # Depends on another view
+```python
+# models/views.py
+@view("top_users")
+class TopUsersView:
+    query = "SELECT * FROM user_stats WHERE order_count > 10"
+    depends_on = ["user_stats"]  # Depends on another view
 ```
 
 The differ ensures views are created after their dependencies and dropped before them.
@@ -778,10 +814,10 @@ View = {
 
 ```python
 from declaro_persistum.differ import diff
-from declaro_persistum.loader import load_schema
+from declaro_persistum import load_schema_from_models
 
-# Load target schema from TOML files
-target = load_schema("./schema")
+# Load target schema from Pydantic models
+target = load_schema_from_models("./models")
 
 # Current schema from introspection (see above)
 current = await inspector.introspect(conn)
@@ -1214,7 +1250,7 @@ Error: Unresolved ambiguities. Run interactively or provide decisions.
 
 ### Pre-declaring Decisions
 
-Create `schema/migrations/pending.toml`:
+Create `models/migrations/pending.toml`:
 
 ```toml
 [users_username]
@@ -1227,14 +1263,14 @@ decided_at = "2024-01-15T10:30:00Z"
 
 ### Using Migration Hints in Schema
 
-```toml
+```python
 # Explicit rename hint
-[users.columns]
-user_name = { type = "text", renamed_from = "username" }
+@table("users")
+class User(BaseModel):
+    user_name: str = field(renamed_from="username")
 
-# Explicit new column hint (prevents rename detection)
-[users.columns]
-display_name = { type = "text", is_new = true }
+    # Explicit new column hint (prevents rename detection)
+    display_name: str = field(is_new=True)
 ```
 
 ## Drift Detection
@@ -1492,14 +1528,14 @@ repos:
         name: Validate database schema
         entry: declaro validate --strict
         language: system
-        files: ^schema/.*\.toml$
+        files: ^models/.*\.py$
 ```
 
 ## API Reference
 
 ### Type Definitions
 
-All data structures are TypedDict - no classes with state. This ensures serialization to/from TOML/JSON.
+All data structures are TypedDict - no classes with state. This ensures serialization to/from JSON.
 
 #### Schema Types
 
@@ -1665,60 +1701,50 @@ except DeclaroError as e:
 
 ### Schema Loading
 
-Load schema from TOML files:
+Load schema from Pydantic model files:
 
 ```python
+from declaro_persistum import (
+    load_schema_from_models,  # Load table schemas from Pydantic models
+    load_models_from_module,  # Load from a single Python module
+)
 from declaro_persistum.loader import (
-    load_schema,       # Load table schemas from directory
     load_snapshot,     # Load last-applied snapshot
     save_snapshot,     # Save current schema as snapshot
     load_decisions,    # Load pending ambiguity decisions
     save_decisions,    # Save decisions for later apply
     clear_decisions,   # Clear decisions after successful migration
-    load_enums,        # Load enum type definitions
-    load_views,        # Load view definitions
-    load_procedures,   # Load stored procedure definitions
 )
 ```
 
 #### Directory Structure
 
 ```
-schema/
-├── tables/           # Table definitions (optional subdirectory)
-│   ├── users.toml
-│   └── orders.toml
-├── views/            # View definitions
-│   └── active_users.toml
-├── types/            # Custom types
-│   └── enums.toml
-├── procedures/       # Stored procedures (PostgreSQL)
-│   └── update_timestamp.toml
-├── schema.toml       # Alternative: all tables in one file
-├── snapshot.toml     # Auto-generated: last applied state
-└── migrations/
-    └── pending.toml  # Ephemeral: ambiguity decisions
+models/
+├── users.py          # Pydantic models with @table decorator
+├── orders.py
+├── views.py          # View definitions with @view decorator
+└── snapshot.toml     # Auto-generated: last applied state
+
+migrations/
+└── pending.toml      # Ephemeral: ambiguity decisions
 ```
 
 #### Loading Examples
 
 ```python
-from declaro_persistum.loader import load_schema, load_snapshot, load_views
+from declaro_persistum import load_schema_from_models
+from declaro_persistum.loader import load_snapshot, LoaderError
 
-# Load target schema
-target = load_schema("./schema")
+# Load target schema from Pydantic models
+target = load_schema_from_models("./models")
 print(f"Loaded {len(target)} tables")
 
 # Load last-applied state
 try:
-    snapshot = load_snapshot("./schema")
+    snapshot = load_snapshot("./models")
 except LoaderError:
     snapshot = {}  # No previous snapshot
-
-# Load views separately
-views = load_views("./schema/views")
-for name, view in views.items():
-    print(f"View: {name}, materialized={view.get('materialized', False)}")
 ```
 
 ### Differ
@@ -1770,18 +1796,19 @@ if result['ambiguities']:
             print(f"  Confidence: {amb['confidence']:.0%}")
 ```
 
-Resolve with migration hints in schema:
+Resolve with migration hints in the Pydantic model:
 
-```toml
-[users.columns]
-# Explicit rename hint
-user_name = { type = "text", renamed_from = "username" }
+```python
+@table("users")
+class User(BaseModel):
+    # Explicit rename hint
+    user_name: str = field(renamed_from="username")
 
-# Confirm this is intentionally new (not a rename)
-display_name = { type = "text", is_new = true }
+    # Confirm this is intentionally new (not a rename)
+    display_name: str = field(is_new=True)
 ```
 
-Or pre-declare decisions in `schema/migrations/pending.toml`:
+Or pre-declare decisions in `models/migrations/pending.toml`:
 
 ```toml
 [decisions.users_username]

@@ -16,9 +16,10 @@ Declaro is a collection of tools for developers who believe:
 ## Packages
 
 | Package | Description | Status |
-|---------|-------------|--------|
+| ------- | ----------- | ------ |
 | `declaro-persistum` | Schema-first database toolkit | In development |
-| `declaro-ximinez` | Type enforcement with memorable errors | Planned |
+| `declaro-ximinez` | Type enforcement with memorable errors | In development |
+| `declaro-observe` | Event sourcing observability | Pre-alpha |
 | `declaro-api` | FastAPI integration | Planned |
 
 ## Installation

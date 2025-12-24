@@ -2,6 +2,7 @@
 Portable abstractions for complex data types.
 
 These abstractions provide database-agnostic patterns for:
+- Enums (Literal types via lookup tables with FK constraints)
 - Arrays (ordered collections via junction tables)
 - Maps (key-value pairs via junction tables)
 - Ranges (time periods, numeric ranges via start/end columns)
@@ -71,6 +72,20 @@ from .ranges import (
     range_overlaps_sql,
     range_to_dict,
 )
+from .enums import (
+    ENUM_TABLE_PREFIX,
+    add_enum_value_sql,
+    create_enum_table_sql,
+    diff_enum_values,
+    drop_enum_table_sql,
+    enum_table_name,
+    expand_schema_enums,
+    generate_enum_table_schema,
+    get_enum_fk_reference,
+    is_enum_table,
+    remove_enum_value_sql,
+    transform_column_for_enum,
+)
 
 __all__ = [
     # Arrays
@@ -129,4 +144,17 @@ __all__ = [
     "is_matview_sql",
     "get_matview_metadata_sql",
     "list_matviews_sql",
+    # Enums (Literal type -> lookup table + FK)
+    "ENUM_TABLE_PREFIX",
+    "enum_table_name",
+    "is_enum_table",
+    "generate_enum_table_schema",
+    "create_enum_table_sql",
+    "drop_enum_table_sql",
+    "add_enum_value_sql",
+    "remove_enum_value_sql",
+    "get_enum_fk_reference",
+    "transform_column_for_enum",
+    "expand_schema_enums",
+    "diff_enum_values",
 ]

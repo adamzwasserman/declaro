@@ -126,6 +126,8 @@ class Column(TypedDict, total=False):
         on_delete: Foreign key ON DELETE action
         on_update: Foreign key ON UPDATE action
         check: CHECK constraint expression
+        literal_values: List of allowed values from Literal type annotation
+                        (used to generate enum lookup tables)
         renamed_from: Migration hint - indicates column was renamed from this name
         is_new: Migration hint - confirms this is intentionally a new column
     """
@@ -139,6 +141,7 @@ class Column(TypedDict, total=False):
     on_delete: Literal["cascade", "set null", "restrict", "no action"]
     on_update: Literal["cascade", "set null", "restrict", "no action"]
     check: str
+    literal_values: list[str]
     # Migration hints (not persisted to DB)
     renamed_from: str
     is_new: bool

@@ -24,24 +24,36 @@ The guiding principle: honest abstraction. No performance lies. Portable pattern
 
 ### A1.1 Triggers
 
-Triggers defined in TOML, generated per dialect.
+Triggers defined in Pydantic models, generated per dialect.
 
 #### Schema Definition
 
-```toml
-# schema/tables/orders.toml
+```python
+# models/orders.py
+from declaro_persistum import table, trigger
 
-[orders.triggers.set_updated_at]
-timing = "before"
-event = "update"
-for_each = "row"
-body = "NEW.updated_at = now(); RETURN NEW;"
+@table("orders")
+class Order(BaseModel):
+    id: UUID = field(primary=True)
+    # ... columns ...
 
-[orders.triggers.audit_changes]
-timing = "after"
-event = ["insert", "update", "delete"]
-for_each = "row"
-execute = "audit_order_change"  # references stored procedure
+    class Meta:
+        triggers = [
+            {
+                "name": "set_updated_at",
+                "timing": "before",
+                "event": "update",
+                "for_each": "row",
+                "body": "NEW.updated_at = now(); RETURN NEW;",
+            },
+            {
+                "name": "audit_changes",
+                "timing": "after",
+                "event": ["insert", "update", "delete"],
+                "for_each": "row",
+                "execute": "audit_order_change",  # references stored procedure
+            },
+        ]
 ```
 
 #### Type Definition
@@ -84,33 +96,34 @@ END;
 
 ### A1.2 Stored Procedures
 
-Procedures defined in separate TOML files under `schema/procedures/`.
+Procedures defined in Pydantic model files.
 
 #### Schema Definition
 
-```toml
-# schema/procedures/audit.toml
+```python
+# models/procedures.py
+from declaro_persistum import procedure
 
-[audit_order_change]
-language = "plpgsql"        # or "sql"
-returns = "trigger"
-body = """
-    INSERT INTO audit_log (table_name, operation, record_id, changed_at)
-    VALUES ('orders', TG_OP, COALESCE(NEW.id, OLD.id), now());
-    RETURN NEW;
-"""
+@procedure("audit_order_change")
+class AuditOrderChange:
+    language = "plpgsql"
+    returns = "trigger"
+    body = """
+        INSERT INTO audit_log (table_name, operation, record_id, changed_at)
+        VALUES ('orders', TG_OP, COALESCE(NEW.id, OLD.id), now());
+        RETURN NEW;
+    """
 
-[calculate_order_total]
-language = "sql"
-returns = "numeric"
-parameters = [
-    { name = "order_id", type = "uuid" }
-]
-body = """
-    SELECT COALESCE(SUM(quantity * unit_price), 0)
-    FROM order_items
-    WHERE order_id = $1;
-"""
+@procedure("calculate_order_total")
+class CalculateOrderTotal:
+    language = "sql"
+    returns = "numeric"
+    parameters = [{"name": "order_id", "type": "uuid"}]
+    body = """
+        SELECT COALESCE(SUM(quantity * unit_price), 0)
+        FROM order_items
+        WHERE order_id = $1;
+    """
 ```
 
 #### Type Definition
@@ -153,34 +166,37 @@ Views as named queries, optionally materialized (PostgreSQL only).
 
 #### Schema Definition
 
-```toml
-# schema/views/order_summaries.toml
+```python
+# models/views.py
+from declaro_persistum import view
 
-[order_summaries]
-query = """
-    SELECT 
-        o.id,
-        o.user_id,
-        o.status,
-        COUNT(i.id) AS item_count,
-        SUM(i.quantity * i.unit_price) AS total
-    FROM orders o
-    LEFT JOIN order_items i ON i.order_id = o.id
-    GROUP BY o.id
-"""
+@view("order_summaries")
+class OrderSummariesView:
+    query = """
+        SELECT
+            o.id,
+            o.user_id,
+            o.status,
+            COUNT(i.id) AS item_count,
+            SUM(i.quantity * i.unit_price) AS total
+        FROM orders o
+        LEFT JOIN order_items i ON i.order_id = o.id
+        GROUP BY o.id
+    """
 
-[active_users]
-query = """
-    SELECT u.*
-    FROM users u
-    WHERE EXISTS (
-        SELECT 1 FROM orders o 
-        WHERE o.user_id = u.id 
-        AND o.created_at > now() - interval '30 days'
-    )
-"""
-materialized = true           # PostgreSQL only
-refresh = "on_demand"         # or "on_commit" (PostgreSQL only)
+@view("active_users")
+class ActiveUsersView:
+    query = """
+        SELECT u.*
+        FROM users u
+        WHERE EXISTS (
+            SELECT 1 FROM orders o
+            WHERE o.user_id = u.id
+            AND o.created_at > now() - interval '30 days'
+        )
+    """
+    materialized = True           # PostgreSQL only
+    refresh = "on_demand"         # or "on_commit" (PostgreSQL only)
 ```
 
 #### Type Definition
@@ -217,46 +233,48 @@ Warning emitted for SQLite:
 
 ### A1.4 Enums
 
-Enums as portable type with CHECK constraint fallback.
+Enums as portable type using Python's `Literal` type. The library auto-generates lookup tables with FK constraints for cross-backend compatibility.
 
 #### Schema Definition
 
-```toml
-# schema/types/enums.toml
+```python
+# models/orders.py
+from typing import Literal
+from uuid import UUID
+from pydantic import BaseModel
+from declaro_persistum import table, field
 
-[order_status]
-type = "enum"
-values = ["pending", "confirmed", "shipped", "delivered", "cancelled"]
+# Define enum values using Literal types
+OrderStatus = Literal["pending", "confirmed", "shipped", "delivered", "cancelled"]
+Priority = Literal["low", "medium", "high", "urgent"]
 
-[priority]
-type = "enum"
-values = ["low", "medium", "high", "urgent"]
-```
-
-#### Column Usage
-
-```toml
-# schema/tables/orders.toml
-
-[orders.columns.status]
-type = "order_status"      # references enum
-nullable = false
-default = "'pending'"
+@table("orders")
+class Order(BaseModel):
+    id: UUID = field(primary=True)
+    status: OrderStatus = field(default="'pending'")  # Uses Literal type
+    priority: Priority = "medium"
 ```
 
 #### Generated SQL
 
-```sql
--- PostgreSQL (native enum)
-CREATE TYPE order_status AS ENUM ('pending', 'confirmed', 'shipped', 'delivered', 'cancelled');
-ALTER TABLE orders ADD COLUMN status order_status NOT NULL DEFAULT 'pending';
+The library generates lookup tables with FK constraints for cross-backend compatibility:
 
--- SQLite/Turso (CHECK constraint)
-ALTER TABLE orders ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending', 'confirmed', 'shipped', 'delivered', 'cancelled'));
+```sql
+-- All backends (lookup table + FK constraint)
+CREATE TABLE _dp_enum_orders_status (
+    value TEXT PRIMARY KEY
+);
+INSERT INTO _dp_enum_orders_status (value) VALUES
+    ('pending'), ('confirmed'), ('shipped'), ('delivered'), ('cancelled');
+
+CREATE TABLE orders (
+    id UUID PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'pending' REFERENCES _dp_enum_orders_status(value),
+    priority TEXT NOT NULL DEFAULT 'medium'
+);
 ```
 
-Semantically identical. PostgreSQL is more efficient (stored as integer internally); SQLite stores full string.
+This approach works identically across PostgreSQL, SQLite, Turso, and LibSQL. The FK constraint ensures data integrity while the lookup table provides a clear source of valid values.
 
 ---
 
@@ -270,9 +288,15 @@ PostgreSQL has native arrays. We emulate with junction tables for portability an
 
 #### Schema Definition
 
-```toml
-[users.columns.roles]
-type = "array<text>"
+```python
+# models/users.py
+from declaro_persistum import table, field
+
+@table("users")
+class User(BaseModel):
+    id: UUID = field(primary=True)
+    name: str
+    roles: list[str] = field(db_type="array<text>")
 ```
 
 #### Generated Schema
@@ -335,9 +359,15 @@ Key-value storage as junction table.
 
 #### Schema Definition
 
-```toml
-[products.columns.attributes]
-type = "map<text, text>"
+```python
+# models/products.py
+from declaro_persistum import table, field
+
+@table("products")
+class Product(BaseModel):
+    id: UUID = field(primary=True)
+    name: str
+    attributes: dict[str, str] = field(db_type="map<text, text>")
 ```
 
 #### Generated Schema
@@ -382,16 +412,29 @@ Temporal and numeric ranges with open-ended support.
 
 #### Schema Definition
 
-```toml
-[reservations.columns.during]
-type = "range<timestamptz>"
-start_required = false    # NULL = beginning of time
-end_required = false      # NULL = end of time
+```python
+# models/reservations.py
+from datetime import datetime
+from decimal import Decimal
+from declaro_persistum import table, field, RangeType
 
-[subscriptions.columns.price_range]
-type = "range<numeric>"
-start_required = true     # must have minimum
-end_required = false      # no maximum = unlimited
+@table("reservations")
+class Reservation(BaseModel):
+    id: UUID = field(primary=True)
+    during: RangeType[datetime] = field(
+        db_type="range<timestamptz>",
+        start_required=False,  # NULL = beginning of time
+        end_required=False,    # NULL = end of time
+    )
+
+@table("subscriptions")
+class Subscription(BaseModel):
+    id: UUID = field(primary=True)
+    price_range: RangeType[Decimal] = field(
+        db_type="range<numeric>",
+        start_required=True,   # must have minimum
+        end_required=False,    # no maximum = unlimited
+    )
 ```
 
 #### Generated Schema
@@ -452,11 +495,18 @@ Basic full-text search via application-maintained inverted index.
 
 #### Schema Definition
 
-```toml
-[articles.columns.body]
-type = "text"
-search = true
-search_config = { min_word_length = 3, stop_words = "english" }
+```python
+# models/articles.py
+from declaro_persistum import table, field
+
+@table("articles")
+class Article(BaseModel):
+    id: UUID = field(primary=True)
+    title: str
+    body: str = field(
+        search=True,
+        search_config={"min_word_length": 3, "stop_words": "english"},
+    )
 ```
 
 #### Generated Schema
@@ -543,11 +593,18 @@ Trees and DAGs via closure table pattern.
 
 #### Schema Definition
 
-```toml
-[categories.columns.parent_id]
-type = "uuid"
-references = "categories.id"
-closure = true    # maintain transitive closure
+```python
+# models/categories.py
+from declaro_persistum import table, field
+
+@table("categories")
+class Category(BaseModel):
+    id: UUID = field(primary=True)
+    name: str
+    parent_id: UUID | None = field(
+        references="categories.id",
+        closure=True,  # maintain transitive closure
+    )
 ```
 
 #### Generated Schema
@@ -639,15 +696,19 @@ Best for read-heavy hierarchies. Write-heavy trees may prefer adjacency list wit
 
 Cross-dialect event/notification system.
 
-#### Schema Definition
+#### Configuration
 
-```toml
-# schema/config.toml
+Events are configured in the `Config` class or environment:
 
-[events]
-enabled = true
-retention_hours = 24       # auto-cleanup old events
-channels = ["orders", "users", "system"]
+```python
+# config.py
+from declaro_persistum import EventsConfig
+
+events_config = EventsConfig(
+    enabled=True,
+    retention_hours=24,      # auto-cleanup old events
+    channels=["orders", "users", "system"],
+)
 ```
 
 #### Generated Schema
@@ -727,12 +788,13 @@ async def cleanup_events(connection: AsyncConnection, retention_hours: int = 24)
 
 #### Configuration
 
-```toml
-[events]
-enabled = true
-poll_interval_ms = 100      # 10ms avg latency
-retention_hours = 24
-cleanup_interval_minutes = 60
+```python
+events_config = EventsConfig(
+    enabled=True,
+    poll_interval_ms=100,      # 10ms avg latency
+    retention_hours=24,
+    cleanup_interval_minutes=60,
+)
 ```
 
 #### Latency Characteristics
@@ -951,15 +1013,16 @@ Record queries exceeding threshold for analysis.
 
 #### Configuration
 
-```toml
-# schema/config.toml
+```python
+from declaro_persistum import ObservabilityConfig
 
-[observability]
-enabled = true
-slow_threshold_ms = 500
-sample_rate = 1.0            # record all slow queries
-storage = "table"            # or "file", "callback"
-retention_hours = 168        # 7 days
+observability_config = ObservabilityConfig(
+    enabled=True,
+    slow_threshold_ms=500,
+    sample_rate=1.0,            # record all slow queries
+    storage="table",            # or "file", "callback"
+    retention_hours=168,        # 7 days
+)
 ```
 
 #### Storage Schema
@@ -1056,14 +1119,17 @@ Optionally create indexes automatically.
 
 #### Configuration
 
-```toml
-[observability.auto_index]
-enabled = true
-mode = "auto"                # "auto" | "recommend" | "off"
-min_occurrences = 1000       # queries before considering
-min_latency_ms = 200         # only optimize slow queries
-max_indexes_per_table = 10   # prevent index bloat
-excluded_tables = ["audit_log", "declaro_events"]
+```python
+from declaro_persistum import AutoIndexConfig
+
+auto_index_config = AutoIndexConfig(
+    enabled=True,
+    mode="auto",                # "auto" | "recommend" | "off"
+    min_occurrences=1000,       # queries before considering
+    min_latency_ms=200,         # only optimize slow queries
+    max_indexes_per_table=10,   # prevent index bloat
+    excluded_tables=["audit_log", "declaro_events"],
+)
 ```
 
 #### Safety Model
@@ -1224,17 +1290,15 @@ class AutoIndexConfig(TypedDict, total=False):
 ## A6. File Structure Additions
 
 ```
-schema/
-├── tables/
-│   └── *.toml              # existing
-├── procedures/
-│   └── *.toml              # NEW: stored procedures
-├── views/
-│   └── *.toml              # NEW: view definitions
-├── types/
-│   └── enums.toml          # NEW: enum definitions
-├── config.toml             # NEW: events, observability config
-└── snapshot.toml           # existing
+models/
+├── users.py                # Pydantic models with @table decorator
+├── orders.py               # Table definitions
+├── views.py                # View definitions with @view decorator
+├── procedures.py           # Stored procedure definitions
+└── snapshot.toml           # Auto-generated: last applied state
+
+migrations/
+└── pending.toml            # Ephemeral: ambiguity decisions
 
 declaro_persistum/
 ├── ...                     # existing
@@ -1245,6 +1309,7 @@ declaro_persistum/
 │   ├── ranges.py           # NEW: range → start/end columns
 │   ├── search.py           # NEW: FTS → inverted index
 │   ├── hierarchy.py        # NEW: tree → closure table
+│   ├── enums.py            # NEW: Literal → lookup table + FK
 │   └── events.py           # NEW: pub/sub → polling table
 ├── functions/
 │   ├── __init__.py
@@ -1301,4 +1366,5 @@ Recommended order for Claude Code implementation:
 - [ ] Auto-index respects safety constraints
 - [ ] Error messages explain dialect limitations clearly
 - [ ] All new types have complete TypedDict definitions
+- [ ] Pydantic model loader correctly detects Literal types for enum abstraction
 - [ ] TursoCloudManager tested against real Turso Platform API

@@ -67,8 +67,8 @@ Open http://localhost:7777 in your browser.
 ```
 todo_app_native/
 ├── app.py              # FastAPI application with native fluent SQL
-├── schema/
-│   └── todos.toml      # declaro_persistum schema
+├── models/
+│   └── todos.py        # Pydantic models with @table decorator
 ├── templates/
 │   ├── index.html
 │   └── partials/

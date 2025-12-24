@@ -120,18 +120,18 @@ await query.update("users").where(id=1).set(name="new")
 
 The imperative code still exists—inside the library. But the interface is declarative. You declare what you want. The library delivers.
 
-```toml
+```python
 # Schema declaration - the ultimate declarative interface
-[user]
-table = "users"
+from pydantic import BaseModel
+from declaro_persistum import table, field
 
-[user.fields]
-id = { type = "uuid" }
-email = { type = "str", validate = ["email"] }
+@table("users")
+class User(BaseModel):
+    id: UUID = field(primary=True)
+    email: str = field(unique=True, validate=["email"])
 ```
 
-TOML defines the schema. The system derives:
-- TypedDicts for Python typing
+Pydantic defines the schema. The system derives:
 - Validation functions
 - Database migrations
 - OpenAPI specifications

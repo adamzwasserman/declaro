@@ -24,15 +24,15 @@ SQLAlchemy and Alembic represent the dominant Python database toolkit, but they 
 
 `declaro_persistum` is a pure functional SQL library that replaces both SQLAlchemy ORM and Alembic with a declarative, state-based approach:
 
-- **Schema as Data**: Database schemas defined as TypedDict structures in TOML files
+- **Schema as Data**: Database schemas defined as Pydantic models with `@table` decorator
 - **State Diffing**: Migrations computed by diffing desired state vs actual database state
 - **Pure Functions**: No sessions, no identity maps, no hidden state—data in, data out
 - **Branch-Friendly**: No linear revision chain; each branch carries its own schema state
 
 ### Key Architectural Decisions
 
-1. TypedDict over classes for all data structures
-2. TOML for schema definition files (explicit typing, merge-conflict friendly)
+1. TypedDict over classes for internal data structures
+2. Pydantic models for schema definition (type-safe, IDE-friendly)
 3. Schema snapshots stored in repository, not database
 4. Drift detection comparing introspected DB against cached expected state
 5. Dependency-aware diff engine with topological sorting
@@ -95,7 +95,7 @@ graph TB
 graph TB
     subgraph "declaro_persistum Architecture"
         App[Application Code]
-        Schema[Schema Files<br/>TOML]
+        Schema[Schema Files<br/>Pydantic]
         Snapshot[Cached Snapshot<br/>repo]
         
         subgraph "Pure Functions"
@@ -155,7 +155,7 @@ sequenceDiagram
     participant Repo as Git Repo
 
     Dev->>CLI: declaro diff --interactive
-    CLI->>Loader: load(schema/*.toml)
+    CLI->>Loader: load(models/*.py)
     Loader-->>CLI: target: Schema
     
     CLI->>Inspector: introspect(connection)
@@ -214,7 +214,7 @@ graph TB
     subgraph "declaro_persistum Package"
         subgraph "Schema Layer"
             Types[types.py<br/>TypedDict definitions]
-            Loader[loader.py<br/>TOML parsing]
+            Loader[loader.py<br/>Pydantic model loading]
             Validator[validator.py<br/>Reference validation]
         end
         
@@ -394,72 +394,99 @@ erDiagram
 
 **Figure 3.2**: Entity relationships within schema data structures.
 
-#### 3.2.3 TOML Schema Format
+#### 3.2.3 Pydantic Schema Format
 
-```toml
-# schema/tables/users.toml
+```python
+# models/user.py
+from uuid import UUID
+from datetime import datetime
+from pydantic import BaseModel
+from declaro_persistum import table, field, index
 
-[users]
-primary_key = ["id"]
+@table("users")
+class User(BaseModel):
+    id: UUID = field(primary=True, default="gen_random_uuid()")
+    email: str = field(unique=True)
+    created_at: datetime = field(default="now()")
+    updated_at: datetime = field(default="now()")
 
-[users.columns.id]
-type = "uuid"
-nullable = false
-default = "gen_random_uuid()"
-
-[users.columns.email]
-type = "text"
-nullable = false
-unique = true
-
-[users.columns.created_at]
-type = "timestamptz"
-nullable = false
-default = "now()"
-
-[users.columns.updated_at]
-type = "timestamptz"
-nullable = false
-default = "now()"
-
-[users.indexes.users_email_idx]
-columns = ["email"]
-unique = true
-
-[users.indexes.users_created_at_idx]
-columns = ["created_at"]
+    class Meta:
+        indexes = [
+            index("users_email_idx", columns=["email"], unique=True),
+            index("users_created_at_idx", columns=["created_at"]),
+        ]
 ```
 
-```toml
-# schema/tables/orders.toml
+```python
+# models/order.py
+from uuid import UUID
+from decimal import Decimal
+from typing import Literal
+from pydantic import BaseModel
+from declaro_persistum import table, field
 
-[orders]
-primary_key = ["id"]
+OrderStatus = Literal["pending", "confirmed", "shipped", "delivered"]
 
-[orders.columns.id]
-type = "uuid"
-nullable = false
-default = "gen_random_uuid()"
-
-[orders.columns.user_id]
-type = "uuid"
-nullable = false
-references = "users.id"
-on_delete = "cascade"
-
-[orders.columns.total]
-type = "numeric(10,2)"
-nullable = false
-check = "total >= 0"
-
-[orders.columns.status]
-type = "text"
-nullable = false
-default = "'pending'"
-check = "status IN ('pending', 'confirmed', 'shipped', 'delivered')"
+@table("orders")
+class Order(BaseModel):
+    id: UUID = field(primary=True, default="gen_random_uuid()")
+    user_id: UUID = field(references="users.id", on_delete="cascade")
+    total: Decimal = field(check="total >= 0")
+    status: OrderStatus = field(default="pending")
 ```
 
-#### 3.2.4 Snapshot Format
+#### 3.2.4 Enum Abstraction via Literal Types
+
+Python's `Literal` type is automatically detected and converted to a lookup table with foreign key constraint. This avoids CHECK constraint parsing issues in some database drivers (notably pyturso).
+
+**Detection**: When a field's type annotation is `Literal["a", "b", "c"]`, declaro_persistum:
+1. Creates a lookup table `_dp_enum_{table}_{field}`
+2. Inserts the literal values as rows
+3. Generates a FK constraint instead of a CHECK constraint
+
+**Example**:
+
+```python
+from typing import Literal
+
+OrderStatus = Literal["pending", "confirmed", "shipped", "delivered"]
+
+@table("orders")
+class Order(BaseModel):
+    id: UUID = field(primary=True)
+    status: OrderStatus = "pending"
+```
+
+**Generated SQL**:
+
+```sql
+-- Lookup table (auto-managed)
+CREATE TABLE _dp_enum_orders_status (
+    value TEXT PRIMARY KEY
+);
+INSERT INTO _dp_enum_orders_status (value) VALUES
+    ('pending'), ('confirmed'), ('shipped'), ('delivered');
+
+-- Orders table with FK
+CREATE TABLE orders (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    status TEXT NOT NULL DEFAULT 'pending'
+        REFERENCES _dp_enum_orders_status(value)
+);
+```
+
+**Migration Behavior**:
+- Adding a value to `Literal[...]`: Inserts new row into lookup table
+- Removing a value: Deletes row from lookup table (fails if referenced)
+- Renaming: Detected as drop+add; requires explicit decision
+
+**Benefits**:
+- Works across all backends (PostgreSQL, SQLite, Turso, LibSQL)
+- No CHECK constraint parsing required
+- Values queryable at runtime via lookup table
+- Standard FK constraint enforcement
+
+#### 3.2.5 Snapshot Format
 
 ```toml
 # schema/snapshot.toml
@@ -476,7 +503,7 @@ dialect = "postgresql"
 # ... complete schema state at time of last migration
 ```
 
-#### 3.2.5 Pending Decisions Format
+#### 3.2.6 Pending Decisions Format
 
 ```toml
 # schema/migrations/pending.toml
@@ -969,17 +996,15 @@ SchemaError: Ambiguous column change in 'users' table
     1. A rename (preserves data)
     2. A drop + add (loses data)
 
-  To resolve, add to schema/tables/users.toml:
-  
-    [users.columns.full_name]
-    renamed_from = "name"
+  To resolve, add to models/user.py:
+
+    full_name: str = field(renamed_from="name")
 
   Or to confirm drop + add:
-  
-    [users.columns.full_name]
-    is_new = true
 
-  File: schema/tables/users.toml, line 14
+    full_name: str = field(is_new=True)
+
+  File: models/user.py, line 14
 ```
 
 #### 3.7.2 Cycle Error
@@ -1421,7 +1446,7 @@ def test_rename_annotation_prevents_data_loss():
 declaro_persistum/
 ├── __init__.py
 ├── types.py              # TypedDict definitions
-├── loader.py             # TOML schema loading
+├── loader.py             # Pydantic model loading
 ├── validator.py          # Schema validation
 ├── pool.py               # Unified connection pool (PostgreSQL, SQLite, Turso, LibSQL)
 ├── exceptions.py         # Exception hierarchy
@@ -1596,20 +1621,21 @@ jobs:
 - NamedTuple: Immutable, but awkward for nested structures
 - Plain dicts: No type checking
 
-### D002: TOML over YAML
+### D002: Pydantic Models for Schema Definition
 
-**Decision**: Use TOML for schema files.
+**Decision**: Use Pydantic models with `@table` decorator for schema definition.
 
 **Rationale**:
-- Explicit typing (strings need quotes)
-- No "Norway problem" (NO parsing as boolean)
-- Merge-conflict friendly (less indentation sensitivity)
-- Clear, unambiguous syntax
+- Full IDE support (autocomplete, type checking, refactoring)
+- Native Python - no separate schema language to learn
+- Pydantic validation built-in
+- Type hints provide compile-time safety
 
 **Alternatives Considered**:
-- YAML: More people know it, but implicit typing is a bug farm
+- TOML files: Separate language, no IDE support, parsing overhead
+- YAML: Implicit typing problems, no Python integration
 - JSON: Too verbose, no comments
-- Python files: Turing-complete (too powerful), execution risk
+- Raw TypedDict: Verbose, no field metadata support
 
 ### D003: Snapshot in repo, not database
 
@@ -1636,7 +1662,7 @@ jobs:
 
 **Trade-offs Accepted**:
 - Two code paths to maintain
-- Decisions must be persistable (TOML annotations)
+- Decisions must be persistable (field annotations)
 
 ### D005: All-or-nothing transactions where supported
 
@@ -1661,7 +1687,7 @@ jobs:
 | Term | Definition |
 |------|------------|
 | Schema | Complete database structure as dict[str, Table] |
-| Target | Desired schema state (from TOML files) |
+| Target | Desired schema state (from Pydantic models) |
 | Actual | Current database state (from introspection) |
 | Expected | Last-applied schema state (from snapshot) |
 | Drift | Difference between actual and expected states |
@@ -1672,7 +1698,7 @@ jobs:
 
 ### B. SQL Type Mappings
 
-| TOML Type | PostgreSQL | SQLite | Turso (embedded) | LibSQL (cloud) |
+| Python Type | PostgreSQL | SQLite | Turso (embedded) | LibSQL (cloud) |
 |-----------|------------|--------|------------------|----------------|
 | `integer` | INTEGER | INTEGER | INTEGER | INTEGER |
 | `bigint` | BIGINT | INTEGER | INTEGER | INTEGER |
@@ -1691,7 +1717,7 @@ jobs:
 - [Turso Platform API](https://docs.turso.tech/api-reference/introduction)
 - [pyturso (embedded Turso)](https://pypi.org/project/pyturso/)
 - [libsql-experimental](https://pypi.org/project/libsql-experimental/)
-- [TOML specification](https://toml.io/en/)
+- [Pydantic documentation](https://docs.pydantic.dev/)
 - [Topological sorting algorithm](https://en.wikipedia.org/wiki/Topological_sorting)
 
 ---

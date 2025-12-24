@@ -9,7 +9,7 @@ Part of the [Declaro](https://github.com/adamzwasserman/declaro) functional Pyth
 Ximinez is a preprocessing static type enforcer for Python that provides strict type safety:
 
 1. **Mandatory explicit local typing** — every variable must be typed
-2. **Declaro integration** — validates model usage against TOML schemas
+2. **Declaro integration** — validates model usage against Pydantic schemas
 3. **Seamless IDE compatibility** — works with mypy, Pyright, Pylance
 
 ## Two Typing Styles
@@ -37,19 +37,20 @@ def process(x: int, y: str) -> float:
 
 ## Declaro Integration
 
-Ximinez validates that your Python code uses models correctly according to their TOML schema definitions.
+Ximinez validates that your Python code uses models correctly according to their Pydantic schema definitions.
 
-**TOML Schema:**
+**Pydantic Schema:**
 
-```toml
-# schema/user.toml
-[user]
-table = "users"
+```python
+# models/user.py
+from pydantic import BaseModel
+from declaro_persistum import table, field
 
-[user.fields]
-id = { type = "uuid" }
-email = { type = "str" }
-name = { type = "str", nullable = true }
+@table("users")
+class User(BaseModel):
+    id: UUID = field(primary=True)
+    email: str
+    name: str | None = None
 ```
 
 **Python with violation:**
@@ -61,12 +62,12 @@ username = user["username"]  # Error: no such field
 ## CLI Flags
 
 | Flag | Behaviour |
-|------|-----------|
+| ---- | --------- |
 | (default) | Standard output |
 | `--quiet` | Minimal output |
 | `--machine` | CI-friendly plain format |
 | `--full` | Full output |
-| `--declaro-schema=PATH` | TOML schema directory |
+| `--declaro-models=PATH` | Pydantic models directory |
 
 ## Configuration
 
@@ -78,7 +79,7 @@ paths = ["src/", "tests/"]
 
 [tool.ximinez.declaro]
 enabled = true
-schema_paths = ["schema/"]
+model_paths = ["models/"]
 ```
 
 ## Pre-Commit Hook

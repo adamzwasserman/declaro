@@ -53,3 +53,24 @@ Thumbs.db
 # Build artifacts
 *.whl
 *.tar.gz
+WARP.md
+CLAUDE.md
+.claude/settings.local.json
+.claude/agents/architect.md
+.claude/agents/auditor.md
+.claude/agents/build.md
+.claude/agents/code-architect-js.md
+.claude/agents/code-architect.md
+.claude/agents/codebase-organizer.md
+.claude/agents/docs-sync-auditor.md
+.claude/agents/git-commit-manager.md
+.claude/agents/git.md
+.claude/agents/js-architect.md
+.claude/agents/organizer.md
+.claude/agents/patent-innovation-tracker.md
+.claude/agents/patent.md
+.claude/agents/performance-optimization-specialist.md
+.claude/agents/performance.md
+.claude/agents/test-automation-specialist.md
+.claude/agents/test.md
+.claude/agents/timestamp-enforcer.md

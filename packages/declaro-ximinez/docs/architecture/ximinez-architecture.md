@@ -20,7 +20,7 @@ The tool functions as a source-to-source transpiler and strict type checker, pri
 - **No untyped locals** – Every local variable must be explicitly typed.
 - **Pythonic to the core** – Significant whitespace, minimal syntax extensions, no terminator keywords.
 - **Complementary integration** – Works alongside existing tools, preserves real-time IDE experience.
-- **Declaro integration** – Validates model usage against TOML schema definitions.
+- **Declaro integration** – Validates model usage against Pydantic schema definitions.
 - **Evolutionary pathway** – Architecture designed to support future stages toward advanced functional programming concepts.
 
 ---
@@ -38,7 +38,7 @@ Source Files (.py) ──► Ximinez Preprocessor ──► Transpiled .py (stan
                               ├──► Declaro Model Validation
                               │         │
                               │         ▼
-                              │    TOML Schema Loader
+                              │    Pydantic Schema Loader
                               │         │
                               │         ▼
                               │    Model Usage Checker
@@ -101,14 +101,15 @@ def process(x: int, y: str) -> float:
 
 ### 5.1 Model Validation at Pre-Commit
 
-Ximinez integrates with `declaro-persistum` to validate that Python code uses models correctly according to their TOML schema definitions.
+Ximinez integrates with `declaro-persistum` to validate that Python code uses models correctly according to their Pydantic schema definitions.
 
 **What it checks:**
 
 | Check | Description |
-|-------|-------------|
+| ----- | ----------- |
 | Field existence | `user["username"]` fails if `User` has no `username` field |
 | Field types | `user["age"] = "thirty"` fails if `age` is declared as `int` |
+| Literal values | `order["status"] = "invalid"` fails if not in `Literal["pending", "shipped"]` |
 | Relationship validity | `user["orders"]` fails if no relationship declared |
 | Required fields | Missing required fields on insert/update |
 
@@ -123,26 +124,26 @@ paths = ["src/", "tests/"]
 # Declaro integration
 [tool.ximinez.declaro]
 enabled = true
-schema_paths = ["schema/"]  # Where to find TOML model definitions
-strict_models = true         # Require all model access to be validated
+model_paths = ["models/"]  # Where to find Pydantic model definitions
+strict_models = true       # Require all model access to be validated
 ```
 
 ### 5.3 Model Validation Examples
 
-**TOML Schema:**
+**Pydantic Schema:**
 
-```toml
-# schema/user.toml
-[user]
-table = "users"
+```python
+# models/user.py
+from uuid import UUID
+from pydantic import BaseModel, EmailStr
+from declaro_persistum import table, field, relationship
 
-[user.fields]
-id = { type = "uuid" }
-email = { type = "str", validate = ["email"] }
-name = { type = "str", nullable = true }
-
-[user.relationships]
-orders = { type = "has_many", target = "order", foreign_key = "user_id" }
+@table("users")
+class User(BaseModel):
+    id: UUID = field(primary=True)
+    email: EmailStr = field(unique=True)
+    name: str | None = None
+    orders: list["Order"] = relationship(has_many=True, foreign_key="user_id")
 ```
 
 **Python Code with Violations:**
@@ -179,7 +180,7 @@ repos:
     rev: v0.1.0
     hooks:
       - id: ximinez
-        args: [--declaro-schema=schema/]
+        args: [--declaro-models=models/]
 ```
 
 ---
@@ -202,7 +203,7 @@ repos:
 
 ### 6.3 Declaro Schema Loader
 
-- Loads TOML model definitions from configured paths
+- Loads Pydantic model definitions from configured paths
 - Builds in-memory model registry with:
   - Field names and types
   - Relationships and targets
@@ -233,7 +234,7 @@ Formats violations for output. Multiple output modes supported.
 | `--quiet` | Minimal output – count and locations only |
 | `--machine` | CI-friendly plain format |
 | `--full` | Full output |
-| `--declaro-schema=PATH` | Path to TOML schema directory |
+| `--declaro-models=PATH` | Path to Pydantic models directory |
 | `--no-declaro` | Disable Declaro model validation |
 
 ### 6.8 Exit Codes
@@ -287,7 +288,7 @@ paths = ["src/", "tests/"]
 
 [tool.ximinez.declaro]
 enabled = true
-schema_paths = ["schema/"]
+model_paths = ["models/"]
 strict_models = true
 ```
 
@@ -329,7 +330,7 @@ strict_models = true
 - Unit tests for parser, checker, and error engine.
 - Integration tests verifying output correctness.
 - Round-trip tests ensuring IDE compatibility after transpilation.
-- Model validation tests against sample TOML schemas.
+- Model validation tests against sample Pydantic schemas.
 - Query validation tests for declaro-persistum integration.
 
 ---
