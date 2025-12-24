@@ -2,7 +2,7 @@
 Turso (libSQL) database inspector implementation.
 
 Turso is SQLite-compatible, so this largely delegates to SQLite logic.
-libsql-experimental uses a synchronous sqlite3-like API.
+Uses async connection API matching aiosqlite patterns.
 """
 
 import re
@@ -34,7 +34,7 @@ class TursoInspector:
     Turso implementation of DatabaseInspector protocol.
 
     Turso uses libSQL which is SQLite-compatible, so the introspection
-    logic is nearly identical to SQLite. Uses synchronous libsql-experimental API.
+    logic is nearly identical to SQLite. Uses async connection API.
     """
 
     def get_dialect(self) -> str:
@@ -64,7 +64,7 @@ class TursoInspector:
         """
         try:
             # Get all tables (excluding sqlite internal tables)
-            cursor = connection.execute(
+            cursor = await connection.execute(
                 """
                 SELECT name FROM sqlite_master
                 WHERE type = 'table'
@@ -73,7 +73,7 @@ class TursoInspector:
                 ORDER BY name
                 """
             )
-            tables = cursor.fetchall()
+            tables = await cursor.fetchall()
 
             schema: Schema = {}
 
@@ -138,8 +138,8 @@ class TursoInspector:
         table_name: str,
     ) -> dict[str, Column]:
         """Get column definitions for a table."""
-        cursor = connection.execute(f"PRAGMA table_info('{table_name}')")
-        rows = cursor.fetchall()
+        cursor = await connection.execute(f"PRAGMA table_info('{table_name}')")
+        rows = await cursor.fetchall()
 
         columns: dict[str, Column] = {}
 
@@ -196,8 +196,8 @@ class TursoInspector:
         table_name: str,
     ) -> set[str]:
         """Get columns with unique constraints (single-column only)."""
-        cursor = connection.execute(f"PRAGMA index_list('{table_name}')")
-        index_rows = cursor.fetchall()
+        cursor = await connection.execute(f"PRAGMA index_list('{table_name}')")
+        index_rows = await cursor.fetchall()
 
         unique_cols: set[str] = set()
 
@@ -207,8 +207,8 @@ class TursoInspector:
             origin = idx_row[3]
 
             if is_unique and origin != "pk":
-                idx_cursor = connection.execute(f"PRAGMA index_info('{idx_name}')")
-                idx_info = idx_cursor.fetchall()
+                idx_cursor = await connection.execute(f"PRAGMA index_info('{idx_name}')")
+                idx_info = await idx_cursor.fetchall()
 
                 if len(idx_info) == 1:
                     unique_cols.add(idx_info[0][2])
@@ -221,8 +221,8 @@ class TursoInspector:
         table_name: str,
     ) -> dict[str, Index]:
         """Get non-auto indexes for a table."""
-        cursor = connection.execute(f"PRAGMA index_list('{table_name}')")
-        index_rows = cursor.fetchall()
+        cursor = await connection.execute(f"PRAGMA index_list('{table_name}')")
+        index_rows = await cursor.fetchall()
 
         indexes: dict[str, Index] = {}
 
@@ -234,8 +234,8 @@ class TursoInspector:
             if origin in ("pk", "u"):
                 continue
 
-            idx_cursor = connection.execute(f"PRAGMA index_info('{idx_name}')")
-            idx_info = idx_cursor.fetchall()
+            idx_cursor = await connection.execute(f"PRAGMA index_info('{idx_name}')")
+            idx_info = await idx_cursor.fetchall()
             columns = [row[2] for row in idx_info]
 
             index: Index = {"columns": columns}
@@ -244,11 +244,11 @@ class TursoInspector:
                 index["unique"] = True
 
             # Check for partial index
-            sql_cursor = connection.execute(
+            sql_cursor = await connection.execute(
                 "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
                 (idx_name,),
             )
-            sql_row = sql_cursor.fetchone()
+            sql_row = await sql_cursor.fetchone()
             if sql_row and sql_row[0]:
                 sql = sql_row[0]
                 if " WHERE " in sql.upper():
@@ -265,8 +265,8 @@ class TursoInspector:
         table_name: str,
     ) -> list[dict[str, str]]:
         """Get foreign key constraints for a table."""
-        cursor = connection.execute(f"PRAGMA foreign_key_list('{table_name}')")
-        rows = cursor.fetchall()
+        cursor = await connection.execute(f"PRAGMA foreign_key_list('{table_name}')")
+        rows = await cursor.fetchall()
 
         return [
             {
@@ -285,11 +285,11 @@ class TursoInspector:
         table_name: str,
     ) -> bool:
         """Check if a table exists."""
-        cursor = connection.execute(
+        cursor = await connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
             (table_name,),
         )
-        result = cursor.fetchone()
+        result = await cursor.fetchone()
         return result is not None
 
     async def get_table_columns(
@@ -324,7 +324,7 @@ class TursoInspector:
         """
         views: dict[str, View] = {}
 
-        cursor = connection.execute(
+        cursor = await connection.execute(
             """
             SELECT name, sql
             FROM sqlite_master
@@ -334,7 +334,7 @@ class TursoInspector:
             ORDER BY name
             """
         )
-        rows = cursor.fetchall()
+        rows = await cursor.fetchall()
 
         for row in rows:
             name, sql = row[0], row[1]
