@@ -1,0 +1,77 @@
+{#
+  Number Range Filter Template
+
+  Renders min/max number inputs with a "to" separator.
+
+  Context (inherited from filter_layout.html):
+    - control: FilterControlConfig
+    - control_value: dict with 'min' and 'max' keys, or None
+#}
+
+{# Use input_id_override if provided as prefix, otherwise default to filter-{id} #}
+{% set range_id = control.input_id_override if control.input_id_override else 'filter-' ~ control.id %}
+{% set min_value = control_value.min if control_value is mapping else '' %}
+{% set max_value = control_value.max if control_value is mapping else '' %}
+{% set step = control.step or 1 %}
+
+<div class="filter-number-range{% if control.css_class %} {{ control.css_class }}{% endif %}"
+     {% if control.width %}style="width: {{ control.width }};"{% endif %}>
+
+  {% if control.label %}
+  <label class="filter-label">{{ control.label }}</label>
+  {% endif %}
+
+  <div class="filter-number-range-inputs">
+    <div class="filter-number-input-wrapper">
+      <input type="number"
+             id="{{ range_id }}-min"
+             name="{{ control.column_id }}_min"
+             class="filter-number-input filter-number-min"
+             data-filter-control
+             data-filter-type="number_range"
+             data-column-id="{{ control.column_id }}"
+             data-range-part="min"
+             placeholder="{{ control.placeholder or 'Min' }}"
+             value="{{ min_value }}"
+             {% if control.min_value is not none %}min="{{ control.min_value }}"{% endif %}
+             {% if control.max_value is not none %}max="{{ control.max_value }}"{% endif %}
+             step="{{ step }}"
+             {% if control.auto_submit and control.hx_get %}
+             hx-get="{{ control.hx_get }}"
+             hx-trigger="change delay:500ms, keyup[key=='Enter']"
+             {% if control.hx_target %}hx-target="{{ control.hx_target }}"{% endif %}
+             hx-swap="{{ control.hx_swap or 'innerHTML' }}"
+             hx-include="[data-filter-control]"
+             hx-indicator=".htmx-indicator"
+             {% endif %}
+             aria-label="Minimum {{ control.label or control.column_id }}">
+    </div>
+
+    <span class="filter-number-range-separator" aria-hidden="true">to</span>
+
+    <div class="filter-number-input-wrapper">
+      <input type="number"
+             id="{{ range_id }}-max"
+             name="{{ control.column_id }}_max"
+             class="filter-number-input filter-number-max"
+             data-filter-control
+             data-filter-type="number_range"
+             data-column-id="{{ control.column_id }}"
+             data-range-part="max"
+             placeholder="Max"
+             value="{{ max_value }}"
+             {% if control.min_value is not none %}min="{{ control.min_value }}"{% endif %}
+             {% if control.max_value is not none %}max="{{ control.max_value }}"{% endif %}
+             step="{{ step }}"
+             {% if control.auto_submit and control.hx_get %}
+             hx-get="{{ control.hx_get }}"
+             hx-trigger="change delay:500ms, keyup[key=='Enter']"
+             {% if control.hx_target %}hx-target="{{ control.hx_target }}"{% endif %}
+             hx-swap="{{ control.hx_swap or 'innerHTML' }}"
+             hx-include="[data-filter-control]"
+             hx-indicator=".htmx-indicator"
+             {% endif %}
+             aria-label="Maximum {{ control.label or control.column_id }}">
+    </div>
+  </div>
+</div>

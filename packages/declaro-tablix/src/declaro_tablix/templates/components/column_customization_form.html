@@ -1,0 +1,217 @@
+<!-- Column Customization Modal Component -->
+<div class="modal fade" id="customizeModal" tabindex="-1" aria-labelledby="customizeModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="customizeModalLabel">
+                    <i class="fas fa-cog me-2"></i>Column Customization
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+
+            <div class="modal-body">
+                <!-- Customization Tabs -->
+                <ul class="nav nav-tabs" id="customizationTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="rename-tab" data-bs-toggle="tab" data-bs-target="#rename-pane" type="button" role="tab">
+                            <i class="fas fa-edit me-1"></i>Column Renaming
+                        </button>
+                    </li>
+                </ul>
+
+                <div class="tab-content mt-3" id="customizationTabContent">
+                    <!-- Column Renaming Tab -->
+                    <div class="tab-pane fade show active" id="rename-pane" role="tabpanel">
+                        <div class="form-section">
+                            <h6>Custom Column Names</h6>
+                            <p class="text-muted small">Rename columns to make them more meaningful for your use case. These names will persist across sessions.</p>
+
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Original Name</th>
+                                            <th>Type</th>
+                                            <th>Custom Name</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for column in columns %}
+                                        <tr>
+                                            <td>
+                                                <div class="d-flex align-items-center">
+                                                    {{ get_column_type_icon(column.type.value) }}
+                                                    <span class="ms-2">{{ column.name }}</span>
+                                                    {% if column.system_alias %}
+                                                    <small class="text-muted ms-2">({{ column.system_alias }})</small>
+                                                    {% endif %}
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <span class="badge bg-light text-dark">{{ column.type.value }}</span>
+                                            </td>
+                                            <td>
+                                                <input type="text"
+                                                       class="form-control form-control-sm"
+                                                       name="custom_name_{{ column.id }}"
+                                                       value="{{ column_renames.get(column.id, '') }}"
+                                                       placeholder="Enter custom name..."
+                                                       data-column-id="{{ column.id }}">
+                                            </td>
+                                            <td>
+                                                <button type="button" class="btn btn-sm btn-outline-primary"
+                                                        onclick="previewColumnRename('{{ column.id }}')">
+                                                    <i class="fas fa-eye"></i>
+                                                </button>
+                                                <button type="button" class="btn btn-sm btn-outline-danger"
+                                                        onclick="clearColumnRename('{{ column.id }}')">
+                                                    <i class="fas fa-times"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <div class="me-auto">
+                    <button type="button" class="btn btn-outline-warning" onclick="clearAllCustomizations()">
+                        <i class="fas fa-eraser me-1"></i>Clear All
+                    </button>
+                    <button type="button" class="btn btn-outline-info" onclick="exportCustomizations()">
+                        <i class="fas fa-download me-1"></i>Export
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" onclick="importCustomizations()">
+                        <i class="fas fa-upload me-1"></i>Import
+                    </button>
+                </div>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="applyCustomizations()">
+                    <i class="fas fa-check me-1"></i>Apply Customizations
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Column customization functionality
+
+function previewColumnRename(columnId) {
+    const input = document.querySelector(`input[name="custom_name_${columnId}"]`);
+    const customName = input.value.trim();
+
+    if (customName) {
+        // Find the column header in the main table and temporarily update it
+        const headers = document.querySelectorAll('th[data-column-id="' + columnId + '"]');
+        headers.forEach(header => {
+            const titleSpan = header.querySelector('.column-title');
+            if (titleSpan) {
+                titleSpan.style.backgroundColor = '#fff3cd';
+                titleSpan.textContent = customName;
+                setTimeout(() => {
+                    titleSpan.style.backgroundColor = '';
+                }, 2000);
+            }
+        });
+
+        if (window.showNotification) {
+            window.showNotification(`Preview: Column renamed to "${customName}"`, 'info');
+        }
+    }
+}
+
+function clearColumnRename(columnId) {
+    const input = document.querySelector(`input[name="custom_name_${columnId}"]`);
+    input.value = '';
+    previewColumnRename(columnId);
+}
+
+
+function applyCustomizations() {
+    // Collect column renames only
+    const customizations = {
+        column_renames: {}
+    };
+
+    // Collect column renames
+    document.querySelectorAll('input[name^="custom_name_"]').forEach(input => {
+        const columnId = input.dataset.columnId;
+        const customName = input.value.trim();
+        if (customName) {
+            customizations.column_renames[columnId] = customName;
+        }
+    });
+
+    // Apply customizations
+    const params = new URLSearchParams(window.location.search);
+    params.set('customizations', JSON.stringify(customizations));
+    window.location.search = params.toString();
+}
+
+function clearAllCustomizations() {
+    if (confirm('Clear all customizations? This will remove all custom column names.')) {
+        const params = new URLSearchParams(window.location.search);
+        params.delete('customizations');
+        window.location.search = params.toString();
+    }
+}
+
+function exportCustomizations() {
+    // Export current customizations as JSON
+    const customizations = {
+        table_name: '{{ table_name }}',
+        exported_at: new Date().toISOString(),
+        column_renames: {}
+    };
+
+    // Collect column renames
+    document.querySelectorAll('input[name^="custom_name_"]').forEach(input => {
+        const columnId = input.dataset.columnId;
+        const customName = input.value.trim();
+        if (customName) {
+            customizations.column_renames[columnId] = customName;
+        }
+    });
+
+    const blob = new Blob([JSON.stringify(customizations, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${customizations.table_name}_customizations.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+function importCustomizations() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const customizations = JSON.parse(e.target.result);
+                    // Apply imported customizations
+                    const params = new URLSearchParams(window.location.search);
+                    params.set('customizations', JSON.stringify(customizations));
+                    window.location.search = params.toString();
+                } catch (error) {
+                    alert('Invalid customization file format');
+                }
+            };
+            reader.readAsText(file);
+        }
+    };
+    input.click();
+}
+</script>

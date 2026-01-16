@@ -1,0 +1,84 @@
+{#
+  Date Range Filter Template
+
+  Renders from/to date inputs for date range filtering.
+
+  Context (inherited from filter_layout.html):
+    - control: FilterControlConfig
+    - control_value: dict with 'from' and 'to' keys, or None
+#}
+
+{# Use input_id_override if provided as prefix, otherwise default to filter-{id} #}
+{% set range_id = control.input_id_override if control.input_id_override else 'filter-' ~ control.id %}
+{% set from_value = control_value.from if control_value is mapping else '' %}
+{% set to_value = control_value.to if control_value is mapping else '' %}
+
+<div class="filter-date-range{% if control.css_class %} {{ control.css_class }}{% endif %}"
+     {% if control.width %}style="width: {{ control.width }};"{% endif %}>
+
+  {% if control.label %}
+  <label class="filter-label">{{ control.label }}</label>
+  {% endif %}
+
+  <div class="filter-date-range-inputs">
+    <div class="filter-date-input-wrapper">
+      <label for="{{ range_id }}-from" class="filter-date-label visually-hidden">From date</label>
+      <input type="date"
+             id="{{ range_id }}-from"
+             name="{{ control.column_id }}_from"
+             class="filter-date-input filter-date-from"
+             data-filter-control
+             data-filter-type="date_range"
+             data-column-id="{{ control.column_id }}"
+             data-range-part="from"
+             value="{{ from_value }}"
+             {% if control.min_date %}min="{{ control.min_date }}"{% endif %}
+             {% if control.max_date %}max="{{ control.max_date }}"{% endif %}
+             {% if control.auto_submit and control.hx_get %}
+             hx-get="{{ control.hx_get }}"
+             hx-trigger="change"
+             {% if control.hx_target %}hx-target="{{ control.hx_target }}"{% endif %}
+             hx-swap="{{ control.hx_swap or 'innerHTML' }}"
+             hx-include="[data-filter-control]"
+             hx-indicator=".htmx-indicator"
+             {% endif %}
+             aria-label="From date for {{ control.label or control.column_id }}">
+
+      <svg class="filter-date-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect>
+        <path d="M16 2v4M8 2v4M3 10h18"></path>
+      </svg>
+    </div>
+
+    <span class="filter-date-range-separator" aria-hidden="true">to</span>
+
+    <div class="filter-date-input-wrapper">
+      <label for="{{ range_id }}-to" class="filter-date-label visually-hidden">To date</label>
+      <input type="date"
+             id="{{ range_id }}-to"
+             name="{{ control.column_id }}_to"
+             class="filter-date-input filter-date-to"
+             data-filter-control
+             data-filter-type="date_range"
+             data-column-id="{{ control.column_id }}"
+             data-range-part="to"
+             value="{{ to_value }}"
+             {% if control.min_date %}min="{{ control.min_date }}"{% endif %}
+             {% if control.max_date %}max="{{ control.max_date }}"{% endif %}
+             {% if control.auto_submit and control.hx_get %}
+             hx-get="{{ control.hx_get }}"
+             hx-trigger="change"
+             {% if control.hx_target %}hx-target="{{ control.hx_target }}"{% endif %}
+             hx-swap="{{ control.hx_swap or 'innerHTML' }}"
+             hx-include="[data-filter-control]"
+             hx-indicator=".htmx-indicator"
+             {% endif %}
+             aria-label="To date for {{ control.label or control.column_id }}">
+
+      <svg class="filter-date-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect>
+        <path d="M16 2v4M8 2v4M3 10h18"></path>
+      </svg>
+    </div>
+  </div>
+</div>

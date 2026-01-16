@@ -1,0 +1,66 @@
+{#
+  Search Input Filter Template
+
+  Renders a text search input with icon and debounce support.
+
+  Context (inherited from filter_layout.html):
+    - control: FilterControlConfig
+    - control_value: current value or None
+#}
+
+{# Use input_id_override if provided, otherwise default to filter-{id} #}
+{% set input_id = control.input_id_override if control.input_id_override else 'filter-' ~ control.id %}
+{% set debounce = control.debounce_ms or 300 %}
+
+<div class="filter-search-input{% if control.css_class %} {{ control.css_class }}{% endif %}"
+     {% if control.width %}style="width: {{ control.width }};"{% endif %}>
+
+  {% if control.label %}
+  <label for="{{ input_id }}" class="filter-label">{{ control.label }}</label>
+  {% endif %}
+
+  <div class="filter-search-wrapper">
+    <svg class="filter-search-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="8"></circle>
+      <path d="m21 21-4.3-4.3"></path>
+    </svg>
+
+    <input type="text"
+           id="{{ input_id }}"
+           name="{{ control.column_id }}"
+           class="filter-search-field"
+           data-filter-control
+           data-filter-type="search"
+           data-column-id="{{ control.column_id }}"
+           placeholder="{{ control.placeholder or 'Search...' }}"
+           value="{{ control_value or '' }}"
+           {% if control.auto_submit and control.hx_get %}
+           hx-get="{{ control.hx_get }}"
+           hx-trigger="input changed delay:{{ debounce }}ms, keyup[key=='Enter']"
+           {% if control.hx_target %}hx-target="{{ control.hx_target }}"{% endif %}
+           hx-swap="{{ control.hx_swap or 'innerHTML' }}"
+           hx-include="[data-filter-control]"
+           hx-indicator=".htmx-indicator"
+           {% endif %}
+           autocomplete="off"
+           spellcheck="false">
+
+    {% if control_value %}
+    <button type="button"
+            class="filter-search-clear"
+            aria-label="Clear search"
+            {% if control.hx_get %}
+            hx-get="{{ control.hx_get }}"
+            hx-vals='{"{{ control.column_id }}": ""}'
+            {% if control.hx_target %}hx-target="{{ control.hx_target }}"{% endif %}
+            hx-swap="{{ control.hx_swap or 'innerHTML' }}"
+            hx-include="[data-filter-control]"
+            hx-indicator=".htmx-indicator"
+            {% endif %}>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path d="M18 6 6 18M6 6l12 12"></path>
+      </svg>
+    </button>
+    {% endif %}
+  </div>
+</div>

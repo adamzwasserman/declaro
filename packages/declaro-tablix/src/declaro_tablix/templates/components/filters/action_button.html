@@ -1,0 +1,47 @@
+{#
+  Action Button Filter Template
+
+  Renders a button for actions like Clear Search or Reset Filters.
+
+  Context (inherited from filter_layout.html):
+    - control: FilterControlConfig
+#}
+
+{# Use button_id_override if provided, otherwise default to filter-{id}-button #}
+{% set btn_id = control.button_id_override if control.button_id_override else ('filter-' ~ control.id ~ '-button') %}
+{% set icon_id = control.icon_id_override if control.icon_id_override else (btn_id ~ '-icon') %}
+{% set text_id = control.text_id_override if control.text_id_override else (btn_id ~ '-text') %}
+
+<button type="button"
+        id="{{ btn_id }}"
+        class="filter-action-button{% if control.css_class %} {{ control.css_class }}{% endif %}"
+        data-action-type="{{ control.action_type or control.id }}"
+        {% if control.hx_get %}
+        hx-get="{{ control.hx_get }}"
+        hx-trigger="{{ control.hx_trigger or 'click' }}"
+        {% if control.hx_target %}hx-target="{{ control.hx_target }}"{% endif %}
+        hx-swap="{{ control.hx_swap or 'innerHTML' }}"
+        hx-vals='{"_clear": "{{ control.action_type or 'all' }}"}'
+        hx-indicator=".htmx-indicator"
+        {% endif %}
+        {% if control.width %}style="width: {{ control.width }};"{% endif %}>
+
+  {% if control.icon_svg %}
+  {{ control.icon_svg | safe }}
+  {% else %}
+  {# Default icons based on action_type #}
+  {% if control.action_type == 'clear-search' %}
+  <svg id="{{ icon_id }}" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="filter-action-icon">
+    <line x1="18" y1="6" x2="6" y2="18"></line>
+    <line x1="6" y1="6" x2="18" y2="18"></line>
+  </svg>
+  {% elif control.action_type == 'reset-filters' %}
+  <svg id="{{ icon_id }}" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="filter-action-icon">
+    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+    <path d="M3 3v5h5"></path>
+  </svg>
+  {% endif %}
+  {% endif %}
+
+  <span id="{{ text_id }}" class="filter-action-text">{{ control.label or control.text_content or control.id }}</span>
+</button>

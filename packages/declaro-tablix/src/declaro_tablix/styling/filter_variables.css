@@ -1,0 +1,188 @@
+/**
+ * Filter Layout CSS Variables
+ *
+ * Provides viewport-based scaling for filter layouts to maintain
+ * pixel-perfect proportions across different screen sizes.
+ *
+ * Base design: 1920px viewport
+ * All dimensions scale proportionally with clamp() for min/max bounds.
+ */
+
+:root {
+  /* ============================================
+     Base Scaling
+     ============================================ */
+
+  /* Reference viewport width for 1:1 scaling */
+  --filter-base-width: 1920;
+
+  /* Dynamic scale factor based on viewport */
+  --filter-scale: calc(100vw / var(--filter-base-width) * 1px);
+
+  /* ============================================
+     Spacing
+     ============================================ */
+
+  /* Gap between filter controls */
+  --filter-gap: clamp(8px, calc(16 * var(--filter-scale)), 24px);
+
+  /* Padding inside containers */
+  --filter-padding: clamp(12px, calc(24 * var(--filter-scale)), 36px);
+  --filter-padding-sm: clamp(6px, calc(12 * var(--filter-scale)), 18px);
+
+  /* Margin between sections */
+  --filter-margin: clamp(8px, calc(16 * var(--filter-scale)), 24px);
+
+  /* ============================================
+     Dimensions
+     ============================================ */
+
+  /* Input heights */
+  --filter-input-height: clamp(32px, calc(40 * var(--filter-scale)), 48px);
+  --filter-input-height-sm: clamp(28px, calc(36 * var(--filter-scale)), 44px);
+
+  /* Search input width */
+  --filter-search-width: clamp(180px, calc(280 * var(--filter-scale)), 400px);
+
+  /* Dropdown widths */
+  --filter-dropdown-width: clamp(140px, calc(200 * var(--filter-scale)), 280px);
+  --filter-dropdown-width-lg: clamp(180px, calc(280 * var(--filter-scale)), 400px);
+
+  /* Number/date range input widths */
+  --filter-range-input-width: clamp(80px, calc(120 * var(--filter-scale)), 180px);
+
+  /* Checkbox group max width */
+  --filter-checkbox-group-max-width: clamp(400px, calc(600 * var(--filter-scale)), 800px);
+
+  /* Icon sizes */
+  --filter-icon-size: clamp(14px, calc(18 * var(--filter-scale)), 22px);
+  --filter-icon-size-sm: clamp(12px, calc(14 * var(--filter-scale)), 18px);
+
+  /* ============================================
+     Typography
+     ============================================ */
+
+  /* Label font size */
+  --filter-label-size: clamp(11px, calc(13 * var(--filter-scale)), 15px);
+  --filter-label-weight: 500;
+  --filter-label-color: var(--text-secondary, #6b7280);
+
+  /* Input font size */
+  --filter-input-size: clamp(13px, calc(14 * var(--filter-scale)), 16px);
+
+  /* Placeholder color */
+  --filter-placeholder-color: var(--text-tertiary, #9ca3af);
+
+  /* ============================================
+     Colors
+     ============================================ */
+
+  /* Primary actions */
+  --filter-primary: var(--color-primary, #3b82f6);
+  --filter-primary-hover: var(--color-primary-hover, #2563eb);
+  --filter-primary-active: var(--color-primary-active, #1d4ed8);
+
+  /* Background colors */
+  --filter-bg: var(--bg-surface, #ffffff);
+  --filter-bg-hover: var(--bg-surface-hover, #f9fafb);
+  --filter-bg-active: var(--bg-surface-active, #f3f4f6);
+
+  /* Border colors */
+  --filter-border: var(--border-default, #e5e7eb);
+  --filter-border-hover: var(--border-hover, #d1d5db);
+  --filter-border-focus: var(--border-focus, #3b82f6);
+
+  /* Focus ring */
+  --filter-focus-ring: 0 0 0 2px rgba(59, 130, 246, 0.2);
+  --filter-focus-ring-offset: 0 0 0 1px var(--filter-bg);
+
+  /* Checkbox/radio colors */
+  --filter-checkbox-checked-bg: var(--filter-primary);
+  --filter-checkbox-checked-border: var(--filter-primary);
+  --filter-checkbox-checked-color: #ffffff;
+
+  /* ============================================
+     Borders & Radius
+     ============================================ */
+
+  --filter-border-width: 1px;
+  --filter-border-radius: clamp(4px, calc(6 * var(--filter-scale)), 8px);
+  --filter-border-radius-sm: clamp(3px, calc(4 * var(--filter-scale)), 6px);
+  --filter-border-radius-lg: clamp(6px, calc(8 * var(--filter-scale)), 12px);
+
+  /* ============================================
+     Shadows
+     ============================================ */
+
+  --filter-shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --filter-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+  --filter-shadow-lg: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --filter-dropdown-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+
+  /* ============================================
+     Transitions
+     ============================================ */
+
+  --filter-transition-fast: 100ms ease-out;
+  --filter-transition: 150ms ease-out;
+  --filter-transition-slow: 200ms ease-out;
+
+  /* ============================================
+     Z-Index
+     ============================================ */
+
+  --filter-z-dropdown: 50;
+  --filter-z-tooltip: 60;
+  --filter-z-modal: 100;
+}
+
+/* ============================================
+   Dark Mode Support
+   ============================================ */
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --filter-label-color: #9ca3af;
+    --filter-placeholder-color: #6b7280;
+    --filter-bg: #1f2937;
+    --filter-bg-hover: #374151;
+    --filter-bg-active: #4b5563;
+    --filter-border: #374151;
+    --filter-border-hover: #4b5563;
+  }
+}
+
+/* Explicit dark mode class */
+.dark,
+[data-theme="dark"] {
+  --filter-label-color: #9ca3af;
+  --filter-placeholder-color: #6b7280;
+  --filter-bg: #1f2937;
+  --filter-bg-hover: #374151;
+  --filter-bg-active: #4b5563;
+  --filter-border: #374151;
+  --filter-border-hover: #4b5563;
+}
+
+/* ============================================
+   Reduced Motion
+   ============================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --filter-transition-fast: 0ms;
+    --filter-transition: 0ms;
+    --filter-transition-slow: 0ms;
+  }
+}
+
+/* ============================================
+   High Contrast Mode
+   ============================================ */
+
+@media (prefers-contrast: high) {
+  :root {
+    --filter-border-width: 2px;
+    --filter-focus-ring: 0 0 0 3px rgba(0, 0, 0, 0.8);
+  }
+}

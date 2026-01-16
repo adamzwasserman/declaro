@@ -1,0 +1,110 @@
+{#
+  Table Template
+
+  Renders a table with CSS class passthrough from config.
+  Includes HTMX-powered sort buttons for sortable columns.
+
+  Context:
+    - config: TableConfig with columns, css, and other settings
+    - data: TableData object with .rows list[dict], or plain list[dict]
+    - sort_field: str|None - currently sorted column id
+    - sort_dir: str|None - current sort direction ("asc" or "desc")
+    - sort_url: str - base URL for sort requests
+#}
+
+{# Handle both TableData objects and plain lists #}
+{% set rows = data.rows if data.rows is defined else data %}
+
+{% set table_classes = "tablix-table" %}
+{% if config.css.table %}
+{% set table_classes = table_classes ~ " " ~ config.css.table|join(" ") %}
+{% endif %}
+
+{% set thead_classes = "tablix-thead" %}
+{% if config.css.thead %}
+{% set thead_classes = thead_classes ~ " " ~ config.css.thead|join(" ") %}
+{% endif %}
+
+{% set tbody_classes = "tablix-tbody" %}
+{% if config.css.tbody %}
+{% set tbody_classes = tbody_classes ~ " " ~ config.css.tbody|join(" ") %}
+{% endif %}
+
+{% set row_classes = "tablix-tr" %}
+{% if config.css.row %}
+{% set row_classes = row_classes ~ " " ~ config.css.row|join(" ") %}
+{% endif %}
+
+{# Use table_id_override if provided, otherwise default to tablix-{table_name} #}
+{% set table_id = config.table_id_override if config.table_id_override else "tablix-" ~ config.table_name %}
+
+<table class="{{ table_classes }}" id="{{ table_id }}">
+  <thead class="{{ thead_classes }}">
+    <tr>
+      {% for col in config.columns %}
+      {% if col.sortable %}
+      {# Sortable column: render button with HTMX attributes #}
+      {% set is_active = sort_field == col.id %}
+      {% set next_dir = "desc" if (is_active and sort_dir == "asc") else "asc" %}
+      {% set btn_classes = "tablix-sort-btn" ~ (" tablix-sort-active" if is_active else "") %}
+      {% if col.css_class %}
+      <th class="tablix-th {{ col.css_class }}">
+      {% else %}
+      <th class="tablix-th">
+      {% endif %}
+        <button type="button"
+                class="{{ btn_classes }}"
+                hx-get="{{ sort_url }}?sort={{ col.id }}&amp;dir={{ next_dir }}"
+                hx-target="closest table"
+                hx-swap="outerHTML">
+          {{ col.name }}
+          {% if is_active %}
+          <span class="tablix-sort-indicator">{% if sort_dir == "asc" %}&#9650;{% else %}&#9660;{% endif %}</span>
+          {% endif %}
+        </button>
+      </th>
+      {% else %}
+      {# Non-sortable column: plain text #}
+      {% if col.css_class %}
+      <th class="tablix-th {{ col.css_class }}">{{ col.name }}</th>
+      {% else %}
+      <th class="tablix-th">{{ col.name }}</th>
+      {% endif %}
+      {% endif %}
+      {% endfor %}
+    </tr>
+  </thead>
+  <tbody class="{{ tbody_classes }}">
+    {% for row in rows %}
+    {% set row_idx = loop.index0 %}
+    {# Generate row ID if template provided #}
+    {% if config.row_id_template %}
+    {% set row_id = config.row_id_template.replace('{row_idx}', row_idx|string) %}
+    <tr class="{{ row_classes }}" id="{{ row_id }}">
+    {% else %}
+    <tr class="{{ row_classes }}">
+    {% endif %}
+      {% for col in config.columns %}
+      {% set cell_value = row[col.id] %}
+      {# Generate cell ID if template provided #}
+      {% if col.cell_id_template %}
+      {% set cell_id = col.cell_id_template.replace('{row_idx}', row_idx|string) %}
+      {% else %}
+      {% set cell_id = none %}
+      {% endif %}
+      {% if col.cell_css_class %}
+      <td class="tablix-td {{ col.cell_css_class }}"{% if cell_id %} id="{{ cell_id }}"{% endif %}>
+      {% else %}
+      <td class="tablix-td"{% if cell_id %} id="{{ cell_id }}"{% endif %}>
+      {% endif %}
+        {% if col.type.value == "image" and cell_value %}
+        <img src="{{ cell_value }}" alt="{{ col.name }}" class="tablix-img" style="width: 32px; height: 32px; object-fit: cover; border-radius: 4px;" />
+        {% else %}
+        {{ cell_value }}
+        {% endif %}
+      </td>
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>

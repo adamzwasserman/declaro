@@ -1,0 +1,98 @@
+{#
+  Filter Layout Template
+
+  Renders a complete CSS Grid-based filter layout with all controls.
+
+  Context:
+    - layout: FilterLayoutConfig
+    - state: FilterState (optional)
+    - options: dict[str, list[FilterOption]] - options keyed by options_source
+#}
+
+{% set container_style = layout.to_css_grid_style() if layout.to_css_grid_style else '' %}
+{% set container_class = layout.container_class or 'filter-layout' %}
+{# Use container_id_override if provided, otherwise default to filter-layout-{id} #}
+{% set container_id = layout.container_id_override if layout.container_id_override else "filter-layout-" ~ layout.id %}
+
+<div id="{{ container_id }}"
+     class="{{ container_class }}{% if layout.collapsible %} collapsible{% endif %}{% if layout.default_collapsed %} collapsed{% endif %}"
+     style="{{ container_style }}{% if layout.container_style %} {{ layout.container_style }}{% endif %}">
+
+  {# Use form_id_override and controls_id_override if provided #}
+  {% set form_id = layout.form_id_override if layout.form_id_override else "filter-form-" ~ layout.id %}
+  {% set controls_id = layout.controls_id_override if layout.controls_id_override else "filter-controls-" ~ layout.id %}
+
+  {% if layout.collapsible %}
+  <button type="button"
+          class="filter-layout-toggle"
+          aria-expanded="{{ 'false' if layout.default_collapsed else 'true' }}"
+          aria-controls="{{ controls_id }}">
+    <span class="filter-layout-toggle-icon"></span>
+    <span class="filter-layout-toggle-text">{{ layout.name or 'Filters' }}</span>
+  </button>
+  {% endif %}
+
+  <form id="{{ form_id }}"
+        class="filter-form"
+        {% if layout.form_hx_get %}
+        hx-get="{{ layout.form_hx_get }}"
+        hx-trigger="{{ layout.form_hx_trigger }}"
+        {% if layout.form_hx_target %}hx-target="{{ layout.form_hx_target }}"{% endif %}
+        {% endif %}>
+
+    <div id="{{ controls_id }}"
+         class="filter-controls"
+         {% if layout.collapsible and layout.default_collapsed %}hidden{% endif %}>
+
+      {% for control in layout.controls %}
+        {% set control_value = state.get_value(control.id) if state else none %}
+        {% set control_options = options.get(control.options_source, []) if options and control.options_source else control.options_static or [] %}
+
+        <div class="filter-control filter-control-{{ control.control_type.value }}"
+             {% if control.grid_column %}style="grid-column: {{ control.grid_column }};{% if control.grid_row %} grid-row: {{ control.grid_row }};{% endif %}"{% endif %}>
+
+          {% if control.control_type.value == 'search_input' %}
+            {% include 'components/filters/search_input.html' %}
+          {% elif control.control_type.value == 'checkbox_group' %}
+            {% include 'components/filters/checkbox_group.html' %}
+          {% elif control.control_type.value == 'multi_select' %}
+            {% include 'components/filters/multi_select.html' %}
+          {% elif control.control_type.value == 'number_range' %}
+            {% include 'components/filters/number_range.html' %}
+          {% elif control.control_type.value == 'date_range' %}
+            {% include 'components/filters/date_range.html' %}
+          {% elif control.control_type.value == 'single_select' %}
+            {% include 'components/filters/single_select.html' %}
+          {% elif control.control_type.value == 'action_button' %}
+            {% include 'components/filters/action_button.html' %}
+          {% endif %}
+
+        </div>
+      {% endfor %}
+
+      {% if layout.show_clear_all or layout.show_apply_button %}
+      <div class="filter-actions">
+        {% if layout.show_clear_all %}
+        <button type="button"
+                class="filter-clear-all"
+                hx-get="{{ layout.form_hx_get }}"
+                hx-vals='{"_clear": "all"}'
+                {% if layout.form_hx_target %}hx-target="{{ layout.form_hx_target }}"{% endif %}
+                hx-swap="innerHTML"
+                hx-indicator=".htmx-indicator"
+                hx-on::before-request="document.querySelectorAll('[data-filter-control]').forEach(el => { if(el.type === 'checkbox') el.checked = false; else if(el.tagName === 'SELECT') el.selectedIndex = 0; else el.value = ''; })">
+          Reset Filters
+        </button>
+        {% endif %}
+
+        {% if layout.show_apply_button %}
+        <button type="submit" class="filter-apply">
+          Apply Filters
+        </button>
+        {% endif %}
+      </div>
+      {% endif %}
+
+    </div>
+  </form>
+</div>

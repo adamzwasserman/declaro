@@ -1,0 +1,137 @@
+<!-- Cell Content Component -->
+{% set cell_value = row.get(column.id) %}
+
+<!-- Handle different cell content types -->
+{% if cell_value is none or cell_value == '' %}
+    <!-- Null/empty value -->
+    <span class="text-muted">—</span>
+
+{% elif column.type.value == 'BOOLEAN' %}
+    <!-- Boolean value -->
+    <span class="badge {{ 'bg-success' if cell_value else 'bg-danger' }}">
+        {{ cell_value | format_boolean }}
+    </span>
+
+{% elif column.type.value == 'CURRENCY' %}
+    <!-- Currency value -->
+    <span class="text-end d-block">
+        {{ cell_value | format_currency }}
+    </span>
+
+{% elif column.type.value == 'PERCENTAGE' %}
+    <!-- Percentage value -->
+    <span class="text-end d-block">
+        {{ cell_value | format_percentage }}
+    </span>
+
+{% elif column.type.value == 'NUMBER' %}
+    <!-- Numeric value -->
+    <span class="text-end d-block">
+        {{ cell_value | format_number }}
+    </span>
+
+{% elif column.type.value in ['DATE', 'DATETIME'] %}
+    <!-- Date/DateTime value -->
+    <span class="text-nowrap">
+        {% if column.type.value == 'DATE' %}
+        {{ cell_value | format_date('%Y-%m-%d') }}
+        {% else %}
+        {{ cell_value | format_date('%Y-%m-%d %H:%M') }}
+        {% endif %}
+    </span>
+
+{% elif column.type.value == 'EMAIL' %}
+    <!-- Email value -->
+    <a href="mailto:{{ cell_value | safe_string }}" class="text-decoration-none">
+        <i class="fas fa-envelope me-1"></i>
+        {{ cell_value | truncate_text(30) }}
+    </a>
+
+{% elif column.type.value == 'URL' %}
+    <!-- URL value -->
+    <a href="{{ cell_value | safe_string }}" target="_blank" class="text-decoration-none">
+        <i class="fas fa-external-link-alt me-1"></i>
+        {{ cell_value | truncate_text(30) }}
+    </a>
+
+{% elif column.type.value == 'PHONE' %}
+    <!-- Phone value -->
+    <a href="tel:{{ cell_value | safe_string }}" class="text-decoration-none">
+        <i class="fas fa-phone me-1"></i>
+        {{ cell_value | safe_string }}
+    </a>
+
+{% elif column.type.value == 'JSON' %}
+    <!-- JSON value -->
+    <details class="json-details">
+        <summary class="btn btn-sm btn-outline-secondary">
+            <i class="fas fa-code"></i> JSON
+        </summary>
+        <pre class="mt-2 p-2 bg-light border rounded small">{{ cell_value | tojson(indent=2) }}</pre>
+    </details>
+
+{% else %}
+    <!-- Default text value -->
+    {% set display_value = cell_value | safe_string %}
+    {% if display_value | length > 50 %}
+        <!-- Long text with tooltip -->
+        <span data-bs-toggle="tooltip" data-bs-title="{{ display_value }}" class="text-truncate d-block">
+            {{ display_value | truncate_text(50) }}
+        </span>
+    {% else %}
+        {{ display_value }}
+    {% endif %}
+{% endif %}
+
+<!-- Customization indicators -->
+{% if customization_metadata and customization_metadata.get(column.id) %}
+    {% set custom_data = customization_metadata[column.id] %}
+
+    <!-- Formula cell indicator -->
+    {% if custom_data.get('is_formula') %}
+    <div class="formula-cell">
+        <i class="fas fa-function formula-indicator" title="Formula: {{ custom_data.get('formula', '') }}"></i>
+    </div>
+    {% endif %}
+
+    <!-- Default value indicator -->
+    {% if custom_data.get('is_default') %}
+    {{ True | default_indicator }}
+    {% endif %}
+
+    <!-- Custom value translation indicator -->
+    {% if custom_data.get('has_translation') %}
+    <i class="fas fa-language customization-indicator" title="Custom value translation applied"></i>
+    {% endif %}
+{% endif %}
+
+<!-- Actions dropdown for cells (if enabled) -->
+{% if config.enable_cell_actions %}
+<div class="cell-actions dropdown">
+    <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+        <i class="fas fa-ellipsis-v"></i>
+    </button>
+    <ul class="dropdown-menu">
+        <li>
+            <a class="dropdown-item" href="#" onclick="copyCellValue('{{ cell_value | safe_string }}')">
+                <i class="fas fa-copy me-2"></i>Copy Value
+            </a>
+        </li>
+        {% if column.type.value in ['NUMBER', 'CURRENCY', 'PERCENTAGE'] %}
+        <li>
+            <a class="dropdown-item" href="#" onclick="filterByValue('{{ column.id }}', '{{ cell_value }}')">
+                <i class="fas fa-filter me-2"></i>Filter by Value
+            </a>
+        </li>
+        {% endif %}
+        <li><hr class="dropdown-divider"></li>
+        <li>
+            <a class="dropdown-item" href="#" onclick="sortByColumn('{{ column.id }}')">
+                <i class="fas fa-sort me-2"></i>Sort by Column
+            </a>
+        </li>
+    </ul>
+</div>
+{% endif %}
+
+<!-- JavaScript moved to main table template to avoid duplication in every cell -->

@@ -1,0 +1,595 @@
+<!-- Layout Configuration Modal Component -->
+<div class="modal fade" id="layoutModal" tabindex="-1" aria-labelledby="layoutModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="layoutModalLabel">
+                    <i class="fas fa-layout me-2"></i>Table Layout Configuration
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+
+            <div class="modal-body">
+                <form id="layoutForm">
+                    <!-- Saved Layouts Section -->
+                    {% if user_layouts %}
+                    <div class="form-section mb-4">
+                        <h6>Saved Layouts</h6>
+                        <div class="row">
+                            {% for layout in user_layouts %}
+                            <div class="col-md-6 col-lg-4 mb-3">
+                                <div class="card">
+                                    <div class="card-body">
+                                        <h6 class="card-title">
+                                            {% if layout.is_default %}⭐{% endif %} {{ layout.name }}
+                                        </h6>
+                                        <p class="card-text small text-muted">
+                                            {{ layout.description or 'No description' }}
+                                        </p>
+                                        <div class="btn-group w-100" role="group">
+                                            <button type="button" class="btn btn-sm btn-primary"
+                                                    onclick="applyLayout('{{ layout.id }}')">
+                                                Apply
+                                            </button>
+                                            <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle dropdown-toggle-split"
+                                                    data-bs-toggle="dropdown">
+                                                <span class="visually-hidden">Toggle Dropdown</span>
+                                            </button>
+                                            <ul class="dropdown-menu">
+                                                {% if not layout.is_default %}
+                                                <li>
+                                                    <a class="dropdown-item" href="#" onclick="setDefaultLayout('{{ layout.id }}')">
+                                                        <i class="fas fa-star me-2"></i>Set as Default
+                                                    </a>
+                                                </li>
+                                                {% else %}
+                                                <li>
+                                                    <a class="dropdown-item" href="#" onclick="clearDefaultLayout('{{ layout.id }}')">
+                                                        <i class="far fa-star me-2"></i>Clear Default
+                                                    </a>
+                                                </li>
+                                                {% endif %}
+                                                <li>
+                                                    <a class="dropdown-item" href="#" onclick="editLayout('{{ layout.id }}')">
+                                                        <i class="fas fa-edit me-2"></i>Edit
+                                                    </a>
+                                                </li>
+                                                <li>
+                                                    <a class="dropdown-item" href="#" onclick="duplicateLayout('{{ layout.id }}')">
+                                                        <i class="fas fa-copy me-2"></i>Duplicate
+                                                    </a>
+                                                </li>
+                                                <li><hr class="dropdown-divider"></li>
+                                                <li>
+                                                    <a class="dropdown-item text-danger" href="#" onclick="deleteLayout('{{ layout.id }}')">
+                                                        <i class="fas fa-trash me-2"></i>Delete
+                                                    </a>
+                                                </li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- Column Configuration Section -->
+                    <div class="form-section mb-4">
+                        <h6>Column Configuration</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 40px;">Order</th>
+                                        <th>Column Name</th>
+                                        <th style="width: 80px;">Visible</th>
+                                        <th style="width: 100px;">Width</th>
+                                        <th style="width: 100px;">Alignment</th>
+                                        <th style="width: 120px;">Custom Name</th>
+                                        <th style="width: 40px;">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="columnConfigTable">
+                                    {% for column in config.columns %}
+                                    <tr data-column-id="{{ column.id }}" draggable="true">
+                                        <td>
+                                            <span class="drag-handle">
+                                                <i class="fas fa-grip-vertical text-muted"></i>
+                                            </span>
+                                            <span class="order-number">{{ loop.index }}</span>
+                                        </td>
+                                        <td>
+                                            <div class="d-flex align-items-center">
+                                                {{ get_column_type_icon(column.type.value) }}
+                                                <span class="ms-2">{{ column.name }}</span>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox"
+                                                       name="column_visible[]"
+                                                       value="{{ column.id }}"
+                                                       {% if column.visible %}checked{% endif %}>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <input type="number"
+                                                   class="form-control form-control-sm"
+                                                   name="column_width[]"
+                                                   value="{{ column.width or '' }}"
+                                                   placeholder="Auto"
+                                                   min="50"
+                                                   max="500">
+                                        </td>
+                                        <td>
+                                            <select class="form-select form-select-sm" name="column_alignment[]">
+                                                <option value="left" {% if column.alignment == 'left' %}selected{% endif %}>Left</option>
+                                                <option value="center" {% if column.alignment == 'center' %}selected{% endif %}>Center</option>
+                                                <option value="right" {% if column.alignment == 'right' %}selected{% endif %}>Right</option>
+                                            </select>
+                                        </td>
+                                        <td>
+                                            <input type="text"
+                                                   class="form-control form-control-sm"
+                                                   name="column_custom_name[]"
+                                                   value="{{ column.display_name or '' }}"
+                                                   placeholder="Custom name">
+                                        </td>
+                                        <td>
+                                            <button type="button" class="btn btn-sm btn-outline-danger"
+                                                    onclick="hideColumn('{{ column.id }}')">
+                                                <i class="fas fa-eye-slash"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Display Options Section -->
+                    <div class="form-section mb-4">
+                        <h6>Display Options</h6>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="showRowNumbers"
+                                           {% if config.show_row_numbers %}checked{% endif %}>
+                                    <label class="form-check-label" for="showRowNumbers">
+                                        Show row numbers
+                                    </label>
+                                </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="enableCellActions"
+                                           {% if config.enable_cell_actions %}checked{% endif %}>
+                                    <label class="form-check-label" for="enableCellActions">
+                                        Enable cell actions menu
+                                    </label>
+                                </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="enableColumnResize"
+                                           {% if config.enable_column_resize %}checked{% endif %}>
+                                    <label class="form-check-label" for="enableColumnResize">
+                                        Enable column resizing
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="pageSize" class="form-label">Page Size</label>
+                                    <select class="form-select" id="pageSize">
+                                        {% set current_page_size = config.pagination.page_size if config.pagination else 20 %}
+                                        {% for size in available_page_sizes %}
+                                        <option value="{{ size }}" {% if size == current_page_size %}selected{% endif %}>
+                                            {{ size }} rows per page
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="tableTheme" class="form-label">Table Theme</label>
+                                    <select class="form-select" id="tableTheme">
+                                        <option value="default">Default</option>
+                                        <option value="striped">Striped rows</option>
+                                        <option value="bordered">Bordered</option>
+                                        <option value="compact">Compact</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sorting Configuration -->
+                    <div class="form-section mb-4">
+                        <h6>Default Sorting</h6>
+                        <div class="row">
+                            {% for column in sortable_columns %}
+                            <div class="col-md-6 mb-2">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio"
+                                           name="default_sort_column"
+                                           value="{{ column.id }}"
+                                           {% if config.sorts and config.sorts|length > 0 and config.sorts[0].column_id == column.id %}checked{% endif %}>
+                                    <label class="form-check-label">
+                                        {{ column.display_name or column.name }}
+                                    </label>
+                                    <select class="form-select form-select-sm ms-2"
+                                            name="default_sort_direction"
+                                            style="width: 100px; display: inline-block;">
+                                        <option value="asc" {% if config.sorts and config.sorts|length > 0 and config.sorts[0].column_id == column.id and config.sorts[0].direction.value == 'asc' %}selected{% endif %}>
+                                            Ascending
+                                        </option>
+                                        <option value="desc" {% if config.sorts and config.sorts|length > 0 and config.sorts[0].column_id == column.id and config.sorts[0].direction.value == 'desc' %}selected{% endif %}>
+                                            Descending
+                                        </option>
+                                    </select>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <div class="modal-footer">
+                <div class="me-auto">
+                    <button type="button" class="btn btn-outline-info" onclick="saveCurrentLayout()">
+                        <i class="fas fa-save me-1"></i>Save Layout
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary" onclick="resetToDefaults()">
+                        <i class="fas fa-undo me-1"></i>Reset to Defaults
+                    </button>
+                </div>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="applyLayoutChanges()">
+                    <i class="fas fa-check me-1"></i>Apply Changes
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Save Layout Modal -->
+<div class="modal fade" id="saveLayoutModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Save Layout</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="saveLayoutForm">
+                    <div class="mb-3">
+                        <label for="layoutName" class="form-label">Layout Name</label>
+                        <input type="text" class="form-control" id="layoutName" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="layoutDescription" class="form-label">Description (optional)</label>
+                        <textarea class="form-control" id="layoutDescription" rows="2"></textarea>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="setLayoutAsDefault">
+                        <label class="form-check-label" for="setLayoutAsDefault">
+                            Set as default layout for this table
+                        </label>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveLayout()">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Layout form functionality
+let draggedElement = null;
+
+// Make column rows sortable
+document.addEventListener('DOMContentLoaded', function() {
+    const tbody = document.getElementById('columnConfigTable');
+    if (tbody) {
+        tbody.addEventListener('dragstart', handleDragStart);
+        tbody.addEventListener('dragover', handleDragOver);
+        tbody.addEventListener('drop', handleDrop);
+        tbody.addEventListener('dragend', handleDragEnd);
+    }
+});
+
+function handleDragStart(e) {
+    if (e.target.closest('tr')) {
+        draggedElement = e.target.closest('tr');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/html', draggedElement.outerHTML);
+    }
+}
+
+function handleDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+}
+
+function handleDrop(e) {
+    e.preventDefault();
+    if (draggedElement && e.target.closest('tr') !== draggedElement) {
+        const dropTarget = e.target.closest('tr');
+        if (dropTarget) {
+            const tbody = dropTarget.parentNode;
+            const allRows = [...tbody.children];
+            const draggedIndex = allRows.indexOf(draggedElement);
+            const targetIndex = allRows.indexOf(dropTarget);
+
+            if (draggedIndex < targetIndex) {
+                tbody.insertBefore(draggedElement, dropTarget.nextSibling);
+            } else {
+                tbody.insertBefore(draggedElement, dropTarget);
+            }
+
+            updateOrderNumbers();
+        }
+    }
+}
+
+function handleDragEnd(e) {
+    draggedElement = null;
+}
+
+function updateOrderNumbers() {
+    const rows = document.querySelectorAll('#columnConfigTable tr');
+    rows.forEach((row, index) => {
+        const orderSpan = row.querySelector('.order-number');
+        if (orderSpan) {
+            orderSpan.textContent = index + 1;
+        }
+    });
+}
+
+function hideColumn(columnId) {
+    const row = document.querySelector(`tr[data-column-id="${columnId}"]`);
+    if (row) {
+        const checkbox = row.querySelector('input[name="column_visible[]"]');
+        checkbox.checked = false;
+    }
+}
+
+function applyLayoutChanges() {
+    const form = document.getElementById('layoutForm');
+    const formData = new FormData(form);
+
+    // Collect column configuration
+    const columnOrder = [];
+    const rows = document.querySelectorAll('#columnConfigTable tr');
+    rows.forEach(row => {
+        const columnId = row.dataset.columnId;
+        if (columnId) {
+            columnOrder.push(columnId);
+        }
+    });
+
+    // Build layout configuration
+    const layoutConfig = {
+        column_order: columnOrder,
+        column_visibility: formData.getAll('column_visible[]'),
+        column_widths: {},
+        column_alignments: {},
+        column_custom_names: {},
+        display_options: {
+            show_row_numbers: document.getElementById('showRowNumbers').checked,
+            enable_cell_actions: document.getElementById('enableCellActions').checked,
+            enable_column_resize: document.getElementById('enableColumnResize').checked,
+            page_size: parseInt(document.getElementById('pageSize').value),
+            table_theme: document.getElementById('tableTheme').value
+        },
+        default_sort: {
+            column: formData.get('default_sort_column'),
+            direction: formData.get('default_sort_direction')
+        }
+    };
+
+    // Apply configuration immediately
+    const params = new URLSearchParams(window.location.search);
+
+    // Add layout parameters
+    Object.entries(layoutConfig).forEach(([key, value]) => {
+        if (typeof value === 'object') {
+            params.set(`layout_${key}`, JSON.stringify(value));
+        } else {
+            params.set(`layout_${key}`, value);
+        }
+    });
+
+    window.location.search = params.toString();
+}
+
+function resetToDefaults() {
+    if (confirm('Reset all layout settings to default? This will remove any customizations.')) {
+        const params = new URLSearchParams(window.location.search);
+
+        // Remove all layout parameters
+        for (let [key, value] of [...params.entries()]) {
+            if (key.startsWith('layout_')) {
+                params.delete(key);
+            }
+        }
+
+        window.location.search = params.toString();
+    }
+}
+
+function saveCurrentLayout() {
+    const modal = new bootstrap.Modal(document.getElementById('saveLayoutModal'));
+    modal.show();
+}
+
+function saveLayout() {
+    const name = document.getElementById('layoutName').value;
+    const description = document.getElementById('layoutDescription').value;
+    const isDefault = document.getElementById('setLayoutAsDefault').checked;
+
+    if (!name.trim()) {
+        alert('Please enter a name for the layout');
+        return;
+    }
+
+    // Collect current layout configuration (same as applyLayoutChanges)
+    const form = document.getElementById('layoutForm');
+    const formData = new FormData(form);
+
+    const columnOrder = [];
+    const rows = document.querySelectorAll('#columnConfigTable tr');
+    rows.forEach(row => {
+        const columnId = row.dataset.columnId;
+        if (columnId) {
+            columnOrder.push(columnId);
+        }
+    });
+
+    const layoutConfig = {
+        column_order: columnOrder,
+        column_visibility: formData.getAll('column_visible[]'),
+        // ... rest of configuration
+    };
+
+    // Send to server
+    fetch('/api/tables/{{ table_name }}/layouts', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            name: name,
+            description: description,
+            configuration: layoutConfig,
+            is_default: isDefault
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('saveLayoutModal')).hide();
+            if (window.showNotification) {
+                window.showNotification('Layout saved successfully', 'success');
+            }
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            alert('Failed to save layout: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        console.error('Error saving layout:', error);
+        alert('Failed to save layout');
+    });
+}
+
+function applyLayout(layoutId) {
+    fetch(`/api/tables/{{ table_name }}/layouts/${layoutId}/apply`, {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.redirect_url) {
+            window.location.href = data.redirect_url;
+        } else {
+            alert('Failed to apply layout');
+        }
+    })
+    .catch(error => {
+        console.error('Error applying layout:', error);
+        alert('Failed to apply layout');
+    });
+}
+
+function setDefaultLayout(layoutId) {
+    fetch(`/api/tables/{{ table_name }}/layouts/${layoutId}/set-default`, {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            if (window.showNotification) {
+                window.showNotification('Default layout updated', 'success');
+            }
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            alert('Failed to set default layout');
+        }
+    })
+    .catch(error => {
+        console.error('Error setting default layout:', error);
+        alert('Failed to set default layout');
+    });
+}
+
+function clearDefaultLayout(layoutId) {
+    fetch(`/api/tables/{{ table_name }}/layouts/${layoutId}/clear-default`, {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            if (window.showNotification) {
+                window.showNotification('Default layout cleared', 'success');
+            }
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            alert('Failed to clear default layout');
+        }
+    });
+}
+
+function deleteLayout(layoutId) {
+    if (confirm('Are you sure you want to delete this layout? This action cannot be undone.')) {
+        fetch(`/api/tables/{{ table_name }}/layouts/${layoutId}`, {
+            method: 'DELETE'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                if (window.showNotification) {
+                    window.showNotification('Layout deleted successfully', 'success');
+                }
+                setTimeout(() => window.location.reload(), 1000);
+            } else {
+                alert('Failed to delete layout');
+            }
+        })
+        .catch(error => {
+            console.error('Error deleting layout:', error);
+            alert('Failed to delete layout');
+        });
+    }
+}
+
+function duplicateLayout(layoutId) {
+    const newName = prompt('Enter a name for the duplicated layout:');
+    if (newName && newName.trim()) {
+        fetch(`/api/tables/{{ table_name }}/layouts/${layoutId}/duplicate`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ name: newName.trim() })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                if (window.showNotification) {
+                    window.showNotification('Layout duplicated successfully', 'success');
+                }
+                setTimeout(() => window.location.reload(), 1000);
+            } else {
+                alert('Failed to duplicate layout');
+            }
+        })
+        .catch(error => {
+            console.error('Error duplicating layout:', error);
+            alert('Failed to duplicate layout');
+        });
+    }
+}
+</script>

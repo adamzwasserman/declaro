@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(xargs:*)",
+      "Bash(find:*)",
+      "Bash(uv run python:*)",
+      "Bash(uv sync:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(cat:*)",
+      "Bash(/Users/adam/dev/declaro/packages/declaro-tablix/.venv/bin/python:*)",
+      "Bash(/Users/adam/dev/declaro/packages/declaro-tablix/.venv/bin/pytest:*)",
+      "Bash(uv pip install:*)",
+      "Bash(bd create:*)",
+      "Bash(bd init:*)",
+      "Bash(bd dep tree:*)",
+      "Bash(bd list:*)",
+      "Bash(bd ready:*)",
+      "Bash(bd update:*)",
+      "Bash(bd close:*)",
+      "Bash(bd show:*)",
+      "Bash(lsof:*)",
+      "Bash(uv run uvicorn:*)",
+      "Bash(curl:*)",
+      "Bash(.venv/bin/python:*)",
+      "Bash(sqlite3:*)"
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{#
+  Static Text Filter Template
+
+  Renders static text content in the filter layout (no form input).
+  Used for labels, headers, instructions, or decorative text.
+
+  Context (inherited from filter_layout.html):
+    - control: FilterControlConfig
+#}
+
+<div class="filter-static-text{% if control.css_class %} {{ control.css_class }}{% endif %}"
+     {% if control.width %}style="width: {{ control.width }};"{% endif %}
+     data-filter-static>
+  {{ control.text_content or '' }}
+</div>

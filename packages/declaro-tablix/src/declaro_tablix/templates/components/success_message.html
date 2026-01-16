@@ -1,0 +1,79 @@
+<!-- Success Message Component -->
+<div class="alert alert-success alert-dismissible fade show" role="alert">
+    <div class="d-flex align-items-start">
+        <!-- Success icon -->
+        <div class="me-3">
+            <i class="fas fa-check-circle fa-lg text-success"></i>
+        </div>
+
+        <!-- Message content -->
+        <div class="flex-grow-1">
+            <h5 class="alert-heading mb-2">Success!</h5>
+
+            <p class="mb-0">{{ message | safe_string }}</p>
+
+            <!-- Additional context if provided -->
+            {% if context %}
+            <hr>
+            <div class="small">
+                {% if context.details %}
+                <p class="mb-1"><strong>Details:</strong> {{ context.details | safe_string }}</p>
+                {% endif %}
+
+                {% if context.next_steps %}
+                <p class="mb-1"><strong>Next Steps:</strong></p>
+                <ul class="mb-1">
+                    {% for step in context.next_steps %}
+                    <li>{{ step | safe_string }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+
+                {% if context.data_summary %}
+                <p class="mb-1"><strong>Summary:</strong></p>
+                <ul class="mb-1">
+                    {% for key, value in context.data_summary.items() %}
+                    <li><strong>{{ key | title }}:</strong> {{ value }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+
+                {% if timestamp %}
+                <p class="mb-0 text-muted"><strong>Completed:</strong> {{ timestamp }}</p>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            <!-- Action buttons if provided -->
+            {% if context and context.actions %}
+            <div class="mt-3">
+                {% for action in context.actions %}
+                <button type="button"
+                        class="btn btn-sm {{ action.class if action.class else 'btn-success' }} me-2"
+                        onclick="{{ action.onclick if action.onclick else '' }}"
+                        {% if action.href %}onclick="window.location.href='{{ action.href }}'"{% endif %}>
+                    {% if action.icon %}<i class="{{ action.icon }} me-1"></i>{% endif %}
+                    {{ action.text }}
+                </button>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Dismissible button -->
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+
+<!-- Auto-dismiss after 3 seconds -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const alert = document.querySelector('.alert-success:last-of-type');
+    if (alert) {
+        setTimeout(() => {
+            const bsAlert = new bootstrap.Alert(alert);
+            bsAlert.close();
+        }, 3000); // Auto-dismiss after 3 seconds
+    }
+});
+</script>

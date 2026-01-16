@@ -1,0 +1,19 @@
+{#
+  Total Field Template
+
+  Renders a total value display (no form input).
+  Used for showing aggregate values like sums, counts, etc.
+
+  Context:
+    - control: FilterControlConfig
+    - total_value: formatted total value string
+#}
+
+<div class="filter-total-field{% if control.css_class %} {{ control.css_class }}{% endif %}"
+     {% if control.width %}style="width: {{ control.width }};"{% endif %}
+     data-filter-static>
+  {% if control.label %}
+  <div class="filter-total-label">{{ control.label }}</div>
+  {% endif %}
+  <div class="filter-total-value">{{ total_value }}</div>
+</div>

@@ -1,0 +1,380 @@
+<!-- Filter Form Modal Component -->
+<div class="modal fade" id="filterModal" tabindex="-1" aria-labelledby="filterModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="filterModalLabel">
+                    <i class="fas fa-filter me-2"></i>Filter Table
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+
+            <div class="modal-body">
+                <form id="filterForm">
+                    <!-- Active Filters Section -->
+                    {% if current_filters %}
+                    <div class="form-section mb-3">
+                        <h6>Active Filters</h6>
+                        <div id="activeFilters">
+                            {% for filter in current_filters %}
+                            <div class="filter-item d-flex align-items-center mb-2 p-2 bg-light rounded">
+                                <select class="form-select form-select-sm me-2" style="width: 150px;" name="filter_column[]">
+                                    {% for column in filterable_columns %}
+                                    <option value="{{ column.id }}" {% if column.id == filter.column_id %}selected{% endif %}>
+                                        {{ column.display_name or column.name }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+
+                                <select class="form-select form-select-sm me-2" style="width: 150px;" name="filter_operator[]">
+                                    {% set matching_columns = columns | selectattr('id', 'equalto', filter.column_id) | list %}
+                                    {% set operators = get_filter_operators_for_column(matching_columns[0] if matching_columns else None) %}
+                                    {% for operator in operators %}
+                                    <option value="{{ operator.value }}" {% if operator.value == filter.operator %}selected{% endif %}>
+                                        {{ operator.label }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+
+                                <input type="text"
+                                       class="form-control form-control-sm me-2"
+                                       name="filter_value[]"
+                                       value="{{ filter.value or '' }}"
+                                       placeholder="Filter value">
+
+                                <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeFilter(this)">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    <!-- Add New Filter Section -->
+                    <div class="form-section">
+                        <h6>Add New Filter</h6>
+                        <div id="newFilterContainer">
+                            <!-- New filter template will be added here -->
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="addNewFilter()">
+                            <i class="fas fa-plus me-1"></i>Add Filter
+                        </button>
+                    </div>
+
+                    <!-- Quick Filter Presets -->
+                    <div class="form-section">
+                        <h6>Quick Filters</h6>
+                        <div class="row">
+                            {% for column in filterable_columns %}
+                                {% if column.type.value == 'BOOLEAN' %}
+                                <div class="col-md-6 mb-2">
+                                    <div class="btn-group w-100" role="group">
+                                        <button type="button" class="btn btn-outline-success btn-sm"
+                                                onclick="addQuickFilter('{{ column.id }}', 'equals', 'true')">
+                                            {{ column.display_name or column.name }}: Yes
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger btn-sm"
+                                                onclick="addQuickFilter('{{ column.id }}', 'equals', 'false')">
+                                            {{ column.display_name or column.name }}: No
+                                        </button>
+                                    </div>
+                                </div>
+                                {% elif column.type.value in ['NUMBER', 'CURRENCY', 'PERCENTAGE'] %}
+                                <div class="col-md-6 mb-2">
+                                    <div class="btn-group w-100" role="group">
+                                        <button type="button" class="btn btn-outline-secondary btn-sm"
+                                                onclick="addQuickFilter('{{ column.id }}', 'greater_than', '0')">
+                                            {{ column.display_name or column.name }} > 0
+                                        </button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm"
+                                                onclick="addQuickFilter('{{ column.id }}', 'is_not_null', '')">
+                                            {{ column.display_name or column.name }} not empty
+                                        </button>
+                                    </div>
+                                </div>
+                                {% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <!-- Saved Filter Sets -->
+                    {% if user_filter_sets %}
+                    <div class="form-section">
+                        <h6>Saved Filter Sets</h6>
+                        <div class="row">
+                            {% for filter_set in user_filter_sets %}
+                            <div class="col-md-6 mb-2">
+                                <button type="button" class="btn btn-outline-info btn-sm w-100"
+                                        onclick="applySavedFilterSet('{{ filter_set.id }}')">
+                                    {% if filter_set.is_default %}⭐{% endif %} {{ filter_set.name }}
+                                    <small class="d-block text-muted">{{ filter_set.description or 'No description' }}</small>
+                                </button>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                </form>
+            </div>
+
+            <div class="modal-footer">
+                <div class="me-auto">
+                    <button type="button" class="btn btn-outline-warning" onclick="clearAllFilters()">
+                        <i class="fas fa-eraser me-1"></i>Clear All
+                    </button>
+                    {% if current_filters %}
+                    <button type="button" class="btn btn-outline-info" onclick="saveCurrentFilterSet()">
+                        <i class="fas fa-save me-1"></i>Save Filter Set
+                    </button>
+                    {% endif %}
+                </div>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="applyFilters()">
+                    <i class="fas fa-check me-1"></i>Apply Filters
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Filter Set Save Modal -->
+<div class="modal fade" id="saveFilterSetModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Save Filter Set</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="saveFilterSetForm">
+                    <div class="mb-3">
+                        <label for="filterSetName" class="form-label">Name</label>
+                        <input type="text" class="form-control" id="filterSetName" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="filterSetDescription" class="form-label">Description (optional)</label>
+                        <textarea class="form-control" id="filterSetDescription" rows="2"></textarea>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="setAsDefault">
+                        <label class="form-check-label" for="setAsDefault">
+                            Set as default filter set for this table
+                        </label>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="saveFilterSet()">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Filter form functionality
+let filterCounter = 0;
+
+function addNewFilter() {
+    const container = document.getElementById('newFilterContainer');
+    const filterId = `filter_${++filterCounter}`;
+
+    const filterHtml = `
+        <div class="filter-item d-flex align-items-center mb-2 p-2 bg-light rounded" id="${filterId}">
+            <select class="form-select form-select-sm me-2" style="width: 150px;" name="filter_column[]" onchange="updateOperators(this)">
+                <option value="">Select column...</option>
+                {% for column in filterable_columns %}
+                <option value="{{ column.id }}" data-type="{{ column.type.value }}">
+                    {{ column.display_name or column.name }}
+                </option>
+                {% endfor %}
+            </select>
+
+            <select class="form-select form-select-sm me-2" style="width: 150px;" name="filter_operator[]">
+                <option value="">Select operator...</option>
+            </select>
+
+            <input type="text"
+                   class="form-control form-control-sm me-2"
+                   name="filter_value[]"
+                   placeholder="Filter value">
+
+            <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeFilter(this)">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+    `;
+
+    container.insertAdjacentHTML('beforeend', filterHtml);
+}
+
+function removeFilter(button) {
+    button.closest('.filter-item').remove();
+}
+
+function updateOperators(columnSelect) {
+    const operatorSelect = columnSelect.parentElement.querySelector('select[name="filter_operator[]"]');
+    const columnType = columnSelect.options[columnSelect.selectedIndex].dataset.type;
+
+    // Clear existing options
+    operatorSelect.innerHTML = '<option value="">Select operator...</option>';
+
+    // Add appropriate operators based on column type
+    const operators = {{ filter_operators | tojson }};
+    const typeOperators = operators[columnType] || operators['TEXT'];
+
+    typeOperators.forEach(operator => {
+        const option = document.createElement('option');
+        option.value = operator.value;
+        option.textContent = operator.label;
+        operatorSelect.appendChild(option);
+    });
+}
+
+function addQuickFilter(columnId, operator, value) {
+    // Find if filter already exists
+    const existingFilters = document.querySelectorAll('select[name="filter_column[]"]');
+    for (let filter of existingFilters) {
+        if (filter.value === columnId) {
+            // Update existing filter
+            const container = filter.closest('.filter-item');
+            container.querySelector('select[name="filter_operator[]"]').value = operator;
+            container.querySelector('input[name="filter_value[]"]').value = value;
+            return;
+        }
+    }
+
+    // Add new filter
+    addNewFilter();
+    const newFilter = document.querySelector('.filter-item:last-child');
+    const columnSelect = newFilter.querySelector('select[name="filter_column[]"]');
+    columnSelect.value = columnId;
+    updateOperators(columnSelect);
+
+    setTimeout(() => {
+        newFilter.querySelector('select[name="filter_operator[]"]').value = operator;
+        newFilter.querySelector('input[name="filter_value[]"]').value = value;
+    }, 100);
+}
+
+function applyFilters() {
+    const form = document.getElementById('filterForm');
+    const formData = new FormData(form);
+    const params = new URLSearchParams();
+
+    // Clear existing filter parameters
+    const currentParams = new URLSearchParams(window.location.search);
+    for (let [key, value] of currentParams.entries()) {
+        if (!key.startsWith('filter_')) {
+            params.set(key, value);
+        }
+    }
+
+    // Add filter parameters
+    const columns = formData.getAll('filter_column[]');
+    const operators = formData.getAll('filter_operator[]');
+    const values = formData.getAll('filter_value[]');
+
+    for (let i = 0; i < columns.length; i++) {
+        if (columns[i] && operators[i]) {
+            params.append(`filter_${columns[i]}_operator`, operators[i]);
+            if (values[i]) {
+                params.append(`filter_${columns[i]}_value`, values[i]);
+            }
+        }
+    }
+
+    params.delete('page'); // Reset to first page
+    window.location.search = params.toString();
+}
+
+function clearAllFilters() {
+    const params = new URLSearchParams(window.location.search);
+
+    // Remove all filter parameters
+    for (let [key, value] of [...params.entries()]) {
+        if (key.startsWith('filter_')) {
+            params.delete(key);
+        }
+    }
+
+    params.delete('page');
+    window.location.search = params.toString();
+}
+
+function saveCurrentFilterSet() {
+    const modal = new bootstrap.Modal(document.getElementById('saveFilterSetModal'));
+    modal.show();
+}
+
+function saveFilterSet() {
+    const name = document.getElementById('filterSetName').value;
+    const description = document.getElementById('filterSetDescription').value;
+    const isDefault = document.getElementById('setAsDefault').checked;
+
+    if (!name.trim()) {
+        alert('Please enter a name for the filter set');
+        return;
+    }
+
+    // Collect current filter configuration
+    const form = document.getElementById('filterForm');
+    const formData = new FormData(form);
+    const filterData = {
+        columns: formData.getAll('filter_column[]'),
+        operators: formData.getAll('filter_operator[]'),
+        values: formData.getAll('filter_value[]')
+    };
+
+    // Send to server
+    fetch('/api/tables/{{ table_name }}/filter-sets', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            name: name,
+            description: description,
+            filter_definitions: filterData,
+            is_default: isDefault
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            bootstrap.Modal.getInstance(document.getElementById('saveFilterSetModal')).hide();
+            if (window.showNotification) {
+                window.showNotification('Filter set saved successfully', 'success');
+            }
+            // Optionally reload the filter modal to show the new saved set
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            alert('Failed to save filter set: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        console.error('Error saving filter set:', error);
+        alert('Failed to save filter set');
+    });
+}
+
+function applySavedFilterSet(filterSetId) {
+    // Apply a saved filter set
+    fetch(`/api/tables/{{ table_name }}/filter-sets/${filterSetId}/apply`, {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.redirect_url) {
+            window.location.href = data.redirect_url;
+        } else {
+            alert('Failed to apply filter set');
+        }
+    })
+    .catch(error => {
+        console.error('Error applying filter set:', error);
+        alert('Failed to apply filter set');
+    });
+}
+</script>

@@ -1,0 +1,17 @@
+{#
+  Static Image Filter Template
+
+  Renders a static image in the filter layout (no form input).
+  Used for logos, icons, or decorative imagery.
+
+  Context (inherited from filter_layout.html):
+    - control: FilterControlConfig
+#}
+
+<div class="filter-static-image{% if control.css_class %} {{ control.css_class }}{% endif %}"
+     {% if control.width %}style="width: {{ control.width }};"{% endif %}
+     data-filter-static>
+  <img src="{{ control.image_url or '' }}"
+       alt="{{ control.image_alt or '' }}"
+       class="filter-image">
+</div>

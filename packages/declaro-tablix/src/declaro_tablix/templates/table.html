@@ -1,0 +1,240 @@
+{% extends "layouts/base.html" %}
+
+{% block title %}{{ table_name | title }}{% endblock %}
+
+{% block heading %}{% endblock %}
+
+{% block content %}
+<div class="table-container">
+    <!-- Table Header with Controls -->
+    <div class="table-header">
+        <div class="row align-items-center">
+            <div class="col-md-6">
+                <!-- Title and stats hidden for Book of Business integration -->
+            </div>
+            <div class="col-md-6 text-end">
+                <!-- Action buttons - show export and customization only -->
+                <div class="btn-group" role="group">
+                    {% if not hide_export %}
+                    <div class="btn-group export-dropdown" role="group">
+                        <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle"
+                                data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fas fa-download"></i> Export
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="#" onclick="exportTable('csv')">
+                                <i class="fas fa-file-csv"></i> CSV</a></li>
+                            <li><a class="dropdown-item" href="#" onclick="exportTable('excel')">
+                                <i class="fas fa-file-excel"></i> Excel</a></li>
+                            <li><a class="dropdown-item" href="#" onclick="exportTable('pdf')">
+                                <i class="fas fa-file-pdf"></i> PDF</a></li>
+                        </ul>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Table Controls - only show if search is enabled -->
+    {% if not hide_search %}
+    {% include "components/controls.html" %}
+    {% endif %}
+
+    <!-- Active Filters Display - only show if filters are enabled -->
+    {% if not hide_filters and filter_summary.active %}
+    <div class="px-3 py-2 bg-light border-bottom">
+        <small class="text-muted">Active filters:</small>
+        {% for description in filter_summary.descriptions %}
+            <span class="filter-active me-2">{{ description }}</span>
+        {% endfor %}
+        <a href="#" class="btn btn-sm btn-outline-danger ms-2">
+            <i class="fas fa-times"></i> Clear all
+        </a>
+    </div>
+    {% endif %}
+
+    <!-- Table Content -->
+    {% if data and data.rows %}
+        <div class="table-responsive">
+            {% include "components/table.html" %}
+        </div>
+
+        <!-- Pagination -->
+        {% if pagination and pagination.total_pages > 1 %}
+            {% include "components/pagination.html" %}
+        {% endif %}
+    {% else %}
+        <!-- Empty State -->
+        <div class="text-center py-5">
+            <i class="fas fa-table fa-3x text-muted mb-3"></i>
+            <h5>No data available</h5>
+            <p class="text-muted">
+                {% if search_term %}
+                    No results found for "{{ search_term }}"
+                {% elif filter_summary.active %}
+                    No results match the applied filters
+                {% else %}
+                    This table doesn't contain any data yet
+                {% endif %}
+            </p>
+            {% if search_term or filter_summary.active %}
+                <button type="button" class="btn btn-outline-primary" onclick="window.location.href = window.location.pathname;">
+                    <i class="fas fa-refresh"></i> Clear filters and search
+                </button>
+            {% endif %}
+        </div>
+    {% endif %}
+</div>
+
+
+{% endblock %}
+
+{% block custom_js %}
+{{ super() }}
+
+// Table-specific JavaScript
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize table functionality
+    initializeTable();
+
+    // Auto-save search as user types (debounced)
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        let searchTimeout;
+        searchInput.addEventListener('input', function() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                TableUtils.performSearch(this.value);
+            }, 500);
+        });
+    }
+
+    // Column sorting
+    document.querySelectorAll('.column-sortable').forEach(header => {
+        header.addEventListener('click', function() {
+            const columnId = this.dataset.columnId;
+            const currentDirection = this.dataset.sortDirection || 'none';
+            let newDirection = 'asc';
+
+            if (currentDirection === 'asc') {
+                newDirection = 'desc';
+            } else if (currentDirection === 'desc') {
+                newDirection = 'none';
+            }
+
+            if (newDirection === 'none') {
+                // Remove sort
+                const params = new URLSearchParams(window.location.search);
+                params.delete('sort_column');
+                params.delete('sort_direction');
+                window.location.search = params.toString();
+            } else {
+                TableUtils.sortColumn(columnId, newDirection);
+            }
+        });
+    });
+
+    // Page size change
+    const pageSizeSelect = document.getElementById('pageSizeSelect');
+    if (pageSizeSelect) {
+        pageSizeSelect.addEventListener('change', function() {
+            const params = new URLSearchParams(window.location.search);
+            params.set('page_size', this.value);
+            params.delete('page'); // Reset to first page
+            window.location.search = params.toString();
+        });
+    }
+});
+
+function initializeTable() {
+    // Add any table initialization logic here
+    console.log('Table initialized for:', '{{ table_name }}');
+
+    // Highlight search terms if present
+    {% if search_term %}
+    highlightSearchTerm('{{ search_term }}');
+    {% endif %}
+}
+
+function highlightSearchTerm(searchTerm) {
+    if (!searchTerm) return;
+
+    const tableCells = document.querySelectorAll('td');
+    tableCells.forEach(cell => {
+        const text = cell.textContent;
+        if (text.toLowerCase().includes(searchTerm.toLowerCase())) {
+            const regex = new RegExp(`(${searchTerm})`, 'gi');
+            cell.innerHTML = text.replace(regex, '<span class="search-highlight">$1</span>');
+        }
+    });
+}
+
+// Export functionality
+function exportTable(format) {
+    // Get current URL and add export_format parameter
+    const params = new URLSearchParams(window.location.search);
+    params.set('export_format', format);
+
+    // For book of business, use the correct route
+    const exportUrl = `/api/v1/book-of-business/tables?${params.toString()}`;
+
+    // Trigger download by creating temporary link
+    window.location.href = exportUrl;
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', function(e) {
+    // Ctrl/Cmd + F for search
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        e.preventDefault();
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput) {
+            searchInput.focus();
+            searchInput.select();
+        }
+    }
+
+    // Escape to clear search
+    if (e.key === 'Escape') {
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput && searchInput.value) {
+            searchInput.value = '';
+            TableUtils.performSearch('');
+        }
+    }
+});
+
+// Cell-specific functionality (moved from cell template to avoid duplication)
+function copyCellValue(value) {
+    navigator.clipboard.writeText(value).then(() => {
+        // Show success notification
+        if (window.showNotification) {
+            window.showNotification('Value copied to clipboard', 'success');
+        }
+    }).catch(err => {
+        console.error('Failed to copy value:', err);
+    });
+}
+
+function filterByValue(columnId, value) {
+    // Add filter for this specific value
+    const params = new URLSearchParams(window.location.search);
+    params.set(`filter_${columnId}`, value);
+    params.delete('page'); // Reset to first page
+    window.location.search = params.toString();
+}
+
+function sortByColumn(columnId) {
+    TableUtils.sortColumn(columnId, 'asc');
+}
+
+// Initialize tooltips for truncated text (moved from cell template)
+document.addEventListener('DOMContentLoaded', function() {
+    const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+});
+
+{% endblock %}

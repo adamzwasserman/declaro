@@ -1,0 +1,367 @@
+<!-- TableV2 Component Template - Pure CSS and JavaScript -->
+<!-- This template provides styling and functionality for table components -->
+<!-- It should be embedded within other pages, not used as standalone page -->
+
+<!-- TableV2 Component Styles -->
+    <style>
+        {% block custom_css %}
+        .table-container {
+            background: white;
+            overflow: hidden;
+        }
+
+        .table-header {
+            padding-bottom: 16px;
+            border-bottom: 1px solid #dee2e6;
+        }
+
+        .table-controls {
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .table-stats {
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+
+        /* Ensure proper table structure display */
+        table {
+            display: table !important;
+            width: 100% !important;
+            border-collapse: collapse !important;
+        }
+
+        tbody {
+            display: table-row-group !important;
+        }
+
+        tbody tr {
+            display: table-row !important;
+            height: auto !important;
+            min-height: 40px !important;
+        }
+
+        tbody td, thead th {
+            display: table-cell !important;
+            height: auto !important;
+            min-height: 40px !important;
+            padding: 8px 12px !important;
+            vertical-align: top !important;
+        }
+
+        /* Column type styling */
+        .column-NUMBER, .column-CURRENCY, .column-PERCENTAGE {
+            text-align: right;
+        }
+
+        .column-BOOLEAN {
+            text-align: center;
+        }
+
+        .column-DATE, .column-DATETIME {
+            white-space: nowrap;
+        }
+
+        /* Sortable columns */
+        .column-sortable {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .column-sortable:hover {
+            background-color: #f8f9fa;
+        }
+
+        /* Customization indicators */
+        .customization-indicator {
+            color: #007bff;
+            margin-left: 0.25rem;
+        }
+
+        .default-indicator {
+            color: #ffc107;
+            margin-left: 0.25rem;
+        }
+
+        /* Sort icon styling */
+        .sort-icon-inline {
+            display: inline-block;
+            font-size: 0.8em;
+            color: #6c757d;
+            margin-left: 0.25rem;
+        }
+
+        .sort-icon-inline i {
+            vertical-align: baseline;
+        }
+
+        /* Column header styling */
+        .column-title {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        /* Export dropdown styling */
+        .export-dropdown .btn {
+            background: linear-gradient(145deg, #f8f9fa, #e9ecef);
+            border: 1px solid #dee2e6;
+            color: #495057;
+            font-weight: 500;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: all 0.2s ease;
+        }
+
+        .export-dropdown .btn:hover {
+            background: linear-gradient(145deg, #e9ecef, #dee2e6);
+            border-color: #adb5bd;
+            color: #212529;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+            transform: translateY(-1px);
+        }
+
+        .export-dropdown .btn:active {
+            transform: translateY(0);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+
+        /* Export dropdown - CSS-only approach */
+        .export-dropdown {
+            position: relative;
+            display: inline-block;
+        }
+
+        .export-dropdown .dropdown-menu {
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+            padding: 0.5rem 0;
+            margin-top: 0.25rem;
+            min-width: 140px;
+            width: max-content;
+            position: absolute;
+            z-index: 9999;
+            right: 0;
+            top: calc(100% + 2px);
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-10px);
+            transition: all 0.2s ease;
+            background: white;
+        }
+
+        .export-dropdown:hover .dropdown-menu,
+        .export-dropdown:focus-within .dropdown-menu {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+
+        .export-dropdown .dropdown-item {
+            padding: 0.5rem 1rem;
+            font-weight: 500;
+            color: #495057;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .export-dropdown .dropdown-item:hover {
+            background: linear-gradient(145deg, #f8f9fa, #e9ecef);
+            color: #212529;
+        }
+
+        .export-dropdown .dropdown-item i {
+            width: 16px;
+            text-align: center;
+            font-size: 0.9em;
+        }
+
+        /* File type specific colors */
+        .export-dropdown .dropdown-item:nth-child(1) i { color: #28a745; } /* CSV - green */
+        .export-dropdown .dropdown-item:nth-child(2) i { color: #217346; } /* Excel - dark green */
+        .export-dropdown .dropdown-item:nth-child(3) i { color: #dc3545; } /* PDF - red */
+
+        .formula-cell {
+            background-color: #e8f4fd;
+            border-left: 3px solid #007bff;
+            padding: 0.25rem;
+            position: relative;
+        }
+
+        .formula-indicator {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            font-size: 0.7rem;
+            color: #007bff;
+        }
+
+        /* Filter and search styling */
+        .filter-active {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 4px;
+            padding: 0.25rem 0.5rem;
+            margin: 0.25rem;
+        }
+
+        .search-highlight {
+            background-color: #ffeb3b;
+            padding: 0.1rem 0.2rem;
+            border-radius: 2px;
+        }
+
+        /* Pagination styling */
+        .pagination-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem;
+            background-color: #f8f9fa;
+            border-top: 1px solid #dee2e6;
+        }
+
+        /* Loading states */
+        .table-loading {
+            text-align: center;
+            padding: 2rem;
+        }
+
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #007bff;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Error states */
+        .table-error {
+            text-align: center;
+            padding: 2rem;
+            color: #dc3545;
+        }
+
+        /* Responsive design */
+        @media (max-width: 768px) {
+            .table-controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .table-responsive {
+                font-size: 0.875rem;
+            }
+        }
+
+        /* Form styling */
+        .form-section {
+            background: #f8f9fa;
+            border-radius: 6px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .form-section h5 {
+            margin-bottom: 0.75rem;
+            color: #495057;
+        }
+        {% endblock %}
+    </style>
+
+<!-- TableV2 Component Content -->
+{% block content %}
+<!-- Table component content goes here -->
+{% endblock %}
+
+<!-- TableV2 Component JavaScript -->
+    <script>
+        {% block custom_js %}
+        // HTMX configuration
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add loading indicators for HTMX requests
+            document.body.addEventListener('htmx:beforeRequest', function(evt) {
+                const target = evt.target;
+                if (target.classList.contains('htmx-request')) {
+                    target.style.opacity = '0.6';
+                    target.style.pointerEvents = 'none';
+                }
+            });
+
+            document.body.addEventListener('htmx:afterRequest', function(evt) {
+                const target = evt.target;
+                if (target.classList.contains('htmx-request')) {
+                    target.style.opacity = '1';
+                    target.style.pointerEvents = 'auto';
+                }
+            });
+
+            // Handle notifications
+            document.body.addEventListener('htmx:afterSwap', function(evt) {
+                // Auto-hide success notifications after 3 seconds
+                const successAlerts = document.querySelectorAll('.alert-success');
+                successAlerts.forEach(alert => {
+                    setTimeout(() => {
+                        if (alert.parentNode) {
+                            alert.remove();
+                        }
+                    }, 3000);
+                });
+            });
+        });
+
+        // Table utilities
+        window.TableUtils = {
+            // Sort column function
+            sortColumn: function(columnId, direction) {
+                const params = new URLSearchParams(window.location.search);
+                params.set('sort_column', columnId);
+                params.set('sort_direction', direction);
+                params.delete('page'); // Reset to first page
+                window.location.search = params.toString();
+            },
+
+            // Filter utilities
+            addFilter: function(columnId, operator, value) {
+                // Implementation would depend on how filters are managed
+                console.log('Adding filter:', columnId, operator, value);
+            },
+
+            // Pagination utilities
+            goToPage: function(page) {
+                const params = new URLSearchParams(window.location.search);
+                params.set('page', page);
+                window.location.search = params.toString();
+            },
+
+            // Search utilities
+            performSearch: function(searchTerm) {
+                const params = new URLSearchParams(window.location.search);
+                if (searchTerm) {
+                    params.set('search', searchTerm);
+                } else {
+                    params.delete('search');
+                }
+                params.delete('page'); // Reset to first page
+                window.location.search = params.toString();
+            }
+        };
+        {% endblock %}
+    </script>
+
+    {% block additional_js %}{% endblock %}
