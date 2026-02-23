@@ -22,6 +22,7 @@ from declaro_persistum.exceptions import (
     PoolExhaustedError,
     RollbackError,
     SchemaError,
+    TransferError,
 )
 from declaro_persistum.pool import ConnectionPool, MirrorPool, SyncConnectionPool, TursoCloudManager
 from declaro_persistum.types import (
@@ -41,6 +42,15 @@ from declaro_persistum.pydantic_loader import (
     extract_literal_values,
     get_literal_columns,
 )
+from declaro_persistum.migrations import (
+    apply_migrations_async,
+    apply_migrations_sync,
+)
+from declaro_persistum.transfer import (
+    bulk_transfer,
+    BulkTransferResult,
+)
+from declaro_persistum.cutover import begin_cutover
 
 __version__ = "0.1.0"
 
@@ -65,6 +75,13 @@ __all__ = [
     "is_literal_type",
     "extract_literal_values",
     "get_literal_columns",
+    # Migrations
+    "apply_migrations_async",
+    "apply_migrations_sync",
+    # Transfer
+    "bulk_transfer",
+    "BulkTransferResult",
+    "begin_cutover",
     # Exceptions
     "DeclaroError",
     "SchemaError",
@@ -78,6 +95,7 @@ __all__ = [
     "PoolClosedError",
     "PoolExhaustedError",
     "PoolConnectionError",
+    "TransferError",
     # Version
     "__version__",
 ]

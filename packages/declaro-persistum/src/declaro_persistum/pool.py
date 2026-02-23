@@ -1563,31 +1563,39 @@ class MirrorPool(BasePool):
         self._closed = False
 
     @asynccontextmanager
-    async def acquire(self) -> AsyncIterator[MirrorConnection]:
-        """Acquire connections from both pools."""
+    async def acquire(self) -> AsyncIterator[MirrorConnection | Any]:
+        """Acquire connections from both pools (or primary only if mirror detached)."""
         if self._closed:
             raise PoolClosedError("Pool has been closed")
 
-        async with (
-            self._primary.acquire() as primary_conn,
-            self._mirror.acquire() as mirror_conn,
-        ):
-            yield MirrorConnection(
-                primary_conn,
-                mirror_conn,
-                logger=self._logger,
-                fail_open=self._fail_open,
-                compare_on_read=self._compare_on_read,
-            )
+        if self._mirror is None:
+            # Mirror detached — pass-through to primary
+            async with self._primary.acquire() as primary_conn:
+                yield primary_conn
+        else:
+            async with (
+                self._primary.acquire() as primary_conn,
+                self._mirror.acquire() as mirror_conn,
+            ):
+                yield MirrorConnection(
+                    primary_conn,
+                    mirror_conn,
+                    logger=self._logger,
+                    fail_open=self._fail_open,
+                    compare_on_read=self._compare_on_read,
+                )
 
     async def close(self) -> None:
-        """Close both pools."""
+        """Close both pools (or primary only if mirror detached)."""
         self._closed = True
-        await asyncio.gather(
-            self._primary.close(),
-            self._mirror.close(),
-            return_exceptions=True,
-        )
+        if self._mirror is not None:
+            await asyncio.gather(
+                self._primary.close(),
+                self._mirror.close(),
+                return_exceptions=True,
+            )
+        else:
+            await self._primary.close()
 
     @property
     def closed(self) -> bool:
@@ -1603,3 +1611,33 @@ class MirrorPool(BasePool):
     def available(self) -> int:
         """Available connections in primary pool."""
         return getattr(self._primary, "available", 0)
+
+    def promote_mirror(self) -> None:
+        """
+        Swap primary and mirror pools.
+
+        After this call, the former mirror becomes the primary (source of truth)
+        and the former primary becomes the mirror (shadow). Useful for live
+        cutover: run dual-write verification, then promote when confident.
+        """
+        self._primary, self._mirror = self._mirror, self._primary
+
+    def detach_mirror(self) -> BasePool:
+        """
+        Detach and return the mirror pool.
+
+        After this call, the MirrorPool operates as a pass-through to the
+        primary pool only. The returned pool can be closed independently.
+
+        Returns:
+            The detached mirror pool.
+
+        Raises:
+            PoolError: If no mirror is attached.
+        """
+        if self._mirror is None:
+            from declaro_persistum.exceptions import PoolError
+            raise PoolError("No mirror pool attached")
+        mirror = self._mirror
+        self._mirror = None
+        return mirror

@@ -317,3 +317,48 @@ class PoolConnectionError(PoolError):
     """
 
     pass
+
+
+# =============================================================================
+# Transfer Exceptions
+# =============================================================================
+
+
+class TransferError(DeclaroError):
+    """
+    Bulk data transfer failure.
+
+    Raised when:
+    - Schema migration on target fails
+    - Critical setup (progress table, FK disable) fails
+    - Transfer cannot proceed
+
+    Individual table failures are logged but do not raise this
+    exception — they are recorded in BulkTransferResult.errors.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        phase: str | None = None,
+        table: str | None = None,
+        original_error: Exception | None = None,
+    ) -> None:
+        self.phase = phase
+        self.table = table
+        self.original_error = original_error
+
+        details = []
+        if phase:
+            details.append(f"Phase: {phase}")
+        if table:
+            details.append(f"Table: {table}")
+        if original_error:
+            details.append(f"Original error: {type(original_error).__name__}: {original_error}")
+
+        details_str = ""
+        if details:
+            details_str = "\n\n  " + "\n  ".join(details)
+
+        super().__init__(f"{message}{details_str}")
