@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -184,24 +183,28 @@ class TursoAsyncCursor:
         return self._rowcount
 
 
-class BasePool(ABC):
-    """Abstract base class for connection pools."""
+class BasePool:
+    """
+    Protocol-style base for connection pools.
 
-    @abstractmethod
+    Subclasses implement acquire(), close(), and closed.
+    No ABC/abstractmethod — structural subtyping via duck typing.
+    Connection pools are inherently stateful (Honest Code exemption
+    for file handles, network connections, database cursors).
+    """
+
     def acquire(self) -> AbstractAsyncContextManager[Any]:
         """Acquire a connection from the pool."""
-        ...
+        raise NotImplementedError
 
-    @abstractmethod
     async def close(self) -> None:
         """Close the pool and all connections."""
-        ...
+        raise NotImplementedError
 
     @property
-    @abstractmethod
     def closed(self) -> bool:
         """Whether the pool has been closed."""
-        ...
+        raise NotImplementedError
 
 
 class PostgreSQLPool(BasePool):
