@@ -4,27 +4,11 @@ PostgreSQL database inspector implementation.
 Uses information_schema and pg_catalog for complete metadata extraction.
 """
 
-from typing import Any, Literal
+from typing import Any
 
 from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionError
+from declaro_persistum.inspector.shared import normalize_fk_action as _normalize_fk_action
 from declaro_persistum.types import Column, Index, Schema, Table, View
-
-# Type for FK actions
-FKAction = Literal["cascade", "set null", "restrict", "no action"]
-
-
-def _normalize_fk_action(action: str | None) -> FKAction | None:
-    """Normalize FK action string to proper Literal type."""
-    if action is None:
-        return None
-    normalized = action.lower().replace(" ", "_")
-    action_map = {
-        "cascade": "cascade",
-        "set_null": "set null",
-        "restrict": "restrict",
-        "no_action": "no action",
-    }
-    return action_map.get(normalized)  # type: ignore[return-value]
 
 
 class PostgreSQLInspector:

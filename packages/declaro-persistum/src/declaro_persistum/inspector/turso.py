@@ -1,49 +1,38 @@
 """
 Turso (libSQL) database inspector implementation.
 
-Turso is SQLite-compatible, so this largely delegates to SQLite logic.
-Uses async connection API matching aiosqlite patterns.
-
-Note: Turso Database (Rust) has limited PRAGMA support, so we use
-the pragma_compat abstraction layer for index_list, index_info, and foreign_key_list.
+Turso is SQLite-compatible, so this shares logic with SQLite via
+inspector.shared module. Uses pragma_compat abstraction for PRAGMA
+calls that may not be natively supported by Turso Database (Rust).
 """
 
-import re
-from typing import Any, Literal
+from typing import Any
 
 from declaro_persistum.abstractions.pragma_compat import (
-    pragma_table_info,
-    pragma_index_list,
-    pragma_index_info,
     pragma_foreign_key_list,
+    pragma_index_info,
+    pragma_index_list,
+    pragma_table_info,
 )
 from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionError
+from declaro_persistum.inspector.shared import (
+    apply_unique_columns,
+    assemble_table,
+    columns_from_pragma_rows,
+    fk_list_from_pragma_rows,
+    indexes_from_rows,
+    unique_cols_from_index_rows,
+    views_from_rows,
+)
 from declaro_persistum.types import Column, Index, Schema, Table, View
-
-# Type for FK actions
-FKAction = Literal["cascade", "set null", "restrict", "no action"]
-
-
-def _normalize_fk_action(action: str | None) -> FKAction | None:
-    """Normalize FK action string to proper Literal type."""
-    if action is None or action == "NO ACTION":
-        return None
-    normalized = action.lower().replace(" ", "_")
-    action_map = {
-        "cascade": "cascade",
-        "set_null": "set null",
-        "restrict": "restrict",
-        "no_action": "no action",
-    }
-    return action_map.get(normalized)  # type: ignore[return-value]
 
 
 class TursoInspector:
     """
     Turso implementation of DatabaseInspector protocol.
 
-    Turso uses libSQL which is SQLite-compatible, so the introspection
-    logic is nearly identical to SQLite. Uses async connection API.
+    Uses pragma_compat wrappers for PRAGMA calls (try native, fall back
+    to emulation for unsupported PRAGMAs like foreign_key_list).
     """
 
     def get_dialect(self) -> str:
@@ -60,19 +49,9 @@ class TursoInspector:
         """
         Introspect Turso database schema.
 
-        Uses the same PRAGMA-based approach as SQLite since Turso
-        is libSQL (SQLite-compatible).
-
-        Args:
-            connection: libsql connection object
-            schema_name: Ignored for Turso (always uses "main")
-            include_views: If True, also introspect views and return as second element
-
-        Returns:
-            Schema dict, or tuple of (Schema, views dict) if include_views=True
+        Uses pragma_compat for PRAGMA calls that may need emulation.
         """
         try:
-            # Get all tables (excluding sqlite internal tables)
             cursor = await connection.execute(
                 """
                 SELECT name FROM sqlite_master
@@ -115,31 +94,7 @@ class TursoInspector:
         indexes = await self._get_indexes(connection, table_name)
         foreign_keys = await self._get_foreign_keys(connection, table_name)
 
-        # Merge foreign key info into columns
-        for fk in foreign_keys:
-            col_name = fk["from"]
-            if col_name in columns:
-                columns[col_name]["references"] = f"{fk['table']}.{fk['to']}"
-                on_delete = _normalize_fk_action(fk.get("on_delete"))
-                if on_delete:
-                    columns[col_name]["on_delete"] = on_delete
-                on_update = _normalize_fk_action(fk.get("on_update"))
-                if on_update:
-                    columns[col_name]["on_update"] = on_update
-
-        table: Table = {"columns": columns}
-
-        # Check for composite primary key
-        pk_columns = [name for name, col in columns.items() if col.get("primary_key")]
-        if len(pk_columns) > 1:
-            table["primary_key"] = pk_columns
-            for col_name in pk_columns:
-                del columns[col_name]["primary_key"]
-
-        if indexes:
-            table["indexes"] = indexes
-
-        return table
+        return assemble_table(columns, indexes, foreign_keys)
 
     async def _get_columns(
         self,
@@ -149,54 +104,12 @@ class TursoInspector:
         """Get column definitions for a table."""
         rows = await pragma_table_info(connection, table_name)
 
-        columns: dict[str, Column] = {}
+        columns = columns_from_pragma_rows(rows)
 
-        for row in rows:
-            # row format: (cid, name, type, notnull, dflt_value, pk)
-            col_name = row[1]
-            col_type = row[2]
-            not_null = bool(row[3])
-            default = row[4]
-            is_pk = bool(row[5])
-
-            col: Column = {"type": self._normalize_type(col_type)}
-
-            if not_null:
-                col["nullable"] = False
-
-            if default is not None:
-                col["default"] = default
-
-            if is_pk:
-                col["primary_key"] = True
-
-            columns[col_name] = col
-
-        # Get unique constraints from indexes
         unique_cols = await self._get_unique_columns(connection, table_name)
-        for col_name in unique_cols:
-            if col_name in columns and not columns[col_name].get("primary_key"):
-                columns[col_name]["unique"] = True
+        apply_unique_columns(columns, unique_cols)
 
         return columns
-
-    def _normalize_type(self, col_type: str) -> str:
-        """Normalize SQLite/libSQL type to canonical form."""
-        if not col_type:
-            return "blob"
-
-        col_type = col_type.lower().strip()
-
-        if "int" in col_type:
-            return "integer"
-        elif "char" in col_type or "clob" in col_type or "text" in col_type:
-            return "text"
-        elif "blob" in col_type or col_type == "":
-            return "blob"
-        elif "real" in col_type or "floa" in col_type or "doub" in col_type:
-            return "real"
-        else:
-            return "numeric"
 
     async def _get_unique_columns(
         self,
@@ -206,20 +119,15 @@ class TursoInspector:
         """Get columns with unique constraints (single-column only)."""
         index_rows = await pragma_index_list(connection, table_name)
 
-        unique_cols: set[str] = set()
-
+        index_info: dict[str, list[tuple]] = {}
         for idx_row in index_rows:
             idx_name = idx_row[1]
             is_unique = bool(idx_row[2])
             origin = idx_row[3]
-
             if is_unique and origin != "pk":
-                idx_info = await pragma_index_info(connection, idx_name)
+                index_info[idx_name] = await pragma_index_info(connection, idx_name)
 
-                if len(idx_info) == 1:
-                    unique_cols.add(idx_info[0][2])
-
-        return unique_cols
+        return unique_cols_from_index_rows(index_rows, index_info)
 
     async def _get_indexes(
         self,
@@ -229,39 +137,26 @@ class TursoInspector:
         """Get non-auto indexes for a table."""
         index_rows = await pragma_index_list(connection, table_name)
 
-        indexes: dict[str, Index] = {}
+        index_info: dict[str, list[tuple]] = {}
+        index_sql: dict[str, str | None] = {}
 
         for idx_row in index_rows:
             idx_name = idx_row[1]
-            is_unique = bool(idx_row[2])
             origin = idx_row[3]
 
             if origin in ("pk", "u"):
                 continue
 
-            idx_info = await pragma_index_info(connection, idx_name)
-            columns = [row[2] for row in idx_info]
+            index_info[idx_name] = await pragma_index_info(connection, idx_name)
 
-            index: Index = {"columns": columns}
-
-            if is_unique:
-                index["unique"] = True
-
-            # Check for partial index
             sql_cursor = await connection.execute(
                 "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
                 (idx_name,),
             )
             sql_row = await sql_cursor.fetchone()
-            if sql_row and sql_row[0]:
-                sql = sql_row[0]
-                if " WHERE " in sql.upper():
-                    where_idx = sql.upper().index(" WHERE ")
-                    index["where"] = sql[where_idx + 7 :].strip()
+            index_sql[idx_name] = sql_row[0] if sql_row else None
 
-            indexes[idx_name] = index
-
-        return indexes
+        return indexes_from_rows(index_rows, index_info, index_sql)
 
     async def _get_foreign_keys(
         self,
@@ -270,17 +165,7 @@ class TursoInspector:
     ) -> list[dict[str, str]]:
         """Get foreign key constraints for a table."""
         rows = await pragma_foreign_key_list(connection, table_name)
-
-        return [
-            {
-                "from": row[3],
-                "table": row[2],
-                "to": row[4],
-                "on_update": row[5],
-                "on_delete": row[6],
-            }
-            for row in rows
-        ]
+        return fk_list_from_pragma_rows(rows)
 
     async def table_exists(
         self,
@@ -312,21 +197,7 @@ class TursoInspector:
         self,
         connection: Any,
     ) -> dict[str, View]:
-        """
-        Introspect views from Turso/libSQL.
-
-        Turso/libSQL is SQLite-compatible, so views work the same way.
-        Materialized views are not supported.
-
-        Args:
-            connection: libsql connection object
-            schema_name: Ignored for Turso (always uses "main")
-
-        Returns:
-            Dict mapping view names to View definitions
-        """
-        views: dict[str, View] = {}
-
+        """Introspect views from Turso/libSQL."""
         cursor = await connection.execute(
             """
             SELECT name, sql
@@ -339,21 +210,4 @@ class TursoInspector:
         )
         rows = await cursor.fetchall()
 
-        for row in rows:
-            name, sql = row[0], row[1]
-            query = _extract_view_query(sql)
-            views[name] = {
-                "name": name,
-                "query": query,
-                "materialized": False,
-            }
-
-        return views
-
-
-def _extract_view_query(create_statement: str) -> str:
-    """Extract SELECT query from CREATE VIEW statement."""
-    match = re.search(r"\bAS\s+(.+)$", create_statement, re.IGNORECASE | re.DOTALL)
-    if match:
-        return " ".join(match.group(1).split())
-    return ""
+        return views_from_rows(rows)
