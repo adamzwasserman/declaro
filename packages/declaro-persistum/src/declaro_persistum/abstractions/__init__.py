@@ -96,6 +96,28 @@ from .pragma_compat import (
     get_affected_tables,
     reset_counters,
 )
+from .check_compat import (
+    CheckAST,
+    CheckParseError,
+    CheckValidationError,
+    ValidatorFn,
+    ValidationResult,
+    parse_check_expression,
+    generate_validator,
+    register_check_constraint,
+    validate_row,
+    process_schema_checks,
+    clear_registry,
+    get_validation_stats,
+    get_affected_tables as get_check_affected_tables,
+)
+from .reconstruction import (
+    generate_create_table_sql,
+    generate_data_copy_sql,
+    get_reconstruction_columns,
+    execute_reconstruction_async,
+    execute_reconstruction_sync,
+)
 
 __all__ = [
     # Arrays
@@ -176,4 +198,24 @@ __all__ = [
     "get_native_success_count",
     "get_affected_tables",
     "reset_counters",
+    # CHECK Constraint Emulation (Turso Database Rust)
+    "CheckAST",
+    "CheckParseError",
+    "CheckValidationError",
+    "ValidatorFn",
+    "ValidationResult",
+    "parse_check_expression",
+    "generate_validator",
+    "register_check_constraint",
+    "validate_row",
+    "process_schema_checks",
+    "clear_registry",
+    "get_validation_stats",
+    "get_check_affected_tables",
+    # Table Reconstruction (SQLite/Turso ALTER COLUMN workaround)
+    "generate_create_table_sql",
+    "generate_data_copy_sql",
+    "get_reconstruction_columns",
+    "execute_reconstruction_async",
+    "execute_reconstruction_sync",
 ]

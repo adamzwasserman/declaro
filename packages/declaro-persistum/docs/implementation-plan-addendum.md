@@ -1133,7 +1133,7 @@ echo "Created epic: $EPIC_ID"
 # Phase 1: Core Schema Extensions
 PHASE1_ID=$(bd create "Phase 1: Core Schema Extensions" -t feature -p 1 \
   -d "Add support for enums, triggers, stored procedures, and views.
-      Enums: PostgreSQL native, SQLite CHECK constraint
+      Enums: Lookup table + FK constraint (all backends)
       Triggers: Both dialects with syntax translation
       Procedures: PostgreSQL only (NotSupportedError for SQLite)
       Views: Regular and materialized (PostgreSQL)" \
@@ -1392,7 +1392,7 @@ uv run pytest tests/integration/test_*_sqlite.py -v
 ## Acceptance Criteria
 
 ### Phase 1 Complete When:
-- [ ] Enums work: PostgreSQL native, SQLite CHECK constraint
+- [ ] Enums work: Lookup table + FK constraint (all backends)
 - [ ] Triggers work: both dialects with proper syntax
 - [ ] Procedures work: PostgreSQL only, clear error for SQLite
 - [ ] Views work: regular and materialized (PostgreSQL)

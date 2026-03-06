@@ -86,6 +86,25 @@ class PostgreSQLApplier:
                 original_error=e,
             ) from e
 
+    def apply_sync(
+        self,
+        connection: Any,
+        operations: list[Operation],
+        execution_order: list[int],
+        *,
+        dry_run: bool = False,
+        target_schema: Any = None,
+    ) -> ApplyResult:
+        """
+        PostgreSQL applier does not support synchronous execution.
+
+        PostgreSQL connections are async-only in this codebase.
+        Use apply() instead.
+        """
+        raise NotImplementedError(
+            "PostgreSQL applier does not support synchronous execution. Use apply() instead."
+        )
+
     def generate_sql(
         self,
         operations: list[Operation],
@@ -176,7 +195,7 @@ class PostgreSQLApplier:
 
         return " ".join(parts)
 
-    def _drop_table_sql(self, table: str) -> str:
+    def _drop_table_sql(self, table: str, details: dict[str, Any]) -> str:
         """Generate DROP TABLE statement."""
         return f'DROP TABLE "{table}"'
 

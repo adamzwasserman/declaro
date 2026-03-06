@@ -40,13 +40,49 @@ class TursoApplier:
         dry_run: bool = False,
     ) -> ApplyResult:
         """
-        Apply migration operations.
+        Apply migration operations asynchronously (protocol compliance).
 
-        Uses libsql-experimental's synchronous sqlite3-like API.
+        Delegates to apply_sync() since Turso Database (pyturso) is synchronous.
         """
-        sql_statements = self.generate_sql(operations, execution_order)
+        return self.apply_sync(connection, operations, execution_order, dry_run=dry_run)
 
+    def apply_sync(
+        self,
+        connection: Any,
+        operations: list[Operation],
+        execution_order: list[int],
+        *,
+        dry_run: bool = False,
+        target_schema: Any = None,
+    ) -> ApplyResult:
+        """
+        Apply migration operations synchronously.
+
+        Turso Database (pyturso) has a synchronous API similar to sqlite3.
+        Uses per-operation execution with reconstruction for unsupported operations.
+
+        Args:
+            connection: pyturso database connection
+            operations: List of operations to apply
+            execution_order: Order to execute operations
+            dry_run: If True, only generate SQL without executing
+            target_schema: Target schema (used for enum value population)
+
+        Returns:
+            ApplyResult with success status and executed SQL
+        """
         if dry_run:
+            # Generate SQL for preview (with reconstruction steps as comments)
+            sql_statements = []
+            for op_idx in execution_order:
+                operation = operations[op_idx]
+                if self._requires_reconstruction(operation):
+                    sql_statements.append(
+                        f"-- Table reconstruction required for {operation['table']}"
+                    )
+                else:
+                    sql_statements.append(self.generate_operation_sql(operation))
+
             return {
                 "success": True,
                 "executed_sql": sql_statements,
@@ -61,32 +97,46 @@ class TursoApplier:
             # Begin transaction
             connection.execute("BEGIN")
 
-            try:
-                for i, op_idx in enumerate(execution_order):
-                    sql = sql_statements[i]
-                    try:
-                        # Handle multi-statement SQL
+            # Per-operation execution
+            for op_idx in execution_order:
+                operation = operations[op_idx]
+
+                try:
+                    if self._requires_reconstruction(operation):
+                        # Execute with reconstruction
+                        self._execute_with_reconstruction_sync(connection, operation)
+                        executed.append(f"Table reconstruction for {operation['table']}")
+                    else:
+                        # Direct SQL execution
+                        sql = self.generate_operation_sql(operation)
                         for statement in sql.split(";"):
                             statement = statement.strip()
                             if statement:
                                 connection.execute(statement)
                         executed.append(sql)
-                    except Exception as e:
-                        connection.rollback()
-                        raise MigrationError(
-                            f"Failed to execute operation {i + 1}/{len(execution_order)}",
-                            operation=operations[op_idx],
-                            sql=sql,
-                            original_error=e,
-                        ) from e
 
-                connection.commit()
+                    # Handle enum value population for newly created lookup tables
+                    if operation["op"] == "create_table" and target_schema:
+                        table_name = operation["table"]
+                        if table_name.startswith("_dp_enum_"):
+                            table_def = target_schema.get(table_name, {})
+                            enum_values = table_def.get("_enum_values", [])
+                            if enum_values:
+                                for value in enum_values:
+                                    escaped_value = value.replace("'", "''")
+                                    insert_sql = f'INSERT INTO "{table_name}" (value) VALUES (\'{escaped_value}\')'
+                                    connection.execute(insert_sql)
+                                    executed.append(insert_sql)
 
-            except MigrationError:
-                raise
-            except Exception:
-                connection.rollback()
-                raise
+                except Exception as e:
+                    connection.rollback()
+                    raise MigrationError(
+                        f"Failed to execute operation",
+                        operation=operation,
+                        original_error=e,
+                    ) from e
+
+            connection.commit()
 
             return {
                 "success": True,
@@ -99,10 +149,120 @@ class TursoApplier:
         except MigrationError:
             raise
         except Exception as e:
+            connection.rollback()
             raise MigrationError(
                 f"Migration failed: {e}",
                 original_error=e,
             ) from e
+
+    def _requires_reconstruction(self, operation: Operation) -> bool:
+        """
+        Check if operation requires table reconstruction.
+
+        Turso Database (like SQLite) doesn't support these operations directly:
+        - Adding/dropping foreign keys
+        - Altering column properties
+        - Dropping columns with constraints (in some versions)
+
+        Args:
+            operation: The operation to check
+
+        Returns:
+            True if reconstruction is needed, False otherwise
+        """
+        op_type = operation["op"]
+        return op_type in ("add_foreign_key", "drop_foreign_key", "alter_column")
+
+    def _execute_with_reconstruction_sync(
+        self, connection: Any, operation: Operation
+    ) -> None:
+        """
+        Execute an operation using table reconstruction (synchronous).
+
+        Fresh introspection is performed before each reconstruction to ensure
+        we have the latest schema state.
+
+        Args:
+            connection: Database connection (pyturso client)
+            operation: The operation to execute
+
+        Raises:
+            ValueError: If operation type is not supported for reconstruction
+        """
+        from declaro_persistum.abstractions.reconstruction import execute_reconstruction_sync
+
+        op_type = operation["op"]
+        table = operation["table"]
+        details = operation["details"]
+
+        # Fresh introspection for current state (direct PRAGMA call - sync)
+        cursor = connection.execute(f"PRAGMA table_info('{table}')")
+        rows = cursor.fetchall()
+        columns: dict[str, Column] = {}
+
+        for row in rows:
+            cid, name, type_str, notnull, dflt_value, pk = row
+
+            col_def: Column = {
+                "type": type_str or "TEXT",
+                "nullable": not bool(notnull),
+            }
+
+            if pk:
+                col_def["primary_key"] = True
+
+            if dflt_value is not None:
+                col_def["default"] = dflt_value
+
+            columns[name] = col_def
+
+        # Determine which columns to keep after reconstruction
+        if op_type == "alter_column":
+            column = details["column"]
+            changes = details["changes"]
+
+            if column not in columns:
+                raise ValueError(f"Column '{column}' not found in table '{table}'")
+
+            # Apply changes to column definition
+            # The differ produces {"from": old, "to": new} dicts for changes
+            for key, value in changes.items():
+                if isinstance(value, dict) and "to" in value:
+                    value = value["to"]
+                columns[column][key] = value  # type: ignore
+
+        elif op_type == "add_foreign_key":
+            # Add FK to column definition
+            column = details["column"]
+            if column not in columns:
+                raise ValueError(f"Column '{column}' not found in table '{table}'")
+
+            ref_table = details["references"]["table"]
+            ref_column = details["references"]["column"]
+            columns[column]["references"] = f"{ref_table}.{ref_column}"
+
+            if "on_delete" in details:
+                columns[column]["on_delete"] = details["on_delete"]
+            if "on_update" in details:
+                columns[column]["on_update"] = details["on_update"]
+
+        elif op_type == "drop_foreign_key":
+            # Remove FK from column definition
+            column = details["column"]
+            if column not in columns:
+                raise ValueError(f"Column '{column}' not found in table '{table}'")
+
+            columns[column].pop("references", None)
+            columns[column].pop("on_delete", None)
+            columns[column].pop("on_update", None)
+
+        else:
+            raise ValueError(
+                f"Operation '{op_type}' does not support reconstruction"
+            )
+
+        # Execute reconstruction with updated schema
+        execute_reconstruction_sync(connection, table, columns)
 
     def generate_sql(
         self,
@@ -177,6 +337,7 @@ class TursoApplier:
         if "default" in col:
             parts.append(f"DEFAULT {col['default']}")
 
+        # CHECK constraint - Turso now supports CHECK natively
         if "check" in col:
             parts.append(f"CHECK ({col['check']})")
 
@@ -223,7 +384,7 @@ class TursoApplier:
         else:
             return type_str.upper()
 
-    def _drop_table_sql(self, table: str) -> str:
+    def _drop_table_sql(self, table: str, details: dict[str, Any]) -> str:
         """Generate DROP TABLE statement."""
         return f'DROP TABLE "{table}"'
 
@@ -250,13 +411,16 @@ class TursoApplier:
         to_col = details["to_column"]
         return f'ALTER TABLE "{table}" RENAME COLUMN "{from_col}" TO "{to_col}"'
 
-    def _alter_column_sql(self, details: dict[str, Any]) -> str:
-        """SQLite/libSQL doesn't support ALTER COLUMN."""
-        col_name = details["column"]
-        changes = details["changes"]
+    def _alter_column_sql(self, table: str, details: dict[str, Any]) -> str:
+        """
+        Generate column alteration SQL.
+
+        Turso Database doesn't support ALTER COLUMN natively.
+        This should not be called directly - use _execute_with_reconstruction_sync() instead.
+        """
         raise NotImplementedError(
-            f"libSQL ALTER COLUMN not directly supported. "
-            f"Column '{col_name}' changes require table reconstruction: {changes}"
+            f"Turso Database doesn't support ALTER COLUMN natively. "
+            f"Use _execute_with_reconstruction_sync() instead."
         )
 
     def _add_index_sql(self, table: str, details: dict[str, Any]) -> str:
@@ -270,41 +434,53 @@ class TursoApplier:
         cols_sql = ", ".join(f'"{c}"' for c in columns)
         return f'CREATE {unique}INDEX "{idx_name}" ON "{table}" ({cols_sql}){where}'
 
-    def _drop_index_sql(self, details: dict[str, Any]) -> str:
+    def _drop_index_sql(self, table: str, details: dict[str, Any]) -> str:
         """Generate DROP INDEX statement."""
         idx_name = details["index"]
         return f'DROP INDEX "{idx_name}"'
 
-    def _add_constraint_sql(self, details: dict[str, Any]) -> str:
+    def _add_constraint_sql(self, table: str, details: dict[str, Any]) -> str:
         """SQLite/libSQL doesn't support ADD CONSTRAINT."""
         const_name = details["constraint"]
         raise NotImplementedError(
-            f"libSQL doesn't support ADD CONSTRAINT after table creation. "
+            f"Turso Database doesn't support ADD CONSTRAINT after table creation. "
             f"Constraint '{const_name}' must be defined in CREATE TABLE."
         )
 
-    def _drop_constraint_sql(self, details: dict[str, Any]) -> str:
-        """SQLite/libSQL doesn't support DROP CONSTRAINT."""
-        const_name = details["constraint"]
+    def _drop_constraint_sql(self, table: str, details: dict[str, Any]) -> str:
+        """
+        Generate DROP CONSTRAINT SQL.
+
+        Turso Database doesn't support DROP CONSTRAINT.
+        This should not be called directly - use _execute_with_reconstruction_sync() instead.
+        """
         raise NotImplementedError(
-            f"libSQL doesn't support DROP CONSTRAINT. "
-            f"Removing constraint '{const_name}' requires table reconstruction."
+            f"Turso Database doesn't support DROP CONSTRAINT. "
+            f"Use _execute_with_reconstruction_sync() instead."
         )
 
-    def _add_foreign_key_sql(self, details: dict[str, Any]) -> str:
-        """SQLite/libSQL doesn't support ADD FOREIGN KEY."""
-        col_name = details["column"]
+    def _add_foreign_key_sql(self, table: str, details: dict[str, Any]) -> str:
+        """
+        Generate ADD FOREIGN KEY SQL.
+
+        Turso Database doesn't support ADD CONSTRAINT FOREIGN KEY.
+        This should not be called directly - use _execute_with_reconstruction_sync() instead.
+        """
         raise NotImplementedError(
-            f"libSQL doesn't support adding foreign keys after table creation. "
-            f"Foreign key on '{col_name}' requires table reconstruction."
+            f"Turso Database doesn't support adding foreign keys after table creation. "
+            f"Use _execute_with_reconstruction_sync() instead."
         )
 
-    def _drop_foreign_key_sql(self, details: dict[str, Any]) -> str:
-        """SQLite/libSQL doesn't support DROP FOREIGN KEY."""
-        col_name = details["column"]
+    def _drop_foreign_key_sql(self, table: str, details: dict[str, Any]) -> str:
+        """
+        Generate DROP FOREIGN KEY SQL.
+
+        Turso Database doesn't support dropping foreign keys.
+        This should not be called directly - use _execute_with_reconstruction_sync() instead.
+        """
         raise NotImplementedError(
-            f"libSQL doesn't support dropping foreign keys. "
-            f"Removing foreign key on '{col_name}' requires table reconstruction."
+            f"Turso Database doesn't support dropping foreign keys. "
+            f"Use _execute_with_reconstruction_sync() instead."
         )
 
     def _create_view_sql(self, _table: str, details: dict[str, Any]) -> str:

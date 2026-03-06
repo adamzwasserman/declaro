@@ -76,6 +76,39 @@ async with pool.acquire() as conn:
 await pool.close()
 ```
 
+## Philosophy & Getting Started
+
+Declaro is part of a larger functional‑Python stack that shuns hidden state and prefers pure functions.
+If you haven't read it yet, the [Declaro Manifesto](../../MANIFESTO.md) lays out the fundamental ideas (banana/monkey/jungle, caching policy, anti‑OOP, etc.).
+
+This package is the persistence layer; it provides a **polymorphic facade** over SQLite, PostgreSQL, Turso, and LibSQL.
+Caching inside this package is intentionally narrow (pools, schemas, prepared statements) – any application‑specific result caching belongs in an adjacent package such as `tablix` or in your own code.
+
+### Quick Start
+
+```bash
+pip install declaro-persistum[all]
+```
+
+```python
+from uuid import uuid4
+from declaro_persistum import ConnectionPool
+from declaro_persistum.query import table
+
+pool = await ConnectionPool.sqlite("./app.db")
+users = table("users")
+
+async with pool.acquire() as conn:
+    await conn.execute("CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT)")
+    await conn.commit()
+    await users.insert(id=str(uuid4()), name="alice").execute(conn)
+    rows = await users.select().execute(conn)
+    print(rows)
+await pool.close()
+```
+
+For more examples and migration commands see the top‑level README.
+
 ## Features
 
 ### Connection Pool
@@ -144,7 +177,7 @@ users.emial  # AttributeError: Table 'users' has no column 'emial'
 
 ### Enum Support via Literal Types
 
-Use Python's `Literal` type for enum fields - declaro_persistum automatically creates lookup tables with foreign key constraints (avoiding CHECK constraint compatibility issues across backends):
+Use Python's `Literal` type for enum fields - declaro_persistum automatically creates lookup tables with foreign key constraints (providing consistent enum enforcement across all backends):
 
 ```python
 from typing import Literal

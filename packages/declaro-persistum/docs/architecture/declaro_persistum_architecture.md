@@ -437,7 +437,7 @@ class Order(BaseModel):
 
 #### 3.2.4 Enum Abstraction via Literal Types
 
-Python's `Literal` type is automatically detected and converted to a lookup table with foreign key constraint. This avoids CHECK constraint parsing issues in some database drivers (notably pyturso).
+Python's `Literal` type is automatically detected and converted to a lookup table with foreign key constraint. This provides consistent enum enforcement across all backends via standard FK constraints.
 
 **Detection**: When a field's type annotation is `Literal["a", "b", "c"]`, declaro_persistum:
 1. Creates a lookup table `_dp_enum_{table}_{field}`
@@ -482,7 +482,7 @@ CREATE TABLE orders (
 
 **Benefits**:
 - Works across all backends (PostgreSQL, SQLite, Turso, LibSQL)
-- No CHECK constraint parsing required
+- No CHECK constraint parsing required (enum values managed via FK lookup)
 - Values queryable at runtime via lookup table
 - Standard FK constraint enforcement
 

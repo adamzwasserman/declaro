@@ -251,9 +251,18 @@ def pydantic_model_to_table(model_cls: type) -> tuple[str, Table] | None:
 
     table: Table = {"columns": columns}
 
-    # Check for Meta class with indexes
+    # Check for Meta class with indexes, constraints, and primary_key
     meta_cls = getattr(model_cls, "Meta", None)
     if meta_cls:
+        # Extract composite primary key
+        primary_key = getattr(meta_cls, "primary_key", None)
+        if primary_key:
+            table["primary_key"] = primary_key
+            # Remove primary_key flag from individual columns when using composite PK
+            for col_name in columns:
+                if "primary_key" in columns[col_name]:
+                    del columns[col_name]["primary_key"]  # type: ignore
+
         indexes = getattr(meta_cls, "indexes", None)
         if indexes:
             table["indexes"] = {idx["name"]: idx for idx in indexes if isinstance(idx, dict)}

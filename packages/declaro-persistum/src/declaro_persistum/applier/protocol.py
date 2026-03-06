@@ -50,13 +50,13 @@ class MigrationApplier(Protocol):
         dry_run: bool = False,
     ) -> ApplyResult:
         """
-        Apply migration operations to database.
+        Apply migration operations to database asynchronously.
 
         This executes the DDL operations in the specified order,
         wrapped in a transaction for safety.
 
         Args:
-            connection: Database connection object (dialect-specific)
+            connection: Async database connection object (dialect-specific)
             operations: List of DDL operations to execute
             execution_order: Topologically sorted operation indices
             dry_run: If True, generate SQL without executing
@@ -71,6 +71,48 @@ class MigrationApplier(Protocol):
         Example:
             >>> applier = PostgreSQLApplier()
             >>> result = await applier.apply(conn, operations, order)
+            >>> if result["success"]:
+            ...     print(f"Applied {result['operations_applied']} operations")
+        """
+        ...
+
+    def apply_sync(
+        self,
+        connection: Any,
+        operations: list[Operation],
+        execution_order: list[int],
+        *,
+        dry_run: bool = False,
+        target_schema: Any = None,
+    ) -> ApplyResult:
+        """
+        Apply migration operations to database synchronously.
+
+        Some backends (Turso Database/pyturso) have synchronous APIs.
+        This method provides the same functionality as apply() but
+        executes synchronously.
+
+        Implementations that don't support sync operations may raise
+        NotImplementedError.
+
+        Args:
+            connection: Sync database connection object (dialect-specific)
+            operations: List of DDL operations to execute
+            execution_order: Topologically sorted operation indices
+            dry_run: If True, generate SQL without executing
+            target_schema: Target schema (used for enum value population)
+
+        Returns:
+            ApplyResult with success status and executed SQL
+
+        Raises:
+            NotImplementedError: If dialect doesn't support sync execution
+            MigrationError: If any operation fails
+            RollbackError: If rollback after failure also fails
+
+        Example:
+            >>> applier = TursoApplier()
+            >>> result = applier.apply_sync(conn, operations, order)
             >>> if result["success"]:
             ...     print(f"Applied {result['operations_applied']} operations")
         """

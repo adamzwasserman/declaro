@@ -1,9 +1,10 @@
 """
 PRAGMA compatibility abstraction for Turso Database (Rust).
 
-Turso Database (Rust) has limited PRAGMA support compared to SQLite:
-- Supported: PRAGMA table_info
-- NOT Supported: PRAGMA index_list, PRAGMA index_info, PRAGMA foreign_key_list
+Turso Database (Rust) supports most PRAGMAs needed for introspection:
+- Supported: table_info, table_list, table_xinfo, index_list, index_info, index_xinfo,
+             foreign_keys, integrity_check, schema_version, and more
+- NOT Supported: foreign_key_list (requires emulation)
 
 This module provides compatibility functions that:
 1. Try native PRAGMA first
