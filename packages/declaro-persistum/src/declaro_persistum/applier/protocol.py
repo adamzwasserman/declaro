@@ -163,19 +163,19 @@ def create_applier(dialect: str) -> MigrationApplier:
     Raises:
         ValueError: If dialect is not supported
     """
-    if dialect == "postgresql":
-        from declaro_persistum.applier.postgresql import PostgreSQLApplier
+    from declaro_persistum.applier.postgresql import PostgreSQLApplier
+    from declaro_persistum.applier.sqlite import SQLiteApplier
+    from declaro_persistum.applier.turso import TursoApplier
 
-        return PostgreSQLApplier()
-    elif dialect == "sqlite":
-        from declaro_persistum.applier.sqlite import SQLiteApplier
+    APPLIERS: dict[str, type] = {
+        "postgresql": PostgreSQLApplier,
+        "sqlite": SQLiteApplier,
+        "turso": TursoApplier,
+    }
 
-        return SQLiteApplier()
-    elif dialect == "turso":
-        from declaro_persistum.applier.turso import TursoApplier
-
-        return TursoApplier()
-    else:
+    applier_cls = APPLIERS.get(dialect)
+    if applier_cls is None:
         raise ValueError(
-            f"Unsupported dialect: {dialect}. Supported dialects: postgresql, sqlite, turso"
+            f"Unsupported dialect: {dialect}. Supported dialects: {', '.join(APPLIERS)}"
         )
+    return applier_cls()

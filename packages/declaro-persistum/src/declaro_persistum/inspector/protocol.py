@@ -118,19 +118,19 @@ def create_inspector(dialect: str) -> DatabaseInspector:
     Raises:
         ValueError: If dialect is not supported
     """
-    if dialect == "postgresql":
-        from declaro_persistum.inspector.postgresql import PostgreSQLInspector
+    from declaro_persistum.inspector.postgresql import PostgreSQLInspector
+    from declaro_persistum.inspector.sqlite import SQLiteInspector
+    from declaro_persistum.inspector.turso import TursoInspector
 
-        return PostgreSQLInspector()  # type: ignore[return-value]
-    elif dialect == "sqlite":
-        from declaro_persistum.inspector.sqlite import SQLiteInspector
+    INSPECTORS: dict[str, type] = {
+        "postgresql": PostgreSQLInspector,
+        "sqlite": SQLiteInspector,
+        "turso": TursoInspector,
+    }
 
-        return SQLiteInspector()  # type: ignore[return-value]
-    elif dialect == "turso":
-        from declaro_persistum.inspector.turso import TursoInspector
-
-        return TursoInspector()  # type: ignore[return-value]
-    else:
+    inspector_cls = INSPECTORS.get(dialect)
+    if inspector_cls is None:
         raise ValueError(
-            f"Unsupported dialect: {dialect}. Supported dialects: postgresql, sqlite, turso"
+            f"Unsupported dialect: {dialect}. Supported dialects: {', '.join(INSPECTORS)}"
         )
+    return inspector_cls()  # type: ignore[return-value]

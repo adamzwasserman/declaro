@@ -7,20 +7,9 @@ Provides an immutable, fluent API for building INSERT queries.
 from typing import Any
 
 from declaro_persistum.query.builder import Query
+from declaro_persistum.query.executor import detect_dialect
 from declaro_persistum.query.table import ColumnProxy, SQLFunction
 from declaro_persistum.types import Schema
-
-
-def _detect_dialect(connection: Any) -> str:
-    """Detect database dialect from connection type."""
-    conn_type = type(connection).__module__
-    if "asyncpg" in conn_type:
-        return "postgresql"
-    elif "aiosqlite" in conn_type:
-        return "sqlite"
-    elif "libsql" in conn_type:
-        return "turso"
-    return "postgresql"
 
 
 class InsertQuery:
@@ -152,14 +141,14 @@ class InsertQuery:
         """Execute insert and return results (if RETURNING specified)."""
         from declaro_persistum.query.executor import execute
 
-        dialect = _detect_dialect(connection)
+        dialect = detect_dialect(connection)
         return await execute(self.to_query(dialect), connection)
 
     async def execute_one(self, connection: Any) -> dict[str, Any] | None:
         """Execute insert and return single result (if RETURNING specified)."""
         from declaro_persistum.query.executor import execute_one
 
-        dialect = _detect_dialect(connection)
+        dialect = detect_dialect(connection)
         return await execute_one(self.to_query(dialect), connection)
 
 

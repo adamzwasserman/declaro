@@ -12,6 +12,21 @@ from declaro_persistum.query.builder import Query
 
 T = TypeVar("T")
 
+_DIALECT_MAP = {
+    "asyncpg": "postgresql",
+    "aiosqlite": "sqlite",
+    "libsql": "turso",
+}
+
+
+def detect_dialect(connection: Any) -> str:
+    """Detect database dialect from connection type."""
+    conn_type = type(connection).__module__
+    for key, dialect in _DIALECT_MAP.items():
+        if key in conn_type:
+            return dialect
+    return "postgresql"  # Default
+
 
 async def execute(
     query: Query,
@@ -156,15 +171,17 @@ def _prepare_query(query: Query, connection: Any) -> tuple[str, Any]:
     # Detect connection type
     conn_type = type(connection).__module__
 
-    if "asyncpg" in conn_type:
-        return _convert_to_asyncpg(sql, params)
-    elif "aiosqlite" in conn_type:
-        return _convert_to_aiosqlite(sql, params)
-    elif "libsql" in conn_type:
-        return _convert_to_libsql(sql, params)
-    else:
-        # Default: assume named parameters work
-        return sql, params
+    _CONVERTERS = {
+        "asyncpg": _convert_to_asyncpg,
+        "aiosqlite": _convert_to_aiosqlite,
+        "libsql": _convert_to_libsql,
+    }
+
+    for key, converter in _CONVERTERS.items():
+        if key in conn_type:
+            return converter(sql, params)
+    # Default: assume named parameters work
+    return sql, params
 
 
 def _convert_to_asyncpg(sql: str, params: dict[str, Any]) -> tuple[str, list[Any]]:
@@ -211,43 +228,45 @@ async def _execute_fetch(connection: Any, sql: str, params: Any) -> list[dict[st
     """Execute and fetch all rows."""
     conn_type = type(connection).__module__
 
-    if "asyncpg" in conn_type:
+    async def _fetch_asyncpg() -> list[dict[str, Any]]:
         rows = await connection.fetch(sql, *params)
         return [dict(row) for row in rows]
 
-    elif "aiosqlite" in conn_type:
+    async def _fetch_aiosqlite() -> list[dict[str, Any]]:
         connection.row_factory = _dict_factory
         cursor = await connection.execute(sql, params)
         rows = await cursor.fetchall()
         return list(rows)
 
-    elif "libsql" in conn_type:
-        # libsql-experimental uses sync sqlite3-like API
+    async def _fetch_libsql() -> list[dict[str, Any]]:
         cursor = connection.execute(sql, params if params else ())
         rows = cursor.fetchall()
         columns = [desc[0] for desc in cursor.description] if cursor.description else []
         return [dict(zip(columns, row, strict=False)) for row in rows]
 
-    else:
-        raise ValueError(f"Unsupported connection type: {conn_type}")
+    _FETCHERS = {"asyncpg": _fetch_asyncpg, "aiosqlite": _fetch_aiosqlite, "libsql": _fetch_libsql}
+
+    for key, fetcher in _FETCHERS.items():
+        if key in conn_type:
+            return await fetcher()
+    raise ValueError(f"Unsupported connection type: {conn_type}")
 
 
 async def _execute_fetch_one(connection: Any, sql: str, params: Any) -> dict[str, Any] | None:
     """Execute and fetch single row."""
     conn_type = type(connection).__module__
 
-    if "asyncpg" in conn_type:
+    async def _fetch_one_asyncpg() -> dict[str, Any] | None:
         row = await connection.fetchrow(sql, *params)
         return dict(row) if row else None
 
-    elif "aiosqlite" in conn_type:
+    async def _fetch_one_aiosqlite() -> dict[str, Any] | None:
         connection.row_factory = _dict_factory
         cursor = await connection.execute(sql, params)
         row = await cursor.fetchone()
         return dict(row) if row else None
 
-    elif "libsql" in conn_type:
-        # libsql-experimental uses sync sqlite3-like API
+    async def _fetch_one_libsql() -> dict[str, Any] | None:
         cursor = connection.execute(sql, params if params else ())
         row = cursor.fetchone()
         if not row:
@@ -255,57 +274,64 @@ async def _execute_fetch_one(connection: Any, sql: str, params: Any) -> dict[str
         columns = [desc[0] for desc in cursor.description] if cursor.description else []
         return dict(zip(columns, row, strict=True))
 
-    else:
-        raise ValueError(f"Unsupported connection type: {conn_type}")
+    _FETCHERS = {"asyncpg": _fetch_one_asyncpg, "aiosqlite": _fetch_one_aiosqlite, "libsql": _fetch_one_libsql}
+
+    for key, fetcher in _FETCHERS.items():
+        if key in conn_type:
+            return await fetcher()
+    raise ValueError(f"Unsupported connection type: {conn_type}")
 
 
 async def _execute_fetch_scalar(connection: Any, sql: str, params: Any) -> Any:
     """Execute and fetch scalar value."""
     conn_type = type(connection).__module__
 
-    if "asyncpg" in conn_type:
+    async def _scalar_asyncpg() -> Any:
         return await connection.fetchval(sql, *params)
 
-    elif "aiosqlite" in conn_type:
+    async def _scalar_aiosqlite() -> Any:
         cursor = await connection.execute(sql, params)
         row = await cursor.fetchone()
         return row[0] if row else None
 
-    elif "libsql" in conn_type:
-        # libsql-experimental uses sync sqlite3-like API
+    async def _scalar_libsql() -> Any:
         cursor = connection.execute(sql, params if params else ())
         row = cursor.fetchone()
-        if not row:
-            return None
-        return row[0]
+        return row[0] if row else None
 
-    else:
-        raise ValueError(f"Unsupported connection type: {conn_type}")
+    _FETCHERS = {"asyncpg": _scalar_asyncpg, "aiosqlite": _scalar_aiosqlite, "libsql": _scalar_libsql}
+
+    for key, fetcher in _FETCHERS.items():
+        if key in conn_type:
+            return await fetcher()
+    raise ValueError(f"Unsupported connection type: {conn_type}")
 
 
 async def _execute_update(connection: Any, sql: str, params: Any) -> int:
     """Execute and return rows affected."""
     conn_type = type(connection).__module__
 
-    if "asyncpg" in conn_type:
+    async def _update_asyncpg() -> int:
         result = await connection.execute(sql, *params)
-        # asyncpg returns "UPDATE N" or "INSERT 0 N" etc
         parts = result.split()
         return int(parts[-1]) if parts else 0
 
-    elif "aiosqlite" in conn_type:
+    async def _update_aiosqlite() -> int:
         cursor = await connection.execute(sql, params)
         await connection.commit()
         return int(cursor.rowcount)
 
-    elif "libsql" in conn_type:
-        # libsql-experimental uses sync sqlite3-like API
+    async def _update_libsql() -> int:
         cursor = connection.execute(sql, params if params else ())
         connection.commit()
         return int(cursor.rowcount)
 
-    else:
-        raise ValueError(f"Unsupported connection type: {conn_type}")
+    _UPDATERS = {"asyncpg": _update_asyncpg, "aiosqlite": _update_aiosqlite, "libsql": _update_libsql}
+
+    for key, updater in _UPDATERS.items():
+        if key in conn_type:
+            return await updater()
+    raise ValueError(f"Unsupported connection type: {conn_type}")
 
 
 def _dict_factory(cursor: Any, row: tuple[Any, ...]) -> dict[str, Any]:

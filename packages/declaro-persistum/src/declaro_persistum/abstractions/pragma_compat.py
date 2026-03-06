@@ -21,7 +21,9 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Emulation counters for monitoring
+# I/O-boundary monitoring state (not business logic).
+# These counters track emulation usage for debugging/observability.
+# Use reset_counters() between tests.
 _emulation_counters = {
     "index_list": 0,
     "index_info": 0,

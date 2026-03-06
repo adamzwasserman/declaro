@@ -8,6 +8,7 @@ Provides a familiar interface for Django developers:
 from typing import TYPE_CHECKING, Any
 
 from declaro_persistum.query.builder import Query
+from declaro_persistum.query.executor import detect_dialect
 from declaro_persistum.query.table import (
     ColumnProxy,
     Condition,
@@ -18,18 +19,6 @@ from declaro_persistum.types import Schema
 
 if TYPE_CHECKING:
     pass
-
-
-def _detect_dialect(connection: Any) -> str:
-    """Detect database dialect from connection type."""
-    conn_type = type(connection).__module__
-    if "asyncpg" in conn_type:
-        return "postgresql"
-    elif "aiosqlite" in conn_type:
-        return "sqlite"
-    elif "libsql" in conn_type:
-        return "turso"
-    return "postgresql"
 
 
 class QuerySet:
@@ -287,7 +276,7 @@ class QuerySet:
             raise ValueError(
                 "No connection provided. Use .using(conn) or pass connection to .all()"
             )
-        dialect = _detect_dialect(conn)
+        dialect = detect_dialect(conn)
         return await execute(self.to_query(dialect), conn)
 
     async def first(self, connection: Any | None = None) -> dict[str, Any] | None:
@@ -300,7 +289,7 @@ class QuerySet:
                 "No connection provided. Use .using(conn) or pass connection to .first()"
             )
         qs = self._clone(limit=1)
-        dialect = _detect_dialect(conn)
+        dialect = detect_dialect(conn)
         return await execute_one(qs.to_query(dialect), conn)
 
     async def get(self, connection: Any | None = None, **kwargs: Any) -> dict[str, Any]:
@@ -323,7 +312,7 @@ class QuerySet:
 
         # Fetch 2 to detect multiple results
         qs_limited = qs._clone(limit=2)
-        dialect = _detect_dialect(conn)
+        dialect = detect_dialect(conn)
 
         from declaro_persistum.query.executor import execute
 
@@ -346,7 +335,7 @@ class QuerySet:
                 "No connection provided. Use .using(conn) or pass connection to .count()"
             )
 
-        dialect = _detect_dialect(conn)
+        dialect = detect_dialect(conn)
 
         # Build count query
         sql = f"SELECT COUNT(*) FROM {self._table_name}"

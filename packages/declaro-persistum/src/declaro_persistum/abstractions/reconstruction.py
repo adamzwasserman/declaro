@@ -19,6 +19,7 @@ Reference: https://www.sqlite.org/lang_altertable.html#making_other_kinds_of_tab
 """
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from declaro_persistum.types import Column, Operation
@@ -177,58 +178,78 @@ def get_reconstruction_columns(
     details = operation["details"]
     new_columns = current_columns.copy()
 
-    if op_type == "alter_column":
-        column_name = details["column"]
-        if column_name not in new_columns:
-            raise ValueError(f"Column '{column_name}' not found in table")
+    _OP_HANDLERS: dict[str, Callable[[dict[str, Column], dict[str, Any]], dict[str, Column]]] = {
+        "alter_column": _apply_alter_column,
+        "drop_column": _apply_drop_column,
+        "add_foreign_key": _apply_add_foreign_key,
+        "drop_foreign_key": _apply_drop_foreign_key,
+    }
 
-        # Apply changes to column definition
-        col_def = new_columns[column_name].copy()
-        changes = details.get("changes", {})
-
-        for key, value in changes.items():
-            if key in ("type", "nullable", "default", "unique", "check"):
-                # The differ produces {"from": old, "to": new} dicts for changes
-                if isinstance(value, dict) and "to" in value:
-                    value = value["to"]
-                if value is None and key == "default":
-                    col_def.pop("default", None)
-                else:
-                    col_def[key] = value  # type: ignore
-
-        new_columns[column_name] = col_def
-
-    elif op_type == "drop_column":
-        column_name = details["column"]
-        if column_name in new_columns:
-            del new_columns[column_name]
-
-    elif op_type == "add_foreign_key":
-        # Add FK reference to column definition
-        column_name = details["column"]
-        references = details["references"]
-
-        if column_name in new_columns:
-            col_def = new_columns[column_name].copy()
-            col_def["references"] = references
-            if details.get("on_delete"):
-                col_def["on_delete"] = details["on_delete"]  # type: ignore
-            if details.get("on_update"):
-                col_def["on_update"] = details["on_update"]  # type: ignore
-            new_columns[column_name] = col_def
-
-    elif op_type == "drop_foreign_key":
-        # Remove FK reference from column definition
-        column_name = details["column"]
-
-        if column_name in new_columns:
-            col_def = new_columns[column_name].copy()
-            col_def.pop("references", None)
-            col_def.pop("on_delete", None)
-            col_def.pop("on_update", None)
-            new_columns[column_name] = col_def
+    handler = _OP_HANDLERS.get(op_type)
+    if handler is not None:
+        new_columns = handler(new_columns, details)
 
     return new_columns
+
+
+def _apply_alter_column(columns: dict[str, Column], details: dict[str, Any]) -> dict[str, Column]:
+    """Apply alter_column changes to column definitions."""
+    column_name = details["column"]
+    if column_name not in columns:
+        raise ValueError(f"Column '{column_name}' not found in table")
+
+    col_def = columns[column_name].copy()
+    changes = details.get("changes", {})
+
+    for key, value in changes.items():
+        if key in ("type", "nullable", "default", "unique", "check"):
+            # The differ produces {"from": old, "to": new} dicts for changes
+            if isinstance(value, dict) and "to" in value:
+                value = value["to"]
+            if value is None and key == "default":
+                col_def.pop("default", None)
+            else:
+                col_def[key] = value  # type: ignore
+
+    columns[column_name] = col_def
+    return columns
+
+
+def _apply_drop_column(columns: dict[str, Column], details: dict[str, Any]) -> dict[str, Column]:
+    """Remove column from schema."""
+    column_name = details["column"]
+    if column_name in columns:
+        del columns[column_name]
+    return columns
+
+
+def _apply_add_foreign_key(columns: dict[str, Column], details: dict[str, Any]) -> dict[str, Column]:
+    """Add FK reference to column definition."""
+    column_name = details["column"]
+    references = details["references"]
+
+    if column_name in columns:
+        col_def = columns[column_name].copy()
+        col_def["references"] = references
+        if details.get("on_delete"):
+            col_def["on_delete"] = details["on_delete"]  # type: ignore
+        if details.get("on_update"):
+            col_def["on_update"] = details["on_update"]  # type: ignore
+        columns[column_name] = col_def
+    return columns
+
+
+def _apply_drop_foreign_key(columns: dict[str, Column], details: dict[str, Any]) -> dict[str, Column]:
+    """Remove FK reference from column definition."""
+    column_name = details["column"]
+
+    if column_name in columns:
+        col_def = columns[column_name].copy()
+        col_def.pop("references", None)
+        col_def.pop("on_delete", None)
+        col_def.pop("on_update", None)
+        columns[column_name] = col_def
+    return columns
 
 
 # =============================================================================

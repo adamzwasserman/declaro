@@ -107,6 +107,12 @@ class CheckValidationError(Exception):
 
 # =============================================================================
 # Validator Registry (Module-Level State)
+#
+# NOTE: This is I/O-boundary monitoring state, not business logic.
+# The registry stores validators for Python-side CHECK emulation
+# (currently unused since all backends support CHECK natively).
+# The counters track usage for debugging/observability.
+# Use clear_registry() between tests.
 # =============================================================================
 
 # Registry: (table, column) -> (expression, validator_fn)
@@ -430,28 +436,24 @@ def generate_validator(
     """
     op = ast.get("op")
 
-    if op == "compare":
-        return _gen_compare_validator(ast, table_name, column_name, expression)
-    elif op == "in":
-        return _gen_in_validator(ast, table_name, column_name, expression)
-    elif op == "between":
-        return _gen_between_validator(ast, table_name, column_name, expression)
-    elif op == "is_null":
-        return _gen_is_null_validator(ast, table_name, column_name, expression)
-    elif op == "is_not_null":
-        return _gen_is_not_null_validator(ast, table_name, column_name, expression)
-    elif op == "and":
-        return _gen_and_validator(ast, table_name, column_name, expression)
-    elif op == "or":
-        return _gen_or_validator(ast, table_name, column_name, expression)
-    elif op == "not":
-        return _gen_not_validator(ast, table_name, column_name, expression)
-    else:
-        # Unknown op - return always-valid validator with warning
+    _VALIDATOR_GENERATORS = {
+        "compare": _gen_compare_validator,
+        "in": _gen_in_validator,
+        "between": _gen_between_validator,
+        "is_null": _gen_is_null_validator,
+        "is_not_null": _gen_is_not_null_validator,
+        "and": _gen_and_validator,
+        "or": _gen_or_validator,
+        "not": _gen_not_validator,
+    }
+
+    generator = _VALIDATOR_GENERATORS.get(op)
+    if generator is None:
         logger.warning(
             f"Unknown CHECK op '{op}' for {table_name}.{column_name}, skipping validation"
         )
         return lambda _row: (True, None)
+    return generator(ast, table_name, column_name, expression)
 
 
 def _is_column_ref(value: Any) -> tuple[bool, str | Any]:
