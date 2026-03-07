@@ -8,10 +8,10 @@ Two APIs are available:
 
 1. Schema-validated dot notation (recommended):
    ```python
-   from declaro_persistum.query import table, load_default_schema
+   from declaro_persistum.query import table
 
-   load_default_schema("./schema")
-   users = table("users")
+   schema = load_schema("./schema")
+   users = table("users", schema)
 
    results = await (
        users
@@ -103,12 +103,9 @@ from declaro_persistum.query.table import (
     avg_,
     # Aggregate functions
     count_,
-    get_default_schema,
-    load_default_schema,
     max_,
     min_,
     now_,
-    set_default_schema,
     sum_,
     table,
 )
@@ -117,9 +114,6 @@ from declaro_persistum.query.update import UpdateQuery
 __all__ = [
     # New API (fluent SQL-like)
     "table",
-    "load_default_schema",
-    "set_default_schema",
-    "get_default_schema",
     "TableProxy",
     "ColumnProxy",
     "Condition",

@@ -5,7 +5,7 @@ Query style-specific BDD step definitions (Django, Prisma, SQLAlchemy).
 import pytest
 from pytest_bdd import given, when, then, parsers
 
-from declaro_persistum.query.table import table, set_default_schema
+from declaro_persistum.query.table import table
 
 
 # =============================================================================

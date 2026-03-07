@@ -9,7 +9,7 @@ import pytest
 import uuid
 from datetime import datetime, timezone
 
-from declaro_persistum.query.table import table, set_default_schema
+from declaro_persistum.query.table import table
 
 from tests.bdd.factories.data_factory import (
     EDGE_CASE_STRINGS,
@@ -28,8 +28,7 @@ class TestStringEdgeCases:
     def setup_schema(self):
         """Set up schema before each test."""
         schema = simple_todos_schema()
-        set_default_schema(schema)
-        self.todos = table("todos")
+        self.todos = table("todos", schema)
 
     def test_empty_string_in_where(self):
         """WHERE clause with empty string should work."""
@@ -83,8 +82,7 @@ class TestNullHandling:
     def setup_schema(self):
         """Set up schema before each test."""
         schema = simple_users_schema()
-        set_default_schema(schema)
-        self.users = table("users")
+        self.users = table("users", schema)
 
     def test_is_null_condition(self):
         """IS NULL condition should generate correct SQL."""
@@ -119,8 +117,7 @@ class TestNumericEdgeCases:
     def setup_schema(self):
         """Set up schema before each test."""
         schema = simple_users_schema()
-        set_default_schema(schema)
-        self.users = table("users")
+        self.users = table("users", schema)
 
     @pytest.mark.parametrize("edge_int", EDGE_CASE_INTEGERS)
     def test_integer_boundaries(self, edge_int):
@@ -150,8 +147,7 @@ class TestInClauseEdgeCases:
     def setup_schema(self):
         """Set up schema before each test."""
         schema = simple_users_schema()
-        set_default_schema(schema)
-        self.users = table("users")
+        self.users = table("users", schema)
 
     def test_in_with_empty_list(self):
         """IN clause with empty list should handle gracefully."""
@@ -191,8 +187,7 @@ class TestLimitOffsetEdgeCases:
     def setup_schema(self):
         """Set up schema before each test."""
         schema = simple_todos_schema()
-        set_default_schema(schema)
-        self.todos = table("todos")
+        self.todos = table("todos", schema)
 
     def test_limit_zero(self):
         """LIMIT 0 should work."""
@@ -227,8 +222,7 @@ class TestConditionCombinations:
     def setup_schema(self):
         """Set up schema before each test."""
         schema = simple_users_schema()
-        set_default_schema(schema)
-        self.users = table("users")
+        self.users = table("users", schema)
 
     def test_and_conditions(self):
         """Multiple AND conditions should work."""

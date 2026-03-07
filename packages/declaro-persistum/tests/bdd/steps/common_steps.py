@@ -5,7 +5,7 @@ Common BDD step definitions used across features.
 import pytest
 from pytest_bdd import given, when, then, parsers
 
-from declaro_persistum.query.table import table, set_default_schema
+from declaro_persistum.query.table import table
 from declaro_persistum.types import Schema
 
 from tests.bdd.factories.schema_factory import (
@@ -25,16 +25,14 @@ from tests.bdd.factories.schema_factory import (
 def given_todos_schema(bdd_context):
     """Set up a todos schema."""
     bdd_context.schema = simple_todos_schema()
-    set_default_schema(bdd_context.schema)
-    bdd_context.table_proxy = table("todos")
+    bdd_context.table_proxy = table("todos", bdd_context.schema)
 
 
 @given("a schema with a \"users\" table")
 def given_users_schema(bdd_context):
     """Set up a users schema."""
     bdd_context.schema = simple_users_schema()
-    set_default_schema(bdd_context.schema)
-    bdd_context.table_proxy = table("users")
+    bdd_context.table_proxy = table("users", bdd_context.schema)
 
 
 @given(parsers.parse('the {table_name} table has columns: {columns}'))
@@ -48,21 +46,19 @@ def given_table_columns(bdd_context, table_name: str, columns: str):
             if col not in existing_columns:
                 # Add missing column
                 bdd_context.schema[table_name]["columns"][col] = {"type": "text"}
-        set_default_schema(bdd_context.schema)
+
 
 
 @given("an empty schema")
 def given_empty_schema(bdd_context):
     """Set up an empty schema."""
     bdd_context.schema = {}
-    set_default_schema(bdd_context.schema)
 
 
 @given("a complex e-commerce schema")
 def given_ecommerce_schema(bdd_context):
     """Set up complex e-commerce schema."""
     bdd_context.schema = complex_ecommerce_schema()
-    set_default_schema(bdd_context.schema)
 
 
 # =============================================================================
@@ -75,8 +71,7 @@ def given_django_table(bdd_context, table_name: str):
     """Set up a table with Django-style interface."""
     if not bdd_context.schema:
         bdd_context.schema = simple_users_schema() if table_name == "users" else simple_todos_schema()
-        set_default_schema(bdd_context.schema)
-    bdd_context.table_proxy = table(table_name)
+    bdd_context.table_proxy = table(table_name, bdd_context.schema)
 
 
 @given(parsers.parse('a {table_name} table with Prisma-style interface'))
@@ -84,8 +79,7 @@ def given_prisma_table(bdd_context, table_name: str):
     """Set up a table with Prisma-style interface."""
     if not bdd_context.schema:
         bdd_context.schema = simple_users_schema() if table_name == "users" else simple_todos_schema()
-        set_default_schema(bdd_context.schema)
-    bdd_context.table_proxy = table(table_name)
+    bdd_context.table_proxy = table(table_name, bdd_context.schema)
 
 
 # =============================================================================

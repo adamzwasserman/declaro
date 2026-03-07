@@ -6,7 +6,7 @@ import pytest
 from typing import Any
 
 from declaro_persistum.types import Schema
-from declaro_persistum.query.table import table, set_default_schema
+from declaro_persistum.query.table import table
 
 from tests.bdd.factories.schema_factory import (
     simple_todos_schema,
@@ -59,15 +59,13 @@ def schema_factory() -> type[SchemaFactory]:
 @pytest.fixture
 def todos_table(todos_schema: Schema):
     """Get a todos TableProxy with schema set."""
-    set_default_schema(todos_schema)
-    return table("todos")
+    return table("todos", todos_schema)
 
 
 @pytest.fixture
 def users_table(users_schema: Schema):
     """Get a users TableProxy with schema set."""
-    set_default_schema(users_schema)
-    return table("users")
+    return table("users", users_schema)
 
 
 # =============================================================================
@@ -173,7 +171,5 @@ def bdd_context() -> BDDContext:
 
 @pytest.fixture(autouse=True)
 def reset_schema_between_tests():
-    """Reset the global schema between tests."""
+    """Reset state between tests."""
     yield
-    # Clean up after test
-    set_default_schema({})

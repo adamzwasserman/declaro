@@ -7,7 +7,6 @@ against the loaded schema at query-build time, not execution time.
 
 from typing import TYPE_CHECKING, Any
 
-from declaro_persistum.loader import load_schema
 from declaro_persistum.types import Column, Schema
 
 if TYPE_CHECKING:
@@ -18,33 +17,14 @@ if TYPE_CHECKING:
     from declaro_persistum.query.select import SelectQuery
     from declaro_persistum.query.update import UpdateQuery
 
-_default_schema: Schema | None = None
 
-
-def set_default_schema(schema: Schema) -> None:
-    """Set the default schema for table() calls."""
-    global _default_schema
-    _default_schema = schema
-
-
-def get_default_schema() -> Schema | None:
-    """Get the current default schema."""
-    return _default_schema
-
-
-def load_default_schema(schema_dir: str = "./schema") -> None:
-    """Load schema from directory and set as default."""
-    global _default_schema
-    _default_schema = load_schema(schema_dir)
-
-
-def table(name: str, schema: Schema | None = None) -> "TableProxy":
+def table(name: str, schema: Schema) -> "TableProxy":
     """
     Create a schema-validated table proxy.
 
     Args:
         name: Table name (must exist in schema)
-        schema: Schema dict (uses default if not provided)
+        schema: Schema dict
 
     Returns:
         TableProxy for building queries
@@ -52,12 +32,9 @@ def table(name: str, schema: Schema | None = None) -> "TableProxy":
     Raises:
         ValueError: If table not found in schema
     """
-    s = schema or _default_schema
-    if s is None:
-        raise ValueError("No schema loaded. Call load_default_schema() first.")
-    if name not in s:
-        raise ValueError(f"Table '{name}' not found in schema. Available: {list(s.keys())}")
-    return TableProxy(name, s)
+    if name not in schema:
+        raise ValueError(f"Table '{name}' not found in schema. Available: {list(schema.keys())}")
+    return TableProxy(name, schema)
 
 
 class TableProxy:

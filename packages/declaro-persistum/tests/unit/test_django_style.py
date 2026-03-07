@@ -8,7 +8,7 @@ import pytest
 from typing import Any
 
 from declaro_persistum.types import Schema
-from declaro_persistum.query import table, set_default_schema
+from declaro_persistum.query import table
 from declaro_persistum.query.django_style import QuerySet, DoesNotExist, MultipleObjectsReturned
 
 

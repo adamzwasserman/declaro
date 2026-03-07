@@ -9,7 +9,7 @@ import pytest
 import uuid
 from hypothesis import given, settings, strategies as st, assume
 
-from declaro_persistum.query.table import table, set_default_schema
+from declaro_persistum.query.table import table
 
 from tests.bdd.factories.schema_factory import simple_todos_schema, simple_users_schema
 from tests.bdd.factories.data_factory import (
@@ -28,8 +28,7 @@ class TestPropertyBasedSelect:
     def setup_schema(self):
         """Set up schema before each test."""
         schema = simple_todos_schema()
-        set_default_schema(schema)
-        self.todos = table("todos")
+        self.todos = table("todos", schema)
 
     @given(limit=st.integers(min_value=0, max_value=10000))
     @settings(max_examples=100)
@@ -82,8 +81,7 @@ class TestPropertyBasedInsert:
     def setup_schema(self):
         """Set up schema before each test."""
         schema = simple_todos_schema()
-        set_default_schema(schema)
-        self.todos = table("todos")
+        self.todos = table("todos", schema)
 
     @given(
         title=sql_safe_text.filter(lambda x: len(x) > 0 and ":" not in x),  # Exclude colon which is param prefix
@@ -130,8 +128,7 @@ class TestPropertyBasedUpdate:
     def setup_schema(self):
         """Set up schema before each test."""
         schema = simple_users_schema()
-        set_default_schema(schema)
-        self.users = table("users")
+        self.users = table("users", schema)
 
     @given(
         name=sql_safe_text,
@@ -174,8 +171,7 @@ class TestPropertyBasedConditions:
     def setup_schema(self):
         """Set up schema before each test."""
         schema = simple_users_schema()
-        set_default_schema(schema)
-        self.users = table("users")
+        self.users = table("users", schema)
 
     @given(values=st.lists(st.text(min_size=1, max_size=50), min_size=1, max_size=50))
     @settings(max_examples=50)
@@ -227,8 +223,7 @@ class TestLargeDataGeneration:
     def setup_schema(self):
         """Set up schema before each test."""
         schema = simple_todos_schema()
-        set_default_schema(schema)
-        self.todos = table("todos")
+        self.todos = table("todos", schema)
 
     @given(count=st.integers(min_value=100, max_value=1000))
     @settings(max_examples=10, deadline=None)  # No deadline for large data tests
@@ -278,8 +273,7 @@ class TestComplexPropertyTests:
     def setup_schema(self):
         """Set up schema before each test."""
         schema = simple_users_schema()
-        set_default_schema(schema)
-        self.users = table("users")
+        self.users = table("users", schema)
 
     @given(
         status=st.sampled_from(["active", "inactive", "pending"]),

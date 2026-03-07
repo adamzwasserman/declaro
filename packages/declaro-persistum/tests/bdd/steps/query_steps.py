@@ -5,7 +5,7 @@ Query-related BDD step definitions.
 import pytest
 from pytest_bdd import given, when, then, parsers
 
-from declaro_persistum.query.table import table, set_default_schema
+from declaro_persistum.query.table import table
 from declaro_persistum.query import count_, sum_, avg_, min_, max_
 
 
@@ -192,14 +192,14 @@ def when_delete_where(bdd_context, column: str, value: str):
 @when(parsers.parse('I join with {other_table} on {join_condition}'))
 def when_join_tables(bdd_context, other_table: str, join_condition: str):
     """Add JOIN clause."""
-    other = table(other_table)
+    other = table(other_table, bdd_context.schema)
     # Parse simple join condition like "users.id = orders.user_id"
     parts = join_condition.split("=")
     left_parts = parts[0].strip().split(".")
     right_parts = parts[1].strip().split(".")
 
-    left_col = getattr(table(left_parts[0]), left_parts[1])
-    right_col = getattr(table(right_parts[0]), right_parts[1])
+    left_col = getattr(table(left_parts[0], bdd_context.schema), left_parts[1])
+    right_col = getattr(table(right_parts[0], bdd_context.schema), right_parts[1])
 
     bdd_context.query = bdd_context.query.join(other, on=left_col == right_col)
     sql, params = bdd_context.query.to_sql()
@@ -210,13 +210,13 @@ def when_join_tables(bdd_context, other_table: str, join_condition: str):
 @when(parsers.parse('I left join with {other_table} on {join_condition}'))
 def when_left_join(bdd_context, other_table: str, join_condition: str):
     """Add LEFT JOIN clause."""
-    other = table(other_table)
+    other = table(other_table, bdd_context.schema)
     parts = join_condition.split("=")
     left_parts = parts[0].strip().split(".")
     right_parts = parts[1].strip().split(".")
 
-    left_col = getattr(table(left_parts[0]), left_parts[1])
-    right_col = getattr(table(right_parts[0]), right_parts[1])
+    left_col = getattr(table(left_parts[0], bdd_context.schema), left_parts[1])
+    right_col = getattr(table(right_parts[0], bdd_context.schema), right_parts[1])
 
     bdd_context.query = bdd_context.query.join(other, on=left_col == right_col, type="left")
     sql, params = bdd_context.query.to_sql()

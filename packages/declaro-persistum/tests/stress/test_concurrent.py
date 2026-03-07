@@ -9,7 +9,7 @@ import asyncio
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from declaro_persistum.query.table import table, set_default_schema
+from declaro_persistum.query.table import table
 
 from tests.bdd.factories.schema_factory import simple_todos_schema
 
@@ -21,13 +21,13 @@ class TestConcurrentQueryBuilding:
     @pytest.fixture(autouse=True)
     def setup_schema(self):
         """Set up schema before each test."""
-        schema = simple_todos_schema()
-        set_default_schema(schema)
+        self.schema = simple_todos_schema()
 
     def test_concurrent_select_queries(self):
         """Building SELECT queries concurrently should be thread-safe."""
+        schema = self.schema
         def build_query(i: int) -> tuple[str, dict]:
-            todos = table("todos")
+            todos = table("todos", schema)
             query = todos.select().where(todos.id == str(uuid.uuid4())).limit(i % 10 + 1)
             return query.to_sql()
 
@@ -46,8 +46,9 @@ class TestConcurrentQueryBuilding:
 
     def test_concurrent_insert_queries(self):
         """Building INSERT queries concurrently should be thread-safe."""
+        schema = self.schema
         def build_query(i: int) -> tuple[str, dict]:
-            todos = table("todos")
+            todos = table("todos", schema)
             query = todos.insert(
                 id=str(uuid.uuid4()),
                 title=f"Todo {i}",
@@ -69,20 +70,22 @@ class TestConcurrentQueryBuilding:
 
     def test_concurrent_mixed_queries(self):
         """Building mixed query types concurrently should be thread-safe."""
+        schema = self.schema
+
         def build_select(i: int):
-            todos = table("todos")
+            todos = table("todos", schema)
             return ("select", todos.select().where(todos.completed == True).to_sql())
 
         def build_insert(i: int):
-            todos = table("todos")
+            todos = table("todos", schema)
             return ("insert", todos.insert(id=str(uuid.uuid4()), title=f"Todo {i}").to_sql())
 
         def build_update(i: int):
-            todos = table("todos")
+            todos = table("todos", schema)
             return ("update", todos.update(completed=True).where(todos.id == str(uuid.uuid4())).to_sql())
 
         def build_delete(i: int):
-            todos = table("todos")
+            todos = table("todos", schema)
             return ("delete", todos.delete().where(todos.id == str(uuid.uuid4())).to_sql())
 
         results = {"select": [], "insert": [], "update": [], "delete": []}
@@ -112,16 +115,16 @@ class TestAsyncQueryExecution:
     @pytest.fixture(autouse=True)
     def setup_schema(self):
         """Set up schema before each test."""
-        schema = simple_todos_schema()
-        set_default_schema(schema)
+        self.schema = simple_todos_schema()
 
     @pytest.mark.asyncio
     async def test_concurrent_async_query_building(self):
         """Building queries in async tasks should work."""
+        schema = self.schema
         async def build_query(i: int) -> tuple[str, dict]:
             # Simulate some async work
             await asyncio.sleep(0.001)
-            todos = table("todos")
+            todos = table("todos", schema)
             query = todos.select().where(todos.id == str(uuid.uuid4()))
             return query.to_sql()
 
@@ -135,8 +138,9 @@ class TestAsyncQueryExecution:
     @pytest.mark.asyncio
     async def test_high_concurrency_async(self):
         """High concurrency async query building should work."""
+        schema = self.schema
         async def build_query(i: int) -> tuple[str, dict]:
-            todos = table("todos")
+            todos = table("todos", schema)
             query = (
                 todos
                 .select()
@@ -156,10 +160,11 @@ class TestAsyncQueryExecution:
     async def test_async_with_semaphore(self):
         """Query building with limited concurrency should work."""
         semaphore = asyncio.Semaphore(50)  # Limit to 50 concurrent
+        schema = self.schema
 
         async def build_query_limited(i: int) -> tuple[str, dict]:
             async with semaphore:
-                todos = table("todos")
+                todos = table("todos", schema)
                 query = todos.select().where(todos.title == f"Todo {i}")
                 return query.to_sql()
 
@@ -176,15 +181,15 @@ class TestParameterUniqueness:
     @pytest.fixture(autouse=True)
     def setup_schema(self):
         """Set up schema before each test."""
-        schema = simple_todos_schema()
-        set_default_schema(schema)
+        self.schema = simple_todos_schema()
 
     def test_unique_parameter_names_concurrent(self):
         """Concurrent query building should generate unique param names."""
         param_names = []
 
+        schema = self.schema
         def build_and_collect(i: int):
-            todos = table("todos")
+            todos = table("todos", schema)
             # Use multiple conditions to generate multiple params
             query = todos.select().where(
                 (todos.title == f"title_{i}") &

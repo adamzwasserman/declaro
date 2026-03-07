@@ -9,7 +9,7 @@ import pytest
 import time
 import uuid
 
-from declaro_persistum.query.table import table, set_default_schema
+from declaro_persistum.query.table import table
 
 from tests.bdd.factories.schema_factory import simple_todos_schema, complex_ecommerce_schema
 from tests.bdd.factories.data_factory import TodoFactory
@@ -23,8 +23,7 @@ class TestQueryBuildingPerformance:
     def setup_schema(self):
         """Set up schema before each test."""
         schema = simple_todos_schema()
-        set_default_schema(schema)
-        self.todos = table("todos")
+        self.todos = table("todos", schema)
 
     def test_build_1000_select_queries(self):
         """Building 1000 SELECT queries should complete in reasonable time."""
@@ -88,10 +87,9 @@ class TestComplexQueryPerformance:
     def setup_schema(self):
         """Set up complex schema before each test."""
         schema = complex_ecommerce_schema()
-        set_default_schema(schema)
-        self.users = table("users")
-        self.orders = table("orders")
-        self.order_items = table("order_items")
+        self.users = table("users", schema)
+        self.orders = table("orders", schema)
+        self.order_items = table("order_items", schema)
 
     def test_build_queries_with_joins(self):
         """Building queries with JOINs should be performant."""
@@ -158,8 +156,7 @@ class TestLargeParameterSets:
     def setup_schema(self):
         """Set up schema before each test."""
         schema = simple_todos_schema()
-        set_default_schema(schema)
-        self.todos = table("todos")
+        self.todos = table("todos", schema)
 
     def test_in_clause_with_1000_values(self):
         """IN clause with 1000 values should work."""
@@ -208,13 +205,11 @@ class TestSchemaScaling:
                 }
             }
 
-        set_default_schema(large_schema)
-
         start = time.perf_counter()
 
         # Access each table and build a query
         for i in range(100):
-            t = table(f"table_{i}")
+            t = table(f"table_{i}", large_schema)
             query = t.select().where(t.id == str(uuid.uuid4()))
             sql, params = query.to_sql()
 

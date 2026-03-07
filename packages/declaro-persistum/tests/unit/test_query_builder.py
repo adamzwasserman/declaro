@@ -11,9 +11,6 @@ from typing import Any
 from declaro_persistum.types import Schema
 from declaro_persistum.query import (
     table,
-    load_default_schema,
-    set_default_schema,
-    get_default_schema,
     TableProxy,
     ColumnProxy,
     Condition,
@@ -86,13 +83,6 @@ class TestTableProxy:
         with pytest.raises(ValueError, match="Table 'unknown' not found"):
             table("unknown", schema=users_schema)
 
-    def test_table_requires_schema(self):
-        """table() raises ValueError when no schema is loaded."""
-        # Clear any default schema
-        set_default_schema(None)  # type: ignore
-        with pytest.raises(ValueError, match="No schema loaded"):
-            table("users")
-
     def test_column_access_valid(self, users_schema: Schema):
         """TableProxy allows access to valid columns."""
         users = table("users", schema=users_schema)
@@ -107,13 +97,6 @@ class TestTableProxy:
         with pytest.raises(AttributeError, match="has no column 'invalid'"):
             _ = users.invalid
 
-    def test_default_schema(self, users_schema: Schema):
-        """set_default_schema allows table() without explicit schema."""
-        set_default_schema(users_schema)
-        users = table("users")
-        assert users._table_name == "users"
-        # Clean up
-        set_default_schema(None)  # type: ignore
 
 
 # ColumnProxy tests

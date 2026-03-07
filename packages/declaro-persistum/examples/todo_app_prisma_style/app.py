@@ -35,18 +35,20 @@ from db import (
 )
 
 # Import Prisma-style query API
-from declaro_persistum.query.table import table, set_default_schema
+from declaro_persistum.query.table import table
 from declaro_persistum.loader import load_schema
 
 SCHEMA_DIR = Path(__file__).parent / "schema"
+
+_schema = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan - initialize DB and schema on startup."""
+    global _schema
     await init_schema(get_database())
-    schema = load_schema(str(SCHEMA_DIR))
-    set_default_schema(schema)
+    _schema = load_schema(str(SCHEMA_DIR))
     yield
 
 
@@ -55,7 +57,7 @@ templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
 
 def get_todos_table():
-    return table("todos")
+    return table("todos", schema=_schema)
 
 
 # =============================================================================
