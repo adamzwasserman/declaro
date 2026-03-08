@@ -85,7 +85,15 @@ def generate_create_table_sql(
 
         # DEFAULT
         if "default" in col_def:
-            parts.append(f"DEFAULT {col_def['default']}")
+            default_val = col_def["default"]
+            if default_val is None:
+                parts.append("DEFAULT NULL")
+            elif isinstance(default_val, str) and default_val.startswith("("):
+                # SQLite strips one layer of outer parens from expression defaults
+                # in PRAGMA table_info. Double-wrap so the round-trip preserves them.
+                parts.append(f"DEFAULT ({default_val})")
+            else:
+                parts.append(f"DEFAULT {default_val}")
 
         # CHECK
         if "check" in col_def:

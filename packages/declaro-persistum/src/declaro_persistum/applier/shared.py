@@ -65,7 +65,15 @@ def column_definition(name: str, col: Column) -> str:
         parts.append("UNIQUE")
 
     if "default" in col:
-        parts.append(f"DEFAULT {col['default']}")
+        default_val = col["default"]
+        if default_val is None:
+            parts.append("DEFAULT NULL")
+        elif isinstance(default_val, str) and default_val.startswith("("):
+            # SQLite strips one layer of outer parens from expression defaults
+            # in PRAGMA table_info. Double-wrap so the round-trip preserves them.
+            parts.append(f"DEFAULT ({default_val})")
+        else:
+            parts.append(f"DEFAULT {default_val}")
 
     if "check" in col:
         parts.append(f"CHECK ({col['check']})")
