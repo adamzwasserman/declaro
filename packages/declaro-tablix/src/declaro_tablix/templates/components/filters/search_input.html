@@ -3,24 +3,46 @@
 
   Renders a text search input with icon and debounce support.
 
+  React structure (for parity):
+  <div id="search-input-wrapper">
+    <label id="search-label">Security name, symbol, or code</label>
+    <svg id="search-icon">...</svg>
+    <input id="search-input" />
+  </div>
+
   Context (inherited from filter_layout.html):
     - control: FilterControlConfig
     - control_value: current value or None
 #}
 
-{# Use input_id_override if provided, otherwise default to filter-{id} #}
+{# Use ID overrides if provided, otherwise default patterns #}
 {% set input_id = control.input_id_override if control.input_id_override else 'filter-' ~ control.id %}
+{% set label_id = control.label_id_override if control.label_id_override else none %}
+{% set icon_id = control.icon_id_override if control.icon_id_override else none %}
+{% set wrapper_id = control.wrapper_id_override if control.wrapper_id_override else none %}
 {% set debounce = control.debounce_ms or 300 %}
 
-<div class="filter-search-input{% if control.css_class %} {{ control.css_class }}{% endif %}"
+<div {% if wrapper_id %}id="{{ wrapper_id }}"{% endif %}
+     class="filter-search-input{% if control.css_class %} {{ control.css_class }}{% endif %}"
      {% if control.width %}style="width: {{ control.width }};"{% endif %}>
 
   {% if control.label %}
-  <label for="{{ input_id }}" class="filter-label">{{ control.label }}</label>
+  <label {% if label_id %}id="{{ label_id }}"{% endif %}
+         for="{{ input_id }}"
+         class="filter-label">{{ control.label }}</label>
   {% endif %}
 
   <div class="filter-search-wrapper">
-    <svg class="filter-search-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <svg {% if icon_id %}id="{{ icon_id }}"{% endif %}
+         class="filter-search-icon"
+         xmlns="http://www.w3.org/2000/svg"
+         viewBox="0 0 24 24"
+         fill="none"
+         stroke="currentColor"
+         stroke-width="2"
+         stroke-linecap="round"
+         stroke-linejoin="round"
+         aria-hidden="true">
       <circle cx="11" cy="11" r="8"></circle>
       <path d="m21 21-4.3-4.3"></path>
     </svg>

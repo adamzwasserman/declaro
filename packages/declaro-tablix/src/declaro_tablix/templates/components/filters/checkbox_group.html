@@ -13,14 +13,15 @@
 {% set group_id = control.input_id_override if control.input_id_override else 'filter-' ~ control.id %}
 {% set selected_values = control_value if control_value is iterable and control_value is not string else [] %}
 
-<fieldset class="filter-checkbox-group{% if control.css_class %} {{ control.css_class }}{% endif %}"
-          {% if control.width %}style="width: {{ control.width }};"{% endif %}>
-
+{# Outer wrapper div with filter ID (for React parity: id="due-diligence-filter") #}
+<div id="{{ group_id }}-filter" class="checkbox-filter" data-filter="true" data-filter-target="#{{ control.hx_target|replace('#', '') if control.hx_target else 'table' }}">
   {% if control.label %}
-  <legend class="filter-label">{{ control.label }}</legend>
+  {# Label with ID (for React parity: id="due-diligence-label") #}
+  <label id="{{ control.label_id_override if control.label_id_override else group_id ~ '-label' }}" class="checkbox-filter__label filter-label">{{ control.label }}</label>
   {% endif %}
 
-  <div class="filter-checkbox-options">
+  {# Inner checkboxes container (for React parity: id="due-diligence-checkboxes") #}
+  <div id="{{ group_id }}-checkboxes" class="checkbox-filter__options filter-checkbox-options" data-filter-field="{{ control.column_id }}">
     {% for option in control_options %}
       {% set opt_value = option.value if option.value is defined else option %}
       {% set opt_label = option.label if option.label is defined else option %}
@@ -31,7 +32,8 @@
       {# Use option's id_override if provided, otherwise default to group_id-index #}
       {% set checkbox_id = opt_id_override if opt_id_override else (group_id ~ '-' ~ loop.index) %}
 
-      <label class="filter-checkbox-label{% if is_checked %} selected{% endif %}{% if opt_disabled %} disabled{% endif %}"
+      {# Label with ID (for React parity: id="due-diligence-all-label") #}
+      <label id="{{ checkbox_id }}-label" class="filter-checkbox-label{% if is_checked %} selected{% endif %}{% if opt_disabled %} disabled{% endif %}"
              for="{{ checkbox_id }}">
         <input type="checkbox"
                id="{{ checkbox_id }}"
@@ -61,4 +63,4 @@
       </label>
     {% endfor %}
   </div>
-</fieldset>
+</div>

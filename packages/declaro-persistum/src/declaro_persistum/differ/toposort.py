@@ -92,74 +92,93 @@ def build_dependency_graph(operations: list[Operation]) -> dict[int, list[int]]:
     return dependencies
 
 
-def _get_operation_dependencies(
+def _handle_drop_table(
+    op: Operation,
     op_idx: int,
+    all_operations: list[Operation],
+    dropped_fks: list[tuple[int, str, str]],
+) -> list[int]:
+    """Handle DROP TABLE dependencies."""
+    deps: list[int] = []
+    table_name = op["table"]
+    # DROP TABLE depends on all DROP FOREIGN KEY that reference this table
+    for fk_idx, _fk_table, _ in dropped_fks:
+        fk_op = all_operations[fk_idx]
+        ref = fk_op["details"].get("references", "")
+        if ref.startswith(f"{table_name}."):
+            deps.append(fk_idx)
+    # DROP TABLE depends on DROP VIEW for views that depend on this table
+    for view_idx, view_op in enumerate(all_operations):
+        if view_op["op"] == "drop_view":
+            view_deps = view_op["details"].get("depends_on", [])
+            if table_name in view_deps:
+                deps.append(view_idx)
+    return deps
+
+
+def _handle_drop_column(
     op: Operation,
     all_operations: list[Operation],
-    created_tables: dict[str, int],
-    created_views: dict[str, int],
     dropped_fks: list[tuple[int, str, str]],
     dropped_indexes: list[tuple[int, str, str]],
 ) -> list[int]:
-    """Get dependencies for a single operation."""
+    """Handle DROP COLUMN dependencies."""
     deps: list[int] = []
-    op_type = op["op"]
     table_name = op["table"]
+    col_name = op["details"].get("column", "")
+    for fk_idx, fk_table, fk_col in dropped_fks:
+        if fk_table == table_name and fk_col == col_name:
+            deps.append(fk_idx)
+    for idx_idx, idx_table, _ in dropped_indexes:
+        if idx_table == table_name:
+            idx_op = all_operations[idx_idx]
+            idx_def = idx_op["details"].get("definition", {})
+            if col_name in idx_def.get("columns", []):
+                deps.append(idx_idx)
+    return deps
 
-    if op_type == "drop_table":
-        # DROP TABLE depends on all DROP FOREIGN KEY that reference this table
-        for fk_idx, _fk_table, _ in dropped_fks:
-            # Check if the FK references this table
-            fk_op = all_operations[fk_idx]
-            ref = fk_op["details"].get("references", "")
-            if ref.startswith(f"{table_name}."):
-                deps.append(fk_idx)
 
-        # DROP TABLE depends on DROP VIEW for views that depend on this table
-        for view_idx, view_op in enumerate(all_operations):
-            if view_op["op"] == "drop_view":
-                view_deps = view_op["details"].get("depends_on", [])
-                if table_name in view_deps:
-                    deps.append(view_idx)
-
-    elif op_type == "drop_column":
-        # DROP COLUMN depends on DROP FK if column is referenced
-        col_name = op["details"].get("column", "")
-        for fk_idx, fk_table, fk_col in dropped_fks:
-            if fk_table == table_name and fk_col == col_name:
-                deps.append(fk_idx)
-
-        # DROP COLUMN depends on DROP INDEX if column is in index
-        for idx_idx, idx_table, _ in dropped_indexes:
-            if idx_table == table_name:
-                idx_op = all_operations[idx_idx]
-                idx_def = idx_op["details"].get("definition", {})
-                if col_name in idx_def.get("columns", []):
-                    deps.append(idx_idx)
-
-    elif op_type == "create_table":
-        # CREATE TABLE depends on CREATE of referenced tables
-        columns = op["details"].get("columns", {})
-        for col_def in columns.values():
-            ref = col_def.get("references", "")
-            if ref:
-                ref_table = ref.split(".")[0]
-                if ref_table in created_tables and ref_table != table_name:
-                    deps.append(created_tables[ref_table])
-
-    elif op_type == "add_column":
-        # ADD COLUMN depends on CREATE TABLE
-        if table_name in created_tables:
-            deps.append(created_tables[table_name])
-
-    elif op_type == "add_foreign_key":
-        # ADD FK depends on CREATE TABLE for referenced table
-        ref = op["details"].get("references", "")
+def _handle_create_table(
+    op: Operation,
+    created_tables: dict[str, int],
+) -> list[int]:
+    """Handle CREATE TABLE dependencies."""
+    deps: list[int] = []
+    table_name = op["table"]
+    columns = op["details"].get("columns", {})
+    for col_def in columns.values():
+        ref = col_def.get("references", "")
         if ref:
             ref_table = ref.split(".")[0]
-            if ref_table in created_tables:
+            if ref_table in created_tables and ref_table != table_name:
                 deps.append(created_tables[ref_table])
+    return deps
 
+
+def _handle_add_column(
+    op: Operation,
+    created_tables: dict[str, int],
+) -> list[int]:
+    """Handle ADD COLUMN dependencies."""
+    deps: list[int] = []
+    table_name = op["table"]
+    if table_name in created_tables:
+        deps.append(created_tables[table_name])
+    return deps
+
+
+def _handle_add_foreign_key(
+    op: Operation,
+    all_operations: list[Operation],
+    created_tables: dict[str, int],
+) -> list[int]:
+    """Handle ADD FOREIGN KEY dependencies."""
+    deps: list[int] = []
+    ref = op["details"].get("references", "")
+    if ref:
+        ref_table = ref.split(".")[0]
+        if ref_table in created_tables:
+            deps.append(created_tables[ref_table])
         # Also depends on ADD COLUMN for the referenced column
         for j, other_op in enumerate(all_operations):
             if other_op["op"] == "add_column":
@@ -171,56 +190,120 @@ def _get_operation_dependencies(
                         and other_op["details"].get("column") == ref_col
                     ):
                         deps.append(j)
-
-    elif op_type == "add_index":
-        # ADD INDEX depends on ADD COLUMN for indexed columns
-        if table_name in created_tables:
-            deps.append(created_tables[table_name])
-
-        idx_def = op["details"].get("definition", {})
-        idx_cols = idx_def.get("columns", [])
-
-        for j, other_op in enumerate(all_operations):
-            if (
-                other_op["op"] == "add_column"
-                and other_op["table"] == table_name
-                and other_op["details"].get("column") in idx_cols
-            ):
-                deps.append(j)
-
-    elif op_type == "alter_column":
-        # ALTER COLUMN may depend on DROP INDEX if type changes
-        changes = op["details"].get("changes", {})
-        if "type" in changes:
-            col_name = op["details"].get("column", "")
-            for idx_idx, idx_table, _ in dropped_indexes:
-                if idx_table == table_name:
-                    idx_op = all_operations[idx_idx]
-                    idx_def = idx_op["details"].get("definition", {})
-                    if col_name in idx_def.get("columns", []):
-                        deps.append(idx_idx)
-
-    elif op_type == "create_view":
-        # CREATE VIEW depends on CREATE TABLE/VIEW for referenced objects
-        view_deps = op["details"].get("depends_on", [])
-        for dep_name in view_deps:
-            # Check if it's a table being created
-            if dep_name in created_tables:
-                deps.append(created_tables[dep_name])
-            # Check if it's another view being created
-            if dep_name in created_views:
-                deps.append(created_views[dep_name])
-
-    elif op_type == "drop_view":
-        # DROP VIEW depends on DROP VIEW for views that depend on this view
-        view_name = op["details"]["name"]
-        for other_idx, other_op in enumerate(all_operations):
-            if other_op["op"] == "drop_view" and other_idx != op_idx:
-                other_deps = other_op["details"].get("depends_on", [])
-                if view_name in other_deps:
-                    deps.append(other_idx)
-
     return deps
+
+
+def _handle_add_index(
+    op: Operation,
+    all_operations: list[Operation],
+    created_tables: dict[str, int],
+) -> list[int]:
+    """Handle ADD INDEX dependencies."""
+    deps: list[int] = []
+    table_name = op["table"]
+    if table_name in created_tables:
+        deps.append(created_tables[table_name])
+    idx_def = op["details"].get("definition", {})
+    idx_cols = idx_def.get("columns", [])
+    for j, other_op in enumerate(all_operations):
+        if (
+            other_op["op"] == "add_column"
+            and other_op["table"] == table_name
+            and other_op["details"].get("column") in idx_cols
+        ):
+            deps.append(j)
+    return deps
+
+
+def _handle_alter_column(
+    op: Operation,
+    all_operations: list[Operation],
+    dropped_indexes: list[tuple[int, str, str]],
+) -> list[int]:
+    """Handle ALTER COLUMN dependencies."""
+    deps: list[int] = []
+    table_name = op["table"]
+    changes = op["details"].get("changes", {})
+    if "type" in changes:
+        col_name = op["details"].get("column", "")
+        for idx_idx, idx_table, _ in dropped_indexes:
+            if idx_table == table_name:
+                idx_op = all_operations[idx_idx]
+                idx_def = idx_op["details"].get("definition", {})
+                if col_name in idx_def.get("columns", []):
+                    deps.append(idx_idx)
+    return deps
+
+
+def _handle_create_view(
+    op: Operation,
+    created_tables: dict[str, int],
+    created_views: dict[str, int],
+) -> list[int]:
+    """Handle CREATE VIEW dependencies."""
+    deps: list[int] = []
+    view_deps = op["details"].get("depends_on", [])
+    for dep_name in view_deps:
+        if dep_name in created_tables:
+            deps.append(created_tables[dep_name])
+        if dep_name in created_views:
+            deps.append(created_views[dep_name])
+    return deps
+
+
+def _handle_drop_view(
+    op: Operation,
+    op_idx: int,
+    all_operations: list[Operation],
+) -> list[int]:
+    """Handle DROP VIEW dependencies."""
+    deps: list[int] = []
+    view_name = op["details"]["name"]
+    for other_idx, other_op in enumerate(all_operations):
+        if other_op["op"] == "drop_view" and other_idx != op_idx:
+            other_deps = other_op["details"].get("depends_on", [])
+            if view_name in other_deps:
+                deps.append(other_idx)
+    return deps
+
+
+# Dict-based dispatch table for operation types
+OP_DEPENDENCY_HANDLERS: dict = {
+    "drop_table": lambda op, op_idx, all_ops, **kw: _handle_drop_table(op, op_idx, all_ops, kw["dropped_fks"]),
+    "drop_column": lambda op, op_idx, all_ops, **kw: _handle_drop_column(op, all_ops, kw["dropped_fks"], kw["dropped_indexes"]),
+    "create_table": lambda op, op_idx, all_ops, **kw: _handle_create_table(op, kw["created_tables"]),
+    "add_column": lambda op, op_idx, all_ops, **kw: _handle_add_column(op, kw["created_tables"]),
+    "add_foreign_key": lambda op, op_idx, all_ops, **kw: _handle_add_foreign_key(op, all_ops, kw["created_tables"]),
+    "add_index": lambda op, op_idx, all_ops, **kw: _handle_add_index(op, all_ops, kw["created_tables"]),
+    "alter_column": lambda op, op_idx, all_ops, **kw: _handle_alter_column(op, all_ops, kw["dropped_indexes"]),
+    "create_view": lambda op, op_idx, all_ops, **kw: _handle_create_view(op, kw["created_tables"], kw["created_views"]),
+    "drop_view": lambda op, op_idx, all_ops, **kw: _handle_drop_view(op, op_idx, all_ops),
+}
+
+
+def _get_operation_dependencies(
+    op_idx: int,
+    op: Operation,
+    all_operations: list[Operation],
+    created_tables: dict[str, int],
+    created_views: dict[str, int],
+    dropped_fks: list[tuple[int, str, str]],
+    dropped_indexes: list[tuple[int, str, str]],
+) -> list[int]:
+    """Get dependencies for a single operation using dict-based dispatch."""
+    op_type = op["op"]
+    handler = OP_DEPENDENCY_HANDLERS.get(op_type)
+    if handler:
+        return handler(
+            op,
+            op_idx,
+            all_operations,
+            created_tables=created_tables,
+            created_views=created_views,
+            dropped_fks=dropped_fks,
+            dropped_indexes=dropped_indexes,
+        )
+    return []
 
 
 def topological_sort(

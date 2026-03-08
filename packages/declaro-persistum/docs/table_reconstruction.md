@@ -216,6 +216,7 @@ declaro_persistum/
 │   ├── table_reconstruction.py    # Legacy async-only implementation
 │   └── reconstruction.py           # New shared implementation (async + sync)
 ├── applier/
+│   ├── shared.py                   # Shared pure SQL generation (sqlite + turso)
 │   ├── sqlite.py                   # Integration with SQLite applier (async)
 │   └── turso.py                    # Integration with Turso applier (sync)
 └── tests/

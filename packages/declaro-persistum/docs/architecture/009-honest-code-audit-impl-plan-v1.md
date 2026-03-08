@@ -1,8 +1,8 @@
 # Implementation Plan: Strangler Pattern Refactoring for Honest Code Compliance
 
 ---
-**STATUS**: PLAN
-**VERSION**: 1.0
+**STATUS**: PARTIALLY COMPLETE
+**VERSION**: 1.1
 **DATE**: 2026-03-06
 **PARENT**: 008-honest-code-audit-v1.md
 **APPROACH**: Strangler Pattern -- one extraction per sprint, class becomes thin shell, thin shell eventually removed
@@ -20,7 +20,7 @@ Every step below preserves backward compatibility. The Protocol contracts do not
 
 These are mechanical transformations with zero behavior change. Each can be done in a single commit.
 
-### 2.1 Replace if/elif Factory Functions with Dict Dispatch
+### 2.1 Replace if/elif Factory Functions with Dict Dispatch ✅ COMPLETE
 
 **Effort**: 30 minutes per factory. No behavior change.
 
@@ -68,14 +68,14 @@ def create_applier(dialect: str) -> MigrationApplier:
 
 **Test**: Run existing test suite. All tests pass with zero changes.
 
-### 2.2 Extract `_normalize_fk_action()` to Shared Module
+### 2.2 Extract `_normalize_fk_action()` to Shared Module ✅ COMPLETE
 
 **Effort**: 15 minutes. The function is copy-pasted identically in `inspector/sqlite.py`, `inspector/postgresql.py`, `inspector/turso.py`.
 
 **Action**:
-1. Create `inspector/common.py` with the shared function
-2. Import from common in all three inspector files
-3. Delete the duplicated definitions
+1. Created `inspector/shared.py` (not `common.py` as originally proposed) with the shared function plus additional shared pure functions
+2. Import from shared in all three inspector files
+3. Deleted the duplicated definitions
 
 **Risk**: None.
 
@@ -108,11 +108,13 @@ def _detect_handler(connection: Any) -> Callable:
 
 This is the highest-impact refactoring. Goal: extract all pure SQL generation functions from the three applier classes into a shared module, leaving the classes as thin I/O shells.
 
-### 3.1 Create `applier/sql_generators.py` -- Shared Pure Functions
+### 3.1 Create `applier/shared.py` -- Shared Pure Functions ✅ COMPLETE
+
+> **Note**: Created as `applier/shared.py` (not `sql_generators.py` as originally proposed).
 
 **Effort**: 2-3 days.
 
-Extract the following pure functions from SQLiteApplier (they are identical or near-identical across all three applier classes):
+Extracted the following pure functions from SQLiteApplier (they are identical or near-identical across sqlite and turso applier classes):
 
 | Method on Class | Pure Function Signature | Dialect Variations |
 |---|---|---|
@@ -190,11 +192,13 @@ class SQLiteApplier:
 
 **Rollback**: If any test fails, revert the extraction for that specific function. The Strangler Pattern allows partial extraction.
 
-### 3.2 Create `inspector/introspection.py` -- Shared Introspection Logic
+### 3.2 Create `inspector/shared.py` -- Shared Introspection Logic ✅ COMPLETE
+
+> **Note**: Created as `inspector/shared.py` (not `introspection.py` as originally proposed).
 
 **Effort**: 1-2 days.
 
-Extract shared logic between SQLiteInspector and TursoInspector:
+Extracted shared logic between SQLiteInspector and TursoInspector:
 
 - `_normalize_type()` (100% identical)
 - `_introspect_table()` (~90% identical)
@@ -274,11 +278,13 @@ def execute_plan_sync(
 
 ## 4. Phase 3: Pool Refactoring (Week 7-8)
 
-### 4.1 Replace ABC Hierarchy with Protocol + Composition
+### 4.1 Replace ABC Hierarchy with Protocol + Composition — PARTIAL
 
 **Effort**: 3-4 days.
 
-Replace `ConnectionPool(ABC)` with a `ConnectionPool` Protocol and separate factory functions:
+> **UPDATE**: ABC removed from `BasePool` — it is now a plain class with `NotImplementedError` defaults. The full Protocol + composition refactoring proposed below was not done; the simpler approach of removing ABC was chosen instead.
+
+Original proposal: Replace `ConnectionPool(ABC)` with a `ConnectionPool` Protocol and separate factory functions:
 
 ```python
 # pool.py
@@ -313,11 +319,11 @@ async def create_pool(
 
 ## 5. Phase 4: Module-Level State Cleanup (Week 9-10)
 
-### 5.1 Replace Global Schema State with Explicit Parameters
+### 5.1 Replace Global Schema State with Explicit Parameters ✅ COMPLETE
 
 **Effort**: 1 day.
 
-In `query/table.py`, deprecate `set_default_schema()` and `load_default_schema()`. Make `table()` require explicit schema parameter:
+In `query/table.py`, removed `set_default_schema()` and `load_default_schema()`. Made `table()` require explicit schema parameter:
 
 ```python
 # Before

@@ -579,6 +579,90 @@
 }
 
 /* ============================================
+   Tab Filter
+   ============================================ */
+
+.tab-filter {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-bottom: var(--filter-border-width) solid var(--filter-border);
+}
+
+.tab-filter__radio {
+  /* Screen reader only - hidden but accessible */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.tab-filter__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: var(--filter-padding-sm) var(--filter-padding);
+  font-size: var(--filter-input-size);
+  color: var(--filter-placeholder-color);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  cursor: pointer;
+  transition: all var(--filter-transition);
+  white-space: nowrap;
+}
+
+.tab-filter__tab:hover {
+  color: var(--filter-label-color);
+  background: var(--filter-bg-hover);
+}
+
+.tab-filter__tab--active {
+  color: var(--filter-primary);
+  border-bottom-color: var(--filter-primary);
+  font-weight: var(--filter-label-weight);
+}
+
+.tab-filter__tab--disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tab-filter__tab--disabled:hover {
+  background: transparent;
+  color: var(--filter-placeholder-color);
+}
+
+.tab-filter__label {
+  /* Label text */
+}
+
+.tab-filter__count {
+  font-size: var(--filter-label-size);
+  color: inherit;
+  opacity: 0.8;
+}
+
+/* Screen reader utility class */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ============================================
    Alpine.js support
    ============================================ */
 

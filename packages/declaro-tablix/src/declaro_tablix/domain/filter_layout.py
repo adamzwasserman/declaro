@@ -22,12 +22,24 @@ class FilterControlType(str, Enum):
     NUMBER_RANGE = "number_range"
     DATE_RANGE = "date_range"
     SINGLE_SELECT = "single_select"
+    TAB_FILTER = "tab_filter"  # Horizontal tabs with counts (e.g., "All (100) | To Review (33)")
     STATIC_TEXT = "static_text"
     STATIC_IMAGE = "static_image"
     TOTAL_ABSOLUTE = "total_absolute"
     TOTAL_VISIBLE = "total_visible"
     CALCULATED_FIELD = "calculated_field"
     ACTION_BUTTON = "action_button"  # Clear Search, Reset Filters, etc.
+
+
+class FilterPosition(str, Enum):
+    """Position in 3-column filter layout.
+
+    Controls horizontal alignment within the grid cell.
+    """
+
+    LEFT = "left"      # justify-content: flex-start
+    MIDDLE = "middle"  # justify-content: center
+    RIGHT = "right"    # justify-content: flex-end
 
 
 class FilterControlConfig(BaseModel):
@@ -43,8 +55,36 @@ class FilterControlConfig(BaseModel):
     placeholder: str | None = Field(None, description="Placeholder text for input controls")
 
     # Grid positioning
-    grid_column: str | None = Field(None, description="CSS grid-column value")
+    position: FilterPosition | None = Field(
+        None, description="Position in 3-column layout: left, middle, right"
+    )
+    grid_column: str | None = Field(None, description="CSS grid-column value (overrides position)")
     grid_row: str | None = Field(None, description="CSS grid-row value")
+
+    def get_cell_style(self) -> str:
+        """Generate flex styles for the grid cell based on position."""
+        if not self.position:
+            return ""
+
+        justify = {
+            FilterPosition.LEFT: "flex-start",
+            FilterPosition.MIDDLE: "center",
+            FilterPosition.RIGHT: "flex-end",
+        }.get(self.position, "flex-start")
+
+        return f"display: flex; flex-direction: row; align-items: flex-end; justify-content: {justify};"
+
+    def get_grid_column(self) -> str | None:
+        """Get grid-column value from explicit setting or position."""
+        if self.grid_column:
+            return self.grid_column
+        if self.position:
+            return {
+                FilterPosition.LEFT: "1",
+                FilterPosition.MIDDLE: "2",
+                FilterPosition.RIGHT: "3",
+            }.get(self.position)
+        return None
 
     # Options for select/checkbox controls
     options_source: str | None = Field(
@@ -102,6 +142,9 @@ class FilterControlConfig(BaseModel):
     label_id_override: str | None = Field(
         None, description="Override the label element ID"
     )
+    wrapper_id_override: str | None = Field(
+        None, description="Override the input wrapper div ID (e.g., 'search-input-wrapper')"
+    )
 
     # Action button fields
     action_type: str | None = Field(
@@ -115,6 +158,26 @@ class FilterControlConfig(BaseModel):
     )
     icon_svg: str | None = Field(
         None, description="SVG markup for the button icon"
+    )
+
+    # Dropdown-specific ID overrides for div-based dropdowns (React pattern)
+    container_id_override: str | None = Field(
+        None, description="Override for the dropdown container div ID (e.g., 'sector-filter')"
+    )
+    button_text_id_override: str | None = Field(
+        None, description="ID for the trigger button's text span (e.g., 'sector-button-text')"
+    )
+    button_icon_id_override: str | None = Field(
+        None, description="ID for the trigger button's chevron icon (e.g., 'sector-button-icon')"
+    )
+    dropdown_menu_id_override: str | None = Field(
+        None, description="ID for the dropdown menu container (e.g., 'sector-dropdown')"
+    )
+    options_container_id_override: str | None = Field(
+        None, description="ID for the options list container (e.g., 'sector-options-container')"
+    )
+    clear_button_id_override: str | None = Field(
+        None, description="ID for the dropdown's internal clear button (e.g., 'sector-clear-button')"
     )
 
     @field_validator("id")
@@ -132,6 +195,86 @@ class FilterControlConfig(BaseModel):
         return v.strip()
 
 
+class FilterControlGroup(BaseModel):
+    """Group multiple controls in a single grid cell.
+
+    Controls within a group flow horizontally (flex-direction: row).
+    """
+
+    id: str = Field(..., description="Unique identifier for the group")
+    controls: list[FilterControlConfig] = Field(
+        ..., description="Controls to render in this group"
+    )
+
+    # Grid positioning (same as FilterControlConfig)
+    position: FilterPosition | None = Field(
+        None, description="Position in 3-column layout: left, middle, right"
+    )
+    grid_column: str | None = Field(None, description="CSS grid-column value (overrides position)")
+    grid_row: str | None = Field(None, description="CSS grid-row value")
+
+    # Styling
+    css_class: str | None = Field(None, description="Additional CSS classes for the group container")
+    gap: str = Field("0.5rem", description="Gap between controls in the group")
+
+    # ID override
+    container_id_override: str | None = Field(
+        None, description="Override the default group container ID"
+    )
+
+    def get_cell_style(self) -> str:
+        """Generate flex styles for the grid cell based on position."""
+        styles = [f"gap: {self.gap}"]
+
+        if self.position:
+            justify = {
+                FilterPosition.LEFT: "flex-start",
+                FilterPosition.MIDDLE: "center",
+                FilterPosition.RIGHT: "flex-end",
+            }.get(self.position, "flex-start")
+            styles.extend([
+                "display: flex",
+                "flex-direction: row",
+                "align-items: flex-end",
+                f"justify-content: {justify}",
+            ])
+        else:
+            # Default flex row without justify
+            styles.extend([
+                "display: flex",
+                "flex-direction: row",
+                "align-items: flex-end",
+            ])
+
+        return "; ".join(styles) + ";"
+
+    def get_grid_column(self) -> str | None:
+        """Get grid-column value from explicit setting or position."""
+        if self.grid_column:
+            return self.grid_column
+        if self.position:
+            return {
+                FilterPosition.LEFT: "1",
+                FilterPosition.MIDDLE: "2",
+                FilterPosition.RIGHT: "3",
+            }.get(self.position)
+        return None
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, v: str) -> str:
+        if not v or len(v.strip()) == 0:
+            raise ValueError("Filter control group ID cannot be empty")
+        return v.strip()
+
+    @field_validator("controls")
+    @classmethod
+    def validate_controls(cls, v: list[FilterControlConfig]) -> list[FilterControlConfig]:
+        if not v:
+            raise ValueError("Filter control group must have at least one control")
+        return v
+
+
 class FilterLayoutConfig(BaseModel):
     """Configuration for a complete filter layout.
 
@@ -142,9 +285,9 @@ class FilterLayoutConfig(BaseModel):
     table_id: str = Field(..., description="Associated table identifier")
     name: str | None = Field(None, description="Human-readable name for the layout")
 
-    # CSS Grid configuration
+    # CSS Grid configuration (3-column layout: left, middle, right)
     grid_template_columns: str = Field(
-        "auto 1fr 1fr auto", description="CSS grid-template-columns value"
+        "1fr 1fr 1fr", description="CSS grid-template-columns value (default: 3 equal columns)"
     )
     grid_template_rows: str | None = Field(None, description="CSS grid-template-rows value")
     grid_gap: str = Field("1rem", description="CSS gap between grid items")
@@ -159,9 +302,9 @@ class FilterLayoutConfig(BaseModel):
     padding: str = Field("1rem", description="Container padding")
     border_radius: str | None = Field(None, description="Border radius")
 
-    # Filter controls
-    controls: list[FilterControlConfig] = Field(
-        default_factory=list, description="Filter controls in this layout"
+    # Filter controls (can be individual controls or groups)
+    controls: list[FilterControlConfig | FilterControlGroup] = Field(
+        default_factory=list, description="Filter controls and groups in this layout"
     )
 
     # Layout behavior
@@ -170,6 +313,12 @@ class FilterLayoutConfig(BaseModel):
     show_clear_all: bool = Field(True, description="Whether to show a clear all button")
     show_apply_button: bool = Field(
         False, description="Whether to show an explicit apply button"
+    )
+    use_form_wrapper: bool = Field(
+        True, description="Whether to wrap controls in a form element (set False for React parity)"
+    )
+    use_controls_wrapper: bool = Field(
+        True, description="Whether to wrap controls in a controls div (set False for React parity)"
     )
 
     # HTMX configuration for the entire layout

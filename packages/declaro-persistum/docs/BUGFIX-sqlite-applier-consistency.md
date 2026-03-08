@@ -227,7 +227,10 @@ async def test_add_foreign_key_uses_reconstruction():
 ## Related Files
 
 - `src/declaro_persistum/applier/sqlite.py`
+- `src/declaro_persistum/applier/shared.py` (shared SQL generation extracted post-bugfix)
 - `src/declaro_persistum/abstractions/table_reconstruction.py`
 - `docs/table_reconstruction.md`
 - `tests/unit/test_sqlite_applier.py`
 - `tests/bdd/features/table_reconstruction.feature`
+
+> **Note**: The applier code referenced in this document has since been refactored. Pure SQL generation methods (e.g. `_drop_table_sql`, `_column_definition`) were extracted from the class into `applier/shared.py` as standalone pure functions. The fixes described here are preserved in the shared module.

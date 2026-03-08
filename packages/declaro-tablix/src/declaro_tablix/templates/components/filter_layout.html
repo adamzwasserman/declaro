@@ -32,6 +32,7 @@
   </button>
   {% endif %}
 
+  {% if layout.use_form_wrapper %}
   <form id="{{ form_id }}"
         class="filter-form"
         {% if layout.form_hx_get %}
@@ -39,35 +40,99 @@
         hx-trigger="{{ layout.form_hx_trigger }}"
         {% if layout.form_hx_target %}hx-target="{{ layout.form_hx_target }}"{% endif %}
         {% endif %}>
+  {% endif %}
 
+    {% if layout.use_controls_wrapper %}
     <div id="{{ controls_id }}"
          class="filter-controls"
          {% if layout.collapsible and layout.default_collapsed %}hidden{% endif %}>
+    {% endif %}
 
-      {% for control in layout.controls %}
-        {% set control_value = state.get_value(control.id) if state else none %}
-        {% set control_options = options.get(control.options_source, []) if options and control.options_source else control.options_static or [] %}
+      {% for item in layout.controls %}
+        {# Check if this is a group (has controls list) or individual control (has control_type) #}
+        {% if item.controls is defined %}
+          {# This is a FilterControlGroup #}
+          {% set group = item %}
+          {% set grid_col = group.get_grid_column() %}
+          {% set cell_style = group.get_cell_style() %}
+          {% set group_id = group.container_id_override if group.container_id_override else "filter-group-" ~ group.id %}
+          <div id="{{ group_id }}"
+               class="filter-control-group{% if group.css_class %} {{ group.css_class }}{% endif %}"
+               {% if grid_col or cell_style or group.grid_row %}style="{% if grid_col %}grid-column: {{ grid_col }};{% endif %}{% if group.grid_row %} grid-row: {{ group.grid_row }};{% endif %}{% if cell_style %} {{ cell_style }}{% endif %}"{% endif %}>
+            {% for control in group.controls %}
+              {% set control_value = state.get_value(control.id) if state else none %}
+              {% set control_options = options.get(control.options_source, []) if options and control.options_source else control.options_static or [] %}
+              {% if control.control_type.value == 'search_input' %}
+                {% include 'components/filters/search_input.html' %}
+              {% elif control.control_type.value == 'checkbox_group' %}
+                {% include 'components/filters/checkbox_group.html' %}
+              {% elif control.control_type.value == 'multi_select' %}
+                {% include 'components/filters/multi_select.html' %}
+              {% elif control.control_type.value == 'number_range' %}
+                {% include 'components/filters/number_range.html' %}
+              {% elif control.control_type.value == 'date_range' %}
+                {% include 'components/filters/date_range.html' %}
+              {% elif control.control_type.value == 'single_select' %}
+                {% include 'components/filters/single_select.html' %}
+              {% elif control.control_type.value == 'action_button' %}
+                {% include 'components/filters/action_button.html' %}
+              {% elif control.control_type.value == 'tab_filter' %}
+                {% include 'components/filters/tab_filter.html' %}
+              {% endif %}
+            {% endfor %}
+          </div>
+        {% else %}
+          {# This is a FilterControlConfig #}
+          {% set control = item %}
+          {% set control_value = state.get_value(control.id) if state else none %}
+          {% set control_options = options.get(control.options_source, []) if options and control.options_source else control.options_static or [] %}
 
-        <div class="filter-control filter-control-{{ control.control_type.value }}"
-             {% if control.grid_column %}style="grid-column: {{ control.grid_column }};{% if control.grid_row %} grid-row: {{ control.grid_row }};{% endif %}"{% endif %}>
+          {# When no wrappers, render control directly without filter-control div wrapper #}
+          {% if not layout.use_controls_wrapper %}
+            {% if control.control_type.value == 'search_input' %}
+              {% include 'components/filters/search_input.html' %}
+            {% elif control.control_type.value == 'checkbox_group' %}
+              {% include 'components/filters/checkbox_group.html' %}
+            {% elif control.control_type.value == 'multi_select' %}
+              {% include 'components/filters/multi_select.html' %}
+            {% elif control.control_type.value == 'number_range' %}
+              {% include 'components/filters/number_range.html' %}
+            {% elif control.control_type.value == 'date_range' %}
+              {% include 'components/filters/date_range.html' %}
+            {% elif control.control_type.value == 'single_select' %}
+              {% include 'components/filters/single_select.html' %}
+            {% elif control.control_type.value == 'action_button' %}
+              {% include 'components/filters/action_button.html' %}
+            {% elif control.control_type.value == 'tab_filter' %}
+              {% include 'components/filters/tab_filter.html' %}
+            {% endif %}
+          {% else %}
+          {% set grid_col = control.get_grid_column() %}
+          {% set cell_style = control.get_cell_style() %}
+          <div class="filter-control filter-control-{{ control.control_type.value }}"
+               {% if grid_col or cell_style or control.grid_row %}style="{% if grid_col %}grid-column: {{ grid_col }};{% endif %}{% if control.grid_row %} grid-row: {{ control.grid_row }};{% endif %}{% if cell_style %} {{ cell_style }}{% endif %}"{% endif %}>
 
-          {% if control.control_type.value == 'search_input' %}
-            {% include 'components/filters/search_input.html' %}
-          {% elif control.control_type.value == 'checkbox_group' %}
-            {% include 'components/filters/checkbox_group.html' %}
-          {% elif control.control_type.value == 'multi_select' %}
-            {% include 'components/filters/multi_select.html' %}
-          {% elif control.control_type.value == 'number_range' %}
-            {% include 'components/filters/number_range.html' %}
-          {% elif control.control_type.value == 'date_range' %}
-            {% include 'components/filters/date_range.html' %}
-          {% elif control.control_type.value == 'single_select' %}
-            {% include 'components/filters/single_select.html' %}
-          {% elif control.control_type.value == 'action_button' %}
-            {% include 'components/filters/action_button.html' %}
+            {% if control.control_type.value == 'search_input' %}
+              {% include 'components/filters/search_input.html' %}
+            {% elif control.control_type.value == 'checkbox_group' %}
+              {% include 'components/filters/checkbox_group.html' %}
+            {% elif control.control_type.value == 'multi_select' %}
+              {% include 'components/filters/multi_select.html' %}
+            {% elif control.control_type.value == 'number_range' %}
+              {% include 'components/filters/number_range.html' %}
+            {% elif control.control_type.value == 'date_range' %}
+              {% include 'components/filters/date_range.html' %}
+            {% elif control.control_type.value == 'single_select' %}
+              {% include 'components/filters/single_select.html' %}
+            {% elif control.control_type.value == 'action_button' %}
+              {% include 'components/filters/action_button.html' %}
+            {% elif control.control_type.value == 'tab_filter' %}
+              {% include 'components/filters/tab_filter.html' %}
+            {% endif %}
+
+          </div>
           {% endif %}
-
-        </div>
+        {% endif %}
       {% endfor %}
 
       {% if layout.show_clear_all or layout.show_apply_button %}
@@ -93,6 +158,10 @@
       </div>
       {% endif %}
 
+    {% if layout.use_controls_wrapper %}
     </div>
+    {% endif %}
+  {% if layout.use_form_wrapper %}
   </form>
+  {% endif %}
 </div>

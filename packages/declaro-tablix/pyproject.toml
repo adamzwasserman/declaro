@@ -28,6 +28,7 @@ dependencies = [
     # Local declaro packages (path dependencies for monorepo dev)
     "declaro_advise",
     "declaro_persistum",
+    "aiosqlite>=0.22.1",
 ]
 
 [project.optional-dependencies]

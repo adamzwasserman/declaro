@@ -23,7 +23,20 @@
       "Bash(uv run uvicorn:*)",
       "Bash(curl:*)",
       "Bash(.venv/bin/python:*)",
-      "Bash(sqlite3:*)"
+      "Bash(sqlite3:*)",
+      "WebFetch(domain:genx.software)",
+      "Bash(uv add:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(bd config:*)",
+      "Bash(bd dep:*)",
+      "Bash(kill:*)",
+      "Bash(bd daemon stop:*)",
+      "Bash(bd daemon start:*)",
+      "Bash(bd daemons stop:*)",
+      "mcp__render__list_services",
+      "mcp__render__deploy_service"
     ]
   }
 }

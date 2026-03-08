@@ -126,6 +126,50 @@ def render_table_ui(
     return "\n".join(sections)
 
 
+# fmtx.js CDN URL for number/date formatting
+FMTX_CDN_URL = "https://cdn.genx.software/v1/fmtx.min.js"
+
+
+def get_fmtx_script_tag() -> str:
+    """Get the script tag for fmtx.js (genX FormatX library).
+
+    Include this in your HTML head or before </body> to enable
+    automatic formatting of currency, percentage, number, and date columns.
+
+    Returns:
+        HTML script tag string
+    """
+    return f'<script src="{FMTX_CDN_URL}"></script>'
+
+
+def get_required_scripts() -> str:
+    """Get all required script tags for tablix functionality.
+
+    Currently includes:
+        - fmtx.js for number/date formatting
+
+    Returns:
+        HTML string with all required script tags
+    """
+    return get_fmtx_script_tag()
+
+
+def needs_fmtx(config: "TableConfig") -> bool:
+    """Check if a table config requires fmtx.js for formatting.
+
+    Args:
+        config: TableConfig to check
+
+    Returns:
+        True if any column uses a formattable type (currency, percentage, number, date, datetime)
+    """
+    formattable_types = {"currency", "percentage", "number", "date", "datetime"}
+    for col in config.columns:
+        if col.type.value in formattable_types:
+            return True
+    return False
+
+
 # Import types for type hints (avoid circular import at runtime)
 from typing import TYPE_CHECKING
 
@@ -136,7 +180,11 @@ if TYPE_CHECKING:
 
 __all__ = [
     "TEMPLATES_DIR",
+    "FMTX_CDN_URL",
     "get_jinja_env",
+    "get_fmtx_script_tag",
+    "get_required_scripts",
+    "needs_fmtx",
     "render_filter_layout",
     "render_table",
     "render_table_ui",

@@ -17,9 +17,11 @@ A simple todo application demonstrating declaro_persistum with **native fluent S
 This demo uses the **native fluent SQL** API - declaro_persistum's built-in query builder:
 
 ```python
-from declaro_persistum.query import table, set_default_schema, count_
+from declaro_persistum.query import table, count_
+from declaro_persistum.loader import load_schema
 
-todos = table("todos")
+schema = load_schema("./schema")
+todos = table("todos", schema=schema)
 
 # Select with where and order
 results = await (

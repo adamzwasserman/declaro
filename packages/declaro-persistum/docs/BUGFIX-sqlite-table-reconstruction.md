@@ -109,4 +109,7 @@ All in `/Users/adam/dev/multicardz/vendor/declaro_persistum/src/declaro_persistu
 
 - `abstractions/table_reconstruction.py` - Added FK and column drop functions
 - `applier/sqlite.py` - Changed to use reconstruction markers
+- `applier/shared.py` - Shared SQL generation extracted post-bugfix
 - `migrations.py` - Added sync reconstruction handling
+
+> **Note**: The applier code referenced in this document has since been refactored. Pure SQL generation was extracted into `applier/shared.py`. The `self._method()` signatures shown above are now standalone functions in the shared module.

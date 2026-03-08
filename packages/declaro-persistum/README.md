@@ -59,12 +59,14 @@ declaro generate -c postgresql://localhost/mydb > migration.sql
 ```python
 from declaro_persistum import ConnectionPool
 from declaro_persistum.query import table
+from declaro_persistum.loader import load_schema
 
 # Create a connection pool
 pool = await ConnectionPool.postgresql("postgresql://localhost/mydb")
+schema = load_schema("./schema")
 
 # Query with the fluent API
-users = table("users")
+users = table("users", schema=schema)
 async with pool.acquire() as conn:
     results = await (
         users
@@ -94,9 +96,11 @@ pip install declaro-persistum[all]
 from uuid import uuid4
 from declaro_persistum import ConnectionPool
 from declaro_persistum.query import table
+from declaro_persistum.loader import load_schema
 
+schema = load_schema("./schema")
 pool = await ConnectionPool.sqlite("./app.db")
-users = table("users")
+users = table("users", schema=schema)
 
 async with pool.acquire() as conn:
     await conn.execute("CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT)")
@@ -171,7 +175,7 @@ pool = SyncConnectionPool.libsql("libsql://...", auth_token="...")
 Typos caught at build time, not runtime:
 
 ```python
-users = table("users")
+users = table("users", schema=schema)
 users.emial  # AttributeError: Table 'users' has no column 'emial'
 ```
 

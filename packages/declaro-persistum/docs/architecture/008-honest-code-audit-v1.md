@@ -63,11 +63,11 @@ The domain core (types, differ, query/builder, abstractions) is exemplary honest
 | `abstractions/reconstruction.py` | COMPLIANT | `generate_create_table_sql()`, `generate_data_copy_sql()`, `get_reconstruction_columns()` are pure SQL generation functions. `execute_reconstruction_async()` and `execute_reconstruction_sync()` are boundary functions. Clean separation. |
 | `abstractions/pragma_compat.py` | PARTIAL | Pure emulation logic (`_emulate_index_list`, `_emulate_foreign_key_list`) is mixed with module-level mutable counters (`_emulation_counters`, `_native_success_counters`, `_affected_tables`). The counters are side effects. |
 | `abstractions/check_compat.py` | PARTIAL | Pure parser and validator generator, but `_validator_registry` and `_validation_counters` are mutable module-level state. `register_check_constraint()` mutates global registry. |
-| `applier/sqlite.py` | VIOLATION | Methods like `_column_definition()`, `_map_type()`, `_create_table_sql()`, `_add_column_sql()` are pure functions trapped behind `self`. They take explicit parameters and return strings. No `self` access. Lines 83-465. |
+| `applier/sqlite.py` | ~~VIOLATION~~ **FIXED** | Pure SQL generation extracted to `applier/shared.py`. Class is now a thin I/O shell. |
 | `applier/postgresql.py` | VIOLATION | Same issue. `_column_definition()` (line 83+), `_map_type()` (line 190+), `_normalize_type()` are pure but accessed via `self`. |
-| `applier/turso.py` | VIOLATION | Same issue throughout. Copy-pasted from sqlite.py. |
-| `inspector/sqlite.py` | PARTIAL | Methods like `_normalize_type()` are pure but on a class. However, `_normalize_fk_action()` at module level is correctly a standalone function. |
-| `query/table.py` | PARTIAL | Module-level `_default_schema` is mutable global state. `set_default_schema()` and `load_default_schema()` mutate it. This is configuration-as-global-state rather than configuration-as-parameter. |
+| `applier/turso.py` | ~~VIOLATION~~ **FIXED** | Pure SQL generation extracted to `applier/shared.py`. Class is now a thin I/O shell delegating to shared functions. |
+| `inspector/sqlite.py` | ~~PARTIAL~~ **FIXED** | Shared pure logic extracted to `inspector/shared.py`. `_normalize_fk_action()` moved to shared module. |
+| `query/table.py` | ~~PARTIAL~~ **FIXED** | `_default_schema` global removed. `schema` is now a required parameter on `table()`. |
 
 ### 2.3 Dict-Lookup Polymorphism
 
@@ -76,8 +76,8 @@ The domain core (types, differ, query/builder, abstractions) is exemplary honest
 | Module | Rating | Evidence |
 |---|---|---|
 | `applier/sqlite.py` | PARTIAL | `generate_operation_sql()` (line ~466) internally uses a `generators` dict mapping op names to functions -- this is honest. But the overall applier dispatch in `protocol.py` uses if/elif. |
-| `applier/protocol.py` | VIOLATION | `create_applier()` (lines 166-181) uses if/elif/else chain: `if dialect == "postgresql": ... elif dialect == "sqlite": ... elif dialect == "turso": ...`. Should be a dict: `APPLIERS = {"postgresql": PostgreSQLApplier, "sqlite": SQLiteApplier, "turso": TursoApplier}`. |
-| `inspector/protocol.py` | VIOLATION | `create_inspector()` (lines 121-136) uses identical if/elif/else chain. Same fix needed. |
+| `applier/protocol.py` | ~~VIOLATION~~ **FIXED** | Now uses dict-lookup dispatch: `APPLIERS: dict[str, type]`. |
+| `inspector/protocol.py` | ~~VIOLATION~~ **FIXED** | Now uses dict-lookup dispatch: `INSPECTORS: dict[str, type]`. |
 | `query/executor.py` | VIOLATION | `_prepare_query()` (lines 141-167), `_execute_fetch()` (lines 210-232), `_execute_fetch_one()` (lines 235-259), `_execute_fetch_scalar()` (lines 262-283), `_execute_update()` (lines 286-308) all dispatch on `conn_type` using if/elif/else chains. Each of these should be a dict mapping connection module names to handler functions. |
 | `pydantic_loader.py` | COMPLIANT | `PYTHON_TO_SQL_TYPE` is a module-level dict mapping Python types to SQL types. Textbook honest dispatch. |
 | `check_compat.py` | VIOLATION | `generate_validator()` (lines 410-454) uses if/elif chain to dispatch on `ast.get("op")`. Should be `VALIDATORS = {"compare": _gen_compare_validator, "in": _gen_in_validator, ...}`. |
@@ -108,7 +108,7 @@ The domain core (types, differ, query/builder, abstractions) is exemplary honest
 
 | Module | Rating | Evidence |
 |---|---|---|
-| `pool.py` | VIOLATION | Uses ABC hierarchy: `ConnectionPool(ABC)` base class with `PostgreSQLPool`, `SQLitePool`, `TursoPool`, `LibSQLPool` subclasses. The `ensure_pool_type()` classmethod and shared `execute()`, `fetch()`, `fetchone()` methods form a classic inheritance hierarchy. |
+| `pool.py` | ~~VIOLATION~~ **PARTIAL FIX** | ABC removed. `BasePool` is now a plain class with `NotImplementedError` defaults (no longer uses `ABC`/`abstractmethod`). Inheritance hierarchy still exists but is pragmatically justified for connection pools. |
 | `applier/` (all) | PARTIAL | No inheritance between appliers (each is independent), but all three share the same Protocol. The Protocol itself is fine -- it defines a contract, not an inheritance chain. The problem is the massive code duplication that results from not sharing common logic through composition. |
 | `query/table.py` | COMPLIANT | No inheritance. `TableProxy` composes `ColumnProxy` objects. `Condition`, `ConditionGroup` compose via `__and__`/`__or__`. Flat. |
 | `query/select.py` | COMPLIANT | No inheritance. `SelectQuery` returns new instances for immutability. |
@@ -132,7 +132,7 @@ The domain core (types, differ, query/builder, abstractions) is exemplary honest
 | `applier/` (all) | COMPLIANT | No configuration stored. All parameters passed explicitly. |
 | `inspector/` (all) | COMPLIANT | No configuration stored. |
 | `pool.py` | VIOLATION | Configuration stored in `__init__`: `self._dsn`, `self._min_size`, `self._max_size`, `self._database_path`, etc. These could be passed as parameters to each operation, but for connection pools this is a pragmatic choice. |
-| `query/table.py` | VIOLATION | `_default_schema` is module-level mutable state. `set_default_schema()` mutates it. Should use explicit parameter passing: `table("users", schema=my_schema)`. The function signature already supports this but the global default encourages the wrong pattern. |
+| `query/table.py` | ~~VIOLATION~~ **FIXED** | `_default_schema` removed. `schema` is now a required parameter on `table()`. No more global state. |
 
 ### 2.8 Type Declarations Over Imperative Validation
 
@@ -220,9 +220,11 @@ return APPLIERS[dialect]()
 
 ### VIOLATION 3: Module-Level Mutable State
 
-**Files**: `abstractions/pragma_compat.py` (lines 25-37), `abstractions/check_compat.py` (lines 113-123), `query/table.py` (lines 21-27)
+**Files**: `abstractions/pragma_compat.py` (lines 25-37), `abstractions/check_compat.py` (lines 113-123)
 
-**The Problem**: Mutable module-level dicts and sets that accumulate side effects. `_emulation_counters`, `_native_success_counters`, `_affected_tables`, `_validator_registry`, `_validation_counters`, `_default_schema`.
+**The Problem**: Mutable module-level dicts and sets that accumulate side effects. `_emulation_counters`, `_native_success_counters`, `_affected_tables`, `_validator_registry`, `_validation_counters`.
+
+> **UPDATE**: `_default_schema` in `query/table.py` has been removed. `schema` is now a required parameter on `table()`. The pragma_compat and check_compat counters remain as documented.
 
 **Impact**: Functions that read or write these globals have hidden dependencies. Tests must call `reset_counters()` or `clear_registry()` between runs. This is "hidden state" that the book explicitly condemns.
 
@@ -234,11 +236,15 @@ return APPLIERS[dialect]()
 
 **Mitigating Factor**: The book (Ch2 p27) exempts inherently stateful resources: "file handles, network connections, database cursors." Connection pools are explicitly this category. The violation is the ABC inheritance mechanism, not the statefulness itself. A Protocol + composition approach would be more honest while preserving the justified statefulness.
 
+> **UPDATE**: ABC removed. `BasePool` is now a plain class with `NotImplementedError` defaults. Inheritance still exists but no longer relies on ABC/abstractmethod machinery.
+
 ### VIOLATION 5: Duplicated Async/Sync Code
 
 **Files**: `applier/sqlite.py` (`apply()` + `apply_sync()`), `applier/turso.py` (`apply()` + `apply_sync()`), `abstractions/reconstruction.py` (`execute_reconstruction_async()` + `execute_reconstruction_sync()`)
 
 **The Problem**: Near-identical logic duplicated for async and sync execution paths. The pure SQL generation is identical; only the I/O execution differs. This should be factored into shared pure core + thin async/sync wrappers.
+
+> **UPDATE**: Pure SQL generation extracted to `applier/shared.py`. SQLite and Turso appliers are now thin I/O shells that delegate to shared functions. ~445 lines of duplication removed.
 
 ---
 
@@ -305,7 +311,7 @@ Using Pydantic models with `@table` decorator to declare database schemas is "Ty
 | `query/builder.py` | COMPLIANT | None |
 | `query/executor.py` | PARTIAL | if/elif dispatch on connection type |
 | `query/select.py` | PARTIAL | Class used for DSL (justified by Python idiom) |
-| `query/table.py` | PARTIAL | Module-level mutable schema state; classes for operator overloading |
+| `query/table.py` | PARTIAL | ~~Module-level mutable schema state~~; classes for operator overloading (global state removed) |
 | `query/__init__.py` | COMPLIANT | Clean re-exports |
 | `pydantic_loader.py` | COMPLIANT | None |
 | `abstractions/enums.py` | COMPLIANT | None |
@@ -317,15 +323,17 @@ Using Pydantic models with `@table` decorator to declare database schemas is "Ty
 | `abstractions/reconstruction.py` | COMPLIANT | Successful Strangler extraction |
 | `abstractions/pragma_compat.py` | PARTIAL | Mutable module-level counters |
 | `abstractions/check_compat.py` | PARTIAL | Mutable registry + if/elif dispatch |
-| `applier/protocol.py` | VIOLATION | if/elif factory dispatch |
-| `applier/sqlite.py` | VIOLATION | Stateless class, methods should be functions |
+| `applier/protocol.py` | **FIXED** | ~~if/elif factory dispatch~~ → dict-lookup dispatch |
+| `applier/shared.py` | **NEW** | Shared pure SQL generation functions |
+| `applier/sqlite.py` | **FIXED** | ~~Stateless class, methods should be functions~~ → thin I/O shell delegating to shared |
 | `applier/postgresql.py` | VIOLATION | Stateless class, methods should be functions |
-| `applier/turso.py` | VIOLATION | Stateless class, copy-pasted from sqlite |
-| `inspector/protocol.py` | VIOLATION | if/elif factory dispatch |
-| `inspector/sqlite.py` | VIOLATION | Stateless class |
-| `inspector/postgresql.py` | VIOLATION | Stateless class |
-| `inspector/turso.py` | VIOLATION | Stateless class |
-| `pool.py` | PARTIAL | ABC inheritance (justified statefulness) |
+| `applier/turso.py` | **FIXED** | ~~Stateless class, copy-pasted from sqlite~~ → thin I/O shell delegating to shared |
+| `inspector/protocol.py` | **FIXED** | ~~if/elif factory dispatch~~ → dict-lookup dispatch |
+| `inspector/shared.py` | **NEW** | Shared pure functions (type normalization, FK parsing, table assembly) |
+| `inspector/sqlite.py` | **FIXED** | ~~Stateless class~~ → delegates to shared pure functions |
+| `inspector/postgresql.py` | PARTIAL | Stateless class; `_normalize_fk_action` moved to shared |
+| `inspector/turso.py` | **FIXED** | ~~Stateless class~~ → delegates to shared pure functions |
+| `pool.py` | PARTIAL | ~~ABC~~ inheritance (ABC removed, plain class with NotImplementedError) |
 
 ---
 

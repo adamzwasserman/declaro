@@ -17,9 +17,11 @@ A simple todo application demonstrating declaro_persistum with **Prisma-style qu
 This demo uses **Prisma-style** queries:
 
 ```python
-from declaro_persistum.query.table import table, set_default_schema
+from declaro_persistum.query.table import table
+from declaro_persistum.loader import load_schema
 
-todos = table("todos")
+schema = load_schema("./schema")
+todos = table("todos", schema=schema)
 
 # Find many with where, order, pagination
 active = await todos.prisma.find_many(

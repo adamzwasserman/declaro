@@ -120,8 +120,10 @@ class ColumnDefinition(BaseModel):
             return v
 
         column_type = info.data.get("type")
-        if column_type == ColumnType.CURRENCY and "currency_symbol" not in v:
-            raise ValueError("Currency columns must have currency_symbol in format_options")
+        # Accept either 'currency' (fmtx naming) or 'currency_symbol' (legacy)
+        if column_type == ColumnType.CURRENCY:
+            if "currency_symbol" not in v and "currency" not in v:
+                raise ValueError("Currency columns must have 'currency' or 'currency_symbol' in format_options")
 
         return v
 

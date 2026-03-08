@@ -37,12 +37,15 @@ ColumnType = _models.ColumnType
 _filter_layout = _load_module("declaro_tablix.domain.filter_layout", f"{TABLIX_SRC}/domain/filter_layout.py")
 FilterLayoutConfig = _filter_layout.FilterLayoutConfig
 FilterControlConfig = _filter_layout.FilterControlConfig
+FilterControlGroup = _filter_layout.FilterControlGroup
 FilterControlType = _filter_layout.FilterControlType
+FilterPosition = _filter_layout.FilterPosition
 FilterOption = _filter_layout.FilterOption
 
 # Load templates module
 _templates = _load_module("declaro_tablix.templates", f"{TABLIX_SRC}/templates/__init__.py")
 get_jinja_env = _templates.get_jinja_env
+get_fmtx_script_tag = _templates.get_fmtx_script_tag
 
 # Database path
 DB_PATH = Path(__file__).parent / "demo.db"
@@ -57,7 +60,7 @@ async def init_db():
     pool = await ConnectionPool.sqlite(str(DB_PATH))
 
     async with pool.acquire() as conn:
-        # Create holdings table
+        # Create holdings table with review_status for tab filter demo
         await execute(raw("""
             CREATE TABLE IF NOT EXISTS holdings (
                 id INTEGER PRIMARY KEY,
@@ -65,29 +68,30 @@ async def init_db():
                 name TEXT NOT NULL,
                 sector TEXT NOT NULL,
                 value REAL NOT NULL,
-                change REAL NOT NULL
+                change REAL NOT NULL,
+                review_status TEXT NOT NULL DEFAULT 'to_review'
             )
         """), conn)
 
         # Check if data exists
         result = await execute(raw("SELECT COUNT(*) as cnt FROM holdings"), conn)
         if result[0]["cnt"] == 0:
-            # Seed data
+            # Seed data with review_status (id, ticker, name, sector, value, change, review_status)
             holdings = [
-                (1, "AAPL", "Apple Inc.", "Technology", 150000, 2.5),
-                (2, "GOOGL", "Alphabet Inc.", "Technology", 200000, -1.2),
-                (3, "JPM", "JPMorgan Chase", "Financials", 180000, 0.8),
-                (4, "BAC", "Bank of America", "Financials", 120000, -0.5),
-                (5, "XOM", "Exxon Mobil", "Energy", 95000, 3.1),
-                (6, "CVX", "Chevron", "Energy", 88000, 2.8),
-                (7, "JNJ", "Johnson & Johnson", "Healthcare", 165000, 0.3),
-                (8, "PFE", "Pfizer", "Healthcare", 72000, -2.1),
-                (9, "PG", "Procter & Gamble", "Consumer", 140000, 1.1),
-                (10, "KO", "Coca-Cola", "Consumer", 110000, 0.6),
+                (1, "AAPL", "Apple Inc.", "Technology", 150000, 2.5, "reviewed"),
+                (2, "GOOGL", "Alphabet Inc.", "Technology", 200000, -1.2, "reviewed"),
+                (3, "JPM", "JPMorgan Chase", "Financials", 180000, 0.8, "to_review"),
+                (4, "BAC", "Bank of America", "Financials", 120000, -0.5, "to_review"),
+                (5, "XOM", "Exxon Mobil", "Energy", 95000, 3.1, "reviewed"),
+                (6, "CVX", "Chevron", "Energy", 88000, 2.8, "to_review"),
+                (7, "JNJ", "Johnson & Johnson", "Healthcare", 165000, 0.3, "reviewed"),
+                (8, "PFE", "Pfizer", "Healthcare", 72000, -2.1, "to_review"),
+                (9, "PG", "Procter & Gamble", "Consumer", 140000, 1.1, "reviewed"),
+                (10, "KO", "Coca-Cola", "Consumer", 110000, 0.6, "reviewed"),
             ]
             for h in holdings:
                 await execute(raw(
-                    "INSERT INTO holdings (id, ticker, name, sector, value, change) VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO holdings (id, ticker, name, sector, value, change, review_status) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     params=h
                 ), conn)
             await conn.commit()
@@ -121,8 +125,18 @@ def get_table_config() -> TableConfig:
             ColumnDefinition(id="ticker", name="Ticker", type=ColumnType.TEXT, cell_id_template="ticker-{row_idx}"),
             ColumnDefinition(id="name", name="Company", type=ColumnType.TEXT),
             ColumnDefinition(id="sector", name="Sector", type=ColumnType.TEXT),
-            ColumnDefinition(id="value", name="Value", type=ColumnType.CURRENCY),
-            ColumnDefinition(id="change", name="Change %", type=ColumnType.PERCENTAGE),
+            ColumnDefinition(
+                id="value",
+                name="Value",
+                type=ColumnType.CURRENCY,
+                format_options={"currency": "USD", "decimals": 0},
+            ),
+            ColumnDefinition(
+                id="change",
+                name="Change %",
+                type=ColumnType.PERCENTAGE,
+                format_options={"decimals": 1},
+            ),
         ],
     )
 
@@ -132,12 +146,32 @@ def get_filter_config(
     show_sector_filter: bool = True,
     sector_searchable: bool = False,
     auto_submit: bool = True,
+    show_tab_filter: bool = True,
 ) -> FilterLayoutConfig:
     """Build filter layout configuration based on options."""
     controls = []
 
-    if show_search:
+    # Tab filter spans full width on row 1
+    if show_tab_filter:
         controls.append(
+            FilterControlConfig(
+                id="review-status",
+                control_type=FilterControlType.TAB_FILTER,
+                column_id="review_status",
+                hx_get="/table",
+                hx_target="#table-section",
+                auto_submit=auto_submit,
+                options_source="review_statuses",
+                grid_column="1 / -1",  # Span all columns
+                grid_row="1",
+            )
+        )
+
+    # Group search and sector filter together in the left column (row 2)
+    left_controls = []
+
+    if show_search:
+        left_controls.append(
             FilterControlConfig(
                 id="search",
                 control_type=FilterControlType.SEARCH_INPUT,
@@ -153,7 +187,7 @@ def get_filter_config(
         )
 
     if show_sector_filter:
-        controls.append(
+        left_controls.append(
             FilterControlConfig(
                 id="sector",
                 control_type=FilterControlType.MULTI_SELECT,
@@ -168,6 +202,17 @@ def get_filter_config(
             )
         )
 
+    if left_controls:
+        controls.append(
+            FilterControlGroup(
+                id="left-filters",
+                position=FilterPosition.LEFT,
+                controls=left_controls,
+                gap="1rem",
+                grid_row="2",
+            )
+        )
+
     return FilterLayoutConfig(
         id="holdings-filters",
         table_id="holdings",
@@ -179,6 +224,7 @@ def get_filter_config(
 @app.get("/", response_class=HTMLResponse)
 async def demo_page():
     """Render the demo page."""
+    fmtx_script = get_fmtx_script_tag()
     return """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -186,6 +232,7 @@ async def demo_page():
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tablix Demo</title>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    """ + fmtx_script + """
     <script src="https://unpkg.com/alpinejs@3.13.3/dist/cdn.min.js" defer></script>
     <style>
         * { box-sizing: border-box; }
@@ -302,6 +349,38 @@ async def demo_page():
         .htmx-indicator { display: none; }
         .htmx-request .htmx-indicator { display: inline; }
 
+        /* Tab Filter Styles */
+        .tab-filter {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            border-bottom: 1px solid #ddd;
+            margin-bottom: 16px;
+        }
+        .tab-filter__radio { position: absolute; opacity: 0; width: 0; height: 0; }
+        .tab-filter__tab {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 8px 16px;
+            font-size: 14px;
+            color: #666;
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -1px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .tab-filter__tab:hover { color: #333; background: #f5f5f5; }
+        .tab-filter__tab--active {
+            color: #0066cc;
+            border-bottom-color: #0066cc;
+            font-weight: 600;
+        }
+        .tab-filter__count { opacity: 0.8; }
+        .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
+
         .status { padding: 10px; background: #e8f5e9; border-radius: 4px; margin-top: 10px; font-size: 14px; }
 
         .db-info { font-size: 12px; color: #888; margin-top: 10px; }
@@ -330,6 +409,10 @@ async def demo_page():
                     <input type="checkbox" id="auto-submit" x-model="autoSubmit" @change="updateFilters()">
                     <label for="auto-submit">Auto-submit on Change</label>
                 </div>
+                <div class="config-item">
+                    <input type="checkbox" id="show-tabs" x-model="showTabFilter" @change="updateFilters()">
+                    <label for="show-tabs">Show Tab Filter</label>
+                </div>
             </div>
             <div class="status" x-show="statusMessage" x-text="statusMessage"></div>
         </div>
@@ -354,6 +437,7 @@ async def demo_page():
                 showSectorFilter: true,
                 sectorSearchable: false,
                 autoSubmit: true,
+                showTabFilter: true,
                 statusMessage: '',
 
                 updateFilters() {
@@ -362,6 +446,7 @@ async def demo_page():
                         show_sector: this.showSectorFilter,
                         sector_searchable: this.sectorSearchable,
                         auto_submit: this.autoSubmit,
+                        show_tab_filter: this.showTabFilter,
                     });
 
                     this.statusMessage = 'Updating...';
@@ -387,6 +472,7 @@ async def get_filters(
     show_sector: bool = True,
     sector_searchable: bool = False,
     auto_submit: bool = True,
+    show_tab_filter: bool = True,
 ):
     """Render filter section based on config."""
     config = get_filter_config(
@@ -394,19 +480,35 @@ async def get_filters(
         show_sector_filter=show_sector,
         sector_searchable=sector_searchable,
         auto_submit=auto_submit,
+        show_tab_filter=show_tab_filter,
     )
 
-    # Get sectors from database
     async with pool.acquire() as conn:
+        # Get sectors from database
         result = await execute(raw("SELECT DISTINCT sector FROM holdings ORDER BY sector"), conn)
         sectors = [row["sector"] for row in result]
 
+        # Get counts for tab filter
+        total_count = (await execute(raw("SELECT COUNT(*) as cnt FROM holdings"), conn))[0]["cnt"]
+        to_review_count = (await execute(raw("SELECT COUNT(*) as cnt FROM holdings WHERE review_status = 'to_review'"), conn))[0]["cnt"]
+        reviewed_count = (await execute(raw("SELECT COUNT(*) as cnt FROM holdings WHERE review_status = 'reviewed'"), conn))[0]["cnt"]
+
     sector_options = [FilterOption(value=s, label=s) for s in sectors]
+
+    # Tab filter options with counts (like "All (100) | To Review (33) | Reviewed (67)")
+    review_status_options = [
+        FilterOption(value="all", label="All", count=total_count),
+        FilterOption(value="to_review", label="To Review", count=to_review_count),
+        FilterOption(value="reviewed", label="Reviewed", count=reviewed_count),
+    ]
 
     env = get_jinja_env()
     template = env.get_template("components/filter_layout.html")
 
-    options = {"sectors": sector_options}
+    options = {
+        "sectors": sector_options,
+        "review_statuses": review_status_options,
+    }
 
     html = template.render(
         layout=config,
@@ -422,6 +524,7 @@ async def get_table(
     request: Request,
     name: str | None = None,
     sector: str | None = None,
+    review_status: str | None = None,
     sort: str | None = None,
     direction: str = "asc",
 ):
@@ -446,6 +549,11 @@ async def get_table(
         placeholders = ",".join("?" * len(sectors))
         sql += f" AND sector IN ({placeholders})"
         params.extend(sectors)
+
+    # Filter by review status (tab filter)
+    if review_status and review_status != "all":
+        sql += " AND review_status = ?"
+        params.append(review_status)
 
     # Sort
     valid_cols = {"ticker", "name", "sector", "value", "change"}

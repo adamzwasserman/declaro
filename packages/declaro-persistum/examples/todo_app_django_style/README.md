@@ -17,9 +17,11 @@ A simple todo application demonstrating declaro_persistum with **Django-style qu
 This demo uses **Django-style** queries:
 
 ```python
-from declaro_persistum.query.table import table, set_default_schema
+from declaro_persistum.query.table import table
+from declaro_persistum.loader import load_schema
 
-todos = table("todos")
+schema = load_schema("./schema")
+todos = table("todos", schema=schema)
 
 # Filter with lookups
 active = await todos.objects.filter(completed=0).all(db)

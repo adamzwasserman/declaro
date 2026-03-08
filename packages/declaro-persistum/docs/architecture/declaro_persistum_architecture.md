@@ -1453,6 +1453,7 @@ declaro_persistum/
 ├── inspector/
 │   ├── __init__.py
 │   ├── protocol.py       # DatabaseInspector protocol
+│   ├── shared.py         # Shared pure functions (type normalization, FK parsing, etc.)
 │   ├── postgresql.py     # PostgreSQL implementation
 │   ├── sqlite.py         # SQLite implementation
 │   └── turso.py          # Turso/LibSQL implementation
@@ -1464,9 +1465,10 @@ declaro_persistum/
 ├── applier/
 │   ├── __init__.py
 │   ├── protocol.py       # MigrationApplier protocol
+│   ├── shared.py         # Shared pure SQL generation (sqlite + turso)
 │   ├── postgresql.py     # PostgreSQL implementation
-│   ├── sqlite.py         # SQLite implementation
-│   └── turso.py          # Turso/LibSQL implementation
+│   ├── sqlite.py         # SQLite implementation (thin I/O shell)
+│   └── turso.py          # Turso/LibSQL implementation (thin I/O shell)
 ├── query/
 │   ├── __init__.py
 │   ├── builder.py        # Query building

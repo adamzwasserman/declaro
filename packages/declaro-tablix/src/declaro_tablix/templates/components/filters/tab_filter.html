@@ -1,0 +1,66 @@
+{#
+  Tab Filter Template
+
+  Renders a horizontal row of tabs for single-value filtering.
+  Each tab displays a label and optional count (e.g., "All (100) | To Review (33) | Reviewed (67)")
+
+  Context (inherited from filter_layout.html):
+    - control: FilterControlConfig
+    - control_value: selected value or None (defaults to first option)
+    - control_options: list of FilterOption with value, label, count
+#}
+
+{# Use ID overrides if provided, otherwise use default patterns #}
+{% set container_id = control.container_id_override if control.container_id_override else 'filter-tabs-' ~ control.id %}
+{% set base_id = control.id %}
+{% set selected_value = control_value if control_value else (control_options[0].value if control_options and control_options[0].value is defined else (control_options[0] if control_options else '')) %}
+
+<div id="{{ container_id }}"
+     class="tab-filter{% if control.css_class %} {{ control.css_class }}{% endif %}"
+     role="tablist"
+     aria-label="{{ control.label or 'Filter options' }}"
+     {% if control.width %}style="width: {{ control.width }};"{% endif %}>
+
+  {% for option in control_options %}
+    {% set opt_value = option.value if option.value is defined else option %}
+    {% set opt_label = option.label if option.label is defined else option %}
+    {% set opt_count = option.count if option.count is defined else none %}
+    {% set opt_disabled = option.disabled if option.disabled is defined else false %}
+    {% set is_active = selected_value == opt_value %}
+    {% set opt_key = opt_value | lower | replace(' ', '-') | replace('/', '-') | replace('%', 'pct') %}
+    {% set tab_id = option.id_override if (option.id_override is defined and option.id_override) else (base_id ~ '-tab-' ~ opt_key) %}
+    {% set input_id = base_id ~ '-input-' ~ opt_key %}
+
+    {# Hidden radio input for form state #}
+    <input type="radio"
+           id="{{ input_id }}"
+           name="{{ control.column_id }}"
+           value="{{ opt_value }}"
+           class="tab-filter__radio sr-only"
+           data-filter-control
+           data-filter-type="tab_filter"
+           data-column-id="{{ control.column_id }}"
+           {% if is_active %}checked{% endif %}
+           {% if opt_disabled %}disabled{% endif %}
+           {% if control.auto_submit and control.hx_get %}
+           hx-get="{{ control.hx_get }}"
+           hx-trigger="{{ control.hx_trigger or 'change' }}"
+           {% if control.hx_target %}hx-target="{{ control.hx_target }}"{% endif %}
+           hx-swap="{{ control.hx_swap or 'innerHTML' }}"
+           hx-include="[data-filter-control]"
+           hx-indicator=".htmx-indicator"
+           {% endif %}>
+
+    <label id="{{ tab_id }}"
+           for="{{ input_id }}"
+           class="tab-filter__tab{% if is_active %} tab-filter__tab--active{% endif %}{% if opt_disabled %} tab-filter__tab--disabled{% endif %}"
+           role="tab"
+           aria-selected="{{ 'true' if is_active else 'false' }}"
+           tabindex="{{ '0' if is_active else '-1' }}">
+      <span class="tab-filter__label">{{ opt_label }}</span>
+      {% if opt_count is not none %}
+      <span class="tab-filter__count">({{ opt_count }})</span>
+      {% endif %}
+    </label>
+  {% endfor %}
+</div>

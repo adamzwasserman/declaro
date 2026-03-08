@@ -3,57 +3,106 @@
 
   Renders a dropdown with multiple selection and an Apply button.
 
+  React structure (for parity):
+  <div id="sector-filter" data-dropdown="true" data-dropdown-type="multi-select">
+    <label id="sector-label">Sector / Category</label>
+    <div id="sector-dropdown-wrapper">
+      <button id="sector-button" data-dropdown-trigger="true">
+        <span id="sector-button-text">All</span>
+        <ChevronDown id="sector-button-icon" />
+      </button>
+      <div id="sector-dropdown">
+        <div id="sector-options-container">
+          <label id="sector-option-tech"><input id="sector-checkbox-tech" />...</label>
+        </div>
+        <div id="sector-clear-container">
+          <button id="sector-clear-button">Clear</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   Context (inherited from filter_layout.html):
     - control: FilterControlConfig
     - control_value: list of selected values or None
     - control_options: list of FilterOption or strings
 #}
 
-{# Use input_id_override if provided, otherwise default to filter-{id} #}
-{% set dropdown_id = control.input_id_override if control.input_id_override else 'filter-' ~ control.id %}
-{% set button_id = control.button_id_override if control.button_id_override else (dropdown_id ~ '-button') %}
-{% set label_id = control.label_id_override if control.label_id_override else (dropdown_id ~ '-label') %}
+{# Use ID overrides if provided, otherwise use default patterns #}
+{% set container_id = control.container_id_override if control.container_id_override else 'filter-' ~ control.id %}
+{% set dropdown_id = control.input_id_override if control.input_id_override else container_id %}
+{% set button_id = control.button_id_override if control.button_id_override else (dropdown_id.replace('-filter', '') ~ '-button') %}
+{% set button_text_id = control.button_text_id_override if control.button_text_id_override else (button_id ~ '-text') %}
+{% set button_icon_id = control.button_icon_id_override if control.button_icon_id_override else (button_id ~ '-icon') %}
+{% set label_id = control.label_id_override if control.label_id_override else (dropdown_id.replace('-filter', '') ~ '-label') %}
+{% set menu_id = control.dropdown_menu_id_override if control.dropdown_menu_id_override else (dropdown_id.replace('-filter', '') ~ '-dropdown') %}
+{% set options_container_id = control.options_container_id_override if control.options_container_id_override else (dropdown_id.replace('-filter', '') ~ '-options-container') %}
+{% set clear_button_id = control.clear_button_id_override if control.clear_button_id_override else (dropdown_id.replace('-filter', '') ~ '-clear-button') %}
+{% set clear_container_id = dropdown_id.replace('-filter', '') ~ '-clear-container' %}
 {% set selected_values = control_value if control_value is iterable and control_value is not string else [] %}
 {% set selected_count = selected_values | length %}
 
-<div class="filter-multi-select{% if control.css_class %} {{ control.css_class }}{% endif %}"
+{# Match React structure: data-dropdown="true" on container #}
+<div id="{{ container_id }}"
+     class="dropdown-filter{% if control.css_class %} {{ control.css_class }}{% endif %}"
+     data-dropdown="true"
+     data-dropdown-name="{{ dropdown_id.replace('-filter', '') }}-filter"
+     data-dropdown-type="multi-select"
      {% if control.width %}style="width: {{ control.width }};"{% endif %}
      x-data="{ open: false }">
 
   {% if control.label %}
-  <label id="{{ label_id }}" class="filter-label">{{ control.label }}</label>
+  <label id="{{ label_id }}"
+         htmlFor="{{ button_id }}"
+         class="dropdown-filter__label filter-label">{{ control.label }}</label>
   {% endif %}
 
-  <button type="button"
-          id="{{ button_id }}"
-          class="filter-multi-select-trigger"
-          aria-haspopup="listbox"
-          aria-expanded="false"
-          aria-labelledby="{{ label_id }}"
-          @click="open = !open"
-          @keydown.escape="open = false">
+  {# Wrapper div for React parity #}
+  <div id="{{ dropdown_id.replace('-filter', '') }}-dropdown-wrapper">
+    <button type="button"
+            id="{{ button_id }}"
+            class="dropdown-filter__trigger"
+            data-dropdown-trigger="true"
+            aria-haspopup="listbox"
+            :aria-expanded="open"
+            aria-labelledby="{{ label_id }}"
+            @click="open = !open"
+            @keydown.escape="open = false">
 
-    <span class="filter-multi-select-text">
-      {% if selected_count == 0 %}
-        {{ control.placeholder or 'Select...' }}
-      {% elif selected_count == 1 %}
-        {{ selected_values[0] }}
-      {% else %}
-        {{ selected_count }} selected
-      {% endif %}
-    </span>
+      <span id="{{ button_text_id }}" class="dropdown-filter__text">
+        {% if selected_count == 0 %}
+          {{ control.placeholder or 'All' }}
+        {% elif selected_count == 1 %}
+          {{ selected_values[0] }}
+        {% else %}
+          {{ selected_count }} selected
+        {% endif %}
+      </span>
 
-    <svg class="filter-multi-select-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-      <path d="m6 9 6 6 6-6"></path>
-    </svg>
-  </button>
+      <svg id="{{ button_icon_id }}"
+           class="dropdown-filter__icon"
+           xmlns="http://www.w3.org/2000/svg"
+           width="16"
+           height="16"
+           viewBox="0 0 24 24"
+           fill="none"
+           stroke="currentColor"
+           stroke-width="2"
+           stroke-linecap="round"
+           stroke-linejoin="round"
+           aria-hidden="true">
+        <path d="m6 9 6 6 6-6"></path>
+      </svg>
+    </button>
 
-  <div class="filter-multi-select-dropdown"
-       role="listbox"
-       aria-multiselectable="true"
-       x-show="open"
-       @click.outside="open = false"
-       x-cloak>
+    <div id="{{ menu_id }}"
+         class="dropdown-filter__menu"
+         data-dropdown-menu="true"
+         role="listbox"
+         aria-multiselectable="true"
+         x-show="open"
+         @click.outside="open = false"
+         x-cloak>
 
     {% if control.searchable %}
     <div class="filter-multi-select-search">
@@ -66,26 +115,37 @@
     </div>
     {% endif %}
 
-    <div class="filter-multi-select-options" data-searchable-options="{{ 'true' if control.searchable else 'false' }}">
+    {# Options container with React ID #}
+    <div id="{{ options_container_id }}"
+         class="dropdown-filter__options"
+         data-searchable-options="{{ 'true' if control.searchable else 'false' }}">
       {% for option in control_options %}
         {% set opt_value = option.value if option.value is defined else option %}
         {% set opt_label = option.label if option.label is defined else option %}
         {% set opt_disabled = option.disabled if option.disabled is defined else false %}
         {% set opt_count = option.count if option.count is defined else none %}
         {% set is_checked = opt_value in selected_values %}
-        {% set option_id = dropdown_id ~ '-opt-' ~ loop.index %}
+        {# React pattern: sector-option-{value}, sector-checkbox-{value} #}
+        {% set opt_key = opt_value | lower | replace(' ', '-') | replace('/', '-') %}
+        {% set option_label_id = dropdown_id.replace('-filter', '') ~ '-option-' ~ opt_key %}
+        {% set option_checkbox_id = dropdown_id.replace('-filter', '') ~ '-checkbox-' ~ opt_key %}
 
-        <label class="filter-multi-select-option{% if is_checked %} selected{% endif %}{% if opt_disabled %} disabled{% endif %}"
-               for="{{ option_id }}"
+        <label id="{{ option_label_id }}"
+               class="dropdown-filter__checkbox-option{% if is_checked %} selected{% endif %}{% if opt_disabled %} disabled{% endif %}"
+               for="{{ option_checkbox_id }}"
+               data-dropdown-option="true"
                role="option"
                aria-selected="{{ 'true' if is_checked else 'false' }}">
 
           <input type="checkbox"
-                 id="{{ option_id }}"
+                 id="{{ option_checkbox_id }}"
                  name="{{ control.column_id }}"
                  value="{{ opt_value }}"
-                 class="filter-multi-select-checkbox"
+                 class="dropdown-filter__checkbox"
                  data-filter-control
+                 data-field="true"
+                 data-field-type="checkbox"
+                 data-field-name="{{ control.column_id }}-{{ opt_key }}"
                  data-filter-type="multi_select"
                  data-column-id="{{ control.column_id }}"
                  {% if is_checked %}checked{% endif %}
@@ -98,7 +158,7 @@
                  hx-include="[data-filter-control]"
                  hx-indicator=".htmx-indicator"
                  {% endif %}>
-          <span class="filter-multi-select-label">{{ opt_label }}</span>
+          <span class="dropdown-filter__checkbox-text">{{ opt_label }}</span>
 
           {% if opt_count is not none %}
           <span class="filter-multi-select-count">{{ opt_count }}</span>
@@ -107,10 +167,14 @@
       {% endfor %}
     </div>
 
-    <div class="filter-multi-select-actions">
+    {# Clear button container with React ID #}
+    <div id="{{ clear_container_id }}" class="dropdown-filter__apply-container">
       <button type="button"
-              class="filter-multi-select-clear"
-              @click="document.querySelectorAll('#{{ dropdown_id }}-dropdown input:checked').forEach(el => el.checked = false)">
+              id="{{ clear_button_id }}"
+              class="dropdown-filter__apply-button"
+              data-action="true"
+              data-action-type="clear-filter"
+              @click="document.querySelectorAll('#{{ menu_id }} input:checked').forEach(el => el.checked = false)">
         Clear
       </button>
 
@@ -129,18 +193,19 @@
       </button>
       {% endif %}
     </div>
-  </div>
-</div>
+    </div>{# End dropdown menu #}
+  </div>{# End dropdown wrapper #}
+</div>{# End dropdown filter container #}
 
 {% if control.searchable %}
 <script>
 function filterOptions(input) {
-  const container = input.closest('.filter-multi-select');
-  const options = container.querySelectorAll('.filter-multi-select-option');
+  const container = input.closest('.dropdown-filter');
+  const options = container.querySelectorAll('.dropdown-filter__checkbox-option');
   const term = input.value.toLowerCase();
 
   options.forEach(option => {
-    const label = option.querySelector('.filter-multi-select-label');
+    const label = option.querySelector('.dropdown-filter__checkbox-text');
     const text = label ? label.textContent.toLowerCase() : '';
     option.style.display = (term === '' || text.includes(term)) ? '' : 'none';
   });

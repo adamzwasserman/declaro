@@ -453,14 +453,16 @@ await pool.close()
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends
 from declaro_persistum import ConnectionPool
-from declaro_persistum.query import table, load_default_schema
+from declaro_persistum.query import table
+from declaro_persistum.loader import load_schema
 
 pool = None
+schema = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global pool
-    load_default_schema("./schema")
+    global pool, schema
+    schema = load_schema("./schema")
     pool = await ConnectionPool.postgresql(
         "postgresql://localhost/mydb",
         min_size=5,
@@ -477,7 +479,7 @@ async def get_conn():
 
 @app.get("/users")
 async def list_users(conn=Depends(get_conn)):
-    users = table("users")
+    users = table("users", schema=schema)
     return await users.select().where(users.active == True).execute(conn)
 ```
 
@@ -856,14 +858,15 @@ else:
 The query builder uses schema-validated dot notation. Typos like `users.emial` are caught immediately at query build time, not when the SQL hits the database.
 
 ```python
-from declaro_persistum.query import table, load_default_schema
+from declaro_persistum.query import table
+from declaro_persistum.loader import load_schema
 
 # Load schema once at startup
-load_default_schema("./schema")
+schema = load_schema("./schema")
 
 # Create table proxies (validates against schema)
-users = table("users")
-orders = table("orders")
+users = table("users", schema=schema)
+orders = table("orders", schema=schema)
 ```
 
 #### SELECT Queries
@@ -890,7 +893,7 @@ user = await (
 )
 # user is dict[str, Any] | None
 
-# With JOIN
+# With JOIN (column-to-column comparison in ON clause)
 results = await (
     orders
     .select(orders.id, orders.total, users.email)
@@ -898,6 +901,20 @@ results = await (
     .where(orders.status == "pending")
     .execute(conn)
 )
+# Generates: ... INNER JOIN users ON orders.user_id = users.id ...
+
+# LEFT JOIN
+results = await (
+    orders
+    .select(orders.id, users.email)
+    .join(users, on=orders.user_id == users.id, type="left")
+    .execute(conn)
+)
+
+# All comparison operators work for column-to-column:
+#   orders.user_id == users.id   →  orders.user_id = users.id
+#   orders.user_id != users.id   →  orders.user_id != users.id
+#   orders.amount > users.limit  →  orders.amount > users.limit
 
 # Complex conditions with AND/OR
 results = await (

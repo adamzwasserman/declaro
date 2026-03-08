@@ -92,10 +92,55 @@
       {% else %}
       {% set cell_id = none %}
       {% endif %}
+
+      {# Map ColumnType to fmtx format #}
+      {% set fx_format = none %}
+      {% if col.type.value == "currency" %}
+        {% set fx_format = "currency" %}
+      {% elif col.type.value == "percentage" %}
+        {% set fx_format = "percent" %}
+      {% elif col.type.value == "number" %}
+        {% set fx_format = "number" %}
+      {% elif col.type.value == "date" %}
+        {% set fx_format = "date" %}
+      {% elif col.type.value == "datetime" %}
+        {% set fx_format = "datetime" %}
+      {% endif %}
+
+      {# Build fx-* attributes from format_options #}
+      {% set fx_attrs = "" %}
+      {% if fx_format %}
+        {% set fx_attrs = fx_attrs ~ ' fx-format="' ~ fx_format ~ '"' %}
+        {% if col.format_options %}
+          {% if col.format_options.currency is defined %}
+            {% set fx_attrs = fx_attrs ~ ' fx-currency="' ~ col.format_options.currency ~ '"' %}
+          {% elif col.format_options.currency_symbol is defined %}
+            {% set fx_attrs = fx_attrs ~ ' fx-currency="' ~ col.format_options.currency_symbol ~ '"' %}
+          {% endif %}
+          {% if col.format_options.decimals is defined %}
+            {% set fx_attrs = fx_attrs ~ ' fx-decimals="' ~ col.format_options.decimals ~ '"' %}
+          {% elif col.format_options.decimal_places is defined %}
+            {% set fx_attrs = fx_attrs ~ ' fx-decimals="' ~ col.format_options.decimal_places ~ '"' %}
+          {% endif %}
+          {% if col.format_options.locale is defined %}
+            {% set fx_attrs = fx_attrs ~ ' fx-locale="' ~ col.format_options.locale ~ '"' %}
+          {% endif %}
+          {% if col.format_options.thousands is defined %}
+            {% set fx_attrs = fx_attrs ~ ' fx-thousands="' ~ col.format_options.thousands ~ '"' %}
+          {% endif %}
+          {% if col.format_options.date_format is defined %}
+            {% set fx_attrs = fx_attrs ~ ' fx-date-format="' ~ col.format_options.date_format ~ '"' %}
+          {% endif %}
+          {% if col.format_options.show_sign is defined %}
+            {% set fx_attrs = fx_attrs ~ ' fx-show-sign="' ~ col.format_options.show_sign ~ '"' %}
+          {% endif %}
+        {% endif %}
+      {% endif %}
+
       {% if col.cell_css_class %}
-      <td class="tablix-td {{ col.cell_css_class }}"{% if cell_id %} id="{{ cell_id }}"{% endif %}>
+      <td class="tablix-td {{ col.cell_css_class }}"{% if cell_id %} id="{{ cell_id }}"{% endif %}{{ fx_attrs|safe }}>
       {% else %}
-      <td class="tablix-td"{% if cell_id %} id="{{ cell_id }}"{% endif %}>
+      <td class="tablix-td"{% if cell_id %} id="{{ cell_id }}"{% endif %}{{ fx_attrs|safe }}>
       {% endif %}
         {% if col.type.value == "image" and cell_value %}
         <img src="{{ cell_value }}" alt="{{ col.name }}" class="tablix-img" style="width: 32px; height: 32px; object-fit: cover; border-radius: 4px;" />

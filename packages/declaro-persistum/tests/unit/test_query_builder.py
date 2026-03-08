@@ -348,7 +348,7 @@ class TestSelectQuery:
         assert params["user_id"] == "abc-123"
 
     def test_select_with_join(self, orders_schema: Schema):
-        """SELECT with JOIN clause."""
+        """SELECT with JOIN clause using column-to-column comparison."""
         users = table("users", schema=orders_schema)
         orders = table("orders", schema=orders_schema)
         query = (
@@ -357,10 +357,11 @@ class TestSelectQuery:
             .join(users, on=orders.user_id == users.id)
         )
         sql, params = query.to_sql()
-        assert "INNER JOIN users ON" in sql
+        assert "INNER JOIN users ON orders.user_id = users.id" in sql
+        assert params == {}  # column-to-column produces no params
 
     def test_select_with_left_join(self, orders_schema: Schema):
-        """SELECT with LEFT JOIN clause."""
+        """SELECT with LEFT JOIN clause using column-to-column comparison."""
         users = table("users", schema=orders_schema)
         orders = table("orders", schema=orders_schema)
         query = (
@@ -369,7 +370,31 @@ class TestSelectQuery:
             .join(users, on=orders.user_id == users.id, type="left")
         )
         sql, params = query.to_sql()
-        assert "LEFT JOIN users ON" in sql
+        assert "LEFT JOIN users ON orders.user_id = users.id" in sql
+        assert params == {}
+
+    def test_column_to_column_comparison_operators(self, orders_schema: Schema):
+        """All comparison operators work for column-to-column (non-equi joins)."""
+        users = table("users", schema=orders_schema)
+        orders = table("orders", schema=orders_schema)
+
+        # != operator
+        cond = orders.user_id != users.id
+        sql, params = cond.to_sql("postgresql")
+        assert sql == "orders.user_id != users.id"
+        assert params == {}
+
+        # < operator
+        cond = orders.id < users.id
+        sql, params = cond.to_sql("postgresql")
+        assert sql == "orders.id < users.id"
+        assert params == {}
+
+        # > operator
+        cond = orders.id > users.id
+        sql, params = cond.to_sql("postgresql")
+        assert sql == "orders.id > users.id"
+        assert params == {}
 
     def test_select_with_count(self, users_schema: Schema):
         """SELECT with COUNT function."""

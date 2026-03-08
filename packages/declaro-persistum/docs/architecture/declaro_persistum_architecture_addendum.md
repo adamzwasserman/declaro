@@ -1302,6 +1302,12 @@ migrations/
 
 declaro_persistum/
 ├── ...                     # existing
+├── applier/
+│   ├── shared.py           # NEW: shared pure SQL generation (sqlite + turso)
+│   └── ...                 # existing applier files
+├── inspector/
+│   ├── shared.py           # NEW: shared pure functions (type normalization, FK parsing)
+│   └── ...                 # existing inspector files
 ├── abstractions/
 │   ├── __init__.py
 │   ├── arrays.py           # NEW: array → junction table

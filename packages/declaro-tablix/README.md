@@ -133,6 +133,8 @@ data = cache.get_cached_table_data(key)
 - `number_range`: Min/max number inputs
 - `date_range`: From/to date inputs
 - `single_select`: Standard dropdown
+- `tab_filter`: Horizontal tabs with optional counts (e.g., "All (100) | To Review (33)")
+- `action_button`: Action buttons (clear search, reset filters)
 
 ### Static Display Controls
 - `static_text`: Display static text content (for labels, instructions)
@@ -142,6 +144,38 @@ data = cache.get_cached_table_data(key)
 - `total_absolute`: Show aggregate totals from all data
 - `total_visible`: Show totals from filtered/visible data
 - `calculated_field`: Display calculated values with optional badge styling based on thresholds
+
+### Tab Filter Example
+
+```python
+from declaro_tablix.domain.filter_layout import (
+    FilterControlConfig, FilterControlType, FilterLayoutConfig, FilterOption
+)
+
+# Define filter layout with tab filter
+filter_layout = FilterLayoutConfig(
+    id="orders-filters",
+    table_id="orders",
+    controls=[
+        FilterControlConfig(
+            id="status-tabs",
+            control_type=FilterControlType.TAB_FILTER,
+            column_id="status",
+            options_source="statuses",
+            grid_column="1 / -1",  # Span full width
+        ),
+    ],
+)
+
+# Provide options with counts
+options = {
+    "statuses": [
+        FilterOption(value="all", label="All", count=150),
+        FilterOption(value="pending", label="Pending", count=42),
+        FilterOption(value="completed", label="Completed", count=108),
+    ]
+}
+```
 
 ## FastAPI Integration
 

@@ -178,38 +178,22 @@ class JoinClause(TypedDict):
 ```python
 # query/table.py
 
-from declaro_persistum.loader import load_schema
 from declaro_persistum.types import Schema, Column
 
-_default_schema: Schema | None = None
-
-def set_default_schema(schema: Schema) -> None:
-    """Set the default schema for table() calls."""
-    global _default_schema
-    _default_schema = schema
-
-def load_default_schema(models_dir: str = "./models") -> None:
-    """Load schema from Pydantic model directory and set as default."""
-    global _default_schema
-    _default_schema = load_schema_from_models(models_dir)
-
-def table(name: str, schema: Schema | None = None) -> "TableProxy":
+def table(name: str, schema: Schema) -> "TableProxy":
     """
     Create a schema-validated table proxy.
 
     Args:
         name: Table name (must exist in schema)
-        schema: Schema dict (uses default if not provided)
+        schema: Schema dict (required - no global default)
 
     Raises:
         ValueError: If table not found in schema
     """
-    s = schema or _default_schema
-    if s is None:
-        raise ValueError("No schema loaded. Call load_default_schema() first.")
-    if name not in s:
-        raise ValueError(f"Table '{name}' not found in schema. Available: {list(s.keys())}")
-    return TableProxy(name, s)
+    if name not in schema:
+        raise ValueError(f"Table '{name}' not found in schema. Available: {list(schema.keys())}")
+    return TableProxy(name, schema)
 
 
 class TableProxy:

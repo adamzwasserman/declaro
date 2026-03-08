@@ -334,7 +334,10 @@ class ColumnProxy:
     """
     Schema-validated column proxy for expressions.
 
-    Supports comparison operators for WHERE clauses.
+    Supports comparison operators for WHERE clauses and JOIN ON clauses.
+    When compared to another ColumnProxy, generates column-to-column SQL
+    (e.g. ``orders.user_id = users.id``) with no parameters.
+    When compared to a literal value, generates parameterized SQL.
     """
 
     __slots__ = ("_table", "_name", "_definition")
@@ -446,6 +449,10 @@ class Condition:
             return f"LOWER({self.column}) LIKE LOWER(:_like_{self._param_counter})", {
                 f"_like_{self._param_counter}": self.value
             }
+
+        # Column-to-column comparison (for JOIN ON clauses)
+        if isinstance(self.value, ColumnProxy):
+            return f"{self.column} {self.operator} {self.value._full_name}", {}
 
         # Standard comparison - if value is string starting with :, it's a param reference
         if isinstance(self.value, str) and self.value.startswith(":"):
