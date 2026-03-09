@@ -7,9 +7,9 @@ Uses _maybe_await to support both sync (pyturso, libsql_experimental raw)
 and async (LibSQLAsyncConnection) connections.
 """
 
-import inspect
 from typing import Any, Literal
 
+from declaro_persistum.abstractions.pragma_compat import _maybe_await
 from declaro_persistum.applier.shared import (
     apply_reconstruction_changes,
     columns_from_pragma_rows,
@@ -18,16 +18,10 @@ from declaro_persistum.applier.shared import (
     generate_operation_sql,
     generate_sql,
     requires_reconstruction,
+    single_change_property,
 )
 from declaro_persistum.exceptions import MigrationError
 from declaro_persistum.types import ApplyResult, Operation
-
-
-async def _maybe_await(value: Any) -> Any:
-    """Await value if it's awaitable, otherwise return as-is."""
-    if inspect.isawaitable(value):
-        return await value
-    return value
 
 
 class TursoApplier:
@@ -130,7 +124,6 @@ class TursoApplier:
         )
 
         table = operation["table"]
-        details = operation["details"]
 
         # Fresh introspection for current state (includes FKs + unique constraints)
         columns = await _get_full_table_schema(connection, table)
@@ -139,27 +132,18 @@ class TursoApplier:
         columns = apply_reconstruction_changes(columns, operation)
 
         # Use specialized functions for single-property alter_column changes
-        if operation["op"] == "alter_column" and len(details["changes"]) == 1:
-            changes = details["changes"]
-            column = details["column"]
-
-            if "nullable" in changes:
-                val = changes["nullable"]
-                if isinstance(val, dict) and "to" in val:
-                    val = val["to"]
-                await alter_column_nullability(connection, table, column, val)
-                return
-            elif "type" in changes:
-                val = changes["type"]
-                if isinstance(val, dict) and "to" in val:
-                    val = val["to"]
-                await alter_column_type(connection, table, column, val)
-                return
-            elif "default" in changes:
-                val = changes["default"]
-                if isinstance(val, dict) and "to" in val:
-                    val = val["to"]
-                await alter_column_default(connection, table, column, val)
+        single = single_change_property(operation)
+        if single is not None:
+            change_key, val = single
+            column = operation["details"]["column"]
+            _SPECIALIZED = {
+                "nullable": alter_column_nullability,
+                "type": alter_column_type,
+                "default": alter_column_default,
+            }
+            handler = _SPECIALIZED.get(change_key)
+            if handler is not None:
+                await handler(connection, table, column, val)
                 return
 
         # General reconstruction

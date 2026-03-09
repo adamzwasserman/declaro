@@ -361,6 +361,29 @@ def apply_reconstruction_changes(
     return columns
 
 
+def single_change_property(operation: Operation) -> tuple[str, Any] | None:
+    """Extract single-property change key and unwrapped value from alter_column op.
+
+    Returns (change_key, value) if the operation is an alter_column with exactly
+    one change in {"nullable", "type", "default"}. Returns None otherwise.
+    """
+    if operation["op"] != "alter_column":
+        return None
+
+    changes = operation["details"]["changes"]
+    if len(changes) != 1:
+        return None
+
+    for key in ("nullable", "type", "default"):
+        if key in changes:
+            val = changes[key]
+            if isinstance(val, dict) and "to" in val:
+                val = val["to"]
+            return key, val
+
+    return None
+
+
 def enum_population_sql(
     operation: Operation, target_schema: Any
 ) -> list[str]:

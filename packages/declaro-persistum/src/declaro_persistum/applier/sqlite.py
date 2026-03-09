@@ -18,6 +18,7 @@ from declaro_persistum.applier.shared import (
     generate_sql,
     map_type as _map_type_shared,
     requires_reconstruction,
+    single_change_property,
 )
 from declaro_persistum.errors import NotSupportedError
 from declaro_persistum.exceptions import MigrationError
@@ -122,7 +123,6 @@ class SQLiteApplier:
         )
 
         table = operation["table"]
-        details = operation["details"]
 
         # Fresh introspection for current state (includes FKs + unique constraints)
         columns = await _get_full_table_schema(connection, table)
@@ -131,27 +131,18 @@ class SQLiteApplier:
         columns = apply_reconstruction_changes(columns, operation)
 
         # Use specialized functions for single-property alter_column changes
-        if operation["op"] == "alter_column" and len(details["changes"]) == 1:
-            changes = details["changes"]
-            column = details["column"]
-
-            if "nullable" in changes:
-                val = changes["nullable"]
-                if isinstance(val, dict) and "to" in val:
-                    val = val["to"]
-                await alter_column_nullability(connection, table, column, val)
-                return
-            elif "type" in changes:
-                val = changes["type"]
-                if isinstance(val, dict) and "to" in val:
-                    val = val["to"]
-                await alter_column_type(connection, table, column, val)
-                return
-            elif "default" in changes:
-                val = changes["default"]
-                if isinstance(val, dict) and "to" in val:
-                    val = val["to"]
-                await alter_column_default(connection, table, column, val)
+        single = single_change_property(operation)
+        if single is not None:
+            change_key, val = single
+            column = operation["details"]["column"]
+            _SPECIALIZED = {
+                "nullable": alter_column_nullability,
+                "type": alter_column_type,
+                "default": alter_column_default,
+            }
+            handler = _SPECIALIZED.get(change_key)
+            if handler is not None:
+                await handler(connection, table, column, val)
                 return
 
         # General reconstruction

@@ -9,6 +9,7 @@ calls that may not be natively supported by Turso Database (Rust).
 from typing import Any
 
 from declaro_persistum.abstractions.pragma_compat import (
+    _maybe_await,
     pragma_foreign_key_list,
     pragma_index_info,
     pragma_index_list,
@@ -52,7 +53,7 @@ class TursoInspector:
         Uses pragma_compat for PRAGMA calls that may need emulation.
         """
         try:
-            cursor = connection.execute(
+            cursor = await _maybe_await(connection.execute(
                 """
                 SELECT name FROM sqlite_master
                 WHERE type = 'table'
@@ -60,8 +61,8 @@ class TursoInspector:
                   AND name NOT LIKE '_litestream_%'
                 ORDER BY name
                 """
-            )
-            tables = cursor.fetchall()
+            ))
+            tables = await _maybe_await(cursor.fetchall())
 
             schema: Schema = {}
 
@@ -149,11 +150,11 @@ class TursoInspector:
 
             index_info[idx_name] = await pragma_index_info(connection, idx_name)
 
-            sql_cursor = connection.execute(
+            sql_cursor = await _maybe_await(connection.execute(
                 "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
                 (idx_name,),
-            )
-            sql_row = sql_cursor.fetchone()
+            ))
+            sql_row = await _maybe_await(sql_cursor.fetchone())
             index_sql[idx_name] = sql_row[0] if sql_row else None
 
         return indexes_from_rows(index_rows, index_info, index_sql)
@@ -173,11 +174,11 @@ class TursoInspector:
         table_name: str,
     ) -> bool:
         """Check if a table exists."""
-        cursor = connection.execute(
+        cursor = await _maybe_await(connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
             (table_name,),
-        )
-        result = cursor.fetchone()
+        ))
+        result = await _maybe_await(cursor.fetchone())
         return result is not None
 
     async def get_table_columns(
@@ -198,7 +199,7 @@ class TursoInspector:
         connection: Any,
     ) -> dict[str, View]:
         """Introspect views from Turso/libSQL."""
-        cursor = connection.execute(
+        cursor = await _maybe_await(connection.execute(
             """
             SELECT name, sql
             FROM sqlite_master
@@ -207,7 +208,7 @@ class TursoInspector:
               AND name NOT LIKE '_litestream_%'
             ORDER BY name
             """
-        )
-        rows = cursor.fetchall()
+        ))
+        rows = await _maybe_await(cursor.fetchall())
 
         return views_from_rows(rows)
