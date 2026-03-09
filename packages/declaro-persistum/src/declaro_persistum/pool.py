@@ -20,6 +20,8 @@ import asyncio
 import logging
 import re
 import time
+
+logger = logging.getLogger(__name__)
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
