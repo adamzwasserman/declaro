@@ -24,7 +24,7 @@ from declaro_persistum.exceptions import (
     SchemaError,
     TransferError,
 )
-from declaro_persistum.pool import ConnectionPool, MirrorPool, TursoCloudManager
+from declaro_persistum.pool import ConnectionPool, LibSQLEmbeddedPool, MirrorPool, TursoCloudManager
 from declaro_persistum.types import (
     Ambiguity,
     ApplyResult,
@@ -65,6 +65,7 @@ __all__ = [
     "ApplyResult",
     # Connection Pool
     "ConnectionPool",
+    "LibSQLEmbeddedPool",
     "MirrorPool",
     "TursoCloudManager",
     # Pydantic Loader

@@ -14,6 +14,7 @@ from declaro_persistum.pool import (
     PostgreSQLPool,
     TursoPool,
     LibSQLPool,
+    LibSQLEmbeddedPool,
 )
 from declaro_persistum.exceptions import (
     PoolClosedError,
@@ -389,3 +390,73 @@ class TestPoolContextManager:
 
         assert sorted(results) == [1, 2, 3]
         await pool.close()
+
+
+class TestLibSQLEmbeddedPool:
+    """Tests for LibSQLEmbeddedPool."""
+
+    def test_pool_initialization(self):
+        """Pool can be instantiated without connecting."""
+        pool = LibSQLEmbeddedPool(
+            "/tmp/test-replica.db",
+            sync_url="libsql://db.turso.io",
+            auth_token="secret",
+        )
+        assert not pool.closed
+        assert pool._local_path == "/tmp/test-replica.db"
+        assert pool._sync_url == "libsql://db.turso.io"
+        assert pool._auth_token == "secret"
+        assert pool._sync_interval == 5.0
+
+    def test_pool_custom_sync_interval(self):
+        """Pool accepts custom sync interval."""
+        pool = LibSQLEmbeddedPool(
+            "/tmp/test-replica.db",
+            sync_url="libsql://db.turso.io",
+            auth_token="secret",
+            sync_interval_seconds=30.0,
+        )
+        assert pool._sync_interval == 30.0
+
+    @pytest.mark.asyncio
+    async def test_pool_closed_error(self):
+        """Acquiring from closed pool raises PoolClosedError."""
+        pool = LibSQLEmbeddedPool(
+            "/tmp/test-replica.db",
+            sync_url="libsql://db.turso.io",
+            auth_token="secret",
+        )
+        await pool.close()
+        assert pool.closed
+        with pytest.raises(PoolClosedError):
+            async with pool.acquire():
+                pass
+
+    def test_factory_method_exists(self):
+        """ConnectionPool.libsql_embedded() factory exists."""
+        assert hasattr(ConnectionPool, "libsql_embedded")
+
+    def test_export_from_package(self):
+        """LibSQLEmbeddedPool is exported from package."""
+        from declaro_persistum import LibSQLEmbeddedPool as Exported
+        assert Exported is LibSQLEmbeddedPool
+
+
+class TestLibSQLPoolConnectionReuse:
+    """Tests for LibSQLPool connection reuse."""
+
+    @pytest.mark.asyncio
+    async def test_pool_has_idle_list(self):
+        """LibSQLPool maintains idle connection list."""
+        pool = LibSQLPool("libsql://localhost", max_size=5)
+        assert pool._idle == []
+        assert pool._max_size == 5
+        await pool.close()
+
+    @pytest.mark.asyncio
+    async def test_close_clears_idle(self):
+        """Closing pool clears idle connections."""
+        pool = LibSQLPool("libsql://localhost")
+        await pool.close()
+        assert pool.closed
+        assert pool._idle == []

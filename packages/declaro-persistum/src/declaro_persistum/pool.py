@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -447,6 +448,63 @@ class _LibSQLConnectionHolder:
             self.conn = None
 
 
+class _LibSQLEmbeddedConnectionHolder:
+    """
+    Holds a libsql_experimental embedded replica connection.
+
+    Embedded replicas maintain a local SQLite file that syncs from
+    Turso Cloud. Reads hit the local file (sub-millisecond).
+    Writes go to cloud and sync back.
+    """
+
+    def __init__(self, local_path: str, sync_url: str, auth_token: str) -> None:
+        import libsql_experimental as libsql
+
+        self._libsql = libsql
+        self.local_path = local_path
+        self.sync_url = sync_url
+        self.auth_token = auth_token
+        self.conn: Any = None
+
+    def connect(self) -> None:
+        """Open embedded replica connection (must be called on executor thread)."""
+        self.conn = self._libsql.connect(
+            self.local_path,
+            sync_url=self.sync_url,
+            auth_token=self.auth_token,
+        )
+
+    def execute(self, sql: str, parameters: tuple) -> tuple[list, Any, int]:
+        cursor = self.conn.cursor()
+        cursor.execute(sql, parameters)
+        try:
+            rows = cursor.fetchall()
+        except Exception:
+            rows = []
+        return (rows, cursor.description, cursor.rowcount)
+
+    def executemany(self, sql: str, parameters: list) -> int:
+        cursor = self.conn.cursor()
+        cursor.executemany(sql, parameters)
+        return cursor.rowcount
+
+    def commit(self) -> None:
+        self.conn.commit()
+
+    def rollback(self) -> None:
+        self.conn.rollback()
+
+    def sync(self) -> None:
+        """Sync local replica with Turso cloud."""
+        self.conn.sync()
+
+    def close(self) -> None:
+        """Close connection."""
+        if self.conn is not None:
+            self.conn.close()
+            self.conn = None
+
+
 class LibSQLAsyncConnection:
     """
     Async wrapper for libsql_experimental synchronous connections.
@@ -500,9 +558,8 @@ class LibSQLPool(BasePool):
     """
     LibSQL connection pool using libsql_experimental.
 
-    Used for Turso cloud connections. libsql_experimental provides a
-    synchronous DB-API 2.0 interface, so we wrap it with
-    LibSQLAsyncConnection for async compatibility.
+    Used for Turso cloud connections. Reuses connections across acquire()
+    calls to avoid paying DNS/TCP/TLS/Hrana setup on every query.
     """
 
     def __init__(
@@ -520,10 +577,24 @@ class LibSQLPool(BasePool):
         self._semaphore = asyncio.Semaphore(max_size)
         self._closed = False
         self._active_connections = 0
+        self._idle: list[tuple[_LibSQLConnectionHolder, ThreadPoolExecutor]] = []
+        self._lock = asyncio.Lock()
+
+    async def _get_or_create_connection(self) -> tuple[_LibSQLConnectionHolder, ThreadPoolExecutor]:
+        """Get an idle connection or create a new one."""
+        async with self._lock:
+            if self._idle:
+                return self._idle.pop()
+
+        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="libsql")
+        holder = _LibSQLConnectionHolder(self._url, self._auth_token)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(executor, holder.connect)
+        return holder, executor
 
     @asynccontextmanager
     async def acquire(self) -> AsyncIterator[LibSQLAsyncConnection]:
-        """Acquire a connection (creates fresh connection each time)."""
+        """Acquire a connection, reusing idle connections when available."""
         if self._closed:
             raise PoolClosedError("Pool has been closed")
 
@@ -535,16 +606,16 @@ class LibSQLPool(BasePool):
                 f"Timed out waiting for connection after {self._acquire_timeout}s"
             ) from err
 
-        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="libsql")
-        holder = _LibSQLConnectionHolder(self._url, self._auth_token)
+        holder = None
+        executor = None
         async_conn = None
 
         try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(executor, holder.connect)
+            holder, executor = await self._get_or_create_connection()
             async_conn = LibSQLAsyncConnection(holder, executor)
         except Exception as e:
-            executor.shutdown(wait=False)
+            if executor:
+                executor.shutdown(wait=False)
             self._semaphore.release()
             raise PoolConnectionError(f"Failed to connect to LibSQL: {e}") from e
 
@@ -554,13 +625,34 @@ class LibSQLPool(BasePool):
         finally:
             self._active_connections -= 1
             if async_conn:
-                await async_conn.close()
-            executor.shutdown(wait=True)
+                async_conn._closed = True  # prevent close() from destroying connection
+            # Return to idle pool instead of destroying
+            if holder and executor and not self._closed:
+                async with self._lock:
+                    if len(self._idle) < self._max_size:
+                        self._idle.append((holder, executor))
+                    else:
+                        await asyncio.get_event_loop().run_in_executor(
+                            None, holder.close
+                        )
+                        executor.shutdown(wait=False)
+            elif holder:
+                await asyncio.get_event_loop().run_in_executor(None, holder.close)
+                if executor:
+                    executor.shutdown(wait=False)
             self._semaphore.release()
 
     async def close(self) -> None:
-        """Mark the pool as closed."""
+        """Close the pool and all idle connections."""
         self._closed = True
+        async with self._lock:
+            for holder, executor in self._idle:
+                try:
+                    holder.close()
+                except Exception:
+                    pass
+                executor.shutdown(wait=False)
+            self._idle.clear()
 
     @property
     def closed(self) -> bool:
@@ -575,6 +667,133 @@ class LibSQLPool(BasePool):
     @property
     def available(self) -> int:
         """Number of available connection slots."""
+        return self._max_size - self._active_connections
+
+
+class LibSQLEmbeddedPool(BasePool):
+    """
+    LibSQL embedded replica pool using libsql_experimental.
+
+    Maintains a local SQLite replica that syncs from Turso Cloud.
+    Reads hit the local file (sub-millisecond). Writes go to cloud.
+    A single connection is reused across acquire() calls.
+    Syncs automatically when stale (configurable interval).
+    """
+
+    def __init__(
+        self,
+        local_path: str,
+        *,
+        sync_url: str,
+        auth_token: str,
+        sync_interval_seconds: float = 5.0,
+        max_size: int = 10,
+        acquire_timeout: float = 30.0,
+    ) -> None:
+        self._local_path = local_path
+        self._sync_url = sync_url
+        self._auth_token = auth_token
+        self._sync_interval = sync_interval_seconds
+        self._max_size = max_size
+        self._acquire_timeout = acquire_timeout
+        self._semaphore = asyncio.Semaphore(max_size)
+        self._closed = False
+        self._active_connections = 0
+        self._holder: _LibSQLEmbeddedConnectionHolder | None = None
+        self._executor: ThreadPoolExecutor | None = None
+        self._last_sync: float = 0.0
+        self._lock = asyncio.Lock()
+
+    async def _ensure_connection(self) -> tuple[_LibSQLEmbeddedConnectionHolder, ThreadPoolExecutor]:
+        """Create or return existing connection, syncing if stale."""
+        async with self._lock:
+            if self._holder is None or self._executor is None:
+                self._executor = ThreadPoolExecutor(
+                    max_workers=1, thread_name_prefix="libsql-embedded"
+                )
+                self._holder = _LibSQLEmbeddedConnectionHolder(
+                    self._local_path, self._sync_url, self._auth_token
+                )
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(self._executor, self._holder.connect)
+                await loop.run_in_executor(self._executor, self._holder.sync)
+                self._last_sync = time.monotonic()
+                logger.info(
+                    f"Embedded replica connected and synced: {self._local_path}"
+                )
+            elif (
+                self._sync_interval > 0
+                and time.monotonic() - self._last_sync > self._sync_interval
+            ):
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(self._executor, self._holder.sync)
+                self._last_sync = time.monotonic()
+
+            return self._holder, self._executor
+
+    @asynccontextmanager
+    async def acquire(self) -> AsyncIterator[LibSQLAsyncConnection]:
+        """Acquire a connection to the local replica."""
+        if self._closed:
+            raise PoolClosedError("Pool has been closed")
+
+        try:
+            async with asyncio.timeout(self._acquire_timeout):
+                await self._semaphore.acquire()
+        except TimeoutError as err:
+            raise PoolExhaustedError(
+                f"Timed out waiting for connection after {self._acquire_timeout}s"
+            ) from err
+
+        try:
+            holder, executor = await self._ensure_connection()
+            async_conn = LibSQLAsyncConnection(holder, executor)
+        except Exception as e:
+            self._semaphore.release()
+            raise PoolConnectionError(
+                f"Failed to connect to embedded replica: {e}"
+            ) from e
+
+        self._active_connections += 1
+        try:
+            yield async_conn
+        finally:
+            self._active_connections -= 1
+            async_conn._closed = True  # prevent close() from destroying shared connection
+            self._semaphore.release()
+
+    async def sync(self) -> None:
+        """Manually trigger a sync from cloud."""
+        if self._holder is None or self._executor is None:
+            return
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(self._executor, self._holder.sync)
+        self._last_sync = time.monotonic()
+
+    async def close(self) -> None:
+        """Close the connection and clean up."""
+        self._closed = True
+        async with self._lock:
+            if self._holder:
+                try:
+                    self._holder.close()
+                except Exception:
+                    pass
+                self._holder = None
+            if self._executor:
+                self._executor.shutdown(wait=False)
+                self._executor = None
+
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
+    @property
+    def size(self) -> int:
+        return self._max_size
+
+    @property
+    def available(self) -> int:
         return self._max_size - self._active_connections
 
 
@@ -799,6 +1018,43 @@ class ConnectionPool:
         return LibSQLPool(
             url,
             auth_token=auth_token,
+            max_size=max_size,
+            acquire_timeout=acquire_timeout,
+        )
+
+    @staticmethod
+    async def libsql_embedded(
+        local_path: str,
+        *,
+        sync_url: str,
+        auth_token: str,
+        sync_interval_seconds: float = 5.0,
+        max_size: int = 10,
+        acquire_timeout: float = 30.0,
+    ) -> LibSQLEmbeddedPool:
+        """
+        Create a LibSQL embedded replica pool.
+
+        Reads are local (sub-millisecond). Writes go to Turso Cloud.
+
+        Args:
+            local_path: Path for the local replica file
+                        (e.g., "/tmp/multicardz/replicas/central.db")
+            sync_url: Turso Cloud URL
+                      (e.g., "libsql://mc-central-multicardz.turso.io")
+            auth_token: Turso auth token
+            sync_interval_seconds: How often to auto-sync from cloud (default: 5.0)
+            max_size: Maximum concurrent connections (default: 10)
+            acquire_timeout: Timeout for acquiring connection in seconds (default: 30)
+
+        Returns:
+            LibSQLEmbeddedPool instance
+        """
+        return LibSQLEmbeddedPool(
+            local_path,
+            sync_url=sync_url,
+            auth_token=auth_token,
+            sync_interval_seconds=sync_interval_seconds,
             max_size=max_size,
             acquire_timeout=acquire_timeout,
         )
