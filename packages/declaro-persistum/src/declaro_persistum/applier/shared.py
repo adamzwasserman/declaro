@@ -299,26 +299,8 @@ def dry_run_preview(
     }
 
 
-def columns_from_pragma_rows(rows: list[tuple]) -> dict[str, Column]:
-    """Convert PRAGMA table_info rows to Column dict (pure)."""
-    columns: dict[str, Column] = {}
-    for row in rows:
-        cid, name, type_str, notnull, dflt_value, pk = row
-
-        col_def: Column = {
-            "type": type_str or "TEXT",
-            "nullable": not bool(notnull),
-        }
-
-        if pk:
-            col_def["primary_key"] = True
-
-        if dflt_value is not None:
-            col_def["default"] = dflt_value
-
-        columns[name] = col_def
-
-    return columns
+# Re-export from inspector.shared — single source of truth for PRAGMA parsing
+from declaro_persistum.inspector.shared import columns_from_pragma_rows as columns_from_pragma_rows
 
 
 def apply_reconstruction_changes(
@@ -349,8 +331,12 @@ def apply_reconstruction_changes(
         if column not in columns:
             raise ValueError(f"Column '{column}' not found in table '{operation['table']}'")
 
-        ref_table = details["references"]["table"]
-        ref_column = details["references"]["column"]
+        ref = details["references"]
+        if isinstance(ref, str):
+            ref_table, ref_column = ref.split(".", 1)
+        else:
+            ref_table = ref["table"]
+            ref_column = ref["column"]
         columns[column]["references"] = f"{ref_table}.{ref_column}"
 
         if "on_delete" in details:

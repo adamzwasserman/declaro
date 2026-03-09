@@ -31,6 +31,10 @@ Feature: Table Reconstruction for SQLite/Turso ALTER COLUMN
       | id          | INTEGER | false    |
       | name        | TEXT    | false    |
       | description | TEXT    | false    |
+    And the table contains data:
+      | id | name       | description    |
+      | 1  | Product 1  | Description 1  |
+      | 2  | Product 2  | Description 2  |
     When I alter column "description" to be nullable
     Then the table schema shows "description" as nullable
     And all existing data is preserved

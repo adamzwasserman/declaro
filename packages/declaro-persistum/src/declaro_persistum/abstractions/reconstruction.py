@@ -350,8 +350,9 @@ async def execute_reconstruction_async(
         if fk_enabled:
             await connection.execute("PRAGMA foreign_keys = ON")
 
-            # Verify foreign key constraints
-            check_cursor = await connection.execute(f'PRAGMA foreign_key_check("{table_name}")')
+            # Verify foreign key constraints (all tables — catches incoming FK
+            # references from other tables that may now be dangling)
+            check_cursor = await connection.execute("PRAGMA foreign_key_check")
             violations = await check_cursor.fetchall()
             if violations:
                 raise ValueError(
@@ -366,120 +367,6 @@ async def execute_reconstruction_async(
         try:
             if fk_enabled:
                 await connection.execute("PRAGMA foreign_keys = ON")
-        except Exception:
-            pass
-        raise
-
-
-# =============================================================================
-# Sync Execution (Turso Database/pyturso)
-# =============================================================================
-
-
-def execute_reconstruction_sync(
-    connection: Any,
-    table_name: str,
-    new_columns: dict[str, Column],
-    *,
-    preserve_data: bool = True,
-) -> None:
-    """
-    Execute table reconstruction synchronously.
-
-    Same as execute_reconstruction_async but for synchronous connections
-    (Turso Database/pyturso).
-
-    Performs fresh introspection before reconstruction to ensure we have
-    the current state (no caching/optimization across multiple operations).
-
-    Args:
-        connection: Sync database connection (pyturso)
-        table_name: Name of table to reconstruct
-        new_columns: New column definitions (full schema with FKs embedded)
-        preserve_data: Whether to copy data from old table (default: True)
-
-    Raises:
-        Exception: If reconstruction fails (caller should handle transaction rollback)
-
-    Example:
-        >>> new_cols = {
-        ...     "id": {"type": "INTEGER", "primary_key": True},
-        ...     "email": {"type": "TEXT", "nullable": False},
-        ... }
-        >>> execute_reconstruction_sync(conn, "users", new_cols)
-    """
-    # Validate column definitions before any destructive operations
-    _validate_columns(table_name, new_columns)
-
-    temp_table = f"{table_name}_new"
-
-    # 1. Fresh introspection - get current state
-    current_columns = _get_table_columns_sync(connection, table_name)
-
-    # 2. Get current foreign key state
-    fk_cursor = connection.execute("PRAGMA foreign_keys")
-    fk_row = fk_cursor.fetchone()
-    fk_enabled = fk_row[0] if fk_row else 0
-
-    try:
-        # 3. Disable foreign keys during reconstruction
-        connection.execute("PRAGMA foreign_keys = OFF")
-
-        # 4. Create new table with updated schema
-        create_sql = generate_create_table_sql(temp_table, new_columns)
-        logger.debug(f"Creating temp table: {create_sql}")
-        connection.execute(create_sql)
-
-        # 5. Copy compatible data if requested
-        if preserve_data:
-            common_columns = [col for col in current_columns if col in new_columns]
-
-            if common_columns:
-                copy_sql = generate_data_copy_sql(table_name, temp_table, common_columns)
-                logger.debug(f"Copying data: {copy_sql}")
-                connection.execute(copy_sql)
-            else:
-                logger.warning(
-                    f"No common columns between old and new schema for '{table_name}'. "
-                    f"No data will be copied."
-                )
-
-        # 6. Get indexes to recreate
-        indexes = _get_table_indexes_sync(connection, table_name)
-
-        # 7. Drop old table
-        connection.execute(f'DROP TABLE "{table_name}"')
-
-        # 8. Rename temp table to original name
-        connection.execute(f'ALTER TABLE "{temp_table}" RENAME TO "{table_name}"')
-
-        # 9. Recreate indexes
-        for index_sql in indexes:
-            # Replace temp table name with original in index definitions
-            recreate_sql = index_sql.replace(f'"{temp_table}"', f'"{table_name}"')
-            logger.debug(f"Recreating index: {recreate_sql}")
-            connection.execute(recreate_sql)
-
-        # 10. Re-enable foreign keys if they were enabled
-        if fk_enabled:
-            connection.execute("PRAGMA foreign_keys = ON")
-
-            # Verify foreign key constraints
-            check_cursor = connection.execute(f'PRAGMA foreign_key_check("{table_name}")')
-            violations = check_cursor.fetchall()
-            if violations:
-                raise ValueError(
-                    f"Foreign key constraint violations after reconstruction: {violations}"
-                )
-
-        logger.info(f"Successfully reconstructed table '{table_name}'")
-
-    except Exception as e:
-        logger.error(f"Table reconstruction failed for '{table_name}': {e}")
-        # Re-enable foreign keys before re-raising
-        try:
-            if fk_enabled:
-                connection.execute("PRAGMA foreign_keys = ON")
         except Exception:
             pass
         raise
@@ -533,14 +420,6 @@ async def _get_table_columns_async(connection: Any, table_name: str) -> list[str
     return [row[1] for row in rows]  # Column name is at index 1
 
 
-def _get_table_columns_sync(connection: Any, table_name: str) -> list[str]:
-    """Get list of column names for a table (sync)."""
-    # For sync connections, use direct PRAGMA
-    cursor = connection.execute(f'PRAGMA table_info("{table_name}")')
-    rows = cursor.fetchall()
-    return [row[1] for row in rows]  # Column name is at index 1
-
-
 async def _get_table_indexes_async(connection: Any, table_name: str) -> list[str]:
     """
     Get CREATE INDEX statements for all indexes on a table (async).
@@ -567,38 +446,6 @@ async def _get_table_indexes_async(connection: Any, table_name: str) -> list[str
             (index_name,),
         )
         result = await cursor.fetchone()
-
-        if result and result[0]:
-            index_sqls.append(result[0])
-
-    return index_sqls
-
-
-def _get_table_indexes_sync(connection: Any, table_name: str) -> list[str]:
-    """
-    Get CREATE INDEX statements for all indexes on a table (sync).
-
-    Returns list of CREATE INDEX SQL statements.
-    """
-    cursor = connection.execute(f'PRAGMA index_list("{table_name}")')
-    index_list = cursor.fetchall()
-    index_sqls = []
-
-    for row in index_list:
-        # row format: (seq, name, unique, origin, partial)
-        index_name = row[1]
-        origin = row[3]
-
-        # Skip auto-generated indexes (UNIQUE/PRIMARY KEY constraints)
-        if origin in ("u", "pk"):
-            continue
-
-        # Get CREATE INDEX statement from sqlite_master
-        cursor = connection.execute(
-            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
-            (index_name,),
-        )
-        result = cursor.fetchone()
 
         if result and result[0]:
             index_sqls.append(result[0])

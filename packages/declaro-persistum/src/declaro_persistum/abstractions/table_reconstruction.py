@@ -110,8 +110,9 @@ async def reconstruct_table(
         if fk_enabled:
             await connection.execute("PRAGMA foreign_keys = ON")
 
-            # Verify foreign key constraints
-            check_cursor = await connection.execute(f'PRAGMA foreign_key_check("{table_name}")')
+            # Verify foreign key constraints (all tables — catches incoming FK
+            # references from other tables that may now be dangling)
+            check_cursor = await connection.execute("PRAGMA foreign_key_check")
             violations = await check_cursor.fetchall()
             if violations:
                 raise ValueError(
@@ -248,28 +249,48 @@ async def _get_full_table_schema(connection: Any, table_name: str) -> dict[str, 
     """
     Extract full column schema from existing table.
 
+    Reads columns from PRAGMA table_info AND foreign keys from
+    PRAGMA foreign_key_list, merging FK data into column definitions.
+
     Returns dict mapping column name to Column definition.
     """
-    from declaro_persistum.abstractions.pragma_compat import pragma_table_info
+    from declaro_persistum.abstractions.pragma_compat import (
+        pragma_foreign_key_list,
+        pragma_index_info,
+        pragma_index_list,
+        pragma_table_info,
+    )
+    from declaro_persistum.inspector.shared import (
+        apply_unique_columns,
+        columns_from_pragma_rows,
+        fk_list_from_pragma_rows,
+        unique_cols_from_index_rows,
+    )
 
+    # Columns (type, nullable, default, pk)
     rows = await pragma_table_info(connection, table_name)
-    columns: dict[str, Column] = {}
+    columns = columns_from_pragma_rows(rows)
 
-    for row in rows:
-        cid, name, type_str, notnull, dflt_value, pk = row
+    # Unique constraints from indexes
+    index_rows = await pragma_index_list(connection, table_name)
+    index_info: dict[str, list[tuple]] = {}
+    for idx_row in index_rows:
+        idx_name = idx_row[1]
+        index_info[idx_name] = await pragma_index_info(connection, idx_name)
+    unique_cols = unique_cols_from_index_rows(index_rows, index_info)
+    apply_unique_columns(columns, unique_cols)
 
-        col_def: Column = {
-            "type": type_str or "TEXT",
-            "nullable": not bool(notnull),
-        }
-
-        if pk:
-            col_def["primary_key"] = True
-
-        if dflt_value is not None:
-            col_def["default"] = dflt_value
-
-        columns[name] = col_def
+    # Foreign keys — merge into column defs
+    fk_rows = await pragma_foreign_key_list(connection, table_name)
+    fk_list = fk_list_from_pragma_rows(fk_rows)
+    for fk in fk_list:
+        col_name = fk["from"]
+        if col_name in columns:
+            columns[col_name]["references"] = f"{fk['table']}.{fk['to']}"
+            if fk.get("on_delete") and fk["on_delete"] != "NO ACTION":
+                columns[col_name]["on_delete"] = fk["on_delete"].lower()
+            if fk.get("on_update") and fk["on_update"] != "NO ACTION":
+                columns[col_name]["on_update"] = fk["on_update"].lower()
 
     return columns
 

@@ -116,7 +116,6 @@ from .reconstruction import (
     generate_data_copy_sql,
     get_reconstruction_columns,
     execute_reconstruction_async,
-    execute_reconstruction_sync,
 )
 
 __all__ = [
@@ -217,5 +216,4 @@ __all__ = [
     "generate_data_copy_sql",
     "get_reconstruction_columns",
     "execute_reconstruction_async",
-    "execute_reconstruction_sync",
 ]

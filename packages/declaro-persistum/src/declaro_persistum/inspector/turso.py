@@ -52,7 +52,7 @@ class TursoInspector:
         Uses pragma_compat for PRAGMA calls that may need emulation.
         """
         try:
-            cursor = await connection.execute(
+            cursor = connection.execute(
                 """
                 SELECT name FROM sqlite_master
                 WHERE type = 'table'
@@ -61,7 +61,7 @@ class TursoInspector:
                 ORDER BY name
                 """
             )
-            tables = await cursor.fetchall()
+            tables = cursor.fetchall()
 
             schema: Schema = {}
 
@@ -149,11 +149,11 @@ class TursoInspector:
 
             index_info[idx_name] = await pragma_index_info(connection, idx_name)
 
-            sql_cursor = await connection.execute(
+            sql_cursor = connection.execute(
                 "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
                 (idx_name,),
             )
-            sql_row = await sql_cursor.fetchone()
+            sql_row = sql_cursor.fetchone()
             index_sql[idx_name] = sql_row[0] if sql_row else None
 
         return indexes_from_rows(index_rows, index_info, index_sql)
@@ -173,11 +173,11 @@ class TursoInspector:
         table_name: str,
     ) -> bool:
         """Check if a table exists."""
-        cursor = await connection.execute(
+        cursor = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
             (table_name,),
         )
-        result = await cursor.fetchone()
+        result = cursor.fetchone()
         return result is not None
 
     async def get_table_columns(
@@ -198,7 +198,7 @@ class TursoInspector:
         connection: Any,
     ) -> dict[str, View]:
         """Introspect views from Turso/libSQL."""
-        cursor = await connection.execute(
+        cursor = connection.execute(
             """
             SELECT name, sql
             FROM sqlite_master
@@ -208,6 +208,6 @@ class TursoInspector:
             ORDER BY name
             """
         )
-        rows = await cursor.fetchall()
+        rows = cursor.fetchall()
 
         return views_from_rows(rows)

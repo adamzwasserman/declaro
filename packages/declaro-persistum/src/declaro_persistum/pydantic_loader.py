@@ -265,7 +265,14 @@ def pydantic_model_to_table(model_cls: type) -> tuple[str, Table] | None:
 
         indexes = getattr(meta_cls, "indexes", None)
         if indexes:
-            table["indexes"] = {idx["name"]: idx for idx in indexes if isinstance(idx, dict)}
+            # Strip "name" from value — it's already the dict key.
+            # Introspection doesn't include "name" in index dicts, so keeping
+            # it here causes the differ to see a structural mismatch.
+            table["indexes"] = {
+                idx["name"]: {k: v for k, v in idx.items() if k != "name"}
+                for idx in indexes
+                if isinstance(idx, dict)
+            }
 
         constraints = getattr(meta_cls, "constraints", None)
         if constraints:

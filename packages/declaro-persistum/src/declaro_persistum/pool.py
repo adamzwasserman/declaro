@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -368,6 +369,30 @@ class SQLitePool(BasePool):
         return self._max_size - self._active_connections
 
 
+def _named_to_positional(sql: str, parameters: dict | tuple) -> tuple[str, tuple]:
+    """Convert :name parameters to ? positional parameters for libsql_experimental.
+
+    libsql_experimental only accepts ? placeholders with tuple params.
+    This converts named parameters (`:name` + dict) to positional (`?` + tuple).
+    If parameters is already a tuple, returns as-is.
+    """
+    if isinstance(parameters, tuple):
+        return sql, parameters
+
+    if not isinstance(parameters, dict):
+        return sql, parameters
+
+    ordered_values: list = []
+
+    def replacer(match: re.Match) -> str:
+        name = match.group(1)
+        ordered_values.append(parameters[name])
+        return "?"
+
+    positional_sql = re.sub(r":(\w+)", replacer, sql)
+    return positional_sql, tuple(ordered_values)
+
+
 class _LibSQLConnectionHolder:
     """
     Holds a libsql_experimental connection on its creation thread.
@@ -436,8 +461,9 @@ class LibSQLAsyncConnection:
         self._loop = asyncio.get_event_loop()
         self._closed = False
 
-    async def execute(self, sql: str, parameters: tuple = ()) -> TursoAsyncCursor:
+    async def execute(self, sql: str, parameters: tuple | dict = ()) -> TursoAsyncCursor:
         """Execute SQL and return an async cursor with pre-fetched results."""
+        sql, parameters = _named_to_positional(sql, parameters)
         rows, description, rowcount = await self._loop.run_in_executor(
             self._executor, self._holder.execute, sql, parameters
         )
@@ -776,240 +802,6 @@ class ConnectionPool:
             max_size=max_size,
             acquire_timeout=acquire_timeout,
         )
-
-
-# =============================================================================
-# Synchronous Pool Classes (for testing)
-# =============================================================================
-
-
-class SyncSQLitePool:
-    """
-    Synchronous SQLite connection pool for testing.
-
-    Provides a simple synchronous interface without async/await overhead.
-    """
-
-    def __init__(self, database_path: str, *, max_size: int = 5) -> None:
-        self._database_path = database_path
-        self._max_size = max_size
-        self._closed = False
-
-    def acquire(self) -> SyncSQLiteConnection:
-        """Acquire a synchronous connection."""
-        if self._closed:
-            raise PoolClosedError("Pool has been closed")
-        import sqlite3
-
-        conn = sqlite3.connect(self._database_path)
-        conn.execute("PRAGMA journal_mode=WAL")
-        return SyncSQLiteConnection(conn)
-
-    def close(self) -> None:
-        """Mark pool as closed."""
-        self._closed = True
-
-    @property
-    def closed(self) -> bool:
-        return self._closed
-
-
-class SyncSQLiteConnection:
-    """Synchronous SQLite connection wrapper."""
-
-    def __init__(self, conn: Any) -> None:
-        self._conn = conn
-
-    def execute(self, sql: str, parameters: tuple = ()) -> Any:
-        return self._conn.execute(sql, parameters)
-
-    def executemany(self, sql: str, parameters: list) -> Any:
-        return self._conn.executemany(sql, parameters)
-
-    def commit(self) -> None:
-        self._conn.commit()
-
-    def rollback(self) -> None:
-        self._conn.rollback()
-
-    def close(self) -> None:
-        self._conn.close()
-
-    def __enter__(self) -> SyncSQLiteConnection:
-        return self
-
-    def __exit__(self, *args: Any) -> None:
-        self.close()
-
-
-class SyncTursoPool:
-    """
-    Synchronous Turso (pyturso) connection pool for testing.
-
-    Provides a simple synchronous interface without async/await overhead.
-    """
-
-    def __init__(self, database_path: str, *, max_size: int = 5) -> None:
-        self._database_path = database_path
-        self._max_size = max_size
-        self._closed = False
-
-    def acquire(self) -> SyncTursoConnection:
-        """Acquire a synchronous connection."""
-        if self._closed:
-            raise PoolClosedError("Pool has been closed")
-        import turso
-
-        conn = turso.connect(self._database_path)
-        return SyncTursoConnection(conn)
-
-    def close(self) -> None:
-        """Mark pool as closed."""
-        self._closed = True
-
-    @property
-    def closed(self) -> bool:
-        return self._closed
-
-
-class SyncTursoConnection:
-    """Synchronous Turso connection wrapper."""
-
-    def __init__(self, conn: Any) -> None:
-        self._conn = conn
-
-    def execute(self, sql: str, parameters: tuple = ()) -> Any:
-        cursor = self._conn.cursor()
-        cursor.execute(sql, parameters)
-        return cursor
-
-    def executemany(self, sql: str, parameters: list) -> Any:
-        cursor = self._conn.cursor()
-        cursor.executemany(sql, parameters)
-        return cursor
-
-    def commit(self) -> None:
-        self._conn.commit()
-
-    def rollback(self) -> None:
-        self._conn.rollback()
-
-    def sync(self) -> None:
-        if hasattr(self._conn, "sync"):
-            self._conn.sync()
-
-    def close(self) -> None:
-        self._conn.__exit__(None, None, None)
-
-    def __enter__(self) -> SyncTursoConnection:
-        return self
-
-    def __exit__(self, *args: Any) -> None:
-        self.close()
-
-
-class SyncLibSQLPool:
-    """
-    Synchronous LibSQL connection pool for testing.
-
-    Provides a simple synchronous interface without async/await overhead.
-    """
-
-    def __init__(self, url: str, *, auth_token: str | None = None, max_size: int = 10) -> None:
-        self._url = url
-        self._auth_token = auth_token
-        self._max_size = max_size
-        self._closed = False
-
-    def acquire(self) -> SyncLibSQLConnection:
-        """Acquire a synchronous connection."""
-        if self._closed:
-            raise PoolClosedError("Pool has been closed")
-        import libsql_experimental as libsql
-
-        if self._auth_token:
-            conn = libsql.connect(self._url, auth_token=self._auth_token)
-        else:
-            conn = libsql.connect(self._url)
-        return SyncLibSQLConnection(conn)
-
-    def close(self) -> None:
-        """Mark pool as closed."""
-        self._closed = True
-
-    @property
-    def closed(self) -> bool:
-        return self._closed
-
-
-class SyncLibSQLConnection:
-    """Synchronous LibSQL connection wrapper."""
-
-    def __init__(self, conn: Any) -> None:
-        self._conn = conn
-
-    def execute(self, sql: str, parameters: tuple = ()) -> Any:
-        cursor = self._conn.cursor()
-        cursor.execute(sql, parameters)
-        return cursor
-
-    def executemany(self, sql: str, parameters: list) -> Any:
-        cursor = self._conn.cursor()
-        cursor.executemany(sql, parameters)
-        return cursor
-
-    def commit(self) -> None:
-        self._conn.commit()
-
-    def rollback(self) -> None:
-        self._conn.rollback()
-
-    def sync(self) -> None:
-        if hasattr(self._conn, "sync"):
-            self._conn.sync()
-
-    def close(self) -> None:
-        self._conn.close()
-
-    def __enter__(self) -> SyncLibSQLConnection:
-        return self
-
-    def __exit__(self, *args: Any) -> None:
-        self.close()
-
-
-class SyncConnectionPool:
-    """
-    Synchronous connection pool factory for testing.
-
-    Usage:
-        # SQLite
-        pool = SyncConnectionPool.sqlite("./test.db")
-        with pool.acquire() as conn:
-            conn.execute("SELECT 1")
-        pool.close()
-
-        # Turso (pyturso)
-        pool = SyncConnectionPool.turso("./test.db")
-
-        # LibSQL
-        pool = SyncConnectionPool.libsql("libsql://...")
-    """
-
-    @staticmethod
-    def sqlite(database_path: str, *, max_size: int = 5) -> SyncSQLitePool:
-        """Create a synchronous SQLite pool."""
-        return SyncSQLitePool(database_path, max_size=max_size)
-
-    @staticmethod
-    def turso(database_path: str, *, max_size: int = 5) -> SyncTursoPool:
-        """Create a synchronous Turso pool."""
-        return SyncTursoPool(database_path, max_size=max_size)
-
-    @staticmethod
-    def libsql(url: str, *, auth_token: str | None = None, max_size: int = 10) -> SyncLibSQLPool:
-        """Create a synchronous LibSQL pool."""
-        return SyncLibSQLPool(url, auth_token=auth_token, max_size=max_size)
 
 
 class TursoCloudManager:

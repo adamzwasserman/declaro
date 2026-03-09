@@ -9,7 +9,6 @@ import aiosqlite
 
 from declaro_persistum.abstractions.reconstruction import (
     execute_reconstruction_async,
-    execute_reconstruction_sync,
     generate_create_table_sql,
     generate_data_copy_sql,
     get_reconstruction_columns,

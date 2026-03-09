@@ -24,7 +24,7 @@ from declaro_persistum.exceptions import (
     SchemaError,
     TransferError,
 )
-from declaro_persistum.pool import ConnectionPool, MirrorPool, SyncConnectionPool, TursoCloudManager
+from declaro_persistum.pool import ConnectionPool, MirrorPool, TursoCloudManager
 from declaro_persistum.types import (
     Ambiguity,
     ApplyResult,
@@ -44,7 +44,6 @@ from declaro_persistum.pydantic_loader import (
 )
 from declaro_persistum.migrations import (
     apply_migrations_async,
-    apply_migrations_sync,
 )
 from declaro_persistum.transfer import (
     bulk_transfer,
@@ -66,7 +65,6 @@ __all__ = [
     "ApplyResult",
     # Connection Pool
     "ConnectionPool",
-    "SyncConnectionPool",
     "MirrorPool",
     "TursoCloudManager",
     # Pydantic Loader
@@ -77,7 +75,6 @@ __all__ = [
     "get_literal_columns",
     # Migrations
     "apply_migrations_async",
-    "apply_migrations_sync",
     # Transfer
     "bulk_transfer",
     "BulkTransferResult",

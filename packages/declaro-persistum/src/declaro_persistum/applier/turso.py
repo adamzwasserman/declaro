@@ -3,9 +3,11 @@ Turso (libSQL) migration applier implementation.
 
 Turso uses libSQL which is SQLite-compatible, so the SQL generation
 is shared with SQLite via applier.shared module.
-The main difference is connection handling (synchronous pyturso API).
+Uses _maybe_await to support both sync (pyturso, libsql_experimental raw)
+and async (LibSQLAsyncConnection) connections.
 """
 
+import inspect
 from typing import Any, Literal
 
 from declaro_persistum.applier.shared import (
@@ -19,6 +21,13 @@ from declaro_persistum.applier.shared import (
 )
 from declaro_persistum.exceptions import MigrationError
 from declaro_persistum.types import ApplyResult, Operation
+
+
+async def _maybe_await(value: Any) -> Any:
+    """Await value if it's awaitable, otherwise return as-is."""
+    if inspect.isawaitable(value):
+        return await value
+    return value
 
 
 class TursoApplier:
@@ -46,27 +55,11 @@ class TursoApplier:
         *,
         dry_run: bool = False,
     ) -> ApplyResult:
-        """Delegates to apply_sync() since Turso Database (pyturso) is synchronous."""
-        return self.apply_sync(connection, operations, execution_order, dry_run=dry_run)
-
-    def apply_sync(
-        self,
-        connection: Any,
-        operations: list[Operation],
-        execution_order: list[int],
-        *,
-        dry_run: bool = False,
-        target_schema: Any = None,
-    ) -> ApplyResult:
         """
-        Apply migration operations synchronously.
+        Apply migration operations within a transaction.
 
-        Args:
-            connection: pyturso database connection
-            operations: List of operations to apply
-            execution_order: Order to execute operations
-            dry_run: If True, only generate SQL without executing
-            target_schema: Target schema (used for enum value population)
+        Turso/libSQL is SQLite-compatible with transactional DDL.
+        Uses per-operation execution with reconstruction for unsupported operations.
         """
         if dry_run:
             return dry_run_preview(operations, execution_order)
@@ -74,8 +67,8 @@ class TursoApplier:
         executed: list[str] = []
 
         try:
-            # Begin transaction
-            connection.execute("BEGIN")
+            # Enable foreign keys and start transaction
+            await _maybe_await(connection.execute("PRAGMA foreign_keys = ON"))
 
             # Per-operation execution
             for op_idx in execution_order:
@@ -83,32 +76,25 @@ class TursoApplier:
 
                 try:
                     if requires_reconstruction(operation):
-                        # Execute with reconstruction
-                        self._execute_with_reconstruction_sync(connection, operation)
+                        await self._execute_with_reconstruction(connection, operation)
                         executed.append(f"Table reconstruction for {operation['table']}")
                     else:
-                        # Direct SQL execution
                         sql = generate_operation_sql(operation)
                         for statement in sql.split(";"):
                             statement = statement.strip()
                             if statement:
-                                connection.execute(statement)
+                                await _maybe_await(connection.execute(statement))
                         executed.append(sql)
 
-                    # Handle enum value population for newly created lookup tables
-                    for insert_sql in enum_population_sql(operation, target_schema):
-                        connection.execute(insert_sql)
-                        executed.append(insert_sql)
-
                 except Exception as e:
-                    connection.rollback()
+                    await _maybe_await(connection.rollback())
                     raise MigrationError(
                         f"Failed to execute operation",
                         operation=operation,
                         original_error=e,
                     ) from e
 
-            connection.commit()
+            await _maybe_await(connection.commit())
 
             return {
                 "success": True,
@@ -121,34 +107,63 @@ class TursoApplier:
         except MigrationError:
             raise
         except Exception as e:
-            connection.rollback()
+            await _maybe_await(connection.rollback())
             raise MigrationError(
                 f"Migration failed: {e}",
                 original_error=e,
             ) from e
 
-    def _execute_with_reconstruction_sync(
+    async def _execute_with_reconstruction(
         self, connection: Any, operation: Operation
     ) -> None:
         """
-        Execute an operation using table reconstruction (synchronous).
+        Execute an operation using table reconstruction (async).
 
-        Fresh introspection → pure column transform → sync reconstruction.
+        Fresh introspection → pure column transform → async reconstruction.
         """
-        from declaro_persistum.abstractions.reconstruction import execute_reconstruction_sync
+        from declaro_persistum.abstractions.table_reconstruction import (
+            _get_full_table_schema,
+            alter_column_default,
+            alter_column_nullability,
+            alter_column_type,
+            reconstruct_table,
+        )
 
         table = operation["table"]
+        details = operation["details"]
 
-        # Fresh introspection for current state (direct PRAGMA call - sync)
-        cursor = connection.execute(f"PRAGMA table_info('{table}')")
-        rows = cursor.fetchall()
-        columns = columns_from_pragma_rows(rows)
+        # Fresh introspection for current state (includes FKs + unique constraints)
+        columns = await _get_full_table_schema(connection, table)
 
         # Apply reconstruction changes (pure)
         columns = apply_reconstruction_changes(columns, operation)
 
-        # Execute reconstruction with updated schema
-        execute_reconstruction_sync(connection, table, columns)
+        # Use specialized functions for single-property alter_column changes
+        if operation["op"] == "alter_column" and len(details["changes"]) == 1:
+            changes = details["changes"]
+            column = details["column"]
+
+            if "nullable" in changes:
+                val = changes["nullable"]
+                if isinstance(val, dict) and "to" in val:
+                    val = val["to"]
+                await alter_column_nullability(connection, table, column, val)
+                return
+            elif "type" in changes:
+                val = changes["type"]
+                if isinstance(val, dict) and "to" in val:
+                    val = val["to"]
+                await alter_column_type(connection, table, column, val)
+                return
+            elif "default" in changes:
+                val = changes["default"]
+                if isinstance(val, dict) and "to" in val:
+                    val = val["to"]
+                await alter_column_default(connection, table, column, val)
+                return
+
+        # General reconstruction
+        await reconstruct_table(connection, table, columns)
 
     def generate_sql(
         self,

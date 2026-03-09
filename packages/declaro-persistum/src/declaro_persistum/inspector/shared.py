@@ -47,6 +47,35 @@ def normalize_sqlite_type(col_type: str) -> str:
         return "numeric"
 
 
+def normalize_schema_for_sqlite(schema: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a target schema's column types to match SQLite introspection output.
+
+    SQLite stores types as affinities (INTEGER, TEXT, REAL, BLOB, NUMERIC).
+    After reconstruction, PRAGMA table_info reports these affinities, not the
+    original declared types. This function normalizes the target schema so the
+    differ sees the same type strings that introspection will produce.
+
+    Pure function — returns a new schema dict, does not mutate the input.
+    """
+    from declaro_persistum.applier.shared import map_type
+
+    normalized: dict[str, Any] = {}
+    for table_name, table_def in schema.items():
+        new_table = dict(table_def)
+        if "columns" in table_def:
+            new_columns: dict[str, Any] = {}
+            for col_name, col_def in table_def["columns"].items():
+                new_col = dict(col_def)
+                if "type" in new_col:
+                    # map_type: high-level → uppercase SQLite affinity
+                    # normalize_sqlite_type: uppercase → lowercase canonical
+                    new_col["type"] = normalize_sqlite_type(map_type(new_col["type"]))
+                new_columns[col_name] = new_col
+            new_table["columns"] = new_columns
+        normalized[table_name] = new_table
+    return normalized
+
+
 def extract_view_query(create_statement: str) -> str:
     """Extract SELECT query from CREATE VIEW statement."""
     match = re.search(r"\bAS\s+(.+)$", create_statement, re.IGNORECASE | re.DOTALL)
@@ -70,10 +99,16 @@ def columns_from_pragma_rows(
 
         col: Column = {"type": normalize_sqlite_type(col_type)}
 
-        if not_null:
+        if not_null or is_pk:
+            # PK columns are implicitly NOT NULL in SQL even when
+            # PRAGMA table_info reports notnull=0 for them.
             col["nullable"] = False
 
         if default is not None:
+            # PRAGMA table_info strips outer parens from expression defaults.
+            # Re-wrap function-call expressions so they match the target schema form.
+            if isinstance(default, str) and "(" in default and not default.startswith("("):
+                default = f"({default})"
             col["default"] = default
 
         if is_pk:

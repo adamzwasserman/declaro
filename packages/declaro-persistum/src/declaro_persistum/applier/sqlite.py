@@ -103,84 +103,6 @@ class SQLiteApplier:
                 original_error=e,
             ) from e
 
-    def apply_sync(
-        self,
-        connection: Any,
-        operations: list[Operation],
-        execution_order: list[int],
-        *,
-        dry_run: bool = False,
-        target_schema: Any = None,
-    ) -> ApplyResult:
-        """
-        Apply migration operations synchronously using stdlib sqlite3.
-
-        Args:
-            connection: sqlite3.Connection
-            operations: List of operations to apply
-            execution_order: Order to execute operations
-            dry_run: If True, only generate SQL without executing
-            target_schema: Target schema (used for enum value population)
-        """
-        if dry_run:
-            return dry_run_preview(operations, execution_order)
-
-        executed: list[str] = []
-
-        try:
-            # Enable foreign keys
-            connection.execute("PRAGMA foreign_keys = ON")
-
-            # Per-operation execution
-            for op_idx in execution_order:
-                operation = operations[op_idx]
-
-                try:
-                    if requires_reconstruction(operation):
-                        # Execute with reconstruction
-                        self._execute_with_reconstruction_sync(connection, operation)
-                        executed.append(f"Table reconstruction for {operation['table']}")
-                    else:
-                        # Direct SQL execution
-                        sql = generate_operation_sql(operation)
-                        for statement in sql.split(";"):
-                            statement = statement.strip()
-                            if statement:
-                                connection.execute(statement)
-                        executed.append(sql)
-
-                    # Handle enum value population for newly created lookup tables
-                    for insert_sql in enum_population_sql(operation, target_schema):
-                        connection.execute(insert_sql)
-                        executed.append(insert_sql)
-
-                except Exception as e:
-                    connection.rollback()
-                    raise MigrationError(
-                        f"Failed to execute operation",
-                        operation=operation,
-                        original_error=e,
-                    ) from e
-
-            connection.commit()
-
-            return {
-                "success": True,
-                "executed_sql": executed,
-                "operations_applied": len(executed),
-                "error": None,
-                "error_operation": None,
-            }
-
-        except MigrationError:
-            raise
-        except Exception as e:
-            connection.rollback()
-            raise MigrationError(
-                f"Migration failed: {e}",
-                original_error=e,
-            ) from e
-
     async def _execute_with_reconstruction(
         self, connection: Any, operation: Operation
     ) -> None:
@@ -191,8 +113,8 @@ class SQLiteApplier:
         we have the latest schema state. Uses specialized functions for
         single-property changes when possible.
         """
-        from declaro_persistum.abstractions.pragma_compat import pragma_table_info
         from declaro_persistum.abstractions.table_reconstruction import (
+            _get_full_table_schema,
             alter_column_default,
             alter_column_nullability,
             alter_column_type,
@@ -202,9 +124,8 @@ class SQLiteApplier:
         table = operation["table"]
         details = operation["details"]
 
-        # Fresh introspection for current state
-        rows = await pragma_table_info(connection, table)
-        columns = columns_from_pragma_rows(rows)
+        # Fresh introspection for current state (includes FKs + unique constraints)
+        columns = await _get_full_table_schema(connection, table)
 
         # Apply reconstruction changes (pure)
         columns = apply_reconstruction_changes(columns, operation)
@@ -235,29 +156,6 @@ class SQLiteApplier:
 
         # General reconstruction
         await reconstruct_table(connection, table, columns)
-
-    def _execute_with_reconstruction_sync(
-        self, connection: Any, operation: Operation
-    ) -> None:
-        """
-        Execute an operation using table reconstruction (synchronous).
-
-        Fresh introspection → pure column transform → sync reconstruction.
-        """
-        from declaro_persistum.abstractions.reconstruction import execute_reconstruction_sync
-
-        table = operation["table"]
-
-        # Fresh introspection for current state (direct PRAGMA call - sync)
-        cursor = connection.execute(f"PRAGMA table_info('{table}')")
-        rows = cursor.fetchall()
-        columns = columns_from_pragma_rows(rows)
-
-        # Apply reconstruction changes (pure)
-        columns = apply_reconstruction_changes(columns, operation)
-
-        # Execute reconstruction with updated schema
-        execute_reconstruction_sync(connection, table, columns)
 
     def generate_sql(
         self,

@@ -17,6 +17,7 @@ See: https://github.com/tursodatabase/turso/blob/main/COMPAT.md
 
 import logging
 import re
+import inspect
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,35 @@ def reset_counters() -> None:
 
 
 # =============================================================================
+# Helper Functions for sync/async compatibility
+# =============================================================================
+
+
+async def _maybe_await(value: Any) -> Any:
+    """Await value if it's awaitable, otherwise return as-is."""
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+async def _execute(conn: Any, query: str, params: tuple[Any, ...] | None = None) -> Any:
+    """Execute SQL against sync or async connection and return cursor."""
+    if params is None:
+        return await _maybe_await(conn.execute(query))
+    return await _maybe_await(conn.execute(query, params))
+
+
+async def _fetchall(cursor: Any) -> list[Any]:
+    """Fetch all rows from sync or async cursor."""
+    return await _maybe_await(cursor.fetchall())
+
+
+async def _fetchone(cursor: Any) -> Any:
+    """Fetch one row from sync or async cursor."""
+    return await _maybe_await(cursor.fetchone())
+
+
+# =============================================================================
 # PRAGMA table_info - Native pass-through
 # =============================================================================
 
@@ -74,14 +104,14 @@ async def pragma_table_info(conn: Any, table: str) -> list[tuple]:
     This is natively supported by both SQLite and Turso, so we pass through directly.
 
     Args:
-        conn: Database connection (async for SQLite/Turso)
+        conn: Database connection (async for SQLite, sync for Turso)
         table: Table name
 
     Returns:
         List of tuples: (cid, name, type, notnull, dflt_value, pk)
     """
-    cursor = await conn.execute(f"PRAGMA table_info('{table}')")
-    rows = await cursor.fetchall()
+    cursor = await _execute(conn, f"PRAGMA table_info('{table}')")
+    rows = await _fetchall(cursor)
     return [tuple(row) for row in rows]
 
 
@@ -110,8 +140,8 @@ async def pragma_index_list(conn: Any, table: str) -> list[tuple]:
         - partial: 1 if partial index (has WHERE clause), 0 otherwise
     """
     try:
-        cursor = await conn.execute(f"PRAGMA index_list('{table}')")
-        rows = await cursor.fetchall()
+        cursor = await _execute(conn, f"PRAGMA index_list('{table}')")
+        rows = await _fetchall(cursor)
 
         # If we get here with Turso, it means native support was added
         if _is_turso_connection(conn):
@@ -139,11 +169,12 @@ async def _emulate_index_list(conn: Any, table: str) -> list[tuple]:
 
     Returns same format as native PRAGMA: (seq, name, unique, origin, partial)
     """
-    cursor = await conn.execute(
+    cursor = await _execute(
+        conn,
         "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ?",
         (table,)
     )
-    rows = await cursor.fetchall()
+    rows = await _fetchall(cursor)
 
     results = []
     for seq, (name, sql) in enumerate(rows):
@@ -199,8 +230,8 @@ async def pragma_index_info(conn: Any, index_name: str) -> list[tuple]:
         - name: Column name (or expression text)
     """
     try:
-        cursor = await conn.execute(f"PRAGMA index_info('{index_name}')")
-        rows = await cursor.fetchall()
+        cursor = await _execute(conn, f"PRAGMA index_info('{index_name}')")
+        rows = await _fetchall(cursor)
 
         # If we get here with Turso, it means native support was added
         if _is_turso_connection(conn):
@@ -227,11 +258,12 @@ async def _emulate_index_info(conn: Any, index_name: str) -> list[tuple]:
 
     Returns same format as native PRAGMA: (seqno, cid, name)
     """
-    cursor = await conn.execute(
+    cursor = await _execute(
+        conn,
         "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
         (index_name,)
     )
-    row = await cursor.fetchone()
+    row = await _fetchone(cursor)
 
     if not row or not row[0]:
         # Index not found or auto-generated (no SQL)
@@ -332,8 +364,8 @@ async def pragma_foreign_key_list(conn: Any, table: str) -> list[tuple]:
         - match: MATCH clause (usually "NONE")
     """
     try:
-        cursor = await conn.execute(f"PRAGMA foreign_key_list('{table}')")
-        rows = await cursor.fetchall()
+        cursor = await _execute(conn, f"PRAGMA foreign_key_list('{table}')")
+        rows = await _fetchall(cursor)
 
         # If we get here with Turso, it means native support was added
         if _is_turso_connection(conn):
@@ -362,11 +394,12 @@ async def _emulate_foreign_key_list(conn: Any, table: str) -> list[tuple]:
     Returns same format as native PRAGMA:
     (id, seq, table, from, to, on_update, on_delete, match)
     """
-    cursor = await conn.execute(
+    cursor = await _execute(
+        conn,
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
         (table,)
     )
-    row = await cursor.fetchone()
+    row = await _fetchone(cursor)
 
     if not row or not row[0]:
         return []
