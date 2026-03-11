@@ -471,25 +471,47 @@ class _LibSQLConnectionHolder:
     def connect(self) -> None:
         """Open embedded replica connection (must be called on executor thread).
 
-        Uses the default isolation_level ("DEFERRED").  In embedded replica
-        mode the libsql driver forwards the entire transaction to the Turso
-        Cloud primary when commit() is called.  sync() then pulls the
-        committed changes back into the local replica file.
+        isolation_level="IMMEDIATE" is required for write-forwarding.
 
-        DO NOT use isolation_level=None (auto-commit) here.  In embedded
-        replica mode auto-commit causes cursor.execute() to block
-        indefinitely while trying to forward each statement to Turso Cloud
-        synchronously — the call never returns.
+        In libsql embedded replica mode the transaction type controls WHERE
+        the transaction executes:
+
+          DEFERRED  — transaction runs on the LOCAL replica file.  commit()
+                      is purely local.  Writes never reach Turso Cloud.
+                      (confirmed broken: fresh sync still shows old data)
+
+          IMMEDIATE — BEGIN IMMEDIATE routes the transaction to the TURSO
+                      CLOUD PRIMARY.  INSERT/UPDATE/DELETE execute on the
+                      primary.  commit() finalises on the primary.  sync()
+                      then pulls the committed change back to local replica.
+
+          None      — auto-commit: each statement is its own remote
+                      transaction.  Writes DO reach Turso Cloud, but each
+                      cursor.execute() blocks on a full network round-trip
+                      (10+ seconds on cold-start), causing the call to hang
+                      indefinitely in practice.
+
+        IMMEDIATE is the correct mode: the whole transaction is forwarded
+        as one unit, network latency is paid once at commit() (which already
+        runs in the thread executor and drives the write-queue timeout path),
+        and cursor.execute() stays fast.
         """
         import os
 
         os.makedirs(os.path.dirname(os.path.abspath(self.local_path)), exist_ok=True)
         if self.auth_token:
             self.conn = self._libsql.connect(
-                self.local_path, sync_url=self.sync_url, auth_token=self.auth_token
+                self.local_path,
+                sync_url=self.sync_url,
+                auth_token=self.auth_token,
+                isolation_level="IMMEDIATE",
             )
         else:
-            self.conn = self._libsql.connect(self.local_path, sync_url=self.sync_url)
+            self.conn = self._libsql.connect(
+                self.local_path,
+                sync_url=self.sync_url,
+                isolation_level="IMMEDIATE",
+            )
 
     def execute(self, sql: str, parameters: tuple) -> tuple[list, Any, int]:
         cursor = self.conn.cursor()

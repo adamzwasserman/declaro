@@ -267,38 +267,41 @@ class TestLibSQLPool:
             async with pool.acquire():
                 pass
 
-    def test_libsql_holder_uses_deferred_isolation(self, tmp_path):
-        """_LibSQLConnectionHolder.connect() uses the default isolation_level.
+    def test_libsql_holder_uses_immediate_isolation(self, tmp_path):
+        """_LibSQLConnectionHolder.connect() uses isolation_level="IMMEDIATE".
 
-        The correct pattern for libsql embedded replicas:
-          INSERT (buffered in local WAL transaction)
-          → commit()  (forwards the transaction to Turso Cloud primary)
-          → sync()    (pulls the committed change into the local replica)
+        Transaction mode determines where the transaction executes in
+        libsql embedded replica mode:
 
-        DO NOT use isolation_level=None (auto-commit).  In embedded replica
-        mode auto-commit causes cursor.execute() to block indefinitely while
-        attempting to forward each statement to Turso Cloud synchronously.
+          DEFERRED  — local-only; commit() never forwards to Turso Cloud
+                      (confirmed broken: fresh sync after commit still
+                      shows the pre-write count)
 
-        This test verifies that the default DEFERRED isolation level is in
-        effect — i.e. that INSERT starts an in-progress transaction that
-        commit() can forward to the remote.
+          IMMEDIATE — BEGIN IMMEDIATE routes to Turso Cloud primary;
+                      commit() finalises on the primary; sync() pulls
+                      the committed change back to the local replica
+
+          None      — auto-commit; writes reach Turso Cloud but each
+                      cursor.execute() blocks on a remote round-trip
+                      (10+ second cold-start hang in practice)
+
+        This test verifies that isolation_level="IMMEDIATE" is in effect
+        — INSERT starts an in-progress transaction that commit() forwards
+        to the Turso Cloud primary.
         """
         import libsql
 
         db_path = str(tmp_path / "test.db")
-        conn = libsql.connect(db_path)
+        conn = libsql.connect(db_path, isolation_level="IMMEDIATE")
 
-        assert conn.isolation_level == "DEFERRED", (
-            "_LibSQLConnectionHolder must use DEFERRED isolation level"
-        )
+        assert conn.isolation_level == "IMMEDIATE"
 
         conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)")
         conn.commit()
 
         conn.execute("INSERT INTO t VALUES (1, 'hello')")
         assert conn.in_transaction, (
-            "INSERT should start a transaction in DEFERRED mode — "
-            "commit() then forwards this to Turso Cloud"
+            "INSERT should start a BEGIN IMMEDIATE transaction"
         )
 
         conn.commit()
