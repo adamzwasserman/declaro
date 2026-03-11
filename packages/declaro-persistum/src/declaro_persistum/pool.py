@@ -471,30 +471,20 @@ class _LibSQLConnectionHolder:
     def connect(self) -> None:
         """Open embedded replica connection (must be called on executor thread).
 
-        isolation_level="IMMEDIATE" is required for write-forwarding.
+        isolation_level=None (auto-commit) is required for writes to reach
+        Turso Cloud.
 
-        In libsql embedded replica mode the transaction type controls WHERE
-        the transaction executes:
+        The local replica file is READ-ONLY — it is a pulled copy of the
+        Turso Cloud primary.  Any isolation_level other than None (DEFERRED,
+        IMMEDIATE) batches writes into a local WAL transaction that is NEVER
+        forwarded to Turso Cloud.  commit() returns success but the write is
+        silently discarded when the next sync() overwrites local from remote.
 
-          DEFERRED  — transaction runs on the LOCAL replica file.  commit()
-                      is purely local.  Writes never reach Turso Cloud.
-                      (confirmed broken: fresh sync still shows old data)
-
-          IMMEDIATE — BEGIN IMMEDIATE routes the transaction to the TURSO
-                      CLOUD PRIMARY.  INSERT/UPDATE/DELETE execute on the
-                      primary.  commit() finalises on the primary.  sync()
-                      then pulls the committed change back to local replica.
-
-          None      — auto-commit: each statement is its own remote
-                      transaction.  Writes DO reach Turso Cloud, but each
-                      cursor.execute() blocks on a full network round-trip
-                      (10+ seconds on cold-start), causing the call to hang
-                      indefinitely in practice.
-
-        IMMEDIATE is the correct mode: the whole transaction is forwarded
-        as one unit, network latency is paid once at commit() (which already
-        runs in the thread executor and drives the write-queue timeout path),
-        and cursor.execute() stays fast.
+        With isolation_level=None each execute() is a direct HTTP call to the
+        Turso Cloud primary.  The call may be slow on cold-start (~10s), but
+        this is handled by the 50ms write-race in _race_write / execute_with_pool:
+        the write continues in the background and the caller gets their data
+        back immediately from the write queue.
         """
         import os
 
@@ -504,13 +494,13 @@ class _LibSQLConnectionHolder:
                 self.local_path,
                 sync_url=self.sync_url,
                 auth_token=self.auth_token,
-                isolation_level="IMMEDIATE",
+                isolation_level=None,
             )
         else:
             self.conn = self._libsql.connect(
                 self.local_path,
                 sync_url=self.sync_url,
-                isolation_level="IMMEDIATE",
+                isolation_level=None,
             )
 
     def execute(self, sql: str, parameters: tuple) -> tuple[list, Any, int]:

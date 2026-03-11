@@ -267,45 +267,32 @@ class TestLibSQLPool:
             async with pool.acquire():
                 pass
 
-    def test_libsql_holder_uses_immediate_isolation(self, tmp_path):
-        """_LibSQLConnectionHolder.connect() uses isolation_level="IMMEDIATE".
+    def test_libsql_holder_uses_auto_commit(self, tmp_path):
+        """_LibSQLConnectionHolder.connect() uses isolation_level=None (auto-commit).
 
-        Transaction mode determines where the transaction executes in
-        libsql embedded replica mode:
+        The local replica file is READ-ONLY — it is a pulled copy of the
+        Turso Cloud primary.  Any isolation_level other than None batches
+        writes into a local WAL transaction that is NEVER forwarded to
+        Turso Cloud.  commit() returns success but the write is silently
+        discarded when sync() overwrites local from remote.
 
-          DEFERRED  — local-only; commit() never forwards to Turso Cloud
-                      (confirmed broken: fresh sync after commit still
-                      shows the pre-write count)
-
-          IMMEDIATE — BEGIN IMMEDIATE routes to Turso Cloud primary;
-                      commit() finalises on the primary; sync() pulls
-                      the committed change back to the local replica
-
-          None      — auto-commit; writes reach Turso Cloud but each
-                      cursor.execute() blocks on a remote round-trip
-                      (10+ second cold-start hang in practice)
-
-        This test verifies that isolation_level="IMMEDIATE" is in effect
-        — INSERT starts an in-progress transaction that commit() forwards
-        to the Turso Cloud primary.
+        With isolation_level=None each execute() is a direct HTTP call to
+        Turso Cloud.  Slow writes (cold-start ~10s) are handled by the
+        50ms write-race / write-queue in execute_with_pool.
         """
         import libsql
 
         db_path = str(tmp_path / "test.db")
-        conn = libsql.connect(db_path, isolation_level="IMMEDIATE")
+        conn = libsql.connect(db_path, isolation_level=None)
 
-        assert conn.isolation_level == "IMMEDIATE"
+        assert conn.isolation_level is None
 
         conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)")
-        conn.commit()
-
         conn.execute("INSERT INTO t VALUES (1, 'hello')")
-        assert conn.in_transaction, (
-            "INSERT should start a BEGIN IMMEDIATE transaction"
-        )
 
-        conn.commit()
-        assert not conn.in_transaction
+        cursor = conn.execute("SELECT COUNT(*) FROM t")
+        row = cursor.fetchone()
+        assert row[0] == 1
 
         conn.close()
 
