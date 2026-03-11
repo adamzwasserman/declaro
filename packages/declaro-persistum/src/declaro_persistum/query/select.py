@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from declaro_persistum.query.builder import Query
 from declaro_persistum.query.table import (
+    CaseExpression,
+    CaseOrderBy,
     ColumnProxy,
     Condition,
     ConditionGroup,
@@ -84,10 +86,10 @@ class SelectQuery:
             pool=self._pool,
         )
 
-    def order_by(self, *orders: OrderBy | ColumnProxy) -> "SelectQuery":
+    def order_by(self, *orders: "OrderBy | ColumnProxy | CaseOrderBy") -> "SelectQuery":
         """Add ORDER BY clause (returns new query)."""
-        # Convert ColumnProxy to default ASC ordering
-        normalized: list[OrderBy] = []
+        # Convert ColumnProxy to default ASC ordering; OrderBy and CaseOrderBy pass through
+        normalized: list[OrderBy | CaseOrderBy] = []
         for order in orders:
             if isinstance(order, ColumnProxy):
                 normalized.append(OrderBy(order._full_name, "ASC"))
@@ -219,10 +221,22 @@ class SelectQuery:
 
     def to_sql(self, dialect: str = "postgresql") -> tuple[str, dict[str, Any]]:
         """Generate SQL and params."""
-        # SELECT clause
-        cols = ", ".join(c._full_name for c in self._columns) if self._columns else "*"
-        sql = f"SELECT {cols} FROM {self._table}"
         params = dict(self._params)
+
+        # SELECT clause — collect params from complex expressions (CASE, functions with CASE args)
+        if self._columns:
+            col_parts = []
+            for c in self._columns:
+                if hasattr(c, "to_sql_fragment"):
+                    c_sql, c_params = c.to_sql_fragment(dialect)
+                    col_parts.append(c_sql)
+                    params.update(c_params)
+                else:
+                    col_parts.append(c._full_name)
+            cols = ", ".join(col_parts)
+        else:
+            cols = "*"
+        sql = f"SELECT {cols} FROM {self._table}"
 
         # JOINs
         for join in self._joins:
@@ -248,10 +262,17 @@ class SelectQuery:
             sql += f" HAVING {having_sql}"
             params.update(having_params)
 
-        # ORDER BY
+        # ORDER BY — CaseOrderBy uses to_sql_fragment; OrderBy uses to_sql
         if self._order_by:
-            orders = ", ".join(o.to_sql() for o in self._order_by)
-            sql += f" ORDER BY {orders}"
+            order_parts = []
+            for o in self._order_by:
+                if hasattr(o, "to_sql_fragment"):
+                    o_sql, o_params = o.to_sql_fragment(dialect)
+                    order_parts.append(o_sql)
+                    params.update(o_params)
+                else:
+                    order_parts.append(o.to_sql())
+            sql += f" ORDER BY {', '.join(order_parts)}"
 
         # LIMIT/OFFSET
         if self._limit_val is not None:
