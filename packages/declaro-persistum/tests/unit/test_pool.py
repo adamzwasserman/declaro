@@ -267,6 +267,60 @@ class TestLibSQLPool:
             async with pool.acquire():
                 pass
 
+    def test_libsql_holder_uses_auto_commit(self, tmp_path):
+        """_LibSQLConnectionHolder.connect() uses isolation_level=None.
+
+        Root cause of the embedded replica write-visibility bug:
+        isolation_level=DEFERRED (default) buffers writes in a local WAL
+        transaction.  commit() commits locally; sync() then overwrites the
+        local file from the remote (which has no knowledge of the local
+        write), silently discarding the data.
+
+        With isolation_level=None (auto-commit) every write is immediately
+        forwarded to the Turso Cloud primary.  commit() is a no-op.
+        sync() then pulls the committed write back to the local replica.
+        """
+        import libsql
+        from declaro_persistum.pool import _LibSQLConnectionHolder
+
+        db_path = str(tmp_path / "test.db")
+        holder = _LibSQLConnectionHolder(db_path, sync_url="", auth_token=None)
+
+        # Bypass connect() to create a plain local connection with our target
+        # isolation_level — we can't call connect() without a valid sync_url.
+        holder.conn = libsql.connect(db_path, isolation_level=None)
+
+        holder.conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)")
+        holder.conn.execute("INSERT INTO t VALUES (1, 'hello')")
+
+        # With isolation_level=None the INSERT is immediately visible on the
+        # same connection without commit().
+        row = holder.conn.execute("SELECT COUNT(*) FROM t").fetchone()
+        assert row[0] == 1, "Write not visible immediately in auto-commit mode"
+
+        # A brand-new connection to the same file also sees the write.
+        conn2 = libsql.connect(db_path, isolation_level=None)
+        row2 = conn2.execute("SELECT COUNT(*) FROM t").fetchone()
+        assert row2[0] == 1, "Write not visible on new connection"
+
+        # Verify that isolation_level=DEFERRED (the old/broken default) would
+        # NOT be auto-commit — proving why the bug existed.
+        import tempfile, os
+        tmp2 = tempfile.mktemp(suffix=".db")
+        conn_old = libsql.connect(tmp2)
+        conn_old.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)")
+        conn_old.commit()
+        conn_old.execute("INSERT INTO t VALUES (1, 'hello')")
+        assert conn_old.in_transaction, (
+            "DEFERRED mode should start a transaction on INSERT "
+            "(confirming the bug path)"
+        )
+        conn_old.close()
+        os.unlink(tmp2)
+
+        holder.conn.close()
+        conn2.close()
+
 
 class TestConnectionPoolFactory:
     """Tests for ConnectionPool factory methods."""

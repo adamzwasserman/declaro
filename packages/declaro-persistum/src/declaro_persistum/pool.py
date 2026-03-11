@@ -469,16 +469,35 @@ class _LibSQLConnectionHolder:
         self.conn: Any = None
 
     def connect(self) -> None:
-        """Open embedded replica connection (must be called on executor thread)."""
+        """Open embedded replica connection (must be called on executor thread).
+
+        isolation_level=None (auto-commit) is REQUIRED for embedded replicas.
+
+        With the default isolation_level="DEFERRED", INSERT starts a local
+        WAL transaction.  commit() commits it locally but does NOT forward
+        it to the Turso Cloud primary.  The subsequent sync() then OVERWRITES
+        the local file from the remote, silently discarding the write.
+
+        With isolation_level=None every write is immediately forwarded to the
+        Turso Cloud primary.  commit() becomes a no-op.  sync() then pulls
+        the committed write back to the local replica.
+        """
         import os
 
         os.makedirs(os.path.dirname(os.path.abspath(self.local_path)), exist_ok=True)
         if self.auth_token:
             self.conn = self._libsql.connect(
-                self.local_path, sync_url=self.sync_url, auth_token=self.auth_token
+                self.local_path,
+                sync_url=self.sync_url,
+                auth_token=self.auth_token,
+                isolation_level=None,
             )
         else:
-            self.conn = self._libsql.connect(self.local_path, sync_url=self.sync_url)
+            self.conn = self._libsql.connect(
+                self.local_path,
+                sync_url=self.sync_url,
+                isolation_level=None,
+            )
 
     def execute(self, sql: str, parameters: tuple) -> tuple[list, Any, int]:
         cursor = self.conn.cursor()
