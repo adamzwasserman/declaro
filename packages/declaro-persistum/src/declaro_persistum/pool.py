@@ -98,6 +98,8 @@ class TursoAsyncConnection:
     same thread, so we use a holder class that stays on the executor.
     """
 
+    _declaro_dialect = "declaro_persistum.pool.async_libsql"
+
     def __init__(self, holder: _TursoConnectionHolder, executor: ThreadPoolExecutor) -> None:
         self._holder = holder
         self._executor = executor
@@ -511,6 +513,8 @@ class LibSQLAsyncConnection:
     Provides an async interface by running sync operations in a
     dedicated thread pool.
     """
+
+    _declaro_dialect = "declaro_persistum.pool.async_libsql"
 
     def __init__(self, holder: _LibSQLConnectionHolder, executor: ThreadPoolExecutor) -> None:
         self._holder = holder

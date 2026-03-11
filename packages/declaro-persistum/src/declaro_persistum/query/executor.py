@@ -21,9 +21,19 @@ _DIALECT_MAP = {
 }
 
 
+def _conn_module(conn: Any) -> str:
+    """Return the connection's dialect identifier.
+
+    Checks for a ``_declaro_dialect`` class attribute first (set on pool-owned
+    async wrappers like LibSQLAsyncConnection and TursoAsyncConnection).
+    Falls back to ``type(conn).__module__`` for raw driver connections.
+    """
+    return getattr(conn, "_declaro_dialect", type(conn).__module__)
+
+
 def detect_dialect(connection: Any) -> str:
     """Detect database dialect from connection type."""
-    conn_type = type(connection).__module__
+    conn_type = _conn_module(connection)
     for key, dialect in _DIALECT_MAP.items():
         if key in conn_type:
             return dialect
@@ -170,8 +180,8 @@ def _prepare_query(query: Query, connection: Any) -> tuple[str, Any]:
     sql = query["sql"]
     params = query["params"]
 
-    # Detect connection type
-    conn_type = type(connection).__module__
+    # Detect connection type — async_libsql shares the same param conversion as libsql
+    conn_type = _conn_module(connection)
 
     _CONVERTERS = {
         "asyncpg": _convert_to_asyncpg,
@@ -228,7 +238,7 @@ def _convert_to_libsql(sql: str, params: dict[str, Any]) -> tuple[str, list[Any]
 
 async def _execute_fetch(connection: Any, sql: str, params: Any) -> list[dict[str, Any]]:
     """Execute and fetch all rows."""
-    conn_type = type(connection).__module__
+    conn_type = _conn_module(connection)
 
     async def _fetch_asyncpg() -> list[dict[str, Any]]:
         rows = await connection.fetch(sql, *params)
@@ -240,13 +250,25 @@ async def _execute_fetch(connection: Any, sql: str, params: Any) -> list[dict[st
         rows = await cursor.fetchall()
         return list(rows)
 
+    async def _fetch_async_libsql() -> list[dict[str, Any]]:
+        cursor = await connection.execute(sql, params if params else ())
+        rows = await cursor.fetchall()
+        columns = [desc[0] for desc in cursor.description] if cursor.description else []
+        return [dict(zip(columns, row, strict=False)) for row in rows]
+
     async def _fetch_libsql() -> list[dict[str, Any]]:
         cursor = connection.execute(sql, params if params else ())
         rows = cursor.fetchall()
         columns = [desc[0] for desc in cursor.description] if cursor.description else []
         return [dict(zip(columns, row, strict=False)) for row in rows]
 
-    _FETCHERS = {"asyncpg": _fetch_asyncpg, "aiosqlite": _fetch_aiosqlite, "libsql": _fetch_libsql}
+    # async_libsql must come before libsql — "libsql" is a substring of "async_libsql"
+    _FETCHERS = {
+        "asyncpg": _fetch_asyncpg,
+        "aiosqlite": _fetch_aiosqlite,
+        "async_libsql": _fetch_async_libsql,
+        "libsql": _fetch_libsql,
+    }
 
     for key, fetcher in _FETCHERS.items():
         if key in conn_type:
@@ -256,7 +278,7 @@ async def _execute_fetch(connection: Any, sql: str, params: Any) -> list[dict[st
 
 async def _execute_fetch_one(connection: Any, sql: str, params: Any) -> dict[str, Any] | None:
     """Execute and fetch single row."""
-    conn_type = type(connection).__module__
+    conn_type = _conn_module(connection)
 
     async def _fetch_one_asyncpg() -> dict[str, Any] | None:
         row = await connection.fetchrow(sql, *params)
@@ -268,6 +290,14 @@ async def _execute_fetch_one(connection: Any, sql: str, params: Any) -> dict[str
         row = await cursor.fetchone()
         return dict(row) if row else None
 
+    async def _fetch_one_async_libsql() -> dict[str, Any] | None:
+        cursor = await connection.execute(sql, params if params else ())
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        columns = [desc[0] for desc in cursor.description] if cursor.description else []
+        return dict(zip(columns, row, strict=True))
+
     async def _fetch_one_libsql() -> dict[str, Any] | None:
         cursor = connection.execute(sql, params if params else ())
         row = cursor.fetchone()
@@ -276,7 +306,13 @@ async def _execute_fetch_one(connection: Any, sql: str, params: Any) -> dict[str
         columns = [desc[0] for desc in cursor.description] if cursor.description else []
         return dict(zip(columns, row, strict=True))
 
-    _FETCHERS = {"asyncpg": _fetch_one_asyncpg, "aiosqlite": _fetch_one_aiosqlite, "libsql": _fetch_one_libsql}
+    # async_libsql must come before libsql — "libsql" is a substring of "async_libsql"
+    _FETCHERS = {
+        "asyncpg": _fetch_one_asyncpg,
+        "aiosqlite": _fetch_one_aiosqlite,
+        "async_libsql": _fetch_one_async_libsql,
+        "libsql": _fetch_one_libsql,
+    }
 
     for key, fetcher in _FETCHERS.items():
         if key in conn_type:
@@ -286,7 +322,7 @@ async def _execute_fetch_one(connection: Any, sql: str, params: Any) -> dict[str
 
 async def _execute_fetch_scalar(connection: Any, sql: str, params: Any) -> Any:
     """Execute and fetch scalar value."""
-    conn_type = type(connection).__module__
+    conn_type = _conn_module(connection)
 
     async def _scalar_asyncpg() -> Any:
         return await connection.fetchval(sql, *params)
@@ -296,12 +332,23 @@ async def _execute_fetch_scalar(connection: Any, sql: str, params: Any) -> Any:
         row = await cursor.fetchone()
         return row[0] if row else None
 
+    async def _scalar_async_libsql() -> Any:
+        cursor = await connection.execute(sql, params if params else ())
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
     async def _scalar_libsql() -> Any:
         cursor = connection.execute(sql, params if params else ())
         row = cursor.fetchone()
         return row[0] if row else None
 
-    _FETCHERS = {"asyncpg": _scalar_asyncpg, "aiosqlite": _scalar_aiosqlite, "libsql": _scalar_libsql}
+    # async_libsql must come before libsql — "libsql" is a substring of "async_libsql"
+    _FETCHERS = {
+        "asyncpg": _scalar_asyncpg,
+        "aiosqlite": _scalar_aiosqlite,
+        "async_libsql": _scalar_async_libsql,
+        "libsql": _scalar_libsql,
+    }
 
     for key, fetcher in _FETCHERS.items():
         if key in conn_type:
@@ -311,7 +358,7 @@ async def _execute_fetch_scalar(connection: Any, sql: str, params: Any) -> Any:
 
 async def _execute_update(connection: Any, sql: str, params: Any) -> int:
     """Execute and return rows affected."""
-    conn_type = type(connection).__module__
+    conn_type = _conn_module(connection)
 
     async def _update_asyncpg() -> int:
         result = await connection.execute(sql, *params)
@@ -323,12 +370,23 @@ async def _execute_update(connection: Any, sql: str, params: Any) -> int:
         await connection.commit()
         return int(cursor.rowcount)
 
+    async def _update_async_libsql() -> int:
+        cursor = await connection.execute(sql, params if params else ())
+        await connection.commit()
+        return int(cursor.rowcount)
+
     async def _update_libsql() -> int:
         cursor = connection.execute(sql, params if params else ())
         connection.commit()
         return int(cursor.rowcount)
 
-    _UPDATERS = {"asyncpg": _update_asyncpg, "aiosqlite": _update_aiosqlite, "libsql": _update_libsql}
+    # async_libsql must come before libsql — "libsql" is a substring of "async_libsql"
+    _UPDATERS = {
+        "asyncpg": _update_asyncpg,
+        "aiosqlite": _update_aiosqlite,
+        "async_libsql": _update_async_libsql,
+        "libsql": _update_libsql,
+    }
 
     for key, updater in _UPDATERS.items():
         if key in conn_type:
@@ -464,7 +522,7 @@ async def execute_with_pool(
             result = await executor_fn(query, conn)
             # aiosqlite requires explicit commit for DML (INSERT/UPDATE/DELETE)
             # asyncpg and libsql are autocommit; aiosqlite is not
-            if is_write_op(op) and "aiosqlite" in type(conn).__module__:
+            if is_write_op(op) and "aiosqlite" in _conn_module(conn):
                 await conn.commit()
             duration_ms = (time.monotonic() - t0) * 1000
             record_execution(pool, sql, duration_ms, success=True)
