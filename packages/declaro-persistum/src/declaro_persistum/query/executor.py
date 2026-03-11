@@ -520,9 +520,12 @@ async def execute_with_pool(
         error = ""
         try:
             result = await executor_fn(query, conn)
-            # aiosqlite requires explicit commit for DML (INSERT/UPDATE/DELETE)
-            # asyncpg and libsql are autocommit; aiosqlite is not
-            if is_write_op(op) and "aiosqlite" in _conn_module(conn):
+            # aiosqlite and async_libsql require explicit commit after DML.
+            # asyncpg and raw libsql are autocommit.
+            # async_libsql.commit() also calls sync(), pushing the write to
+            # Turso Cloud and refreshing the local replica.
+            _cm = _conn_module(conn)
+            if is_write_op(op) and ("aiosqlite" in _cm or "async_libsql" in _cm):
                 await conn.commit()
             duration_ms = (time.monotonic() - t0) * 1000
             record_execution(pool, sql, duration_ms, success=True)
