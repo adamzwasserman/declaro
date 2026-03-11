@@ -121,8 +121,14 @@ class TursoAsyncConnection:
         return TursoAsyncCursor([], None, rowcount)
 
     async def commit(self) -> None:
-        """Commit the current transaction."""
+        """Commit the current transaction and sync the local replica.
+
+        Embedded replicas write to Turso Cloud on commit() but reads come from
+        the local SQLite file. Without an immediate sync() after commit, reads
+        return stale pre-write data until the next connection is opened.
+        """
         await self._loop.run_in_executor(self._executor, self._holder.commit)
+        await self.sync()
 
     async def rollback(self) -> None:
         """Rollback the current transaction."""
@@ -537,8 +543,14 @@ class LibSQLAsyncConnection:
         return TursoAsyncCursor([], None, rowcount)
 
     async def commit(self) -> None:
-        """Commit the current transaction."""
+        """Commit the current transaction and sync the local replica.
+
+        Embedded replicas write to Turso Cloud on commit() but reads come from
+        the local SQLite file. Without an immediate sync() after commit, reads
+        return stale pre-write data until the next connection is opened.
+        """
         await self._loop.run_in_executor(self._executor, self._holder.commit)
+        await self.sync()
 
     async def rollback(self) -> None:
         """Rollback the current transaction."""
