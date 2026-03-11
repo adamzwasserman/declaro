@@ -501,9 +501,16 @@ class _LibSQLConnectionHolder:
         self.conn.rollback()
 
     def sync(self) -> None:
-        """Sync with Turso cloud (libsql-specific)."""
+        """Sync with Turso cloud (libsql-specific).
+
+        Silently ignores ValueError raised when the connection was opened in
+        File mode (local-only connections do not support sync).
+        """
         if hasattr(self.conn, "sync"):
-            self.conn.sync()
+            try:
+                self.conn.sync()
+            except ValueError:
+                pass  # File-mode connections don't support sync — that's fine
 
     def close(self) -> None:
         """Close connection."""
