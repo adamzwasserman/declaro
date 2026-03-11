@@ -19,6 +19,15 @@ if TYPE_CHECKING:
     pass
 
 
+def _find_pk_column(schema: Schema, table_name: str) -> str:
+    """Return the primary key column name for a table, or '' if not found."""
+    table_def = schema.get(table_name, {})
+    for col_name, col_def in table_def.get("columns", {}).items():
+        if col_def.get("primary_key"):
+            return col_name
+    return ""
+
+
 class PrismaQueryBuilder:
     """
     Prisma-style query builder.
@@ -208,7 +217,12 @@ class PrismaQueryBuilder:
             sql, params = self._build_select_sql(where, order, take, skip, dialect)
             return {"sql": sql, "params": params, "dialect": dialect}
 
-        return await execute_with_pool(pool, _query, mode="all")
+        pk_col = _find_pk_column(self._schema, self._table_name)
+        return await execute_with_pool(
+            pool, _query, mode="all",
+            table_name=self._table_name,
+            pk_column=pk_col,
+        )
 
     async def find_one(
         self,
@@ -229,7 +243,14 @@ class PrismaQueryBuilder:
             sql, params = self._build_select_sql(where, None, 1, None, dialect)
             return {"sql": sql, "params": params, "dialect": dialect}
 
-        return await execute_with_pool(pool, _query, mode="one")
+        pk_col = _find_pk_column(self._schema, self._table_name)
+        pk_val = where.get(pk_col) if pk_col else None
+        return await execute_with_pool(
+            pool, _query, mode="one",
+            table_name=self._table_name,
+            pk_column=pk_col,
+            pk_value=pk_val,
+        )
 
     async def find_first(
         self,
@@ -254,7 +275,14 @@ class PrismaQueryBuilder:
             sql, params = self._build_select_sql(where, order, 1, None, dialect)
             return {"sql": sql, "params": params, "dialect": dialect}
 
-        return await execute_with_pool(pool, _query, mode="one")
+        pk_col = _find_pk_column(self._schema, self._table_name)
+        pk_val = (where or {}).get(pk_col) if pk_col else None
+        return await execute_with_pool(
+            pool, _query, mode="one",
+            table_name=self._table_name,
+            pk_column=pk_col,
+            pk_value=pk_val,
+        )
 
     async def create(
         self,
@@ -292,7 +320,15 @@ class PrismaQueryBuilder:
         def _query(dialect: str) -> Query:
             return {"sql": sql, "params": params, "dialect": dialect}
 
-        result = await execute_with_pool(pool, _query, mode="one")
+        pk_col = _find_pk_column(self._schema, self._table_name)
+        pk_val = data.get(pk_col) if pk_col else None
+        result = await execute_with_pool(
+            pool, _query, mode="one",
+            table_name=self._table_name,
+            pk_column=pk_col,
+            pk_value=pk_val,
+            data=data,
+        )
         return result or data  # Return input if RETURNING not supported
 
     async def update(
@@ -348,7 +384,15 @@ class PrismaQueryBuilder:
             sql += " RETURNING *"
             return {"sql": sql, "params": params, "dialect": dialect}
 
-        return await execute_with_pool(pool, _query, mode="one")
+        pk_col = _find_pk_column(self._schema, self._table_name)
+        pk_val = where.get(pk_col) if pk_col else None
+        return await execute_with_pool(
+            pool, _query, mode="one",
+            table_name=self._table_name,
+            pk_column=pk_col,
+            pk_value=pk_val,
+            data=data,
+        )
 
     async def delete(
         self,
@@ -382,7 +426,15 @@ class PrismaQueryBuilder:
             sql += " RETURNING *"
             return {"sql": sql, "params": params, "dialect": dialect}
 
-        return await execute_with_pool(pool, _query, mode="one")
+        pk_col = _find_pk_column(self._schema, self._table_name)
+        pk_val = where.get(pk_col) if pk_col else None
+        return await execute_with_pool(
+            pool, _query, mode="one",
+            table_name=self._table_name,
+            pk_column=pk_col,
+            pk_value=pk_val,
+            data={},
+        )
 
     async def upsert(
         self,
@@ -441,5 +493,10 @@ class PrismaQueryBuilder:
 
             return {"sql": sql, "params": params, "dialect": dialect}
 
-        result = await execute_with_pool(pool, _query, mode="scalar")
+        pk_col = _find_pk_column(self._schema, self._table_name)
+        result = await execute_with_pool(
+            pool, _query, mode="scalar",
+            table_name=self._table_name,
+            pk_column=pk_col,
+        )
         return int(result) if result else 0

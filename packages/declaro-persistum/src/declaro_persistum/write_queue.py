@@ -27,7 +27,7 @@ from typing import Any, TypedDict
 
 logger = logging.getLogger(__name__)
 
-_CRITICAL_THRESHOLD_SECONDS = 6 * 3600  # 6 hours
+_CRITICAL_THRESHOLD_SECONDS = 3600  # 1 hour
 
 
 class PendingEntry(TypedDict):
@@ -76,6 +76,8 @@ class WriteQueue:
         self._semaphore = asyncio.Semaphore(max_concurrent_drains)
         # Track when each key first started failing continuously
         self._first_failure_time: dict[str, float] = {}
+        # Debounced sync task
+        self._pending_sync_task: asyncio.Task[None] | None = None
 
     # ------------------------------------------------------------------
     # Public queue API
@@ -186,81 +188,103 @@ class WriteQueue:
         await self._flush()
 
     async def _supervisor_loop(self) -> None:
-        """Drain queue continuously with exponential backoff on failure."""
-        idle_backoff = 0.1
-        failure_backoff = 0.1
+        """Spawn persistent retry tasks for each pending queue entry."""
+        active_tasks: dict[str, asyncio.Task[bool]] = {}
         while True:
-            if not self._queue:
-                await asyncio.sleep(idle_backoff)
-                idle_backoff = min(idle_backoff * 1.5, 5.0)
-                continue
+            # Spawn retry tasks for new entries without an active task
+            for key, entry in list(self._queue.items()):
+                if key not in active_tasks or active_tasks[key].done():
+                    active_tasks[key] = asyncio.create_task(self._write_retry(key, entry))
+            # Clean up done tasks for entries no longer in queue
+            for key in list(active_tasks.keys()):
+                if key not in self._queue and active_tasks[key].done():
+                    del active_tasks[key]
+            await asyncio.sleep(0.1)
 
-            idle_backoff = 0.1
-            keys = list(self._queue.keys())
-            tasks = [
-                asyncio.create_task(self._drain_one(key, self._queue[key]))
-                for key in keys
-                if key in self._queue
-            ]
-            if tasks:
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                all_failed = all(r is False or isinstance(r, Exception) for r in results)
-                if all_failed:
-                    await asyncio.sleep(failure_backoff)
-                    failure_backoff = min(failure_backoff * 2.0, 60.0)
-                else:
-                    failure_backoff = 0.1
-            await asyncio.sleep(0.05)
+    async def _write_retry(self, key: str, entry: PendingEntry) -> bool:
+        """Retry a pending write forever until it succeeds or the key is removed."""
+        from declaro_persistum.instrumentation import record_execution
+        from declaro_persistum.query.builder import Query
+        from declaro_persistum.query.executor import _execute_update, _prepare_query
 
-    async def _drain_one(self, key: str, entry: PendingEntry) -> bool:
-        """Attempt to execute one pending write. Returns True on success, False on failure."""
-        async with self._semaphore:
-            from declaro_persistum.instrumentation import record_execution
-            from declaro_persistum.query.executor import _execute_update
+        backoff = 0.1
+        while key in self._queue:
+            async with self._semaphore:
+                t0 = time.monotonic()
+                try:
+                    acquire = getattr(self._pool, "acquire_write", self._pool.acquire)
+                    q: Query = {"sql": entry["sql"], "params": entry["params"], "dialect": entry["dialect"]}
+                    async with acquire() as conn:
+                        prepared_sql, prepared_params = _prepare_query(q, conn)
+                        await _execute_update(conn, prepared_sql, prepared_params)
+                    duration_ms = (time.monotonic() - t0) * 1000
+                    record_execution(self._pool, entry["sql"], duration_ms, success=True)
+                    self.remove_entry(entry["table"], entry["pk_value"])
+                    self._schedule_sync()
+                    return True
+                except Exception as exc:
+                    error_str = str(exc)
+                    duration_ms = (time.monotonic() - t0) * 1000
+                    record_execution(self._pool, entry["sql"], duration_ms, success=False, error=error_str)
+                    if key in self._queue:
+                        self._queue[key]["attempt_count"] += 1
+                        self._queue[key]["last_error"] = error_str[:200]
+                        self._persist_to_disk()
+                    self._check_critical_threshold(key, entry, exc)
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2.0, 60.0)
+        return True
 
-            t0 = time.monotonic()
-            try:
-                async with self._pool.acquire() as conn:
-                    await _execute_update(conn, entry["sql"], entry["params"])
-                duration_ms = (time.monotonic() - t0) * 1000
-                record_execution(self._pool, entry["sql"], duration_ms, success=True)
-                self.remove_entry(entry["table"], entry["pk_value"])
-                return True
-            except Exception as exc:
-                error_str = str(exc)
-                duration_ms = (time.monotonic() - t0) * 1000
-                record_execution(self._pool, entry["sql"], duration_ms, success=False, error=error_str)
-                if key in self._queue:
-                    self._queue[key]["attempt_count"] += 1
-                    self._queue[key]["last_error"] = error_str[:200]
-                    self._persist_to_disk()
+    def _check_critical_threshold(self, key: str, entry: PendingEntry, exc: Exception) -> None:
+        """Log CRITICAL if a key has been failing for longer than the threshold."""
+        now = time.monotonic()
+        if key not in self._first_failure_time:
+            self._first_failure_time[key] = now
+        elif now - self._first_failure_time[key] >= _CRITICAL_THRESHOLD_SECONDS:
+            logger.critical(
+                "WRITE_QUEUE_EXHAUSTED: entry %s for %s:%s has been failing for >1 hour. "
+                "Last error: %s",
+                entry["entry_id"],
+                entry["table"],
+                entry["pk_value"],
+                str(exc),
+            )
 
-                now = time.monotonic()
-                if key not in self._first_failure_time:
-                    self._first_failure_time[key] = now
-                elif now - self._first_failure_time[key] >= _CRITICAL_THRESHOLD_SECONDS:
-                    logger.critical(
-                        "WRITE_QUEUE_EXHAUSTED: entry %s for %s:%s has been failing for >6 hours. "
-                        "Last error: %s",
-                        entry["entry_id"],
-                        entry["table"],
-                        entry["pk_value"],
-                        error_str,
-                    )
-                return False
+    def _schedule_sync(self) -> None:
+        """Schedule a debounced sync after a successful write (max one per 500ms)."""
+        if self._pending_sync_task is not None and not self._pending_sync_task.done():
+            return  # debounce: one sync per 500ms window
+        self._pending_sync_task = asyncio.create_task(self._debounced_sync())
+
+    async def _debounced_sync(self) -> None:
+        """Wait 500ms then sync the pool if it supports sync."""
+        await asyncio.sleep(0.5)
+        if hasattr(self._pool, "sync"):
+            await self._pool.sync()
 
     async def _flush(self) -> None:
         """Final drain attempt for all remaining entries on shutdown."""
         if not self._queue:
             return
         logger.info("WriteQueue flushing %d pending entries on shutdown", len(self._queue))
-        keys = list(self._queue.keys())
-        for key in keys:
+        from declaro_persistum.instrumentation import record_execution
+        from declaro_persistum.query.builder import Query
+        from declaro_persistum.query.executor import _execute_update, _prepare_query
+
+        for key in list(self._queue.keys()):
             if key not in self._queue:
                 continue
             entry = self._queue[key]
+            t0 = time.monotonic()
             try:
-                await self._drain_one(key, entry)
+                acquire = getattr(self._pool, "acquire_write", self._pool.acquire)
+                q: Query = {"sql": entry["sql"], "params": entry["params"], "dialect": entry["dialect"]}
+                async with acquire() as conn:
+                    prepared_sql, prepared_params = _prepare_query(q, conn)
+                    await _execute_update(conn, prepared_sql, prepared_params)
+                duration_ms = (time.monotonic() - t0) * 1000
+                record_execution(self._pool, entry["sql"], duration_ms, success=True)
+                self.remove_entry(entry["table"], entry["pk_value"])
             except Exception:
                 pass
         self._persist_to_disk()
@@ -355,6 +379,15 @@ def _find_fk_relationship(
             ref_col = ref.split(".", 1)[1]
             return col_name, ref_col
     return None, None
+
+
+def _extract_join_tables(sql: str) -> list[str]:
+    """
+    Parse SQL for JOIN clauses and return list of joined table names.
+
+    Works with any JOIN type (INNER, LEFT, RIGHT, FULL, CROSS).
+    """
+    return re.findall(r"\bJOIN\s+([a-zA-Z_][a-zA-Z0-9_]*)", sql, re.IGNORECASE)
 
 
 def _extract_order_by(sql: str) -> list[tuple[str, str]]:

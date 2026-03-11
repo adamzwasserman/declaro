@@ -146,8 +146,9 @@ class TestInstrumentationCallableSink:
 class TestPoolBinding:
     """Tests for pool-bound table API (Phase 1)."""
 
-    def test_pool_binding_table_requires_pool(self):
-        """table() raises TypeError when pool argument is missing."""
+    @pytest.mark.asyncio
+    async def test_pool_binding_execute_requires_pool(self):
+        """Executing a query on a pool-less TableProxy raises an error."""
         from declaro_persistum.query.table import table
 
         schema = {
@@ -159,8 +160,9 @@ class TestPoolBinding:
             }
         }
 
-        with pytest.raises(TypeError):
-            table("users", schema)  # missing pool argument
+        users = table("users", schema)  # no pool — construction succeeds
+        with pytest.raises((AttributeError, TypeError)):
+            await users.select().execute()  # fails at execution time
 
     @pytest.mark.asyncio
     async def test_execute_acquires_from_pool(self):

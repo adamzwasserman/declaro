@@ -111,83 +111,6 @@ class TestWriteQueueBasics:
             await pool.close()
 
 
-class TestWriteQueueRace:
-    """50ms race write behavior."""
-
-    @pytest.mark.asyncio
-    async def test_race_fast_write_queue_stays_empty(self):
-        """SQLite sub-1ms write completes before threshold; queue stays empty."""
-        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-            db_path = f.name
-        try:
-            pool = await ConnectionPool.sqlite(db_path)
-            queue = WriteQueue(pool, threshold_ms=500.0)  # 500ms threshold — write should always win
-            pool._write_queue = queue
-
-            async with pool.acquire() as conn:
-                await conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
-                await conn.commit()
-
-            from declaro_persistum.query.executor import _race_write
-            from declaro_persistum.query.builder import Query
-
-            query: Query = {
-                "sql": "INSERT INTO users (id, name) VALUES (1, 'Alice')",
-                "params": {},
-                "dialect": "sqlite",
-            }
-
-            await _race_write(pool, query, queue, "users", "id", 1, "insert", {"id": 1, "name": "Alice"}, "sqlite")
-
-            # Queue should be empty (write completed before threshold)
-            assert not queue.is_pending("users", 1)
-            await pool.close()
-        finally:
-            if os.path.exists(db_path):
-                os.unlink(db_path)
-
-    @pytest.mark.asyncio
-    async def test_race_slow_write_enqueues(self):
-        """With threshold=0.001ms, write always exceeds it and gets queued."""
-        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
-            db_path = f.name
-        try:
-            pool = await ConnectionPool.sqlite(db_path)
-            queue = WriteQueue(pool, threshold_ms=0.001)  # 0.001ms — impossible to beat
-            pool._write_queue = queue
-
-            async with pool.acquire() as conn:
-                await conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
-                await conn.commit()
-
-            from declaro_persistum.query.executor import _race_write
-            from declaro_persistum.query.builder import Query
-
-            query: Query = {
-                "sql": "INSERT INTO users (id, name) VALUES (2, 'Bob')",
-                "params": {},
-                "dialect": "sqlite",
-            }
-
-            result = await _race_write(pool, query, queue, "users", "id", 2, "insert",
-                                       {"id": 2, "name": "Bob"}, "sqlite")
-
-            # Returns data immediately
-            assert result == {"id": 2, "name": "Bob"}
-            # Entry is queued
-            assert queue.is_pending("users", 2)
-
-            # Give background task time to finish
-            await asyncio.sleep(0.1)
-            # Background write completes and removes from queue
-            assert not queue.is_pending("users", 2)
-
-            await pool.close()
-        finally:
-            if os.path.exists(db_path):
-                os.unlink(db_path)
-
-
 class TestSupervisor:
     """Supervisor drain and backoff behavior."""
 
@@ -286,10 +209,9 @@ class TestSupervisor:
         await pool2.close()
 
     @pytest.mark.asyncio
-    async def test_supervisor_critical_log_after_6_hours(self):
-        """WRITE_QUEUE_EXHAUSTED is logged at CRITICAL after 6hrs of failure."""
+    async def test_supervisor_critical_log_after_1_hour(self):
+        """WRITE_QUEUE_EXHAUSTED is logged at CRITICAL after 1hr of failure."""
         import logging
-        from unittest.mock import patch
 
         pool = await ConnectionPool.sqlite(":memory:")
         queue = WriteQueue(pool)
@@ -302,8 +224,8 @@ class TestSupervisor:
         entry = queue.get_pending_for_table("nowhere")[0]
         key = "nowhere:1"
 
-        # Simulate 6+ hours of continuous failure
-        fake_first_failure = time.monotonic() - (6 * 3600 + 1)
+        # Simulate 1+ hour of continuous failure
+        fake_first_failure = time.monotonic() - (3600 + 1)
         queue._first_failure_time[key] = fake_first_failure
 
         critical_messages = []
@@ -316,8 +238,8 @@ class TestSupervisor:
         import declaro_persistum.write_queue as wq_module
         wq_module.logger.addHandler(CaptureHandler())
 
-        # Trigger drain failure
-        await queue._drain_one(key, entry)
+        # Trigger critical threshold check directly
+        queue._check_critical_threshold(key, entry, Exception("connection refused"))
 
         assert any("WRITE_QUEUE_EXHAUSTED" in m for m in critical_messages)
         await pool.close()

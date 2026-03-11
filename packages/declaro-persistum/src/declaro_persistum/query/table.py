@@ -51,7 +51,7 @@ if TYPE_CHECKING:
     from declaro_persistum.query.update import UpdateQuery
 
 
-def table(name: str, schema: Schema, pool: Any) -> "TableProxy":
+def table(name: str, schema: Schema, pool: Any = None) -> "TableProxy":
     """
     Create a schema-validated table proxy.
 
