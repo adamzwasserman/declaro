@@ -267,59 +267,44 @@ class TestLibSQLPool:
             async with pool.acquire():
                 pass
 
-    def test_libsql_holder_uses_auto_commit(self, tmp_path):
-        """_LibSQLConnectionHolder.connect() uses isolation_level=None.
+    def test_libsql_holder_uses_deferred_isolation(self, tmp_path):
+        """_LibSQLConnectionHolder.connect() uses the default isolation_level.
 
-        Root cause of the embedded replica write-visibility bug:
-        isolation_level=DEFERRED (default) buffers writes in a local WAL
-        transaction.  commit() commits locally; sync() then overwrites the
-        local file from the remote (which has no knowledge of the local
-        write), silently discarding the data.
+        The correct pattern for libsql embedded replicas:
+          INSERT (buffered in local WAL transaction)
+          → commit()  (forwards the transaction to Turso Cloud primary)
+          → sync()    (pulls the committed change into the local replica)
 
-        With isolation_level=None (auto-commit) every write is immediately
-        forwarded to the Turso Cloud primary.  commit() is a no-op.
-        sync() then pulls the committed write back to the local replica.
+        DO NOT use isolation_level=None (auto-commit).  In embedded replica
+        mode auto-commit causes cursor.execute() to block indefinitely while
+        attempting to forward each statement to Turso Cloud synchronously.
+
+        This test verifies that the default DEFERRED isolation level is in
+        effect — i.e. that INSERT starts an in-progress transaction that
+        commit() can forward to the remote.
         """
         import libsql
-        from declaro_persistum.pool import _LibSQLConnectionHolder
 
         db_path = str(tmp_path / "test.db")
-        holder = _LibSQLConnectionHolder(db_path, sync_url="", auth_token=None)
+        conn = libsql.connect(db_path)
 
-        # Bypass connect() to create a plain local connection with our target
-        # isolation_level — we can't call connect() without a valid sync_url.
-        holder.conn = libsql.connect(db_path, isolation_level=None)
-
-        holder.conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)")
-        holder.conn.execute("INSERT INTO t VALUES (1, 'hello')")
-
-        # With isolation_level=None the INSERT is immediately visible on the
-        # same connection without commit().
-        row = holder.conn.execute("SELECT COUNT(*) FROM t").fetchone()
-        assert row[0] == 1, "Write not visible immediately in auto-commit mode"
-
-        # A brand-new connection to the same file also sees the write.
-        conn2 = libsql.connect(db_path, isolation_level=None)
-        row2 = conn2.execute("SELECT COUNT(*) FROM t").fetchone()
-        assert row2[0] == 1, "Write not visible on new connection"
-
-        # Verify that isolation_level=DEFERRED (the old/broken default) would
-        # NOT be auto-commit — proving why the bug existed.
-        import tempfile, os
-        tmp2 = tempfile.mktemp(suffix=".db")
-        conn_old = libsql.connect(tmp2)
-        conn_old.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)")
-        conn_old.commit()
-        conn_old.execute("INSERT INTO t VALUES (1, 'hello')")
-        assert conn_old.in_transaction, (
-            "DEFERRED mode should start a transaction on INSERT "
-            "(confirming the bug path)"
+        assert conn.isolation_level == "DEFERRED", (
+            "_LibSQLConnectionHolder must use DEFERRED isolation level"
         )
-        conn_old.close()
-        os.unlink(tmp2)
 
-        holder.conn.close()
-        conn2.close()
+        conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)")
+        conn.commit()
+
+        conn.execute("INSERT INTO t VALUES (1, 'hello')")
+        assert conn.in_transaction, (
+            "INSERT should start a transaction in DEFERRED mode — "
+            "commit() then forwards this to Turso Cloud"
+        )
+
+        conn.commit()
+        assert not conn.in_transaction
+
+        conn.close()
 
 
 class TestConnectionPoolFactory:

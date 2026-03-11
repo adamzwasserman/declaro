@@ -471,33 +471,25 @@ class _LibSQLConnectionHolder:
     def connect(self) -> None:
         """Open embedded replica connection (must be called on executor thread).
 
-        isolation_level=None (auto-commit) is REQUIRED for embedded replicas.
+        Uses the default isolation_level ("DEFERRED").  In embedded replica
+        mode the libsql driver forwards the entire transaction to the Turso
+        Cloud primary when commit() is called.  sync() then pulls the
+        committed changes back into the local replica file.
 
-        With the default isolation_level="DEFERRED", INSERT starts a local
-        WAL transaction.  commit() commits it locally but does NOT forward
-        it to the Turso Cloud primary.  The subsequent sync() then OVERWRITES
-        the local file from the remote, silently discarding the write.
-
-        With isolation_level=None every write is immediately forwarded to the
-        Turso Cloud primary.  commit() becomes a no-op.  sync() then pulls
-        the committed write back to the local replica.
+        DO NOT use isolation_level=None (auto-commit) here.  In embedded
+        replica mode auto-commit causes cursor.execute() to block
+        indefinitely while trying to forward each statement to Turso Cloud
+        synchronously — the call never returns.
         """
         import os
 
         os.makedirs(os.path.dirname(os.path.abspath(self.local_path)), exist_ok=True)
         if self.auth_token:
             self.conn = self._libsql.connect(
-                self.local_path,
-                sync_url=self.sync_url,
-                auth_token=self.auth_token,
-                isolation_level=None,
+                self.local_path, sync_url=self.sync_url, auth_token=self.auth_token
             )
         else:
-            self.conn = self._libsql.connect(
-                self.local_path,
-                sync_url=self.sync_url,
-                isolation_level=None,
-            )
+            self.conn = self._libsql.connect(self.local_path, sync_url=self.sync_url)
 
     def execute(self, sql: str, parameters: tuple) -> tuple[list, Any, int]:
         cursor = self.conn.cursor()
@@ -644,7 +636,15 @@ class LibSQLPool(BasePool):
 
     @asynccontextmanager
     async def acquire(self) -> AsyncIterator[LibSQLAsyncConnection]:
-        """Acquire a connection to the local embedded replica."""
+        """Acquire a connection to the local embedded replica.
+
+        Syncs from Turso Cloud on every acquire so that each connection
+        sees writes committed by any previous connection.  Without this,
+        a new connection opens the local SQLite file from disk and may
+        read pages that pre-date the last commit+sync on the write
+        connection.  sync() here is idempotent — if no remote changes
+        have arrived since the last sync it returns immediately.
+        """
         if self._closed:
             raise PoolClosedError("Pool has been closed")
 
@@ -663,6 +663,7 @@ class LibSQLPool(BasePool):
         try:
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(executor, holder.connect)
+            await loop.run_in_executor(executor, holder.sync)
             async_conn = LibSQLAsyncConnection(holder, executor)
         except Exception as e:
             executor.shutdown(wait=False)
