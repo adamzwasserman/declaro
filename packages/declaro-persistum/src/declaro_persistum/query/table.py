@@ -3,6 +3,39 @@ Schema-validated table and column proxies.
 
 Provides dot-notation access to tables and columns that validates
 against the loaded schema at query-build time, not execution time.
+
+-------------------------------------------------------------------------------
+STOP. THIS MODULE CONTAINS INTERNAL IMPLEMENTATION DETAILS.
+-------------------------------------------------------------------------------
+
+``Condition``, ``ConditionGroup``, ``CaseExpression``, ``CaseOrderBy``,
+``SubqueryExpr``, and ``SQLFunction`` are **internal classes**. Their
+``.to_sql()`` and ``.to_sql_fragment()`` methods are called by ``SelectQuery``
+as part of query assembly. They are not part of the public API. They carry no
+stability guarantee. Their signatures may change without notice.
+
+If you are calling ``.to_sql()`` on a ``Condition`` or any other internal class
+directly, **stop doing that immediately**. You are bypassing the query layer and
+will be broken by the next refactor with no sympathy.
+
+The public API is ``SelectQuery``:
+
+    # Build a query using the table proxy
+    rows = await (
+        users.select(users.id, users.email)
+        .where(users.status == "active")
+        .order_by(users.created_at.desc())
+        .execute()
+    )
+
+    # Or get the SQL string + params if you need to inspect them
+    sql, params = q.to_sql()           # defaults to postgresql dialect
+    sql, params = q.to_sql("sqlite")   # explicit dialect
+
+``SelectQuery.to_sql(dialect)`` is the one place the dialect is exposed.
+It propagates to every internal component automatically. You do not touch
+``Condition``, ``ConditionGroup``, or anything else in this module directly.
+-------------------------------------------------------------------------------
 """
 
 from typing import TYPE_CHECKING, Any
