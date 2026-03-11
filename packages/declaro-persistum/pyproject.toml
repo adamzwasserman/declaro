@@ -111,6 +111,7 @@ markers = [
     "sqlite: requires SQLite database",
     "postgresql: requires PostgreSQL database",
     "turso: requires Turso database",
+    "libsql: requires LibSQL/Turso database",
 ]
 
 [tool.coverage.run]
