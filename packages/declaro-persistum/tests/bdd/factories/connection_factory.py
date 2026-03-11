@@ -263,7 +263,7 @@ class ConnectionFactory:
                 yield conn
         elif self.dialect == "turso":
             # Turso uses sync API
-            import libsql_experimental as libsql
+            import libsql
             conn = libsql.connect(get_turso_url(), auth_token=get_turso_auth_token())
             try:
                 yield conn

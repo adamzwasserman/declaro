@@ -1,5 +1,7 @@
 # Todo App Demo (SQLAlchemy-style)
 
+> **Note**: The SQLAlchemy-style API (`declarative_base`, `Column`, `Session`) is not yet implemented in declaro_persistum. This demo is a placeholder showing the planned API surface.
+
 A simple todo application demonstrating declaro_persistum with **SQLAlchemy-style queries**.
 
 ## Features

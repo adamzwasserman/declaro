@@ -1,9 +1,9 @@
 # Implementation Plan: Strangler Pattern Refactoring for Honest Code Compliance
 
 ---
-**STATUS**: PARTIALLY COMPLETE
-**VERSION**: 1.1
-**DATE**: 2026-03-06
+**STATUS**: COMPLETE (Phases 1-4 done; Phases 5-6 deferred — stateless classes acceptable per user decision)
+**VERSION**: 1.2
+**DATE**: 2026-03-11
 **PARENT**: 008-honest-code-audit-v1.md
 **APPROACH**: Strangler Pattern -- one extraction per sprint, class becomes thin shell, thin shell eventually removed
 ---
@@ -79,7 +79,7 @@ def create_applier(dialect: str) -> MigrationApplier:
 
 **Risk**: None.
 
-### 2.3 Replace query/executor.py if/elif Chains with Dict Dispatch
+### 2.3 Replace query/executor.py if/elif Chains with Dict Dispatch ✅ COMPLETE
 
 **Effort**: 1 hour. Five functions with identical dispatch pattern.
 
@@ -323,15 +323,15 @@ async def create_pool(
 
 **Effort**: 1 day.
 
-In `query/table.py`, removed `set_default_schema()` and `load_default_schema()`. Made `table()` require explicit schema parameter:
+In `query/table.py`, removed `set_default_schema()` and `load_default_schema()`. Made `table()` require explicit `schema` and `pool` parameters:
 
 ```python
 # Before
 set_default_schema(my_schema)
 users = table("users")  # uses global
 
-# After
-users = table("users", schema=my_schema)  # explicit
+# After (pool is also required — pool bound at table creation)
+users = table("users", schema, pool)  # fully explicit
 ```
 
 **Risk**: Low. The explicit parameter signature already exists; this just removes the default fallback.

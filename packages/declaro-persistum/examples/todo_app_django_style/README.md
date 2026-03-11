@@ -17,30 +17,34 @@ A simple todo application demonstrating declaro_persistum with **Django-style qu
 This demo uses **Django-style** queries:
 
 ```python
+from declaro_persistum import ConnectionPool
 from declaro_persistum.query.table import table
 from declaro_persistum.loader import load_schema
 
 schema = load_schema("./schema")
-todos = table("todos", schema=schema)
+pool = await ConnectionPool.sqlite("./todos.db")
 
-# Filter with lookups
-active = await todos.objects.filter(completed=0).all(db)
+# Pool bound at table creation — no connection on the caller surface
+todos = table("todos", schema, pool)
+
+# Filter with lookups — no conn parameter
+active = await todos.objects.filter(completed=0).all()
 
 # Django-style lookups
-recent = await todos.objects.filter(created_at__gte="2024-01-01").all(db)
-search = await todos.objects.filter(title__contains="important").all(db)
+recent = await todos.objects.filter(created_at__gte="2024-01-01").all()
+search = await todos.objects.filter(title__contains="important").all()
 
 # Ordering (prefix with - for DESC)
-ordered = await todos.objects.order("-created_at").all(db)
+ordered = await todos.objects.order("-created_at").all()
 
 # Chaining
-result = await todos.objects.filter(completed=0).order("-created_at")[:10].all(db)
+result = await todos.objects.filter(completed=0).order("-created_at")[:10].all()
 
 # Single object
-todo = await todos.objects.get(db, id=todo_id)
+todo = await todos.objects.get(id=todo_id)
 
 # Count
-count = await todos.objects.filter(completed=0).count(db)
+count = await todos.objects.filter(completed=0).count()
 ```
 
 ## Setup

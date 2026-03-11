@@ -19,13 +19,14 @@ classifiers = [
 ]
 
 dependencies = [
+    "libsql>=0.1.11",
     "tomli-w>=1.0.0",
 ]
 
 [project.optional-dependencies]
 postgresql = ["asyncpg>=0.28.0"]
 sqlite = ["aiosqlite>=0.19.0"]
-turso = ["libsql-experimental>=0.0.30"]
+turso = ["libsql>=0.1.0"]
 all = [
     "declaro_persistum[postgresql]",
     "declaro_persistum[sqlite]",
@@ -122,4 +123,9 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "raise NotImplementedError",
     "@overload",
+]
+
+[dependency-groups]
+dev = [
+    "python-dotenv>=1.2.2",
 ]

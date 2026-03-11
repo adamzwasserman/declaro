@@ -7,7 +7,6 @@ Provides an immutable, fluent API for building SELECT queries.
 from typing import TYPE_CHECKING, Any, Literal
 
 from declaro_persistum.query.builder import Query
-from declaro_persistum.query.executor import detect_dialect
 from declaro_persistum.query.table import (
     ColumnProxy,
     Condition,
@@ -37,6 +36,7 @@ class SelectQuery:
         "_group_by",
         "_having",
         "_params",
+        "_pool",
     )
 
     def __init__(
@@ -52,6 +52,7 @@ class SelectQuery:
         group_by: list[ColumnProxy] | None = None,
         having: Condition | ConditionGroup | None = None,
         params: dict[str, Any] | None = None,
+        pool: Any = None,
     ):
         self._table = table
         self._schema = schema
@@ -64,6 +65,7 @@ class SelectQuery:
         self._group_by = group_by or []
         self._having = having
         self._params = params or {}
+        self._pool = pool
 
     def where(self, condition: Condition | ConditionGroup) -> "SelectQuery":
         """Add WHERE clause (returns new query)."""
@@ -79,6 +81,7 @@ class SelectQuery:
             group_by=self._group_by,
             having=self._having,
             params=self._params,
+            pool=self._pool,
         )
 
     def order_by(self, *orders: OrderBy | ColumnProxy) -> "SelectQuery":
@@ -103,6 +106,7 @@ class SelectQuery:
             group_by=self._group_by,
             having=self._having,
             params=self._params,
+            pool=self._pool,
         )
 
     def limit(self, n: int) -> "SelectQuery":
@@ -119,6 +123,7 @@ class SelectQuery:
             group_by=self._group_by,
             having=self._having,
             params=self._params,
+            pool=self._pool,
         )
 
     def offset(self, n: int) -> "SelectQuery":
@@ -135,6 +140,7 @@ class SelectQuery:
             group_by=self._group_by,
             having=self._having,
             params=self._params,
+            pool=self._pool,
         )
 
     def join(
@@ -157,6 +163,7 @@ class SelectQuery:
             group_by=self._group_by,
             having=self._having,
             params=self._params,
+            pool=self._pool,
         )
 
     def group_by(self, *columns: ColumnProxy) -> "SelectQuery":
@@ -173,6 +180,7 @@ class SelectQuery:
             group_by=list(columns),
             having=self._having,
             params=self._params,
+            pool=self._pool,
         )
 
     def having(self, condition: Condition | ConditionGroup) -> "SelectQuery":
@@ -189,6 +197,7 @@ class SelectQuery:
             group_by=self._group_by,
             having=condition,
             params=self._params,
+            pool=self._pool,
         )
 
     def params(self, **kwargs: Any) -> "SelectQuery":
@@ -205,6 +214,7 @@ class SelectQuery:
             group_by=self._group_by,
             having=self._having,
             params={**self._params, **kwargs},
+            pool=self._pool,
         )
 
     def to_sql(self, dialect: str = "postgresql") -> tuple[str, dict[str, Any]]:
@@ -256,23 +266,20 @@ class SelectQuery:
         sql, params = self.to_sql(dialect)
         return {"sql": sql, "params": params, "dialect": dialect}
 
-    async def execute(self, connection: Any) -> list[dict[str, Any]]:
+    async def execute(self) -> list[dict[str, Any]]:
         """Execute query and return all rows."""
-        from declaro_persistum.query.executor import execute
+        from declaro_persistum.query.executor import execute_with_pool
 
-        dialect = detect_dialect(connection)
-        return await execute(self.to_query(dialect), connection)
+        return await execute_with_pool(self._pool, self.to_query, mode="all")
 
-    async def execute_one(self, connection: Any) -> dict[str, Any] | None:
+    async def execute_one(self) -> dict[str, Any] | None:
         """Execute query and return single row or None."""
-        from declaro_persistum.query.executor import execute_one
+        from declaro_persistum.query.executor import execute_with_pool
 
-        dialect = detect_dialect(connection)
-        return await execute_one(self.to_query(dialect), connection)
+        return await execute_with_pool(self._pool, self.to_query, mode="one")
 
-    async def execute_scalar(self, connection: Any) -> Any:
+    async def execute_scalar(self) -> Any:
         """Execute query and return scalar value."""
-        from declaro_persistum.query.executor import execute_scalar
+        from declaro_persistum.query.executor import execute_with_pool
 
-        dialect = detect_dialect(connection)
-        return await execute_scalar(self.to_query(dialect), connection)
+        return await execute_with_pool(self._pool, self.to_query, mode="scalar")

@@ -47,9 +47,9 @@ def require_postgresql() -> None:
 def require_turso() -> None:
     """Require Turso for stress tests - skip if not configured."""
     try:
-        import libsql_experimental  # noqa: F401
+        import libsql  # noqa: F401
     except ImportError:
-        pytest.skip("Turso (libsql) not installed. Install with: uv pip install libsql-experimental")
+        pytest.skip("Turso (libsql) not installed. Install with: uv pip install libsql")
 
     # Also check if Turso is configured with a real URL
     turso_url = os.environ.get("TEST_TURSO_URL", "")

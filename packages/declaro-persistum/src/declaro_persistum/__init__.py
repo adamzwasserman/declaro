@@ -23,7 +23,10 @@ from declaro_persistum.exceptions import (
     RollbackError,
     SchemaError,
     TransferError,
+    WriteQueueError,
 )
+from declaro_persistum.instrumentation import LatencyRecord
+from declaro_persistum.write_queue import WriteQueue, PendingEntry
 from declaro_persistum.pool import ConnectionPool, MirrorPool, SyncConnectionPool, TursoCloudManager
 from declaro_persistum.types import (
     Ambiguity,
@@ -94,6 +97,12 @@ __all__ = [
     "PoolExhaustedError",
     "PoolConnectionError",
     "TransferError",
+    "WriteQueueError",
+    # Write Queue
+    "WriteQueue",
+    "PendingEntry",
+    # Instrumentation
+    "LatencyRecord",
     # Version
     "__version__",
 ]

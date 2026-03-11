@@ -6,7 +6,6 @@ import pytest
 from typing import Any
 
 from declaro_persistum.types import Schema
-from declaro_persistum.query.table import table
 
 from tests.bdd.factories.schema_factory import (
     simple_todos_schema,
@@ -49,23 +48,6 @@ def ecommerce_schema() -> Schema:
 def schema_factory() -> type[SchemaFactory]:
     """Schema factory class for building custom schemas."""
     return SchemaFactory
-
-
-# =============================================================================
-# Table Proxy Fixtures
-# =============================================================================
-
-
-@pytest.fixture
-def todos_table(todos_schema: Schema):
-    """Get a todos TableProxy with schema set."""
-    return table("todos", todos_schema)
-
-
-@pytest.fixture
-def users_table(users_schema: Schema):
-    """Get a users TableProxy with schema set."""
-    return table("users", users_schema)
 
 
 # =============================================================================
@@ -138,22 +120,15 @@ class BDDContext:
 
     def __init__(self):
         self.schema: Schema | None = None
-        self.table_proxy: Any = None
-        self.query: Any = None
-        self.sql: str = ""
-        self.params: dict[str, Any] = {}
         self.results: list[dict[str, Any]] = []
         self.error: Exception | None = None
         self.connection: Any = None
+        self.connection_factory: Any = None
         self.dialect: str = "sqlite"
 
     def reset(self):
         """Reset context for new scenario."""
         self.schema = None
-        self.table_proxy = None
-        self.query = None
-        self.sql = ""
-        self.params = {}
         self.results = []
         self.error = None
 

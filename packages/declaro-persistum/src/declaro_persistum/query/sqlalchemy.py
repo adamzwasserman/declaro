@@ -285,6 +285,7 @@ class Column:
 
 _model_registry: dict[str, type["ModelBase"]] = {}
 _schema_cache: Schema = {}
+_pool_ref: Any = None
 
 
 class ModelMeta(type):
@@ -367,7 +368,7 @@ class ModelBase(metaclass=ModelMeta):
     @classmethod
     def _get_table_proxy(cls) -> TableProxy:
         """Get TableProxy for this model's table."""
-        return _table(cls.__tablename__, schema=_schema_cache)
+        return _table(cls.__tablename__, schema=_schema_cache, pool=_pool_ref)
 
     # Class-level query methods (like Django)
     @classmethod
@@ -386,19 +387,19 @@ class ModelBase(metaclass=ModelMeta):
         return cls._get_table_proxy().order(*fields)
 
     @classmethod
-    async def all(cls, connection: Any) -> list[dict[str, Any]]:
+    async def all(cls) -> list[dict[str, Any]]:
         """Get all rows."""
-        return await cls._get_table_proxy().all(connection)
+        return await cls._get_table_proxy().all()
 
     @classmethod
-    async def get(cls, connection: Any, **kwargs: Any) -> dict[str, Any]:
+    async def get(cls, **kwargs: Any) -> dict[str, Any]:
         """Get single row by kwargs."""
-        return await cls._get_table_proxy().get(connection, **kwargs)
+        return await cls._get_table_proxy().get(**kwargs)
 
     @classmethod
-    async def first(cls, connection: Any) -> dict[str, Any] | None:
+    async def first(cls) -> dict[str, Any] | None:
         """Get first row."""
-        return await cls._get_table_proxy().first(connection)
+        return await cls._get_table_proxy().first()
 
 
 def declarative_base() -> type[ModelBase]:
@@ -439,10 +440,18 @@ def get_registered_models() -> dict[str, type[ModelBase]]:
     return _model_registry.copy()
 
 
+def set_pool(pool: Any) -> None:
+    """Set the connection pool for SQLAlchemy-style model queries."""
+    global _pool_ref
+    _pool_ref = pool
+
+
 def clear_model_registry() -> None:
     """Clear the model registry (useful for testing)."""
+    global _pool_ref
     _model_registry.clear()
     _schema_cache.clear()
+    _pool_ref = None
 
 
 # =============================================================================
@@ -514,27 +523,27 @@ class Query(Generic[T]):
 
     async def all(self) -> list[dict[str, Any]]:
         """Execute and return all results."""
-        return await self._queryset.all(self._session._connection)
+        return await self._queryset.all()
 
     async def first(self) -> dict[str, Any] | None:
         """Execute and return first result."""
-        return await self._queryset.first(self._session._connection)
+        return await self._queryset.first()
 
     async def one(self) -> dict[str, Any]:
         """Execute and return exactly one result, or raise."""
-        return await self._queryset.get(self._session._connection)
+        return await self._queryset.get()
 
     async def one_or_none(self) -> dict[str, Any] | None:
         """Execute and return one result or None."""
-        return await self._queryset.first(self._session._connection)
+        return await self._queryset.first()
 
     async def count(self) -> int:
         """Return count of results."""
-        return await self._queryset.count(self._session._connection)
+        return await self._queryset.count()
 
     async def exists(self) -> bool:
         """Return True if any results exist."""
-        return await self._queryset.exists(self._session._connection)
+        return await self._queryset.exists()
 
     def __getitem__(self, key: Any) -> "Query[T]":
         """Support slicing."""
@@ -549,20 +558,20 @@ class Session:
     SQLAlchemy-compatible Session.
 
     Provides familiar interface for database operations:
-        async with Session(connection) as session:
+        async with Session(pool) as session:
             users = await session.query(User).filter_by(status='active').all()
             session.add(User(email='test@example.com'))
             await session.commit()
     """
 
-    def __init__(self, connection: Any):
+    def __init__(self, pool: Any):
         """
-        Create a session bound to a connection.
+        Create a session bound to a pool.
 
         Args:
-            connection: Database connection (asyncpg, aiosqlite, or libsql)
+            pool: Connection pool with acquire() context manager
         """
-        self._connection = connection
+        self._pool = pool
         self._pending_adds: list[ModelBase] = []
         self._pending_deletes: list[ModelBase] = []
         self._in_transaction = False
@@ -619,50 +628,45 @@ class Session:
         from declaro_persistum.query.builder import delete, insert
         from declaro_persistum.query.executor import execute
 
-        # Process inserts
-        for instance in self._pending_adds:
-            table_name = instance.__tablename__
-            data = {k: v for k, v in instance.to_dict().items() if v is not None}
-            if data:
-                query = insert(table_name, data)
-                await execute(query, self._connection)
+        async with self._pool.acquire() as conn:
+            # Process inserts
+            for instance in self._pending_adds:
+                table_name = instance.__tablename__
+                data = {k: v for k, v in instance.to_dict().items() if v is not None}
+                if data:
+                    query = insert(table_name, data)
+                    await execute(query, conn)
 
-        # Process deletes
-        for instance in self._pending_deletes:
-            table_name = instance.__tablename__
-            # Find primary key column
-            pk_col = None
-            for col_name, col in instance._columns.items():
-                if col.primary_key:
-                    pk_col = col_name
-                    break
+            # Process deletes
+            for instance in self._pending_deletes:
+                table_name = instance.__tablename__
+                # Find primary key column
+                pk_col = None
+                for col_name, col in instance._columns.items():
+                    if col.primary_key:
+                        pk_col = col_name
+                        break
 
-            if pk_col:
-                pk_value = getattr(instance, pk_col, None)
-                if pk_value is not None:
-                    query = delete(table_name, where=f"{pk_col} = :pk", params={"pk": pk_value})
-                    await execute(query, self._connection)
+                if pk_col:
+                    pk_value = getattr(instance, pk_col, None)
+                    if pk_value is not None:
+                        query = delete(table_name, where=f"{pk_col} = :pk", params={"pk": pk_value})
+                        await execute(query, conn)
+
+            # Commit if connection supports it
+            if hasattr(conn, "commit") and callable(conn.commit):
+                result = conn.commit()
+                if hasattr(result, "__await__"):
+                    await result
 
         # Clear pending
         self._pending_adds.clear()
         self._pending_deletes.clear()
 
-        # Commit if connection supports it
-        if hasattr(self._connection, "commit") and callable(self._connection.commit):
-            result = self._connection.commit()
-            if hasattr(result, "__await__"):
-                await result
-
     async def rollback(self) -> None:
         """Rollback pending changes."""
         self._pending_adds.clear()
         self._pending_deletes.clear()
-
-        # Rollback if connection supports it
-        if hasattr(self._connection, "rollback") and callable(self._connection.rollback):
-            result = self._connection.rollback()
-            if hasattr(result, "__await__"):
-                await result
 
     async def execute(self, query: Any) -> Any:
         """
@@ -674,7 +678,8 @@ class Session:
         """
         from declaro_persistum.query.executor import execute
 
-        return await execute(query, self._connection)
+        async with self._pool.acquire() as conn:
+            return await execute(query, conn)
 
     async def refresh(self, instance: ModelBase) -> None:
         """Refresh instance from database."""
@@ -688,7 +693,7 @@ class Session:
         if pk_col:
             pk_value = getattr(instance, pk_col, None)
             if pk_value is not None:
-                data = await instance.get(self._connection, **{pk_col: pk_value})
+                data = await instance.get(**{pk_col: pk_value})
                 for key, value in data.items():
                     setattr(instance, key, value)
 
@@ -726,6 +731,7 @@ __all__ = [
     "ModelBase",
     "get_model_schema",
     "get_registered_models",
+    "set_pool",
     "clear_model_registry",
     # Session
     "Session",

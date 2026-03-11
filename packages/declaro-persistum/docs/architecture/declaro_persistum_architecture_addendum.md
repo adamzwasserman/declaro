@@ -1,9 +1,9 @@
 # declaro_persistum Architecture Addendum
 
 ---
-**STATUS**: DESIGN
-**VERSION**: 0.1.0
-**DATE**: 2025-12-14
+**STATUS**: PARTIALLY IMPLEMENTED — A9 (Instrumentation + Write Queue) complete; A1-A8 still design
+**VERSION**: 0.2.0
+**DATE**: 2026-03-11
 **PARENT**: declaro_persistum_architecture.md
 ---
 
@@ -15,6 +15,9 @@ This addendum extends the core architecture with:
 2. **Portable Abstractions**: Relational patterns that emulate PostgreSQL features across all dialects
 3. **Query Layer Extensions**: Native function mapping and dialect translation
 4. **Observability**: Performance monitoring and automatic index optimization
+5. **Pool Binding**: Connection removed from caller surface — pool bound at `table()` creation ✅ IMPLEMENTED
+6. **Instrumentation**: Per-query latency recording with pluggable sinks ✅ IMPLEMENTED
+7. **Write Queue**: Optimistic writes for high-latency backends with transparent read merging ✅ IMPLEMENTED
 
 The guiding principle: honest abstraction. No performance lies. Portable patterns that work everywhere without hidden degradation.
 
@@ -835,7 +838,7 @@ result = await select(
     from_table="orders",
     group_by=["user_id"],
     having="SUM(amount) > 1000"
-).execute(conn)
+).execute()
 ```
 
 #### Scalar Functions
@@ -848,7 +851,7 @@ result = await select(
     lower_("email"),          # → LOWER(email)
     coalesce_("nickname", "name"),  # → COALESCE(nickname, name)
     from_table="users"
-).execute(conn)
+).execute()
 ```
 
 #### Type Definition
@@ -1373,4 +1376,124 @@ Recommended order for Claude Code implementation:
 - [ ] Error messages explain dialect limitations clearly
 - [ ] All new types have complete TypedDict definitions
 - [ ] Pydantic model loader correctly detects Literal types for enum abstraction
+
+---
+
+## A9. Instrumentation + Write Queue ✅ IMPLEMENTED
+
+> **Status**: Fully implemented as of 2026-03-11. See `src/declaro_persistum/instrumentation.py` and `src/declaro_persistum/write_queue.py`.
+
+### A9.1 Connection-Level Latency Instrumentation
+
+Every query executed via `execute_with_pool` is timed and optionally recorded. Zero overhead when disabled — `pool._latency_logger` is `None` and the record path is never entered.
+
+#### Types
+
+```python
+class LatencyRecord(TypedDict):
+    ts: str           # ISO 8601
+    tier: str         # Pool label (e.g. "central", "project")
+    op: str           # "select" | "insert" | "update" | "delete" | "create" | "alter" | "other"
+    duration_ms: float
+    success: bool
+    sql: str          # First 120 chars
+    error: str        # First 200 chars on failure
+```
+
+#### API
+
+```python
+# At pool creation (enables instrumentation + optional write queue)
+pool = await ConnectionPool.libsql(
+    url, auth_token=token,
+    instrumentation=True,
+    tier_label="project",
+    latency_sink="jsonl",
+    latency_path="./data/db_latency.jsonl",
+)
+
+# Or post-creation
+pool.configure_instrumentation(
+    tier_label="project",
+    callable_sink=lambda r: metrics.record(r),
+)
+```
+
+#### Implementation
+
+- `instrumentation.py`: `classify_sql`, `is_write_op`, `build_record`, `format_jsonl`, `get_latency_logger`, `setup_jsonl_sink`, `setup_callable_sink`, `record_execution`
+- `pool.py`: `BasePool._latency_logger`, `BasePool._tier`, `BasePool.configure_instrumentation()`
+- `query/executor.py`: `execute_with_pool` calls `record_execution(pool, sql, duration_ms, success)`
+- `write_queue.py`: `_drain_one` also calls `record_execution` for background retry attempts
+
+### A9.2 Optimistic Write Queue
+
+For high-latency backends, writes that exceed a threshold (default 50ms) are queued and the caller receives the data immediately. The write continues in the background.
+
+#### Design Decisions
+
+1. One queue per pool — keyed by `"{table}:{pk_value}"`
+2. 50ms race: `asyncio.wait_for(asyncio.shield(task), timeout=0.05)` — fast writes skip the queue entirely
+3. Background write continues after timeout — on success, removes itself from queue
+4. Supervisor coroutine drains queue with semaphore(3) concurrency and exponential backoff
+5. CRITICAL log after 6 hours continuous failure (prefix `WRITE_QUEUE_EXHAUSTED`)
+6. Transparent read merging — SELECT results include pending entries merged by PK
+7. JOIN-aware merge — uses FK schema knowledge to match pending entries to joined rows
+8. Re-sort after merge — preserves ORDER BY from original query
+
+#### Types
+
+```python
+class PendingEntry(TypedDict):
+    entry_id: str       # UUID
+    table: str
+    pk_column: str
+    pk_value: Any
+    op: str             # "insert" | "update" | "delete"
+    data: dict[str, Any]   # Row data returned to caller
+    sql: str
+    params: Any
+    dialect: str
+    queued_at: str      # ISO 8601
+    attempt_count: int
+    last_error: str
+```
+
+#### API
+
+```python
+# At pool creation
+pool = await ConnectionPool.libsql(
+    url, auth_token=token,
+    write_queue_path="./data/pending_writes.jsonl",
+    write_queue_threshold_ms=50.0,
+    write_queue_concurrency=3,
+)
+
+# Or post-creation
+pool.configure_write_queue(
+    persistence_path="./data/pending_writes.jsonl",
+    threshold_ms=50.0,
+    max_concurrent_drains=3,
+)
+
+# All writes go through the queue transparently
+users = table("users", schema, pool)
+await users.insert(id=new_id, name="alice").execute()  # returns immediately if >50ms
+
+# Reads merge pending queue entries automatically
+rows = await users.select().execute()  # includes pending inserts
+```
+
+#### Implementation
+
+- `write_queue.py`: `PendingEntry` TypedDict, `WriteQueue` class with supervisor, `merge_pending_into_results`, `merge_pending_into_join_results`, `_find_fk_relationship`, `_extract_order_by`, `_resort`
+- `query/executor.py`: `_race_write` function, `execute_with_pool` wires queue for write and read merge
+- `pool.py`: `BasePool._write_queue`, `BasePool.configure_write_queue()`, all `close()` methods call `queue.stop_supervisor()`
+- `__init__.py`: exports `WriteQueue`, `PendingEntry`, `LatencyRecord`, `WriteQueueError`
+- `exceptions.py`: `WriteQueueError(PoolError)`
+
+#### Disk Persistence
+
+Queue is persisted atomically (tmp + rename) to a JSONL file on every change. On startup, `load_from_disk()` restores pending entries and the supervisor resumes retrying them.
 - [ ] TursoCloudManager tested against real Turso Platform API

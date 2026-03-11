@@ -248,9 +248,14 @@ async def _get_full_table_schema(connection: Any, table_name: str) -> dict[str, 
     """
     Extract full column schema from existing table.
 
-    Returns dict mapping column name to Column definition.
+    Returns dict mapping column name to Column definition, including
+    UNIQUE constraints and foreign key references.
     """
-    from declaro_persistum.abstractions.pragma_compat import pragma_table_info
+    from declaro_persistum.abstractions.pragma_compat import (
+        pragma_table_info,
+        pragma_index_list,
+        pragma_foreign_key_list,
+    )
 
     rows = await pragma_table_info(connection, table_name)
     columns: dict[str, Column] = {}
@@ -270,6 +275,31 @@ async def _get_full_table_schema(connection: Any, table_name: str) -> dict[str, 
             col_def["default"] = dflt_value
 
         columns[name] = col_def
+
+    # Detect inline UNIQUE constraints (auto-generated indexes with origin='u')
+    index_list = await pragma_index_list(connection, table_name)
+    for idx_row in index_list:
+        # (seq, name, unique, origin, partial)
+        if idx_row[3] == "u" and idx_row[2]:
+            cursor = await connection.execute(f'PRAGMA index_info("{idx_row[1]}")')
+            idx_info = await cursor.fetchall()
+            if len(idx_info) == 1:  # Single-column unique constraint
+                col_name = idx_info[0][2]
+                if col_name in columns:
+                    columns[col_name]["unique"] = True  # type: ignore
+
+    # Detect foreign key constraints
+    fk_list = await pragma_foreign_key_list(connection, table_name)
+    for fk_row in fk_list:
+        # (id, seq, table, from, to, on_update, on_delete, match)
+        from_col, ref_table, ref_col = fk_row[3], fk_row[2], fk_row[4]
+        on_delete, on_update = fk_row[6], fk_row[5]
+        if from_col in columns:
+            columns[from_col]["references"] = f"{ref_table}.{ref_col}"  # type: ignore
+            if on_delete and on_delete.upper() not in ("NO ACTION", "NONE", ""):
+                columns[from_col]["on_delete"] = on_delete.lower()  # type: ignore
+            if on_update and on_update.upper() not in ("NO ACTION", "NONE", ""):
+                columns[from_col]["on_update"] = on_update.lower()  # type: ignore
 
     return columns
 

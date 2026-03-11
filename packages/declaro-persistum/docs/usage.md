@@ -424,13 +424,25 @@ pool = await ConnectionPool.libsql(
 
 ### Using the Pool
 
-```python
-# Acquire a connection with async context manager
-async with pool.acquire() as conn:
-    users = table("users")
-    results = await users.select().where(users.active == True).execute(conn)
+Pool is bound at `table()` creation time. No connection parameter on the caller surface:
 
-# Connection is automatically returned to pool after the block
+```python
+schema = load_schema("./schema")
+pool = await ConnectionPool.sqlite("./app.db")
+
+# Bind table to pool — pool is a required parameter
+users = table("users", schema, pool)
+
+# Execute — no conn parameter, connection managed internally
+results = await users.select().where(users.active == True).execute()
+```
+
+Raw connection access is still available when needed (e.g. schema setup):
+
+```python
+async with pool.acquire() as conn:
+    await conn.execute("CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY)")
+    await conn.commit()
 ```
 
 ### Pool Lifecycle
@@ -439,11 +451,13 @@ async with pool.acquire() as conn:
 # Create pool at application startup
 pool = await ConnectionPool.postgresql("postgresql://localhost/mydb")
 
-# Use throughout application lifetime
-async with pool.acquire() as conn:
-    # ... do work ...
+# Bind tables — no conn needed at query time
+users = table("users", schema, pool)
 
-# Close pool at shutdown
+# Use throughout application lifetime — no acquire/release on caller
+results = await users.select().execute()
+
+# Close pool at shutdown — also flushes write queue if attached
 await pool.close()
 ```
 
@@ -451,36 +465,32 @@ await pool.close()
 
 ```python
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI
 from declaro_persistum import ConnectionPool
 from declaro_persistum.query import table
 from declaro_persistum.loader import load_schema
 
-pool = None
-schema = None
+_pool = None
+_users = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global pool, schema
+    global _pool, _users
     schema = load_schema("./schema")
-    pool = await ConnectionPool.postgresql(
+    _pool = await ConnectionPool.postgresql(
         "postgresql://localhost/mydb",
         min_size=5,
         max_size=20,
     )
+    _users = table("users", schema, _pool)
     yield
-    await pool.close()
+    await _pool.close()
 
 app = FastAPI(lifespan=lifespan)
 
-async def get_conn():
-    async with pool.acquire() as conn:
-        yield conn
-
 @app.get("/users")
-async def list_users(conn=Depends(get_conn)):
-    users = table("users", schema=schema)
-    return await users.select().where(users.active == True).execute(conn)
+async def list_users():
+    return await _users.select().where(_users.active == True).execute()
 ```
 
 ### Pool Properties
@@ -518,39 +528,9 @@ async with pool.acquire() as conn:
     await conn.sync()  # Ensure data is synced
 ```
 
-### Synchronous Pools (for Testing)
+### Async-Only
 
-For tests that don't work well with async, use `SyncConnectionPool`:
-
-```python
-from declaro_persistum import SyncConnectionPool
-
-# SQLite (uses stdlib sqlite3)
-pool = SyncConnectionPool.sqlite("./test.db")
-with pool.acquire() as conn:
-    conn.execute("CREATE TABLE users (id TEXT PRIMARY KEY)")
-    conn.commit()
-pool.close()
-
-# Turso (pyturso)
-pool = SyncConnectionPool.turso("./test.db")
-with pool.acquire() as conn:
-    conn.execute("SELECT 1")
-    conn.commit()
-pool.close()
-
-# LibSQL (Turso cloud)
-pool = SyncConnectionPool.libsql("libsql://db.turso.io", auth_token="...")
-with pool.acquire() as conn:
-    conn.execute("SELECT 1")
-pool.close()
-```
-
-The synchronous pools provide the same methods as async pools but without `await`:
-- `pool.acquire()` returns a connection (use with `with` statement)
-- `conn.execute(sql, params)` executes SQL
-- `conn.commit()` / `conn.rollback()` for transactions
-- `conn.sync()` for Turso/LibSQL sync operations
+declaro-persistum is async-only. `SyncConnectionPool` and all sync connection types were removed in 2026-03-08. Use `pytest-asyncio` and `asyncio.run()` for tests.
 
 ### Mirror Pool (Replication Verification)
 
@@ -619,6 +599,112 @@ except PoolClosedError:
     # Tried to use pool after close()
     pass
 ```
+
+## Instrumentation
+
+Record every query's duration, op type, and success/failure.
+
+### Enabling Instrumentation
+
+```python
+# At pool creation
+pool = await ConnectionPool.libsql(
+    "libsql://your-db.turso.io",
+    auth_token="...",
+    instrumentation=True,
+    tier_label="project",
+    latency_sink="jsonl",
+    latency_path="./data/db_latency.jsonl",
+)
+
+# Or post-creation with a callable sink
+pool = await ConnectionPool.sqlite("./app.db")
+pool.configure_instrumentation(
+    tier_label="my-app",
+    callable_sink=lambda record: metrics.record(record),
+)
+```
+
+### LatencyRecord
+
+Each recorded query produces a `LatencyRecord` TypedDict:
+
+```python
+{
+    "ts": "2026-03-11T14:22:01-0500",  # ISO 8601
+    "tier": "project",                  # Pool label
+    "op": "insert",                     # select|insert|update|delete|create|alter|other
+    "duration_ms": 842.31,
+    "success": True,
+    "sql": "INSERT INTO cards (id, name...",  # First 120 chars
+    "error": "",                               # First 200 chars on failure
+}
+```
+
+### Zero Overhead When Disabled
+
+When `configure_instrumentation()` has not been called, `pool._latency_logger` is `None`. The record path is never entered — no timing, no allocations.
+
+---
+
+## Write Queue
+
+For high-latency backends (Turso Cloud writes can take 750–1100ms), the write queue returns data to the caller immediately and persists in the background.
+
+### Enabling the Write Queue
+
+```python
+pool = await ConnectionPool.libsql(
+    "libsql://your-db.turso.io",
+    auth_token="...",
+    instrumentation=True,
+    tier_label="project",
+    write_queue_path="./data/pending_writes.jsonl",
+    write_queue_threshold_ms=50.0,    # Queue writes that take >50ms
+    write_queue_concurrency=3,        # Max concurrent drain tasks
+)
+```
+
+Or post-creation:
+
+```python
+pool.configure_write_queue(
+    persistence_path="./data/pending_writes.jsonl",
+    threshold_ms=50.0,
+    max_concurrent_drains=3,
+)
+```
+
+### Usage
+
+The queue is completely transparent. No API changes on the caller:
+
+```python
+users = table("users", schema, pool)
+
+# Returns immediately if write takes >50ms — data returned before DB confirms
+await users.insert(id=new_id, name="alice").execute()
+
+# Reads merge pending queue entries — insert appears in results immediately
+rows = await users.select().execute()
+```
+
+### How It Works
+
+1. `execute_with_pool` races the write against the threshold: `asyncio.wait_for(asyncio.shield(task), timeout=0.05)`
+2. Fast writes (under threshold): queue never touched
+3. Slow writes: `enqueue()` called immediately, data returned to caller; write continues in background
+4. On background write success: entry removed from queue
+5. On background write failure: supervisor retries with exponential backoff (cap 60s)
+6. CRITICAL log after 6 hours of continuous failure (prefix: `WRITE_QUEUE_EXHAUSTED`)
+7. SELECT results merge pending entries by primary key and re-sort using original ORDER BY
+8. JOIN results: pending entries matched via FK schema knowledge
+
+### Disk Persistence
+
+Queue is atomically persisted (tmp + rename) to a JSONL file on every change. Pending writes survive `kill -9`. On `pool.close()`, the supervisor is stopped and a final flush is attempted.
+
+---
 
 ## Programmatic Usage
 
@@ -858,28 +944,30 @@ else:
 The query builder uses schema-validated dot notation. Typos like `users.emial` are caught immediately at query build time, not when the SQL hits the database.
 
 ```python
+from declaro_persistum import ConnectionPool
 from declaro_persistum.query import table
 from declaro_persistum.loader import load_schema
 
-# Load schema once at startup
+# Load schema and create pool at startup
 schema = load_schema("./schema")
+pool = await ConnectionPool.postgresql("postgresql://localhost/mydb")
 
-# Create table proxies (validates against schema)
-users = table("users", schema=schema)
-orders = table("orders", schema=schema)
+# Bind table proxies to pool — pool is a required parameter
+users = table("users", schema, pool)
+orders = table("orders", schema, pool)
 ```
 
 #### SELECT Queries
 
 ```python
-# Basic SELECT with dot notation
+# Basic SELECT with dot notation — no conn parameter
 results = await (
     users
     .select(users.id, users.email, users.name)
     .where(users.status == "active")
     .order_by(users.created_at.desc())
     .limit(10)
-    .execute(conn)
+    .execute()
 )
 # results is list[dict[str, Any]]
 
@@ -889,7 +977,7 @@ user = await (
     .select(users.id, users.email)
     .where(users.id == ":id")
     .params(id=user_id)
-    .execute_one(conn)
+    .execute_one()
 )
 # user is dict[str, Any] | None
 
@@ -899,7 +987,7 @@ results = await (
     .select(orders.id, orders.total, users.email)
     .join(users, on=orders.user_id == users.id)
     .where(orders.status == "pending")
-    .execute(conn)
+    .execute()
 )
 # Generates: ... INNER JOIN users ON orders.user_id = users.id ...
 
@@ -908,7 +996,7 @@ results = await (
     orders
     .select(orders.id, users.email)
     .join(users, on=orders.user_id == users.id, type="left")
-    .execute(conn)
+    .execute()
 )
 
 # All comparison operators work for column-to-column:
@@ -924,7 +1012,7 @@ results = await (
         (users.status == "active") &
         (users.role.in_(["admin", "editor"]) | users.is_superuser == True)
     )
-    .execute(conn)
+    .execute()
 )
 ```
 
@@ -939,7 +1027,7 @@ await (
         created_at=now_(),  # Dialect-aware function
     )
     .params(email="alice@example.com", name="Alice")
-    .execute(conn)
+    .execute()
 )
 ```
 
@@ -951,7 +1039,7 @@ await (
     .update(name=":name", updated_at=now_())
     .where(users.id == ":id")
     .params(id=user_id, name="New Name")
-    .execute(conn)
+    .execute()
 )
 ```
 
@@ -963,7 +1051,7 @@ await (
     .delete()
     .where(users.id == ":id")
     .params(id=user_id)
-    .execute(conn)
+    .execute()
 )
 ```
 
@@ -977,7 +1065,7 @@ count = await (
     users
     .select(count_("*"))
     .where(users.status == "active")
-    .execute_scalar(conn)
+    .execute_scalar()
 )
 print(f"Active users: {count}")
 ```
@@ -1029,7 +1117,7 @@ user: UserRow | None = await (
     .select(users.id, users.email, users.name)
     .where(users.id == ":id")
     .params(id=user_id)
-    .execute_one(conn)
+    .execute_one()
 )
 
 if user:
@@ -1047,22 +1135,23 @@ Familiar to Django developers with QuerySet-like patterns:
 ```python
 from declaro_persistum.query import table
 
-users = table("users")
+# Pool is required — bound at table creation
+users = table("users", schema, pool)
 
-# Filter with lookups
-active = await users.objects.filter(status="active").all(conn)
+# Filter with lookups — no conn parameter
+active = await users.objects.filter(status="active").all()
 
 # Django-style field lookups
-recent = await users.objects.filter(created_at__gte="2024-01-01").all(conn)
-search = await users.objects.filter(name__contains="alice").all(conn)
-nulls = await users.objects.filter(deleted_at__isnull=True).all(conn)
+recent = await users.objects.filter(created_at__gte="2024-01-01").all()
+search = await users.objects.filter(name__contains="alice").all()
+nulls = await users.objects.filter(deleted_at__isnull=True).all()
 
 # Comparison lookups
-adults = await users.objects.filter(age__gt=18).all(conn)
-seniors = await users.objects.filter(age__gte=65).all(conn)
+adults = await users.objects.filter(age__gt=18).all()
+seniors = await users.objects.filter(age__gte=65).all()
 
 # Ordering (prefix with - for DESC)
-ordered = await users.objects.order("-created_at").all(conn)
+ordered = await users.objects.order("-created_at").all()
 
 # Chaining
 result = await (
@@ -1070,14 +1159,14 @@ result = await (
     .filter(status="active")
     .exclude(role="banned")
     .order("-created_at")[:10]
-    .all(conn)
+    .all()
 )
 
 # Single object
-user = await users.objects.get(conn, id=user_id)
+user = await users.objects.get(id=user_id)
 
 # Count
-count = await users.objects.filter(status="active").count(conn)
+count = await users.objects.filter(status="active").count()
 ```
 
 #### Supported Lookups
@@ -1099,11 +1188,11 @@ Dict-based queries familiar to Prisma/TypeScript developers:
 ```python
 from declaro_persistum.query import table
 
-users = table("users")
+# Pool is required — bound at table creation
+users = table("users", schema, pool)
 
-# Find many with filtering and pagination
+# Find many with filtering and pagination — no conn parameter
 active = await users.prisma.find_many(
-    conn,
     where={"status": "active"},
     order_by={"created_at": "desc"},
     take=10,
@@ -1112,7 +1201,6 @@ active = await users.prisma.find_many(
 
 # Nested where conditions
 results = await users.prisma.find_many(
-    conn,
     where={
         "status": "active",
         "age": {"gt": 18},
@@ -1121,41 +1209,37 @@ results = await users.prisma.find_many(
 )
 
 # Find unique record
-user = await users.prisma.find_unique(conn, where={"id": user_id})
+user = await users.prisma.find_one(where={"id": user_id})
 
 # Find first matching
 first = await users.prisma.find_first(
-    conn,
     where={"status": "active"},
     order_by={"created_at": "desc"}
 )
 
 # Create
 new_user = await users.prisma.create(
-    conn,
     data={"id": str(uuid4()), "email": "alice@example.com", "name": "Alice"}
 )
 
 # Update
 updated = await users.prisma.update(
-    conn,
     where={"id": user_id},
     data={"name": "New Name"}
 )
 
 # Upsert
 result = await users.prisma.upsert(
-    conn,
     where={"email": "alice@example.com"},
     create={"id": str(uuid4()), "email": "alice@example.com", "name": "Alice"},
     update={"name": "Alice Updated"}
 )
 
 # Delete
-deleted = await users.prisma.delete(conn, where={"id": user_id})
+deleted = await users.prisma.delete(where={"id": user_id})
 
 # Count
-count = await users.prisma.count(conn, where={"status": "active"})
+count = await users.prisma.count(where={"status": "active"})
 ```
 
 #### Supported Operators
@@ -1173,7 +1257,9 @@ count = await users.prisma.count(conn, where={"status": "active"})
 
 ### SQLAlchemy-Style API
 
-Declarative models familiar to SQLAlchemy developers:
+> **Note**: The SQLAlchemy-style API (`declarative_base`, `Column`, `Session`) is not yet implemented. This section documents the planned API surface.
+
+Declarative models familiar to SQLAlchemy developers (planned):
 
 ```python
 from declaro_persistum.query import (
@@ -1190,37 +1276,10 @@ class User(Base):
     status = Column(String, default="active")
     created_at = Column(DateTime, server_default="now()")
 
-# Using Session
-async with Session(conn) as session:
-    # Query all
+# Using Session (planned API)
+async with Session(pool) as session:
     users = await session.query(User).all()
-
-    # Filter
     active = await session.query(User).filter_by(status="active").all()
-
-    # Order
-    recent = await session.query(User).order_by("-created_at").all()
-
-    # Single object
-    user = await session.query(User).filter_by(id=user_id).first()
-
-    # Count
-    count = await session.query(User).filter_by(status="active").count()
-
-    # Create
-    new_user = User(id=str(uuid4()), email="alice@example.com", name="Alice")
-    session.add(new_user)
-    await session.commit()
-
-    # Update
-    user = await session.query(User).filter_by(id=user_id).first()
-    if user:
-        user.name = "New Name"
-        await session.commit()
-
-    # Delete
-    await session.query(User).filter_by(id=user_id).delete()
-    await session.commit()
 ```
 
 #### Supported Column Types

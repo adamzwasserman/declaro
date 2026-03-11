@@ -241,14 +241,16 @@ class TestLibSQLPool:
     """Tests for LibSQL connection pool structure (Turso cloud)."""
 
     def test_pool_initialization(self):
-        """LibSQLPool can be instantiated."""
+        """LibSQLPool can be instantiated with sync_url and local_path."""
         pool = LibSQLPool(
             "libsql://db.turso.io",
+            "./db/test.db",
             auth_token="secret",
             max_size=5,
             acquire_timeout=10.0,
         )
-        assert pool._url == "libsql://db.turso.io"
+        assert pool._sync_url == "libsql://db.turso.io"
+        assert pool._local_path == "./db/test.db"
         assert pool._auth_token == "secret"
         assert pool._max_size == 5
         assert pool._acquire_timeout == 10.0
@@ -257,7 +259,7 @@ class TestLibSQLPool:
     @pytest.mark.asyncio
     async def test_pool_closed_before_use(self):
         """Closing pool before use works."""
-        pool = LibSQLPool("libsql://localhost")
+        pool = LibSQLPool("libsql://localhost", "./db/test.db")
         await pool.close()
         assert pool.closed
 

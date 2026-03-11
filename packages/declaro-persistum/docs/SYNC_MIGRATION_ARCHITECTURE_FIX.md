@@ -1,5 +1,7 @@
 # Sync Migration Architecture Fix
 
+> **Note (2026-03-08)**: The synchronous pool and connection API was removed from declaro-persistum. This document describes a fix that was subsequently superseded by the full removal of all sync surface area. `SyncConnectionPool`, `SyncLibSQLPool`, `SyncSQLitePool`, `SyncTursoPool`, and all sync connection types were deleted. declaro-persistum is async-only going forward.
+
 ## Summary
 
 Fixed the sync migration architecture in declaro-persistum to properly delegate execution to the applier layer rather than duplicating logic in migrations.py.

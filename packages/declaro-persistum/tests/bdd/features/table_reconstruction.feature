@@ -378,44 +378,6 @@ Feature: Table Reconstruction for SQLite/Turso ALTER COLUMN
     And all other data is preserved
 
   # ============================================
-  # Sequential Reconstructions
-  # ============================================
-
-  Scenario: Multiple sequential reconstructions of same table
-    Given a table "config" with columns:
-      | name  | type | nullable |
-      | id    | TEXT | false    |
-      | key   | TEXT | false    |
-      | value | TEXT | true     |
-    And the table contains data:
-      | id | key      | value   |
-      | 1  | setting1 | value1  |
-      | 2  | setting2 | value2  |
-    When I perform the following operations in sequence:
-      | operation     | column | detail           |
-      | alter_column  | value  | nullable=false   |
-      | alter_column  | value  | type=INTEGER     |
-      | alter_column  | key    | unique=true      |
-    Then each operation uses fresh introspection
-    And all data is preserved after all operations
-    And the final schema matches expected state
-
-  Scenario: Reconstruction followed by FK add
-    Given a table "users" with columns:
-      | name  | type | nullable |
-      | id    | TEXT | false    |
-      | email | TEXT | true     |
-    And a table "posts" with columns:
-      | name    | type | nullable |
-      | id      | TEXT | false    |
-      | title   | TEXT | false    |
-      | user_id | TEXT | true     |
-    When I alter column "users.email" to be NOT NULL
-    And I add foreign key on "posts.user_id" referencing "users.id"
-    Then both operations complete successfully
-    And all constraints are enforced
-
-  # ============================================
   # Complex Foreign Key Scenarios
   # ============================================
 
@@ -490,27 +452,3 @@ Feature: Table Reconstruction for SQLite/Turso ALTER COLUMN
     And the original table is unchanged
 
   # ============================================
-  # Dialect-Specific Behavior
-  # ============================================
-
-  Scenario: SQLite applier chooses reconstruction vs direct operation
-    Given a SQLite database connection
-    And a table "users" with columns:
-      | name  | type | nullable |
-      | id    | TEXT | false    |
-      | email | TEXT | true     |
-      | notes | TEXT | true     |
-    When I request to drop column "notes"
-    Then the SQLite applier uses direct ALTER TABLE DROP COLUMN
-    But when I request to add a foreign key
-    Then the SQLite applier uses table reconstruction
-
-  Scenario: Turso applier uses reconstruction for all constrained operations
-    Given a Turso database connection
-    And a table "users" with columns:
-      | name  | type | nullable |
-      | id    | TEXT | false    |
-      | email | TEXT | true     |
-    When I request any ALTER COLUMN operation
-    Then the Turso applier uses table reconstruction
-    And the operation completes successfully

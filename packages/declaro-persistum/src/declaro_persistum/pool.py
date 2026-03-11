@@ -5,7 +5,7 @@ Provides a consistent async context manager API for:
 - PostgreSQL (asyncpg with native pooling)
 - SQLite (aiosqlite with semaphore-based limiting)
 - Turso (pyturso with semaphore-based limiting) - embedded SQLite-compatible DB
-- LibSQL (libsql_experimental) - Turso cloud connections
+- LibSQL (libsql) - Turso cloud connections
 
 Example:
     pool = await ConnectionPool.postgresql("postgresql://localhost/mydb")
@@ -191,7 +191,16 @@ class BasePool:
     No ABC/abstractmethod — structural subtyping via duck typing.
     Connection pools are inherently stateful (Honest Code exemption
     for file handles, network connections, database cursors).
+
+    Instrumentation fields (set by configure_instrumentation()):
+        _tier: str — label for every latency record from this pool
+        _latency_logger: logging.Logger | None — None means disabled (zero overhead)
+        _write_queue: Any | None — reserved for Phase 3 write queue
     """
+
+    _tier: str = ""
+    _latency_logger: Any = None  # logging.Logger when instrumentation enabled
+    _write_queue: Any = None     # WriteQueue instance when enabled (Phase 3)
 
     def acquire(self) -> AbstractAsyncContextManager[Any]:
         """Acquire a connection from the pool."""
@@ -205,6 +214,66 @@ class BasePool:
     def closed(self) -> bool:
         """Whether the pool has been closed."""
         raise NotImplementedError
+
+    def configure_instrumentation(
+        self,
+        *,
+        tier_label: str = "",
+        sink: str | None = None,
+        path: str | None = None,
+        callable_sink: Any = None,
+    ) -> None:
+        """
+        Enable latency instrumentation on this pool.
+
+        Args:
+            tier_label: Tag every record with this label (e.g. "central", "project")
+            sink: "jsonl" to write JSONL to path, or None for callable_sink only
+            path: File path for JSONL sink (required when sink="jsonl")
+            callable_sink: Callable(record: dict) -> None for custom sinks
+        """
+        from declaro_persistum.instrumentation import (
+            get_latency_logger,
+            setup_callable_sink,
+            setup_jsonl_sink,
+        )
+
+        self._tier = tier_label
+        logger = get_latency_logger()
+
+        if sink == "jsonl" and path:
+            setup_jsonl_sink(logger, path)
+        if callable_sink is not None:
+            setup_callable_sink(logger, callable_sink)
+
+        self._latency_logger = logger
+
+    def configure_write_queue(
+        self,
+        *,
+        persistence_path: str | None = None,
+        threshold_ms: float = 50.0,
+        max_concurrent_drains: int = 3,
+    ) -> None:
+        """
+        Attach a write queue to this pool and start the supervisor.
+
+        Args:
+            persistence_path: JSONL file to persist queue across restarts
+            threshold_ms: Write latency threshold before queuing (default: 50ms)
+            max_concurrent_drains: Max concurrent drain tasks (default: 3)
+        """
+        from declaro_persistum.write_queue import WriteQueue
+
+        queue = WriteQueue(
+            self,
+            persistence_path=persistence_path,
+            threshold_ms=threshold_ms,
+            max_concurrent_drains=max_concurrent_drains,
+        )
+        queue.load_from_disk()
+        queue.start_supervisor()
+        self._write_queue = queue
 
 
 class PostgreSQLPool(BasePool):
@@ -266,6 +335,8 @@ class PostgreSQLPool(BasePool):
 
     async def close(self) -> None:
         """Close the pool and all connections."""
+        if self._write_queue is not None:
+            await self._write_queue.stop_supervisor()
         if self._pool is not None:
             await self._pool.close()
             self._pool = None
@@ -299,6 +370,8 @@ class SQLitePool(BasePool):
     to limit concurrent connections (important for WAL mode which
     supports up to ~5 concurrent writers).
     """
+
+    _write_queue: Any = None
 
     def __init__(
         self,
@@ -349,6 +422,8 @@ class SQLitePool(BasePool):
 
     async def close(self) -> None:
         """Mark the pool as closed."""
+        if self._write_queue is not None:
+            await self._write_queue.stop_supervisor()
         self._closed = True
 
     @property
@@ -370,25 +445,32 @@ class SQLitePool(BasePool):
 
 class _LibSQLConnectionHolder:
     """
-    Holds a libsql_experimental connection on its creation thread.
+    Holds a libsql embedded replica connection on its creation thread.
 
-    libsql_experimental provides a synchronous DB-API 2.0 interface.
+    Always uses embedded replica mode: a local SQLite file that syncs
+    from Turso Cloud. libsql provides a synchronous DB-API 2.0 interface.
     """
 
-    def __init__(self, url: str, auth_token: str | None) -> None:
-        import libsql_experimental as libsql
+    def __init__(self, local_path: str, sync_url: str, auth_token: str | None) -> None:
+        import libsql
 
         self._libsql = libsql
-        self.url = url
+        self.local_path = local_path
+        self.sync_url = sync_url
         self.auth_token = auth_token
         self.conn: Any = None
 
     def connect(self) -> None:
-        """Open connection (must be called on executor thread)."""
+        """Open embedded replica connection (must be called on executor thread)."""
+        import os
+
+        os.makedirs(os.path.dirname(os.path.abspath(self.local_path)), exist_ok=True)
         if self.auth_token:
-            self.conn = self._libsql.connect(self.url, auth_token=self.auth_token)
+            self.conn = self._libsql.connect(
+                self.local_path, sync_url=self.sync_url, auth_token=self.auth_token
+            )
         else:
-            self.conn = self._libsql.connect(self.url)
+            self.conn = self._libsql.connect(self.local_path, sync_url=self.sync_url)
 
     def execute(self, sql: str, parameters: tuple) -> tuple[list, Any, int]:
         cursor = self.conn.cursor()
@@ -424,7 +506,7 @@ class _LibSQLConnectionHolder:
 
 class LibSQLAsyncConnection:
     """
-    Async wrapper for libsql_experimental synchronous connections.
+    Async wrapper for libsql synchronous connections.
 
     Provides an async interface by running sync operations in a
     dedicated thread pool.
@@ -472,22 +554,27 @@ class LibSQLAsyncConnection:
 
 class LibSQLPool(BasePool):
     """
-    LibSQL connection pool using libsql_experimental.
+    LibSQL connection pool using libsql embedded replicas.
 
-    Used for Turso cloud connections. libsql_experimental provides a
-    synchronous DB-API 2.0 interface, so we wrap it with
-    LibSQLAsyncConnection for async compatibility.
+    Always uses embedded replica mode: a local SQLite file synced from
+    Turso Cloud. Reads are sub-millisecond (local SQLite). Writes go
+    through Turso Cloud and are applied locally.
+
+    Call ConnectionPool.libsql() to create — it performs the initial
+    sync from Turso Cloud before returning the pool.
     """
 
     def __init__(
         self,
-        url: str,
+        sync_url: str,
+        local_path: str,
         *,
         auth_token: str | None = None,
         max_size: int = 10,
         acquire_timeout: float = 30.0,
     ) -> None:
-        self._url = url
+        self._sync_url = sync_url
+        self._local_path = local_path
         self._auth_token = auth_token
         self._max_size = max_size
         self._acquire_timeout = acquire_timeout
@@ -495,9 +582,27 @@ class LibSQLPool(BasePool):
         self._closed = False
         self._active_connections = 0
 
+    async def _initial_sync(self) -> None:
+        """
+        Sync embedded replica from Turso Cloud.
+
+        Called once at pool creation (startup). Opens a connection,
+        pulls latest data from Turso Cloud, then closes it. Subsequent
+        acquire() calls open connections to the already-synced local file.
+        """
+        executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="libsql-sync")
+        holder = _LibSQLConnectionHolder(self._local_path, self._sync_url, self._auth_token)
+        loop = asyncio.get_event_loop()
+        try:
+            await loop.run_in_executor(executor, holder.connect)
+            await loop.run_in_executor(executor, holder.sync)
+        finally:
+            holder.close()
+            executor.shutdown(wait=True)
+
     @asynccontextmanager
     async def acquire(self) -> AsyncIterator[LibSQLAsyncConnection]:
-        """Acquire a connection (creates fresh connection each time)."""
+        """Acquire a connection to the local embedded replica."""
         if self._closed:
             raise PoolClosedError("Pool has been closed")
 
@@ -510,7 +615,7 @@ class LibSQLPool(BasePool):
             ) from err
 
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="libsql")
-        holder = _LibSQLConnectionHolder(self._url, self._auth_token)
+        holder = _LibSQLConnectionHolder(self._local_path, self._sync_url, self._auth_token)
         async_conn = None
 
         try:
@@ -534,6 +639,8 @@ class LibSQLPool(BasePool):
 
     async def close(self) -> None:
         """Mark the pool as closed."""
+        if self._write_queue is not None:
+            await self._write_queue.stop_supervisor()
         self._closed = True
 
     @property
@@ -621,6 +728,8 @@ class TursoPool(BasePool):
 
     async def close(self) -> None:
         """Mark the pool as closed."""
+        if self._write_queue is not None:
+            await self._write_queue.stop_supervisor()
         self._closed = True
 
     @property
@@ -670,7 +779,14 @@ class ConnectionPool:
         min_size: int = 1,
         max_size: int = 10,
         acquire_timeout: float = 30.0,
-    ) -> PostgreSQLPool:
+        instrumentation: bool = False,
+        tier_label: str = "",
+        latency_sink: str | None = None,
+        latency_path: str | None = None,
+        write_queue_path: str | None = None,
+        write_queue_threshold_ms: float = 50.0,
+        write_queue_concurrency: int = 3,
+    ) -> "PostgreSQLPool":
         """
         Create a PostgreSQL connection pool.
 
@@ -679,6 +795,13 @@ class ConnectionPool:
             min_size: Minimum pool size (default: 1)
             max_size: Maximum pool size (default: 10)
             acquire_timeout: Timeout for acquiring connection in seconds (default: 30)
+            instrumentation: Enable latency recording (default: False)
+            tier_label: Label for every latency record from this pool
+            latency_sink: "jsonl" to write to latency_path, or None
+            latency_path: File path for JSONL sink
+            write_queue_path: JSONL path to persist write queue across restarts
+            write_queue_threshold_ms: Latency threshold before queuing (default: 50ms)
+            write_queue_concurrency: Max concurrent drain tasks (default: 3)
 
         Returns:
             PostgreSQLPool instance
@@ -689,8 +812,17 @@ class ConnectionPool:
             max_size=max_size,
             acquire_timeout=acquire_timeout,
         )
-        # Pre-create the pool to fail fast on bad connection strings
         await pool._ensure_pool()
+        if instrumentation:
+            pool.configure_instrumentation(
+                tier_label=tier_label, sink=latency_sink, path=latency_path
+            )
+        if write_queue_path is not None:
+            pool.configure_write_queue(
+                persistence_path=write_queue_path,
+                threshold_ms=write_queue_threshold_ms,
+                max_concurrent_drains=write_queue_concurrency,
+            )
         return pool
 
     @staticmethod
@@ -699,7 +831,14 @@ class ConnectionPool:
         *,
         max_size: int = 5,
         acquire_timeout: float = 30.0,
-    ) -> SQLitePool:
+        instrumentation: bool = False,
+        tier_label: str = "",
+        latency_sink: str | None = None,
+        latency_path: str | None = None,
+        write_queue_path: str | None = None,
+        write_queue_threshold_ms: float = 50.0,
+        write_queue_concurrency: int = 3,
+    ) -> "SQLitePool":
         """
         Create a SQLite connection pool.
 
@@ -707,15 +846,33 @@ class ConnectionPool:
             database_path: Path to SQLite database (or ":memory:" for in-memory)
             max_size: Maximum concurrent connections (default: 5 for WAL mode)
             acquire_timeout: Timeout for acquiring connection in seconds (default: 30)
+            instrumentation: Enable latency recording (default: False)
+            tier_label: Label for every latency record from this pool
+            latency_sink: "jsonl" to write to latency_path, or None
+            latency_path: File path for JSONL sink
+            write_queue_path: JSONL path to persist write queue across restarts
+            write_queue_threshold_ms: Latency threshold before queuing (default: 50ms)
+            write_queue_concurrency: Max concurrent drain tasks (default: 3)
 
         Returns:
             SQLitePool instance
         """
-        return SQLitePool(
+        pool = SQLitePool(
             database_path,
             max_size=max_size,
             acquire_timeout=acquire_timeout,
         )
+        if instrumentation:
+            pool.configure_instrumentation(
+                tier_label=tier_label, sink=latency_sink, path=latency_path
+            )
+        if write_queue_path is not None:
+            pool.configure_write_queue(
+                persistence_path=write_queue_path,
+                threshold_ms=write_queue_threshold_ms,
+                max_concurrent_drains=write_queue_concurrency,
+            )
+        return pool
 
     @staticmethod
     async def turso(
@@ -723,59 +880,123 @@ class ConnectionPool:
         *,
         max_size: int = 5,
         acquire_timeout: float = 30.0,
-    ) -> TursoPool:
+        instrumentation: bool = False,
+        tier_label: str = "",
+        latency_sink: str | None = None,
+        latency_path: str | None = None,
+        write_queue_path: str | None = None,
+        write_queue_threshold_ms: float = 50.0,
+        write_queue_concurrency: int = 3,
+    ) -> "TursoPool":
         """
         Create a Turso connection pool using pyturso.
-
-        Turso is an embedded SQLite-compatible database with additional
-        features like vector search and change data capture (CDC).
 
         Args:
             database_path: Path to database (or ":memory:" for in-memory)
             max_size: Maximum concurrent connections (default: 5)
             acquire_timeout: Timeout for acquiring connection in seconds (default: 30)
+            instrumentation: Enable latency recording (default: False)
+            tier_label: Label for every latency record from this pool
+            latency_sink: "jsonl" to write to latency_path, or None
+            latency_path: File path for JSONL sink
+            write_queue_path: JSONL path to persist write queue across restarts
+            write_queue_threshold_ms: Latency threshold before queuing (default: 50ms)
+            write_queue_concurrency: Max concurrent drain tasks (default: 3)
 
         Returns:
             TursoPool instance
-
-        Note:
-            Requires `pyturso` package: `pip install pyturso`
         """
-        return TursoPool(
+        pool = TursoPool(
             database_path,
             max_size=max_size,
             acquire_timeout=acquire_timeout,
         )
+        if instrumentation:
+            pool.configure_instrumentation(
+                tier_label=tier_label, sink=latency_sink, path=latency_path
+            )
+        if write_queue_path is not None:
+            pool.configure_write_queue(
+                persistence_path=write_queue_path,
+                threshold_ms=write_queue_threshold_ms,
+                max_concurrent_drains=write_queue_concurrency,
+            )
+        return pool
 
     @staticmethod
     async def libsql(
         url: str,
         *,
         auth_token: str | None = None,
+        local_path: str | None = None,
+        db_dir: str = "./db",
         max_size: int = 10,
         acquire_timeout: float = 30.0,
+        instrumentation: bool = False,
+        tier_label: str = "",
+        latency_sink: str | None = None,
+        latency_path: str | None = None,
+        write_queue_path: str | None = None,
+        write_queue_threshold_ms: float = 50.0,
+        write_queue_concurrency: int = 3,
     ) -> LibSQLPool:
         """
-        Create a LibSQL connection pool for Turso cloud.
+        Create a LibSQL connection pool for Turso cloud using embedded replica.
+
+        Always uses embedded replica mode: a local SQLite file is synced from
+        Turso Cloud at startup, giving sub-millisecond read latency.
+
+        To reconstruct many replicas concurrently at startup (one per user):
+
+            pools = await asyncio.gather(*[
+                ConnectionPool.libsql(url, auth_token=token)
+                for url, token in user_configs
+            ])
 
         Args:
             url: LibSQL/Turso cloud URL (e.g., "libsql://db.turso.io")
             auth_token: Authentication token for Turso cloud
+            local_path: Path for the local replica file. Defaults to
+                        ``./db/<sanitized_url>.db`` relative to CWD.
+            db_dir: Directory for auto-derived local paths (default: ``./db``)
             max_size: Maximum concurrent connections (default: 10)
             acquire_timeout: Timeout for acquiring connection in seconds (default: 30)
+            instrumentation: Enable latency recording (default: False)
+            tier_label: Label for every latency record from this pool
+            latency_sink: "jsonl" to write to latency_path, or None
+            latency_path: File path for JSONL sink
+            write_queue_path: JSONL path to persist write queue across restarts
+            write_queue_threshold_ms: Latency threshold before queuing (default: 50ms)
+            write_queue_concurrency: Max concurrent drain tasks (default: 3)
 
         Returns:
-            LibSQLPool instance
-
-        Note:
-            Requires `libsql-experimental` package: `pip install libsql-experimental`
+            LibSQLPool instance, already synced from Turso Cloud
         """
-        return LibSQLPool(
+        import re
+
+        if local_path is None:
+            safe_name = re.sub(r"[^\w.-]", "_", url.replace("libsql://", "").replace("https://", ""))
+            local_path = f"{db_dir}/{safe_name}.db"
+
+        pool = LibSQLPool(
             url,
+            local_path,
             auth_token=auth_token,
             max_size=max_size,
             acquire_timeout=acquire_timeout,
         )
+        await pool._initial_sync()
+        if instrumentation:
+            pool.configure_instrumentation(
+                tier_label=tier_label, sink=latency_sink, path=latency_path
+            )
+        if write_queue_path is not None:
+            pool.configure_write_queue(
+                persistence_path=write_queue_path,
+                threshold_ms=write_queue_threshold_ms,
+                max_concurrent_drains=write_queue_concurrency,
+            )
+        return pool
 
 
 # =============================================================================
@@ -925,7 +1146,7 @@ class SyncLibSQLPool:
         """Acquire a synchronous connection."""
         if self._closed:
             raise PoolClosedError("Pool has been closed")
-        import libsql_experimental as libsql
+        import libsql
 
         if self._auth_token:
             conn = libsql.connect(self._url, auth_token=self._auth_token)
@@ -1194,7 +1415,7 @@ class TursoCloudManager:
         if db_name not in self._pools:
             token = await self.get_token(db_name)
             url = self._build_db_url(db_name)
-            self._pools[db_name] = LibSQLPool(
+            self._pools[db_name] = await ConnectionPool.libsql(
                 url,
                 auth_token=token,
                 max_size=self._pool_max_size,

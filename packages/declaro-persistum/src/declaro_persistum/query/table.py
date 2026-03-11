@@ -18,13 +18,14 @@ if TYPE_CHECKING:
     from declaro_persistum.query.update import UpdateQuery
 
 
-def table(name: str, schema: Schema) -> "TableProxy":
+def table(name: str, schema: Schema, pool: Any) -> "TableProxy":
     """
     Create a schema-validated table proxy.
 
     Args:
         name: Table name (must exist in schema)
         schema: Schema dict
+        pool: Connection pool with acquire() context manager
 
     Returns:
         TableProxy for building queries
@@ -34,7 +35,7 @@ def table(name: str, schema: Schema) -> "TableProxy":
     """
     if name not in schema:
         raise ValueError(f"Table '{name}' not found in schema. Available: {list(schema.keys())}")
-    return TableProxy(name, schema)
+    return TableProxy(name, schema, pool)
 
 
 class TableProxy:
@@ -45,11 +46,12 @@ class TableProxy:
     All query methods return new immutable query objects.
     """
 
-    __slots__ = ("_name", "_schema", "_columns")
+    __slots__ = ("_name", "_schema", "_columns", "_pool")
 
-    def __init__(self, name: str, schema: Schema):
+    def __init__(self, name: str, schema: Schema, pool: Any):
         self._name = name
         self._schema = schema
+        self._pool = pool
         table_def = schema[name]
         self._columns: dict[str, ColumnProxy] = {
             col_name: ColumnProxy(name, col_name, col_def)
@@ -74,25 +76,25 @@ class TableProxy:
         """Start a SELECT query on this table."""
         from declaro_persistum.query.select import SelectQuery
 
-        return SelectQuery(self._name, self._schema, columns)
+        return SelectQuery(self._name, self._schema, columns, pool=self._pool)
 
     def insert(self, **values: Any) -> "InsertQuery":
         """Start an INSERT query on this table."""
         from declaro_persistum.query.insert import InsertQuery
 
-        return InsertQuery(self._name, self._schema, values, self._columns)
+        return InsertQuery(self._name, self._schema, values, self._columns, pool=self._pool)
 
     def update(self, **values: Any) -> "UpdateQuery":
         """Start an UPDATE query on this table."""
         from declaro_persistum.query.update import UpdateQuery
 
-        return UpdateQuery(self._name, self._schema, values, self._columns)
+        return UpdateQuery(self._name, self._schema, values, self._columns, pool=self._pool)
 
     def delete(self) -> "DeleteQuery":
         """Start a DELETE query on this table."""
         from declaro_persistum.query.delete import DeleteQuery
 
-        return DeleteQuery(self._name, self._schema)
+        return DeleteQuery(self._name, self._schema, pool=self._pool)
 
     # =========================================================================
     # Django-style API
@@ -108,7 +110,7 @@ class TableProxy:
         """
         from declaro_persistum.query.django_style import QuerySet
 
-        return QuerySet(self._name, self._schema, self._columns)
+        return QuerySet(self._name, self._schema, self._columns, pool=self._pool)
 
     def filter(self, **kwargs: Any) -> "QuerySet":
         """
@@ -140,36 +142,36 @@ class TableProxy:
     # Alias
     order_by = order
 
-    async def get(self, connection: Any, **kwargs: Any) -> dict[str, Any]:
+    async def get(self, **kwargs: Any) -> dict[str, Any]:
         """
         Django-style get. Returns single matching object.
 
         Example:
-            user = await users.get(conn, id=user_id)
+            user = await users.get(id=user_id)
 
         Raises:
             DoesNotExist: If no object found
             MultipleObjectsReturned: If more than one object found
         """
-        return await self.objects.get(connection, **kwargs)
+        return await self.objects.get(**kwargs)
 
-    async def all(self, connection: Any) -> list[dict[str, Any]]:
+    async def all(self) -> list[dict[str, Any]]:
         """
         Django-style all. Returns all rows.
 
         Example:
-            all_users = await users.all(conn)
+            all_users = await users.all()
         """
-        return await self.objects.all(connection)
+        return await self.objects.all()
 
-    async def first(self, connection: Any) -> dict[str, Any] | None:
+    async def first(self) -> dict[str, Any] | None:
         """
         Django-style first. Returns first row or None.
 
         Example:
-            user = await users.filter(status="active").first(conn)
+            user = await users.filter(status="active").first()
         """
-        return await self.objects.first(connection)
+        return await self.objects.first()
 
     # =========================================================================
     # Prisma-style API
@@ -190,11 +192,10 @@ class TableProxy:
         """
         from declaro_persistum.query.prisma_style import PrismaQueryBuilder
 
-        return PrismaQueryBuilder(self._name, self._schema, self._columns)
+        return PrismaQueryBuilder(self._name, self._schema, self._columns, pool=self._pool)
 
     async def find_many(
         self,
-        connection: Any,
         *,
         where: dict[str, Any] | None = None,
         order: dict[str, str] | list[dict[str, str]] | None = None,
@@ -206,19 +207,17 @@ class TableProxy:
 
         Example:
             users = await db.users.find_many(
-                conn,
                 where={"status": "active"},
                 order={"created_at": "desc"},
                 take=10
             )
         """
         return await self.prisma.find_many(
-            connection, where=where, order=order, take=take, skip=skip
+            where=where, order=order, take=take, skip=skip
         )
 
     async def find_one(
         self,
-        connection: Any,
         *,
         where: dict[str, Any],
     ) -> dict[str, Any] | None:
@@ -226,13 +225,12 @@ class TableProxy:
         Prisma-style find_one. Returns single matching row or None.
 
         Example:
-            user = await db.users.find_one(conn, where={"id": user_id})
+            user = await db.users.find_one(where={"id": user_id})
         """
-        return await self.prisma.find_one(connection, where=where)
+        return await self.prisma.find_one(where=where)
 
     async def find_first(
         self,
-        connection: Any,
         *,
         where: dict[str, Any] | None = None,
         order: dict[str, str] | list[dict[str, str]] | None = None,
@@ -242,16 +240,14 @@ class TableProxy:
 
         Example:
             user = await db.users.find_first(
-                conn,
                 where={"status": "active"},
                 order={"created_at": "desc"}
             )
         """
-        return await self.prisma.find_first(connection, where=where, order=order)
+        return await self.prisma.find_first(where=where, order=order)
 
     async def create(
         self,
-        connection: Any,
         *,
         data: dict[str, Any],
     ) -> dict[str, Any]:
@@ -260,15 +256,13 @@ class TableProxy:
 
         Example:
             user = await db.users.create(
-                conn,
                 data={"email": "alice@example.com", "name": "Alice"}
             )
         """
-        return await self.prisma.create(connection, data=data)
+        return await self.prisma.create(data=data)
 
     async def update_one(
         self,
-        connection: Any,
         *,
         where: dict[str, Any],
         data: dict[str, Any],
@@ -278,16 +272,14 @@ class TableProxy:
 
         Example:
             user = await db.users.update_one(
-                conn,
                 where={"id": user_id},
                 data={"name": "New Name"}
             )
         """
-        return await self.prisma.update(connection, where=where, data=data)
+        return await self.prisma.update(where=where, data=data)
 
     async def delete_one(
         self,
-        connection: Any,
         *,
         where: dict[str, Any],
     ) -> dict[str, Any] | None:
@@ -295,13 +287,12 @@ class TableProxy:
         Prisma-style delete. Deletes a record matching the where clause.
 
         Example:
-            user = await db.users.delete_one(conn, where={"id": user_id})
+            user = await db.users.delete_one(where={"id": user_id})
         """
-        return await self.prisma.delete(connection, where=where)
+        return await self.prisma.delete(where=where)
 
     async def upsert(
         self,
-        connection: Any,
         *,
         where: dict[str, Any],
         create: dict[str, Any],
@@ -312,22 +303,21 @@ class TableProxy:
 
         Example:
             user = await db.users.upsert(
-                conn,
                 where={"email": "alice@example.com"},
                 create={"email": "alice@example.com", "name": "Alice"},
                 update={"name": "Alice Updated"}
             )
         """
-        return await self.prisma.upsert(connection, where=where, create=create, update=update)
+        return await self.prisma.upsert(where=where, create=create, update=update)
 
-    async def count(self, connection: Any, where: dict[str, Any] | None = None) -> int:
+    async def count(self, where: dict[str, Any] | None = None) -> int:
         """
         Prisma-style count.
 
         Example:
-            active_count = await db.users.count(conn, where={"status": "active"})
+            active_count = await db.users.count(where={"status": "active"})
         """
-        return await self.prisma.count(connection, where=where)
+        return await self.prisma.count(where=where)
 
 
 class ColumnProxy:

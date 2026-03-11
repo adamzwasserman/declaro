@@ -5,6 +5,8 @@ Executes Query objects against database connections.
 Handles parameter binding for different dialects.
 """
 
+import asyncio
+import time
 from collections.abc import Callable
 from typing import Any, TypeVar
 
@@ -338,3 +340,160 @@ def _dict_factory(cursor: Any, row: tuple[Any, ...]) -> dict[str, Any]:
     """Row factory for aiosqlite to return dicts."""
     columns = [col[0] for col in cursor.description]
     return dict(zip(columns, row, strict=True))
+
+
+async def _race_write(
+    pool: Any,
+    query: "Query",
+    queue: Any,
+    table_name: str,
+    pk_column: str,
+    pk_value: Any,
+    op: str,
+    data: dict[str, Any],
+    dialect: str,
+) -> Any:
+    """
+    Race a write against the 50ms threshold.
+
+    - If the write completes within threshold: queue is never touched.
+    - If it times out: enqueue immediately and return data to caller.
+      The write continues in background; on completion it removes itself
+      from the queue.
+    """
+    sql = query["sql"]
+    params = query["params"]
+
+    async def _do_write() -> Any:
+        async with pool.acquire() as conn:
+            return await _execute_update(conn, sql, params)
+
+    write_task = asyncio.create_task(_do_write())
+    try:
+        result = await asyncio.wait_for(asyncio.shield(write_task), timeout=queue._threshold_ms / 1000.0)
+        return result  # fast path — queue never touched
+    except asyncio.TimeoutError:
+        queue.enqueue(table_name, pk_column, pk_value, op, data, sql, params, dialect)
+
+        async def _on_complete() -> None:
+            try:
+                await write_task
+                queue.remove_entry(table_name, pk_value)
+            except Exception as exc:
+                key = f"{table_name}:{pk_value}"
+                if key in queue._queue:
+                    queue._queue[key]["attempt_count"] += 1
+                    queue._queue[key]["last_error"] = str(exc)[:200]
+                    queue._persist_to_disk()
+
+        asyncio.create_task(_on_complete())
+        return data  # return immediately — write continues in background
+
+
+async def execute_with_pool(
+    pool: Any,
+    to_query: Callable[..., Query],
+    mode: str = "all",
+    *,
+    table_name: str = "",
+    pk_column: str = "",
+    pk_value: Any = None,
+    data: dict[str, Any] | None = None,
+    join_tables: list[str] | None = None,
+    schema: dict[str, Any] | None = None,
+) -> Any:
+    """
+    Acquire a connection from pool, detect dialect, build query, execute.
+
+    Times the execution and records latency if the pool has instrumentation
+    enabled (pool._latency_logger is set).
+
+    For write operations (insert/update/delete), if the pool has a write queue
+    attached and the write exceeds the threshold, the entry is queued and the
+    caller receives the data immediately.
+
+    For SELECT results, pending write queue entries are merged in and results
+    are re-sorted to match the query's ORDER BY clause.
+
+    Args:
+        pool: Connection pool with acquire() context manager
+        to_query: Callable that takes (dialect: str) and returns a Query dict
+        mode: "all" | "one" | "scalar"
+        table_name: Table being queried/written (for write queue key)
+        pk_column: Primary key column name (for write queue key)
+        pk_value: Primary key value (for write queue key)
+        data: Row data to return immediately on queue (for write queue)
+        join_tables: Additional tables joined in this query (for JOIN merge)
+        schema: Full schema dict (for FK-aware JOIN merge)
+    """
+    from declaro_persistum.instrumentation import classify_sql, is_write_op, record_execution
+
+    _MODE_DISPATCH: dict[str, Callable[..., Any]] = {
+        "all": execute,
+        "one": execute_one,
+        "scalar": execute_scalar,
+    }
+    executor_fn = _MODE_DISPATCH[mode]
+
+    async with pool.acquire() as conn:
+        dialect = detect_dialect(conn)
+        query = to_query(dialect)
+        sql = query.get("sql", "")
+        op = classify_sql(sql)
+
+        # Write queue race — only when queue is attached and all metadata provided
+        queue = getattr(pool, "_write_queue", None)
+        if queue is not None and is_write_op(op) and table_name and pk_column and pk_value is not None:
+            t0 = time.monotonic()
+            try:
+                result = await _race_write(
+                    pool, query, queue, table_name, pk_column, pk_value, op,
+                    data or {}, dialect
+                )
+                duration_ms = (time.monotonic() - t0) * 1000
+                record_execution(pool, sql, duration_ms, success=True)
+                return result
+            except Exception as exc:
+                duration_ms = (time.monotonic() - t0) * 1000
+                record_execution(pool, sql, duration_ms, success=False, error=str(exc))
+                raise
+
+        t0 = time.monotonic()
+        error = ""
+        try:
+            result = await executor_fn(query, conn)
+            # aiosqlite requires explicit commit for DML (INSERT/UPDATE/DELETE)
+            # asyncpg and libsql are autocommit; aiosqlite is not
+            if is_write_op(op) and "aiosqlite" in type(conn).__module__:
+                await conn.commit()
+            duration_ms = (time.monotonic() - t0) * 1000
+            record_execution(pool, sql, duration_ms, success=True)
+
+            # Read merge — merge pending write queue entries into SELECT results
+            if queue is not None and not is_write_op(op) and table_name and pk_column:
+                if isinstance(result, list):
+                    from declaro_persistum.write_queue import (
+                        _extract_order_by,
+                        _resort,
+                        merge_pending_into_join_results,
+                        merge_pending_into_results,
+                    )
+                    pending = queue.get_pending_for_table(table_name)
+                    if pending:
+                        result = merge_pending_into_results(result, pending, pk_column)
+                    if join_tables and schema:
+                        pending_by_table = {t: queue.get_pending_for_table(t) for t in join_tables}
+                        if any(pending_by_table.values()):
+                            result = merge_pending_into_join_results(
+                                result, pending_by_table, schema, join_tables, table_name
+                            )
+                    order_by = _extract_order_by(sql)
+                    if order_by:
+                        result = _resort(result, order_by)
+
+            return result
+        except Exception as exc:
+            duration_ms = (time.monotonic() - t0) * 1000
+            error = str(exc)
+            record_execution(pool, sql, duration_ms, success=False, error=error)
+            raise

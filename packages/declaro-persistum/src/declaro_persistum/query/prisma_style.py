@@ -12,7 +12,6 @@ Provides a dict-based interface familiar to Prisma users:
 from typing import TYPE_CHECKING, Any
 
 from declaro_persistum.query.builder import Query
-from declaro_persistum.query.executor import detect_dialect
 from declaro_persistum.query.table import ColumnProxy, Condition, ConditionGroup
 from declaro_persistum.types import Schema
 
@@ -34,17 +33,19 @@ class PrismaQueryBuilder:
         upsert(where={}, create={}, update={})
     """
 
-    __slots__ = ("_table_name", "_schema", "_columns")
+    __slots__ = ("_table_name", "_schema", "_columns", "_pool")
 
     def __init__(
         self,
         table_name: str,
         schema: Schema,
         columns: dict[str, ColumnProxy],
+        pool: Any = None,
     ):
         self._table_name = table_name
         self._schema = schema
         self._columns = columns
+        self._pool = pool
 
     def _where_to_conditions(self, where: dict[str, Any]) -> list[Condition]:
         """Convert Prisma-style where dict to Condition objects."""
@@ -183,7 +184,6 @@ class PrismaQueryBuilder:
 
     async def find_many(
         self,
-        connection: Any,
         *,
         where: dict[str, Any] | None = None,
         order: dict[str, str] | list[dict[str, str]] | None = None,
@@ -200,16 +200,18 @@ class PrismaQueryBuilder:
                 take=10
             )
         """
-        from declaro_persistum.query.executor import execute
+        from declaro_persistum.query.executor import execute_with_pool
 
-        dialect = detect_dialect(connection)
-        sql, params = self._build_select_sql(where, order, take, skip, dialect)
-        query: Query = {"sql": sql, "params": params, "dialect": dialect}
-        return await execute(query, connection)
+        pool = self._pool
+
+        def _query(dialect: str) -> Query:
+            sql, params = self._build_select_sql(where, order, take, skip, dialect)
+            return {"sql": sql, "params": params, "dialect": dialect}
+
+        return await execute_with_pool(pool, _query, mode="all")
 
     async def find_one(
         self,
-        connection: Any,
         *,
         where: dict[str, Any],
     ) -> dict[str, Any] | None:
@@ -219,16 +221,18 @@ class PrismaQueryBuilder:
         Example:
             user = await db.users.find_one(where={"id": user_id})
         """
-        from declaro_persistum.query.executor import execute_one
+        from declaro_persistum.query.executor import execute_with_pool
 
-        dialect = detect_dialect(connection)
-        sql, params = self._build_select_sql(where, None, 1, None, dialect)
-        query: Query = {"sql": sql, "params": params, "dialect": dialect}
-        return await execute_one(query, connection)
+        pool = self._pool
+
+        def _query(dialect: str) -> Query:
+            sql, params = self._build_select_sql(where, None, 1, None, dialect)
+            return {"sql": sql, "params": params, "dialect": dialect}
+
+        return await execute_with_pool(pool, _query, mode="one")
 
     async def find_first(
         self,
-        connection: Any,
         *,
         where: dict[str, Any] | None = None,
         order: dict[str, str] | list[dict[str, str]] | None = None,
@@ -242,16 +246,18 @@ class PrismaQueryBuilder:
                 order={"created_at": "desc"}
             )
         """
-        from declaro_persistum.query.executor import execute_one
+        from declaro_persistum.query.executor import execute_with_pool
 
-        dialect = detect_dialect(connection)
-        sql, params = self._build_select_sql(where, order, 1, None, dialect)
-        query: Query = {"sql": sql, "params": params, "dialect": dialect}
-        return await execute_one(query, connection)
+        pool = self._pool
+
+        def _query(dialect: str) -> Query:
+            sql, params = self._build_select_sql(where, order, 1, None, dialect)
+            return {"sql": sql, "params": params, "dialect": dialect}
+
+        return await execute_with_pool(pool, _query, mode="one")
 
     async def create(
         self,
-        connection: Any,
         *,
         data: dict[str, Any],
     ) -> dict[str, Any]:
@@ -263,7 +269,9 @@ class PrismaQueryBuilder:
                 data={"email": "alice@example.com", "name": "Alice"}
             )
         """
-        from declaro_persistum.query.executor import execute_one
+        from declaro_persistum.query.executor import execute_with_pool
+
+        pool = self._pool
 
         # Validate columns
         for key in data:
@@ -281,14 +289,14 @@ class PrismaQueryBuilder:
         sql = f"INSERT INTO {self._table_name} ({cols_sql}) VALUES ({placeholders}) RETURNING *"
         params = {f"ins_{k}": v for k, v in data.items()}
 
-        dialect = detect_dialect(connection)
-        query: Query = {"sql": sql, "params": params, "dialect": dialect}
-        result = await execute_one(query, connection)
+        def _query(dialect: str) -> Query:
+            return {"sql": sql, "params": params, "dialect": dialect}
+
+        result = await execute_with_pool(pool, _query, mode="one")
         return result or data  # Return input if RETURNING not supported
 
     async def update(
         self,
-        connection: Any,
         *,
         where: dict[str, Any],
         data: dict[str, Any],
@@ -302,7 +310,9 @@ class PrismaQueryBuilder:
                 data={"name": "New Name"}
             )
         """
-        from declaro_persistum.query.executor import execute_one
+        from declaro_persistum.query.executor import execute_with_pool
+
+        pool = self._pool
 
         # Validate columns
         for key in data:
@@ -313,37 +323,35 @@ class PrismaQueryBuilder:
                     f"Available columns: {available}"
                 )
 
-        dialect = detect_dialect(connection)
+        def _query(dialect: str) -> Query:
+            # Build SET clause
+            set_parts = []
+            params: dict[str, Any] = {}
+            for col, val in data.items():
+                param_name = f"upd_{col}"
+                set_parts.append(f"{col} = :{param_name}")
+                params[param_name] = val
 
-        # Build SET clause
-        set_parts = []
-        params: dict[str, Any] = {}
-        for col, val in data.items():
-            param_name = f"upd_{col}"
-            set_parts.append(f"{col} = :{param_name}")
-            params[param_name] = val
+            set_sql = ", ".join(set_parts)
+            sql = f"UPDATE {self._table_name} SET {set_sql}"
 
-        set_sql = ", ".join(set_parts)
-        sql = f"UPDATE {self._table_name} SET {set_sql}"
+            # Build WHERE clause
+            conditions = self._where_to_conditions(where)
+            if conditions:
+                combined: Condition | ConditionGroup = conditions[0]
+                for c in conditions[1:]:
+                    combined = combined & c
+                where_sql, where_params = combined.to_sql(dialect)
+                sql += f" WHERE {where_sql}"
+                params.update(where_params)
 
-        # Build WHERE clause
-        conditions = self._where_to_conditions(where)
-        if conditions:
-            combined: Condition | ConditionGroup = conditions[0]
-            for c in conditions[1:]:
-                combined = combined & c
-            where_sql, where_params = combined.to_sql(dialect)
-            sql += f" WHERE {where_sql}"
-            params.update(where_params)
+            sql += " RETURNING *"
+            return {"sql": sql, "params": params, "dialect": dialect}
 
-        sql += " RETURNING *"
-
-        query: Query = {"sql": sql, "params": params, "dialect": dialect}
-        return await execute_one(query, connection)
+        return await execute_with_pool(pool, _query, mode="one")
 
     async def delete(
         self,
-        connection: Any,
         *,
         where: dict[str, Any],
     ) -> dict[str, Any] | None:
@@ -353,31 +361,31 @@ class PrismaQueryBuilder:
         Example:
             user = await db.users.delete(where={"id": user_id})
         """
-        from declaro_persistum.query.executor import execute_one
+        from declaro_persistum.query.executor import execute_with_pool
 
-        dialect = detect_dialect(connection)
+        pool = self._pool
 
-        sql = f"DELETE FROM {self._table_name}"
-        params: dict[str, Any] = {}
+        def _query(dialect: str) -> Query:
+            sql = f"DELETE FROM {self._table_name}"
+            params: dict[str, Any] = {}
 
-        # Build WHERE clause
-        conditions = self._where_to_conditions(where)
-        if conditions:
-            combined: Condition | ConditionGroup = conditions[0]
-            for c in conditions[1:]:
-                combined = combined & c
-            where_sql, where_params = combined.to_sql(dialect)
-            sql += f" WHERE {where_sql}"
-            params.update(where_params)
+            # Build WHERE clause
+            conditions = self._where_to_conditions(where)
+            if conditions:
+                combined: Condition | ConditionGroup = conditions[0]
+                for c in conditions[1:]:
+                    combined = combined & c
+                where_sql, where_params = combined.to_sql(dialect)
+                sql += f" WHERE {where_sql}"
+                params.update(where_params)
 
-        sql += " RETURNING *"
+            sql += " RETURNING *"
+            return {"sql": sql, "params": params, "dialect": dialect}
 
-        query: Query = {"sql": sql, "params": params, "dialect": dialect}
-        return await execute_one(query, connection)
+        return await execute_with_pool(pool, _query, mode="one")
 
     async def upsert(
         self,
-        connection: Any,
         *,
         where: dict[str, Any],
         create: dict[str, Any],
@@ -394,17 +402,16 @@ class PrismaQueryBuilder:
             )
         """
         # Try to find existing
-        existing = await self.find_one(connection, where=where)
+        existing = await self.find_one(where=where)
 
         if existing:
-            result = await self.update(connection, where=where, data=update)
+            result = await self.update(where=where, data=update)
             return result or existing
         else:
-            return await self.create(connection, data=create)
+            return await self.create(data=create)
 
     async def count(
         self,
-        connection: Any,
         *,
         where: dict[str, Any] | None = None,
     ) -> int:
@@ -414,23 +421,25 @@ class PrismaQueryBuilder:
         Example:
             count = await db.users.count(where={"status": "active"})
         """
-        from declaro_persistum.query.executor import execute_scalar
+        from declaro_persistum.query.executor import execute_with_pool
 
-        dialect = detect_dialect(connection)
+        pool = self._pool
 
-        sql = f"SELECT COUNT(*) FROM {self._table_name}"
-        params: dict[str, Any] = {}
+        def _query(dialect: str) -> Query:
+            sql = f"SELECT COUNT(*) FROM {self._table_name}"
+            params: dict[str, Any] = {}
 
-        if where:
-            conditions = self._where_to_conditions(where)
-            if conditions:
-                combined: Condition | ConditionGroup = conditions[0]
-                for c in conditions[1:]:
-                    combined = combined & c
-                where_sql, where_params = combined.to_sql(dialect)
-                sql += f" WHERE {where_sql}"
-                params.update(where_params)
+            if where:
+                conditions = self._where_to_conditions(where)
+                if conditions:
+                    combined: Condition | ConditionGroup = conditions[0]
+                    for c in conditions[1:]:
+                        combined = combined & c
+                    where_sql, where_params = combined.to_sql(dialect)
+                    sql += f" WHERE {where_sql}"
+                    params.update(where_params)
 
-        query: Query = {"sql": sql, "params": params, "dialect": dialect}
-        result = await execute_scalar(query, connection)
+            return {"sql": sql, "params": params, "dialect": dialect}
+
+        result = await execute_with_pool(pool, _query, mode="scalar")
         return int(result) if result else 0

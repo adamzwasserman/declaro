@@ -3,7 +3,7 @@ Turso (libSQL) migration applier implementation.
 
 Turso uses libSQL which is SQLite-compatible, so the SQL generation
 is shared with SQLite via applier.shared module.
-The main difference is connection handling (synchronous pyturso API).
+Connection handling uses LibSQLAsyncConnection (async wrapper over sync libsql_experimental).
 """
 
 from typing import Any, Literal
@@ -26,8 +26,8 @@ class TursoApplier:
     Turso implementation of MigrationApplier protocol.
 
     Turso/libSQL is SQLite-compatible. SQL generation is shared
-    with SQLite via applier.shared. Connection handling differs
-    (synchronous pyturso API, explicit BEGIN).
+    with SQLite via applier.shared. Connection handling uses
+    LibSQLAsyncConnection (async wrapper over libsql_experimental).
     """
 
     def get_dialect(self) -> str:
@@ -45,24 +45,13 @@ class TursoApplier:
         execution_order: list[int],
         *,
         dry_run: bool = False,
-    ) -> ApplyResult:
-        """Delegates to apply_sync() since Turso Database (pyturso) is synchronous."""
-        return self.apply_sync(connection, operations, execution_order, dry_run=dry_run)
-
-    def apply_sync(
-        self,
-        connection: Any,
-        operations: list[Operation],
-        execution_order: list[int],
-        *,
-        dry_run: bool = False,
         target_schema: Any = None,
     ) -> ApplyResult:
         """
-        Apply migration operations synchronously.
+        Apply migration operations asynchronously.
 
         Args:
-            connection: pyturso database connection
+            connection: LibSQLAsyncConnection (async wrapper over libsql_experimental)
             operations: List of operations to apply
             execution_order: Order to execute operations
             dry_run: If True, only generate SQL without executing
@@ -74,20 +63,109 @@ class TursoApplier:
         executed: list[str] = []
 
         try:
-            # Begin transaction
-            connection.execute("BEGIN")
+            await connection.execute("BEGIN")
 
-            # Per-operation execution
             for op_idx in execution_order:
                 operation = operations[op_idx]
 
                 try:
                     if requires_reconstruction(operation):
-                        # Execute with reconstruction
+                        await self._execute_with_reconstruction(connection, operation)
+                        executed.append(f"Table reconstruction for {operation['table']}")
+                    else:
+                        sql = generate_operation_sql(operation)
+                        for statement in sql.split(";"):
+                            statement = statement.strip()
+                            if statement:
+                                await connection.execute(statement)
+                        executed.append(sql)
+
+                    for insert_sql in enum_population_sql(operation, target_schema):
+                        await connection.execute(insert_sql)
+                        executed.append(insert_sql)
+
+                except Exception as e:
+                    await connection.rollback()
+                    raise MigrationError(
+                        f"Failed to execute operation",
+                        operation=operation,
+                        original_error=e,
+                    ) from e
+
+            await connection.commit()
+
+            return {
+                "success": True,
+                "executed_sql": executed,
+                "operations_applied": len(executed),
+                "error": None,
+                "error_operation": None,
+            }
+
+        except MigrationError:
+            raise
+        except Exception as e:
+            await connection.rollback()
+            raise MigrationError(
+                f"Migration failed: {e}",
+                original_error=e,
+            ) from e
+
+    async def _execute_with_reconstruction(
+        self, connection: Any, operation: Operation
+    ) -> None:
+        """
+        Execute an operation using table reconstruction (async).
+
+        Fresh introspection → pure column transform → async reconstruction.
+        """
+        from declaro_persistum.abstractions.reconstruction import execute_reconstruction_async
+
+        table = operation["table"]
+
+        cursor = await connection.execute(f"PRAGMA table_info('{table}')")
+        rows = await cursor.fetchall()
+        columns = columns_from_pragma_rows(rows)
+
+        columns = apply_reconstruction_changes(columns, operation)
+
+        await execute_reconstruction_async(connection, table, columns)
+
+    def apply_sync(
+        self,
+        connection: Any,
+        operations: list[Operation],
+        execution_order: list[int],
+        *,
+        dry_run: bool = False,
+        target_schema: Any = None,
+    ) -> ApplyResult:
+        """
+        Apply migration operations synchronously (raw sync connection).
+
+        Args:
+            connection: Raw sync libsql_experimental or pyturso connection
+            operations: List of operations to apply
+            execution_order: Order to execute operations
+            dry_run: If True, only generate SQL without executing
+            target_schema: Target schema (used for enum value population)
+        """
+        if dry_run:
+            return dry_run_preview(operations, execution_order)
+
+        executed: list[str] = []
+
+        try:
+            connection.execute("BEGIN")
+
+            for op_idx in execution_order:
+                operation = operations[op_idx]
+
+                try:
+                    if requires_reconstruction(operation):
                         self._execute_with_reconstruction_sync(connection, operation)
                         executed.append(f"Table reconstruction for {operation['table']}")
                     else:
-                        # Direct SQL execution
                         sql = generate_operation_sql(operation)
                         for statement in sql.split(";"):
                             statement = statement.strip()
@@ -95,7 +173,6 @@ class TursoApplier:
                                 connection.execute(statement)
                         executed.append(sql)
 
-                    # Handle enum value population for newly created lookup tables
                     for insert_sql in enum_population_sql(operation, target_schema):
                         connection.execute(insert_sql)
                         executed.append(insert_sql)
@@ -130,24 +207,17 @@ class TursoApplier:
     def _execute_with_reconstruction_sync(
         self, connection: Any, operation: Operation
     ) -> None:
-        """
-        Execute an operation using table reconstruction (synchronous).
-
-        Fresh introspection → pure column transform → sync reconstruction.
-        """
+        """Execute table reconstruction synchronously (raw sync connection)."""
         from declaro_persistum.abstractions.reconstruction import execute_reconstruction_sync
 
         table = operation["table"]
 
-        # Fresh introspection for current state (direct PRAGMA call - sync)
         cursor = connection.execute(f"PRAGMA table_info('{table}')")
         rows = cursor.fetchall()
         columns = columns_from_pragma_rows(rows)
 
-        # Apply reconstruction changes (pure)
         columns = apply_reconstruction_changes(columns, operation)
 
-        # Execute reconstruction with updated schema
         execute_reconstruction_sync(connection, table, columns)
 
     def generate_sql(
