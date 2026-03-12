@@ -58,6 +58,7 @@ class TursoInspector:
                 WHERE type = 'table'
                   AND name NOT LIKE 'sqlite_%'
                   AND name NOT LIKE '_litestream_%'
+                  AND name NOT LIKE '_declaro_%'
                 ORDER BY name
                 """
             )
