@@ -779,8 +779,14 @@ class LibSQLPool(BasePool):
             async with self._write_lock:
                 await loop.run_in_executor(self._write_executor, self._write_holder.sync)
 
-    async def close(self) -> None:
-        """Close write connection and mark pool as closed."""
+    async def close(self, *, cleanup_local: bool = False) -> None:
+        """Close write connection and mark pool as closed.
+
+        Args:
+            cleanup_local: If True, remove the local replica file and its
+                WAL/SHM/info sidecars after closing.  Prevents stale files
+                from accumulating across pool lifecycles.
+        """
         if self._write_queue is not None:
             await self._write_queue.stop_supervisor()
         self._closed = True
@@ -788,6 +794,15 @@ class LibSQLPool(BasePool):
             loop = asyncio.get_event_loop()
             await loop.run_in_executor(self._write_executor, self._write_holder.close)
             self._write_executor.shutdown(wait=False)
+        if cleanup_local and self._local_path:
+            import glob as _glob
+            import os as _os
+
+            for path in _glob.glob(f"{self._local_path}*"):
+                try:
+                    _os.remove(path)
+                except OSError:
+                    pass
 
     @property
     def closed(self) -> bool:

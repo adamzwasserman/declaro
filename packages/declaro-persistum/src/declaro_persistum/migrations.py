@@ -32,6 +32,18 @@ META_TABLE = "_declaro_meta"
 logger = logging.getLogger(__name__)
 
 
+def _acquire_write_or_read(pool: Any) -> Any:
+    """Return pool.acquire_write() if available, else pool.acquire().
+
+    DDL and hash writes must go through the write connection on pools
+    with split read/write paths (e.g. LibSQLPool) so that changes reach
+    the cloud primary rather than only the local replica file.
+    """
+    if hasattr(pool, "acquire_write"):
+        return pool.acquire_write()
+    return pool.acquire()
+
+
 # ---------------------------------------------------------------------------
 # Schema hash helpers (skip-if-clean)
 # ---------------------------------------------------------------------------
@@ -100,14 +112,52 @@ async def _store_hash(conn: Any, schema_name: str, schema_hash: str) -> None:
 async def _schema_is_clean(
     conn: Any, schema_path: Path, schema_hash: str
 ) -> bool:
-    """Check if schema file hash matches the stored hash (skip-if-clean)."""
+    """Check if schema file hash matches the stored hash (skip-if-clean).
+
+    A hash match alone is not sufficient: if the cloud DB was destroyed and
+    recreated, the local replica retains the stale hash while the cloud is
+    empty.  We guard against this by verifying that at least one user table
+    (anything other than ``_declaro_meta``) exists — unless the schema itself
+    defines zero tables (empty module), in which case an empty DB is expected.
+    """
     try:
         await _ensure_meta_table(conn)
         stored = await _get_stored_hash(conn, schema_path.name)
-        return stored == schema_hash
+        if stored != schema_hash:
+            return False
+        # Hash matches — verify cloud DB is not empty (stale-hash guard).
+        # Skip this check for empty schemas (no tables defined).
+        has_tables = await _has_user_tables(conn)
+        if has_tables:
+            return True
+        # No user tables — only trust the hash if the schema file itself
+        # produces no tables (empty module).  Otherwise, the DB was likely
+        # destroyed and recreated.
+        try:
+            target = load_models_from_module(schema_path)
+            return len(target) == 0
+        except Exception:
+            return False
     except Exception:
         # Meta table doesn't exist or query failed — treat as dirty
         return False
+
+
+async def _has_user_tables(conn: Any) -> bool:
+    """Return True if the database has at least one table besides _declaro_meta."""
+    sql = (
+        "SELECT name FROM sqlite_master "
+        "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != ?"
+    )
+    if hasattr(conn, "fetch"):
+        # asyncpg — use information_schema instead
+        rows = await conn.fetch(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+        )
+        return any(r["tablename"] != META_TABLE for r in rows)
+    cursor = await conn.execute(sql, (META_TABLE,))
+    row = await cursor.fetchone()
+    return row is not None
 
 
 async def apply_migrations_async(
@@ -181,7 +231,7 @@ async def apply_migrations_async(
     if not target_schema:
         logger.warning("No tables found in schema models")
         # Store hash so next call skips
-        async with pool.acquire() as conn:
+        async with _acquire_write_or_read(pool) as conn:
             await _ensure_meta_table(conn)
             await _store_hash(conn, schema_path.name, schema_hash)
         return {
@@ -215,7 +265,7 @@ async def apply_migrations_async(
     if not diff_result["operations"]:
         logger.info("Schema is up to date - no migrations needed")
         # Store hash so next call skips introspection
-        async with pool.acquire() as conn:
+        async with _acquire_write_or_read(pool) as conn:
             await _ensure_meta_table(conn)
             await _store_hash(conn, schema_path.name, schema_hash)
         return {
@@ -245,9 +295,9 @@ async def apply_migrations_async(
             "error": f"Ambiguous changes: {diff_result['ambiguities']}",
         }
 
-    # Apply migrations
+    # Apply migrations — must use write connection so DDL reaches cloud
     applier = create_applier(dialect)
-    async with pool.acquire() as conn:
+    async with _acquire_write_or_read(pool) as conn:
         result = await applier.apply(
             conn, diff_result["operations"], diff_result["execution_order"]
         )
@@ -257,7 +307,7 @@ async def apply_migrations_async(
         for sql in result["executed_sql"]:
             logger.debug(f"  Executed: {sql}")
         # Store hash after successful migration
-        async with pool.acquire() as conn:
+        async with _acquire_write_or_read(pool) as conn:
             await _ensure_meta_table(conn)
             await _store_hash(conn, schema_path.name, schema_hash)
         return {

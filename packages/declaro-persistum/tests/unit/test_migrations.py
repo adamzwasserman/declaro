@@ -116,16 +116,47 @@ class TestSchemaIsClean:
 
     @pytest.mark.asyncio
     async def test_clean_when_hash_matches(self, tmp_path: Path):
-        """Returns True when stored hash matches file hash."""
+        """Returns True when stored hash matches file hash and user tables exist."""
         schema = tmp_path / "models.py"
         schema.write_text("x = 1")
         file_hash = _compute_schema_hash(schema)
 
         pool = await ConnectionPool.sqlite(":memory:")
         async with pool.acquire() as conn:
+            # A user table must exist — otherwise the stale-hash guard
+            # correctly treats the DB as empty (cloud destroy/recreate).
+            await conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY)")
+            await conn.commit()
             await _ensure_meta_table(conn)
             await _store_hash(conn, "models.py", file_hash)
             assert await _schema_is_clean(conn, schema, file_hash) is True
+        await pool.close()
+
+    @pytest.mark.asyncio
+    async def test_dirty_when_hash_matches_but_no_user_tables(self, tmp_path: Path):
+        """Returns False when hash matches but DB has no user tables (stale hash).
+
+        Simulates cloud DB destroy/recreate: the local replica retains the
+        hash but the cloud DB is empty.  The schema defines a table, so
+        an empty DB means the hash is stale.
+        """
+        schema = tmp_path / "models.py"
+        schema.write_text(
+            "from pydantic import BaseModel\n"
+            "class User(BaseModel):\n"
+            "    class Meta:\n"
+            "        table_name = 'users'\n"
+            "    id: int\n"
+            "    name: str\n"
+        )
+        file_hash = _compute_schema_hash(schema)
+
+        pool = await ConnectionPool.sqlite(":memory:")
+        async with pool.acquire() as conn:
+            await _ensure_meta_table(conn)
+            await _store_hash(conn, "models.py", file_hash)
+            # No user tables — simulates cloud DB destroy/recreate
+            assert await _schema_is_clean(conn, schema, file_hash) is False
         await pool.close()
 
     @pytest.mark.asyncio
