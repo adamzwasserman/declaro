@@ -581,24 +581,28 @@ class TursoPool(BasePool):
         await self._write_holder.connect_async()
         if self._remote_url:
             await self._write_holder.pull()
-        # Try MVCC first (concurrent writers); fall back to WAL (still sub-ms).
-        # MVCC is entering GA in future pyturso releases — this auto-upgrades.
-        try:
-            cur = await self._write_holder.conn.execute("PRAGMA journal_mode = 'mvcc'")
-            rows = await cur.fetchall()
-            mode = rows[0][0] if rows else "unknown"
-            if mode == "mvcc":
-                self._mvcc = True
-            else:
+        # MVCC and cache_size pragmas are only for local-only connections.
+        # Cloud sync (CDC replication) has its own journaling — MVCC is
+        # incompatible and the commit() triggers a CDC sync that fails.
+        if not self._remote_url:
+            try:
+                cur = await self._write_holder.conn.execute("PRAGMA journal_mode = 'mvcc'")
+                rows = await cur.fetchall()
+                mode = rows[0][0] if rows else "unknown"
+                if mode == "mvcc":
+                    self._mvcc = True
+                else:
+                    self._mvcc = False
+                    logger.info("MVCC not available (got %s), using WAL — writes are still sub-ms", mode)
+            except Exception:
                 self._mvcc = False
-                logger.info("MVCC not available (got %s), using WAL — writes are still sub-ms", mode)
-        except Exception:
+            try:
+                await self._write_holder.conn.execute("PRAGMA cache_size = -256")
+            except Exception:
+                logger.debug("PRAGMA cache_size not supported — using default")
+            await self._write_holder.conn.commit()
+        else:
             self._mvcc = False
-        try:
-            await self._write_holder.conn.execute("PRAGMA cache_size = -256")
-        except Exception:
-            logger.debug("PRAGMA cache_size not supported — using default")
-        await self._write_holder.conn.commit()
         if self._remote_url:
             self._push_task = asyncio.create_task(self._push_loop())
 
