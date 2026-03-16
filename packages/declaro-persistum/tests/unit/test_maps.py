@@ -216,7 +216,7 @@ class TestMapSQLiteFallback:
 
 
 class TestTursoDialect:
-    """Tests for Turso/LibSQL dialect support in maps."""
+    """Tests for Turso dialect support in maps."""
 
     def test_map_set_sql_turso(self):
         """Turso dialect uses SQLite-compatible syntax."""
@@ -228,24 +228,13 @@ class TestTursoDialect:
         # Should NOT use EXCLUDED.value (PostgreSQL style)
         assert "EXCLUDED" not in sql
 
-    def test_map_set_sql_libsql(self):
-        """LibSQL dialect uses SQLite-compatible syntax."""
-        from declaro_persistum.abstractions.maps import map_set_sql
-
-        sql = map_set_sql("users", "metadata", "libsql")
-        # Should use :value placeholder (SQLite style)
-        assert "SET value = :value" in sql
-        # Should NOT use EXCLUDED.value (PostgreSQL style)
-        assert "EXCLUDED" not in sql
-
     def test_map_set_sql_sqlite_vs_postgresql(self):
-        """SQLite/Turso/LibSQL use different syntax than PostgreSQL."""
+        """SQLite/Turso use different syntax than PostgreSQL."""
         from declaro_persistum.abstractions.maps import map_set_sql
 
         pg_sql = map_set_sql("users", "metadata", "postgresql")
         sqlite_sql = map_set_sql("users", "metadata", "sqlite")
         turso_sql = map_set_sql("users", "metadata", "turso")
-        libsql_sql = map_set_sql("users", "metadata", "libsql")
 
         # PostgreSQL uses EXCLUDED.value
         assert "EXCLUDED.value" in pg_sql
@@ -253,7 +242,6 @@ class TestTursoDialect:
         # SQLite variants use :value placeholder
         assert "SET value = :value" in sqlite_sql
         assert "SET value = :value" in turso_sql
-        assert "SET value = :value" in libsql_sql
 
-        # SQLite/Turso/LibSQL should generate identical SQL
-        assert sqlite_sql == turso_sql == libsql_sql
+        # SQLite/Turso should generate identical SQL
+        assert sqlite_sql == turso_sql

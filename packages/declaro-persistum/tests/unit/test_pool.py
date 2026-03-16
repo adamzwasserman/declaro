@@ -2,7 +2,7 @@
 Unit tests for the connection pool.
 
 Tests SQLite pool with in-memory database (no external dependencies).
-PostgreSQL, Turso, and LibSQL tests are integration tests that require real databases.
+PostgreSQL and Turso tests are integration tests that require real databases.
 """
 
 import asyncio
@@ -13,8 +13,6 @@ from declaro_persistum.pool import (
     SQLitePool,
     PostgreSQLPool,
     TursoPool,
-    LibSQLPool,
-    LibSQLEmbeddedPool,
 )
 from declaro_persistum.exceptions import (
     PoolClosedError,
@@ -194,6 +192,9 @@ class TestPostgreSQLPool:
             max_size=10,
             acquire_timeout=5.0,
         )
+        assert pool._min_size == 2
+        assert pool._max_size == 10
+        assert pool._acquire_timeout == 5.0
         assert not pool.closed
 
     @pytest.mark.asyncio
@@ -218,41 +219,15 @@ class TestTursoPool:
             max_size=5,
             acquire_timeout=10.0,
         )
+        assert pool._database_path == ":memory:"
+        assert pool._max_size == 5
+        assert pool._acquire_timeout == 10.0
         assert not pool.closed
-        assert pool.size == 5
-        assert pool.available == 5
 
     @pytest.mark.asyncio
     async def test_pool_closed_before_use(self):
         """Closing pool before use works."""
         pool = TursoPool(":memory:")
-        await pool.close()
-        assert pool.closed
-
-        with pytest.raises(PoolClosedError):
-            async with pool.acquire():
-                pass
-
-
-class TestLibSQLPool:
-    """Tests for LibSQL connection pool structure (Turso cloud)."""
-
-    def test_pool_initialization(self):
-        """LibSQLPool can be instantiated."""
-        pool = LibSQLPool(
-            "libsql://db.turso.io",
-            auth_token="secret",
-            max_size=5,
-            acquire_timeout=10.0,
-        )
-        assert not pool.closed
-        assert pool.size == 5
-        assert pool.available == 5
-
-    @pytest.mark.asyncio
-    async def test_pool_closed_before_use(self):
-        """Closing pool before use works."""
-        pool = LibSQLPool("libsql://localhost")
         await pool.close()
         assert pool.closed
 
@@ -279,7 +254,8 @@ class TestConnectionPoolFactory:
             max_size=10,
             acquire_timeout=60.0,
         )
-        assert pool.size == 10
+        assert pool._max_size == 10
+        assert pool._acquire_timeout == 60.0
         await pool.close()
 
     def test_postgresql_returns_correct_type(self):
@@ -291,9 +267,6 @@ class TestConnectionPoolFactory:
         """ConnectionPool.turso() returns TursoPool type."""
         assert hasattr(ConnectionPool, "turso")
 
-    def test_libsql_returns_correct_type(self):
-        """ConnectionPool.libsql() returns LibSQLPool type."""
-        assert hasattr(ConnectionPool, "libsql")
 
 
 class TestPoolExceptions:
@@ -383,75 +356,3 @@ class TestPoolContextManager:
 
         assert sorted(results) == [1, 2, 3]
         await pool.close()
-
-
-class TestLibSQLEmbeddedPool:
-    """Tests for LibSQLEmbeddedPool."""
-
-    def test_pool_initialization(self):
-        """Pool can be instantiated without connecting."""
-        pool = LibSQLEmbeddedPool(
-            "/tmp/test-replica.db",
-            sync_url="libsql://db.turso.io",
-            auth_token="secret",
-        )
-        assert not pool.closed
-        assert pool.size == 10
-        assert pool.available == 10
-
-    def test_pool_custom_options(self):
-        """Pool accepts custom max_size and sync interval."""
-        pool = LibSQLEmbeddedPool(
-            "/tmp/test-replica.db",
-            sync_url="libsql://db.turso.io",
-            auth_token="secret",
-            sync_interval_seconds=30.0,
-            max_size=20,
-        )
-        assert pool.size == 20
-        assert pool.available == 20
-
-    @pytest.mark.asyncio
-    async def test_pool_closed_error(self):
-        """Acquiring from closed pool raises PoolClosedError."""
-        pool = LibSQLEmbeddedPool(
-            "/tmp/test-replica.db",
-            sync_url="libsql://db.turso.io",
-            auth_token="secret",
-        )
-        await pool.close()
-        assert pool.closed
-        with pytest.raises(PoolClosedError):
-            async with pool.acquire():
-                pass
-
-    def test_factory_method_exists(self):
-        """ConnectionPool.libsql_embedded() factory exists."""
-        assert hasattr(ConnectionPool, "libsql_embedded")
-
-    def test_export_from_package(self):
-        """LibSQLEmbeddedPool is exported from package."""
-        from declaro_persistum import LibSQLEmbeddedPool as Exported
-        assert Exported is LibSQLEmbeddedPool
-
-
-class TestLibSQLPoolConnectionReuse:
-    """Tests for LibSQLPool connection reuse."""
-
-    @pytest.mark.asyncio
-    async def test_pool_starts_with_full_availability(self):
-        """Fresh pool has all slots available."""
-        pool = LibSQLPool("libsql://localhost", max_size=5)
-        assert pool.size == 5
-        assert pool.available == 5
-        await pool.close()
-
-    @pytest.mark.asyncio
-    async def test_close_marks_pool_closed(self):
-        """Closing pool prevents further acquire."""
-        pool = LibSQLPool("libsql://localhost")
-        await pool.close()
-        assert pool.closed
-        with pytest.raises(PoolClosedError):
-            async with pool.acquire():
-                pass

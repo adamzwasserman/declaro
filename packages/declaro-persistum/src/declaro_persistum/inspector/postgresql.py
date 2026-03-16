@@ -47,6 +47,7 @@ class PostgreSQLInspector:
                 FROM information_schema.tables
                 WHERE table_schema = $1
                   AND table_type = 'BASE TABLE'
+                  AND table_name NOT LIKE '_declaro_%'
                 ORDER BY table_name
                 """,
                 schema_name,

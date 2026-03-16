@@ -319,6 +319,18 @@ class PoolConnectionError(PoolError):
     pass
 
 
+class WriteQueueError(PoolError):
+    """
+    Write queue operation failed.
+
+    Raised when:
+    - A queued write cannot be persisted after exhausting retries
+    - The write queue cannot be initialized
+    """
+
+    pass
+
+
 # =============================================================================
 # Transfer Exceptions
 # =============================================================================

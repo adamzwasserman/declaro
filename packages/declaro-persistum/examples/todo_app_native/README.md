@@ -17,41 +17,45 @@ A simple todo application demonstrating declaro_persistum with **native fluent S
 This demo uses the **native fluent SQL** API - declaro_persistum's built-in query builder:
 
 ```python
+from declaro_persistum import ConnectionPool
 from declaro_persistum.query import table, count_
 from declaro_persistum.loader import load_schema
 
 schema = load_schema("./schema")
-todos = table("todos", schema=schema)
+pool = await ConnectionPool.sqlite("./todos.db")
 
-# Select with where and order
+# Pool bound at table creation — no connection on the caller surface
+todos = table("todos", schema, pool)
+
+# Select with where and order — no conn parameter
 results = await (
     todos
     .select(todos.id, todos.title, todos.completed)
     .where(todos.completed == 0)
     .order_by(todos.created_at.desc())
-    .execute(conn)
+    .execute()
 )
 
 # Insert
-await todos.insert(id=todo_id, title=title, completed=0).execute(conn)
+await todos.insert(id=todo_id, title=title, completed=0).execute()
 
 # Update with where
 await (
     todos
     .update(completed=1)
     .where(todos.id == todo_id)
-    .execute(conn)
+    .execute()
 )
 
 # Delete with where
-await todos.delete().where(todos.id == todo_id).execute(conn)
+await todos.delete().where(todos.id == todo_id).execute()
 
 # Aggregate functions
 result = await (
     todos
     .select(count_(todos.id))
     .where(todos.completed == 0)
-    .execute_one(conn)
+    .execute_one()
 )
 ```
 

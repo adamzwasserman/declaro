@@ -7,7 +7,6 @@ Provides an immutable, fluent API for building DELETE queries.
 from typing import Any
 
 from declaro_persistum.query.builder import Query
-from declaro_persistum.query.executor import detect_dialect
 from declaro_persistum.query.table import (
     ColumnProxy,
     Condition,
@@ -19,7 +18,7 @@ from declaro_persistum.types import Schema
 class DeleteQuery:
     """Immutable DELETE query builder."""
 
-    __slots__ = ("_table", "_schema", "_where", "_returning", "_params")
+    __slots__ = ("_table", "_schema", "_where", "_returning", "_params", "_pool")
 
     def __init__(
         self,
@@ -28,12 +27,14 @@ class DeleteQuery:
         where: Condition | ConditionGroup | None = None,
         returning: list[str] | None = None,
         params: dict[str, Any] | None = None,
+        pool: Any = None,
     ):
         self._table = table
         self._schema = schema
         self._where = where
         self._returning = returning
         self._params = params or {}
+        self._pool = pool
 
     def where(self, condition: Condition | ConditionGroup) -> "DeleteQuery":
         """Add WHERE clause (returns new query)."""
@@ -43,6 +44,7 @@ class DeleteQuery:
             where=condition,
             returning=self._returning,
             params=self._params,
+            pool=self._pool,
         )
 
     def returning(self, *columns: ColumnProxy | str) -> "DeleteQuery":
@@ -59,6 +61,7 @@ class DeleteQuery:
             where=self._where,
             returning=ret_cols,
             params=self._params,
+            pool=self._pool,
         )
 
     def params(self, **kwargs: Any) -> "DeleteQuery":
@@ -69,6 +72,7 @@ class DeleteQuery:
             where=self._where,
             returning=self._returning,
             params={**self._params, **kwargs},
+            pool=self._pool,
         )
 
     def to_sql(self, dialect: str = "postgresql") -> tuple[str, dict[str, Any]]:
@@ -94,16 +98,14 @@ class DeleteQuery:
         sql, params = self.to_sql(dialect)
         return {"sql": sql, "params": params, "dialect": dialect}
 
-    async def execute(self, connection: Any) -> list[dict[str, Any]]:
+    async def execute(self) -> list[dict[str, Any]]:
         """Execute delete and return results (if RETURNING specified)."""
-        from declaro_persistum.query.executor import execute
+        from declaro_persistum.query.executor import execute_with_pool
 
-        dialect = detect_dialect(connection)
-        return await execute(self.to_query(dialect), connection)
+        return await execute_with_pool(self._pool, self.to_query, mode="all")
 
-    async def execute_one(self, connection: Any) -> dict[str, Any] | None:
+    async def execute_one(self) -> dict[str, Any] | None:
         """Execute delete and return single result (if RETURNING specified)."""
-        from declaro_persistum.query.executor import execute_one
+        from declaro_persistum.query.executor import execute_with_pool
 
-        dialect = detect_dialect(connection)
-        return await execute_one(self.to_query(dialect), connection)
+        return await execute_with_pool(self._pool, self.to_query, mode="one")

@@ -78,7 +78,7 @@ The domain core (types, differ, query/builder, abstractions) is exemplary honest
 | `applier/sqlite.py` | PARTIAL | `generate_operation_sql()` (line ~466) internally uses a `generators` dict mapping op names to functions -- this is honest. But the overall applier dispatch in `protocol.py` uses if/elif. |
 | `applier/protocol.py` | ~~VIOLATION~~ **FIXED** | Now uses dict-lookup dispatch: `APPLIERS: dict[str, type]`. |
 | `inspector/protocol.py` | ~~VIOLATION~~ **FIXED** | Now uses dict-lookup dispatch: `INSPECTORS: dict[str, type]`. |
-| `query/executor.py` | VIOLATION | `_prepare_query()` (lines 141-167), `_execute_fetch()` (lines 210-232), `_execute_fetch_one()` (lines 235-259), `_execute_fetch_scalar()` (lines 262-283), `_execute_update()` (lines 286-308) all dispatch on `conn_type` using if/elif/else chains. Each of these should be a dict mapping connection module names to handler functions. |
+| `query/executor.py` | ~~VIOLATION~~ **FIXED** | Now uses dict-lookup dispatch: `_DIALECT_MAP`, `_CONVERTERS`, `_FETCHERS`, `_UPDATERS` dicts in each function. No if/elif chains. |
 | `pydantic_loader.py` | COMPLIANT | `PYTHON_TO_SQL_TYPE` is a module-level dict mapping Python types to SQL types. Textbook honest dispatch. |
 | `check_compat.py` | VIOLATION | `generate_validator()` (lines 410-454) uses if/elif chain to dispatch on `ast.get("op")`. Should be `VALIDATORS = {"compare": _gen_compare_validator, "in": _gen_in_validator, ...}`. |
 | `abstractions/reconstruction.py` | PARTIAL | `get_reconstruction_columns()` dispatches on `op_type` via if/elif (lines 180-230). Should use a dict of handler functions. |
@@ -309,7 +309,7 @@ Using Pydantic models with `@table` decorator to declare database schemas is "Ty
 | `differ/ambiguity.py` | COMPLIANT | None |
 | `differ/extended.py` | COMPLIANT | None |
 | `query/builder.py` | COMPLIANT | None |
-| `query/executor.py` | PARTIAL | if/elif dispatch on connection type |
+| `query/executor.py` | **FIXED** | ~~if/elif dispatch~~ → dict-lookup dispatch (`_CONVERTERS`, `_FETCHERS`, `_UPDATERS`) |
 | `query/select.py` | PARTIAL | Class used for DSL (justified by Python idiom) |
 | `query/table.py` | PARTIAL | ~~Module-level mutable schema state~~; classes for operator overloading (global state removed) |
 | `query/__init__.py` | COMPLIANT | Clean re-exports |
@@ -377,12 +377,16 @@ The impure functions are concentrated in:
 - These are the system's core IP and follow every principle.
 
 ### Medium Risk (Refactor When Touching)
-- query/table.py (global schema state)
 - abstractions/pragma_compat.py and check_compat.py (module-level counters)
-- query/executor.py (if/elif dispatch)
-- pool.py (ABC hierarchy, but justified)
+- pool.py (plain class with NotImplementedError, ABC removed)
 
-### High Risk (Prioritize Refactoring)
-- applier/sqlite.py, postgresql.py, turso.py (stateless classes, massive duplication)
-- applier/protocol.py, inspector/protocol.py (if/elif factories)
-- inspector/sqlite.py, postgresql.py, turso.py (stateless classes, duplication)
+### Previously High Risk (Now Fixed)
+- ~~query/table.py (global schema state)~~ — `_default_schema` removed; `schema` and `pool` are required parameters
+- ~~query/executor.py (if/elif dispatch)~~ — now uses dict-lookup dispatch throughout
+- ~~applier/protocol.py, inspector/protocol.py (if/elif factories)~~ — now uses dict-lookup dispatch
+- ~~applier/sqlite.py, turso.py (stateless classes, duplication)~~ — now delegate to `applier/shared.py`
+- ~~inspector/sqlite.py, turso.py (stateless classes, duplication)~~ — now delegate to `inspector/shared.py`
+
+### Remaining Medium Risk
+- applier/postgresql.py — stateless class pattern, low priority to refactor
+- inspector/postgresql.py — stateless class; `_normalize_fk_action` moved to shared

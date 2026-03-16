@@ -1,15 +1,13 @@
-"""Integration tests for Turso (libSQL).
+"""Integration tests for Turso (pyturso).
 
 These tests can run against:
-1. Local libSQL file (default) - for CI/quick testing
+1. Local SQLite file via TursoPool (default) - for CI/quick testing
 2. Turso cloud database - set TEST_TURSO_URL and TEST_TURSO_AUTH_TOKEN
 """
 
 import os
 import tempfile
 import pytest
-
-import libsql_experimental as libsql
 
 
 # Determine test mode
@@ -20,36 +18,44 @@ USE_CLOUD = TURSO_URL and TURSO_TOKEN
 
 @pytest.fixture
 async def turso_connection():
-    """Create Turso/libSQL test connection."""
+    """Create Turso async connection via TursoPool."""
+    from declaro_persistum.pool import ConnectionPool
+
     if USE_CLOUD:
-        # Cloud Turso database with embedded replica
-        conn = libsql.connect(":memory:", sync_url=TURSO_URL, auth_token=TURSO_TOKEN)
-
-        # Clean up any existing test tables
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'test_%'"
+        pool = await ConnectionPool.turso(
+            "./db/test_integration.db",
+            remote_url=TURSO_URL,
         )
-        for row in cursor.fetchall():
-            conn.execute(f"DROP TABLE IF EXISTS {row[0]}")
+        async with pool.acquire() as conn:
+            # Clean up any existing test tables from prior runs
+            cursor = await conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'test_%'"
+            )
+            rows = await cursor.fetchall()
+            for row in rows:
+                await conn.execute(f"DROP TABLE IF EXISTS {row[0]}")
+            await conn.commit()
 
-        yield conn
+            yield conn
 
-        # Cleanup
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'test_%'"
-        )
-        for row in cursor.fetchall():
-            conn.execute(f"DROP TABLE IF EXISTS {row[0]}")
+            # Cleanup
+            cursor = await conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'test_%'"
+            )
+            rows = await cursor.fetchall()
+            for row in rows:
+                await conn.execute(f"DROP TABLE IF EXISTS {row[0]}")
+            await conn.commit()
 
     else:
-        # Local file-based libSQL (SQLite-compatible)
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
 
-        conn = libsql.connect(db_path)
-        yield conn
+        pool = await ConnectionPool.turso(db_path)
+        async with pool.acquire() as conn:
+            yield conn
 
-        # Cleanup
+        await pool.close()
         os.unlink(db_path)
 
 
@@ -57,26 +63,27 @@ class TestTursoInspector:
     """Integration tests for Turso inspector."""
 
     async def test_introspect_empty_database(self, turso_connection):
-        """Introspecting empty database returns empty dict."""
+        """No test_ tables exist before any are created."""
         from declaro_persistum.inspector.turso import TursoInspector
 
         inspector = TursoInspector()
         schema = await inspector.introspect(turso_connection)
+        test_tables = {k: v for k, v in schema.items() if k.startswith("test_")}
 
-        assert schema == {}
+        assert test_tables == {}
 
     async def test_introspect_simple_table(self, turso_connection):
         """Introspect a simple table."""
         from declaro_persistum.inspector.turso import TursoInspector
 
-        # Create a table (sync API)
-        turso_connection.execute("""
+        await turso_connection.execute("""
             CREATE TABLE test_users (
                 id INTEGER PRIMARY KEY,
                 email TEXT NOT NULL UNIQUE,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        await turso_connection.commit()
 
         inspector = TursoInspector()
         schema = await inspector.introspect(turso_connection)
@@ -91,15 +98,16 @@ class TestTursoInspector:
         """Introspect table with foreign key."""
         from declaro_persistum.inspector.turso import TursoInspector
 
-        turso_connection.execute(
+        await turso_connection.execute(
             "CREATE TABLE test_users (id INTEGER PRIMARY KEY)"
         )
-        turso_connection.execute("""
+        await turso_connection.execute("""
             CREATE TABLE test_orders (
                 id INTEGER PRIMARY KEY,
                 user_id INTEGER NOT NULL REFERENCES test_users(id) ON DELETE CASCADE
             )
         """)
+        await turso_connection.commit()
 
         inspector = TursoInspector()
         schema = await inspector.introspect(turso_connection)
@@ -136,20 +144,20 @@ class TestTursoApplier:
         assert result["success"] is True
         assert result["operations_applied"] == 1
 
-        # Verify table exists (sync API)
-        cursor = turso_connection.execute(
+        cursor = await turso_connection.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='test_table'"
         )
-        assert len(cursor.fetchall()) == 1
+        rows = await cursor.fetchall()
+        assert len(rows) == 1
 
     async def test_add_column(self, turso_connection):
         """Apply ADD COLUMN operation."""
         from declaro_persistum.applier.turso import TursoApplier
 
-        # Create table first (sync API)
-        turso_connection.execute(
+        await turso_connection.execute(
             "CREATE TABLE test_table (id INTEGER PRIMARY KEY)"
         )
+        await turso_connection.commit()
 
         applier = TursoApplier()
         operations = [
@@ -167,9 +175,9 @@ class TestTursoApplier:
 
         assert result["success"] is True
 
-        # Verify column exists (sync API)
-        cursor = turso_connection.execute("PRAGMA table_info('test_table')")
-        columns = [row[1] for row in cursor.fetchall()]
+        cursor = await turso_connection.execute("PRAGMA table_info('test_table')")
+        rows = await cursor.fetchall()
+        columns = [row[1] for row in rows]
         assert "email" in columns
 
 

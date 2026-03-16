@@ -223,7 +223,7 @@ dependencies = [
 all = [
     { name = "aiosqlite" },
     { name = "asyncpg" },
-    { name = "libsql-experimental" },
+    { name = "pyturso" },
 ]
 dev = [
     { name = "coverage" },
@@ -253,7 +253,12 @@ sqlite = [
     { name = "aiosqlite" },
 ]
 turso = [
-    { name = "libsql-experimental" },
+    { name = "pyturso" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "python-dotenv" },
 ]
 
 [package.metadata]
@@ -270,7 +275,6 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'examples'", specifier = ">=0.109.0" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.0.0" },
     { name = "jinja2", marker = "extra == 'examples'", specifier = ">=3.1.0" },
-    { name = "libsql-experimental", marker = "extra == 'turso'", specifier = ">=0.0.30" },
     { name = "mako", marker = "extra == 'examples'", specifier = ">=1.3.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
@@ -278,11 +282,15 @@ requires-dist = [
     { name = "pytest-bdd", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-timeout", marker = "extra == 'dev'", specifier = ">=2.2.0" },
     { name = "python-multipart", marker = "extra == 'examples'", specifier = ">=0.0.6" },
+    { name = "pyturso", marker = "extra == 'turso'", git = "https://github.com/tursodatabase/turso.git?subdirectory=bindings%2Fpython" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "tomli-w", specifier = ">=1.0.0" },
     { name = "uvicorn", marker = "extra == 'examples'", specifier = ">=0.27.0" },
 ]
 provides-extras = ["postgresql", "sqlite", "turso", "all", "dev", "examples"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "python-dotenv", specifier = ">=1.2.2" }]
 
 [[package]]
 name = "django"
@@ -466,24 +474,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/d6/49/3732b0e8424ae35ad5c3166d9dd5bcdae43ce98775e0867a716ff5868064/librt-0.7.4-cp314-cp314t-win32.whl", hash = "sha256:8a461f6456981d8c8e971ff5a55f2e34f4e60871e665d2f5fde23ee74dea4eeb", size = 40276, upload-time = "2025-12-15T16:52:27.54Z" },
     { url = "https://files.pythonhosted.org/packages/35/d6/d8823e01bd069934525fddb343189c008b39828a429b473fb20d67d5cd36/librt-0.7.4-cp314-cp314t-win_amd64.whl", hash = "sha256:721a7b125a817d60bf4924e1eec2a7867bfcf64cfc333045de1df7a0629e4481", size = 46772, upload-time = "2025-12-15T16:52:28.653Z" },
     { url = "https://files.pythonhosted.org/packages/36/e9/a0aa60f5322814dd084a89614e9e31139702e342f8459ad8af1984a18168/librt-0.7.4-cp314-cp314t-win_arm64.whl", hash = "sha256:76b2ba71265c0102d11458879b4d53ccd0b32b0164d14deb8d2b598a018e502f", size = 39724, upload-time = "2025-12-15T16:52:29.836Z" },
-]
-
-[[package]]
-name = "libsql-experimental"
-version = "0.0.55"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/53/14/d3eb81673e2096f38eb48f08e38b447f6f2fdc37a50bdb1810d4a225a7aa/libsql_experimental-0.0.55.tar.gz", hash = "sha256:34df13ad6da446e4ccede9b3803af40684da399c8f304848b54ea37e7111b249", size = 31954, upload-time = "2025-06-09T07:26:48.682Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/86/5d/27315a4287356d9d859e7702dda54146a560581f973f3efb6c65515ca7ad/libsql_experimental-0.0.55-cp311-cp311-macosx_10_12_x86_64.whl", hash = "sha256:213a0fb80117e5946f16cfc5e4d99fc961829bdb6ded3121ba94516a327d7b79", size = 4874679, upload-time = "2025-06-09T07:26:26.989Z" },
-    { url = "https://files.pythonhosted.org/packages/e9/ed/72132173b149933d539f00cd308d036d9de526db2dcb844912b9e7869101/libsql_experimental-0.0.55-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:c858f49a3270127f4f9e7b5835dde3e89c5df8eed375c9f17afd13d9d5723ed5", size = 4653222, upload-time = "2025-06-09T07:26:29.34Z" },
-    { url = "https://files.pythonhosted.org/packages/8f/e6/186db46aedf96edab9392c9a72e4e5e965616620e9c82efe0832c5a081bd/libsql_experimental-0.0.55-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:dacab03d6579c228e502833c30597af6a6d6b399d50debb482fc87e3b199e513", size = 5270078, upload-time = "2025-06-09T07:26:30.778Z" },
-    { url = "https://files.pythonhosted.org/packages/25/28/72e3bea3d9f28fbabcf11648d791f1f20fe42c288f58afdfbd978bd5500e/libsql_experimental-0.0.55-cp312-cp312-macosx_10_12_x86_64.whl", hash = "sha256:cffb9cd0c4bb39b37a5060ad492516c921ecbcc17ca7baa62c791d6753aa155b", size = 4881247, upload-time = "2025-06-09T07:26:32.335Z" },
-    { url = "https://files.pythonhosted.org/packages/17/ed/479f0908ccfdf1ccace798aac65480cb9514737fb37757daae0036ae6c7d/libsql_experimental-0.0.55-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:50312e354e739676885a9ea4000365538f3cec914d6b508a2206c3d33bea93a3", size = 4656349, upload-time = "2025-06-09T07:26:34.217Z" },
-    { url = "https://files.pythonhosted.org/packages/69/32/d84a47c7ab5332247be52065aaa6b22e4baae969b33af8daa99fb1a317bf/libsql_experimental-0.0.55-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:60d018dbad48f98ddee49d211618ab6309d4fa2a51beb8d9076de184d1cae9da", size = 5273739, upload-time = "2025-06-09T07:26:35.913Z" },
-    { url = "https://files.pythonhosted.org/packages/a0/9f/3589b9590ba948922bd200a02d754fa29e739da81a2953367e9283667a16/libsql_experimental-0.0.55-cp313-cp313-macosx_10_12_x86_64.whl", hash = "sha256:f3bfd7af2ca9d1ff8f8c7f7fce5f1a650bfe53c23b45658253480fe287283bae", size = 4881245, upload-time = "2025-06-09T07:26:37.382Z" },
-    { url = "https://files.pythonhosted.org/packages/37/cf/4aead944cb90f82ab1b61edc78dbe893420e8c4ceee19e1fdae775b1273d/libsql_experimental-0.0.55-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:b3476a78edb8f59aa6c571d6def1840fff8d263eb4bbc4b26b2afd7400cb9ba2", size = 4656348, upload-time = "2025-06-09T07:26:39.04Z" },
-    { url = "https://files.pythonhosted.org/packages/70/73/134dc2db0c3805f62953c85778bf93ac2f4a5ad81d49e592be990b012711/libsql_experimental-0.0.55-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:7a5dd325f87425546e0a7f0d460d4b6e1852bc4d4194a7b5ad127614ef8b3b10", size = 5273740, upload-time = "2025-06-09T07:26:40.597Z" },
-    { url = "https://files.pythonhosted.org/packages/a3/72/d958df309c1cf3baa816eb323dd49dbb0cb91b1cf0e29beea13aa1ade637/libsql_experimental-0.0.55-pp311-pypy311_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f12fdddea8987572e44eda7eef8f2ed7377c42ea43386bccaae43d001116bbc1", size = 5268646, upload-time = "2025-06-09T07:26:47.407Z" },
 ]
 
 [[package]]
@@ -850,12 +840,29 @@ wheels = [
 ]
 
 [[package]]
+name = "python-dotenv"
+version = "1.2.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/82/ed/0301aeeac3e5353ef3d94b6ec08bbcabd04a72018415dcb29e588514bba8/python_dotenv-1.2.2.tar.gz", hash = "sha256:2c371a91fbd7ba082c2c1dc1f8bf89ca22564a087c2c287cd9b662adde799cf3", size = 50135, upload-time = "2026-03-01T16:00:26.196Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0b/d7/1959b9648791274998a9c3526f6d0ec8fd2233e4d4acce81bbae76b44b2a/python_dotenv-1.2.2-py3-none-any.whl", hash = "sha256:1d8214789a24de455a8b8bd8ae6fe3c6b69a5e3d64aa8a8e5d68e694bbcb285a", size = 22101, upload-time = "2026-03-01T16:00:25.09Z" },
+]
+
+[[package]]
 name = "python-multipart"
 version = "0.0.21"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/78/96/804520d0850c7db98e5ccb70282e29208723f0964e88ffd9d0da2f52ea09/python_multipart-0.0.21.tar.gz", hash = "sha256:7137ebd4d3bbf70ea1622998f902b97a29434a9e8dc40eb203bbcf7c2a2cba92", size = 37196, upload-time = "2025-12-17T09:24:22.446Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/aa/76/03af049af4dcee5d27442f71b6924f01f3efb5d2bd34f23fcd563f2cc5f5/python_multipart-0.0.21-py3-none-any.whl", hash = "sha256:cf7a6713e01c87aa35387f4774e812c4361150938d20d232800f75ffcf266090", size = 24541, upload-time = "2025-12-17T09:24:21.153Z" },
+]
+
+[[package]]
+name = "pyturso"
+version = "0.6.0rc1"
+source = { git = "https://github.com/tursodatabase/turso.git?subdirectory=bindings%2Fpython#daabd9135af48ad1614b6cb691ab0107ce228242" }
+dependencies = [
+    { name = "typing-extensions" },
 ]
 
 [[package]]

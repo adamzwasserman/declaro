@@ -1,15 +1,18 @@
 """
-Turso (libSQL) migration applier implementation.
+Turso migration applier implementation.
 
-Turso uses libSQL which is SQLite-compatible, so the SQL generation
-is shared with SQLite via applier.shared module.
-Uses _maybe_await to support both sync (pyturso, libsql_experimental raw)
-and async (LibSQLAsyncConnection) connections.
+Turso is SQLite-compatible, so the SQL generation is shared with SQLite
+via applier.shared module.
+Connection handling uses TursoAsyncConnection (async wrapper over pyturso).
+
+Uses per-operation transactions: each operation gets its own BEGIN/COMMIT.
+Failed operations are logged and skipped so that one unsupported operation
+(e.g. ADD FOREIGN KEY) does not block valid ones (e.g. ADD COLUMN).
 """
 
+import logging
 from typing import Any, Literal
 
-from declaro_persistum.abstractions.pragma_compat import _maybe_await
 from declaro_persistum.applier.shared import (
     apply_reconstruction_changes,
     columns_from_pragma_rows,
@@ -18,19 +21,24 @@ from declaro_persistum.applier.shared import (
     generate_operation_sql,
     generate_sql,
     requires_reconstruction,
-    single_change_property,
 )
 from declaro_persistum.exceptions import MigrationError
 from declaro_persistum.types import ApplyResult, Operation
+
+logger = logging.getLogger(__name__)
 
 
 class TursoApplier:
     """
     Turso implementation of MigrationApplier protocol.
 
-    Turso/libSQL is SQLite-compatible. SQL generation is shared
-    with SQLite via applier.shared. Connection handling differs
-    (synchronous pyturso API, explicit BEGIN).
+    Turso is SQLite-compatible. SQL generation is shared
+    with SQLite via applier.shared. Connection handling uses
+    TursoAsyncConnection (async wrapper over pyturso).
+
+    Uses per-operation transactions so that unsupported operations
+    (e.g. ADD FOREIGN KEY on SQLite) fail independently without
+    blocking valid operations like ADD COLUMN.
     """
 
     def get_dialect(self) -> str:
@@ -38,8 +46,8 @@ class TursoApplier:
         return "turso"
 
     def get_transaction_mode(self) -> Literal["all_or_nothing", "per_operation"]:
-        """Turso (libSQL) supports transactional DDL."""
-        return "all_or_nothing"
+        """Per-operation: each op gets its own transaction."""
+        return "per_operation"
 
     async def apply(
         self,
@@ -48,64 +56,79 @@ class TursoApplier:
         execution_order: list[int],
         *,
         dry_run: bool = False,
+        target_schema: Any = None,
     ) -> ApplyResult:
         """
-        Apply migration operations within a transaction.
+        Apply migration operations asynchronously.
 
-        Turso/libSQL is SQLite-compatible with transactional DDL.
-        Uses per-operation execution with reconstruction for unsupported operations.
+        Each operation runs in its own transaction. Failed operations
+        are rolled back individually and skipped — remaining operations
+        continue. This prevents one unsupported operation from blocking
+        the entire migration batch.
+
+        Args:
+            connection: TursoAsyncConnection (async wrapper over pyturso)
+            operations: List of operations to apply
+            execution_order: Order to execute operations
+            dry_run: If True, only generate SQL without executing
+            target_schema: Target schema (used for enum value population)
         """
         if dry_run:
             return dry_run_preview(operations, execution_order)
 
         executed: list[str] = []
+        skipped: list[str] = []
 
-        try:
-            # Enable foreign keys and start transaction
-            await _maybe_await(connection.execute("PRAGMA foreign_keys = ON"))
+        for op_idx in execution_order:
+            operation = operations[op_idx]
+            op_desc = f"{operation['op']} on {operation.get('table', 'N/A')}"
 
-            # Per-operation execution
-            for op_idx in execution_order:
-                operation = operations[op_idx]
+            try:
+                await connection.execute("BEGIN")
 
+                if requires_reconstruction(operation):
+                    await self._execute_with_reconstruction(connection, operation)
+                    executed.append(f"Table reconstruction for {operation['table']}")
+                else:
+                    sql = generate_operation_sql(operation)
+                    for statement in sql.split(";"):
+                        statement = statement.strip()
+                        if statement:
+                            await connection.execute(statement)
+                    executed.append(sql)
+
+                for insert_sql in enum_population_sql(operation, target_schema):
+                    await connection.execute(insert_sql)
+                    executed.append(insert_sql)
+
+                await connection.commit()
+                logger.info(f"Applied: {op_desc}")
+
+            except Exception as e:
                 try:
-                    if requires_reconstruction(operation):
-                        await self._execute_with_reconstruction(connection, operation)
-                        executed.append(f"Table reconstruction for {operation['table']}")
-                    else:
-                        sql = generate_operation_sql(operation)
-                        for statement in sql.split(";"):
-                            statement = statement.strip()
-                            if statement:
-                                await _maybe_await(connection.execute(statement))
-                        executed.append(sql)
+                    await connection.rollback()
+                except Exception:
+                    pass
+                skip_msg = f"{op_desc}: {e}"
+                skipped.append(skip_msg)
+                logger.warning(f"Skipped unsupported operation: {skip_msg}")
 
-                except Exception as e:
-                    await _maybe_await(connection.rollback())
-                    raise MigrationError(
-                        f"Failed to execute operation",
-                        operation=operation,
-                        original_error=e,
-                    ) from e
+        success = len(executed) > 0 or len(skipped) == 0
+        error_msg = None
+        if skipped:
+            error_msg = f"{len(skipped)} operation(s) skipped: {'; '.join(skipped)}"
+            if executed:
+                logger.info(
+                    f"Migration partial: {len(executed)} applied, {len(skipped)} skipped"
+                )
 
-            await _maybe_await(connection.commit())
-
-            return {
-                "success": True,
-                "executed_sql": executed,
-                "operations_applied": len(executed),
-                "error": None,
-                "error_operation": None,
-            }
-
-        except MigrationError:
-            raise
-        except Exception as e:
-            await _maybe_await(connection.rollback())
-            raise MigrationError(
-                f"Migration failed: {e}",
-                original_error=e,
-            ) from e
+        return {
+            "success": success,
+            "executed_sql": executed,
+            "operations_applied": len(executed),
+            "error": error_msg,
+            "error_operation": None,
+        }
 
     async def _execute_with_reconstruction(
         self, connection: Any, operation: Operation
@@ -115,39 +138,111 @@ class TursoApplier:
 
         Fresh introspection → pure column transform → async reconstruction.
         """
-        from declaro_persistum.abstractions.table_reconstruction import (
-            _get_full_table_schema,
-            alter_column_default,
-            alter_column_nullability,
-            alter_column_type,
-            reconstruct_table,
-        )
+        from declaro_persistum.abstractions.reconstruction import execute_reconstruction_async
 
         table = operation["table"]
 
-        # Fresh introspection for current state (includes FKs + unique constraints)
-        columns = await _get_full_table_schema(connection, table)
+        cursor = await connection.execute(f"PRAGMA table_info('{table}')")
+        rows = await cursor.fetchall()
+        columns = columns_from_pragma_rows(rows)
 
-        # Apply reconstruction changes (pure)
         columns = apply_reconstruction_changes(columns, operation)
 
-        # Use specialized functions for single-property alter_column changes
-        single = single_change_property(operation)
-        if single is not None:
-            change_key, val = single
-            column = operation["details"]["column"]
-            _SPECIALIZED = {
-                "nullable": alter_column_nullability,
-                "type": alter_column_type,
-                "default": alter_column_default,
-            }
-            handler = _SPECIALIZED.get(change_key)
-            if handler is not None:
-                await handler(connection, table, column, val)
-                return
+        await execute_reconstruction_async(connection, table, columns)
 
-        # General reconstruction
-        await reconstruct_table(connection, table, columns)
+    def apply_sync(
+        self,
+        connection: Any,
+        operations: list[Operation],
+        execution_order: list[int],
+        *,
+        dry_run: bool = False,
+        target_schema: Any = None,
+    ) -> ApplyResult:
+        """
+        Apply migration operations synchronously (raw sync connection).
+
+        Per-operation transactions, same as async apply().
+
+        Args:
+            connection: Raw sync pyturso connection
+            operations: List of operations to apply
+            execution_order: Order to execute operations
+            dry_run: If True, only generate SQL without executing
+            target_schema: Target schema (used for enum value population)
+        """
+        if dry_run:
+            return dry_run_preview(operations, execution_order)
+
+        executed: list[str] = []
+        skipped: list[str] = []
+
+        for op_idx in execution_order:
+            operation = operations[op_idx]
+            op_desc = f"{operation['op']} on {operation.get('table', 'N/A')}"
+
+            try:
+                connection.execute("BEGIN")
+
+                if requires_reconstruction(operation):
+                    self._execute_with_reconstruction_sync(connection, operation)
+                    executed.append(f"Table reconstruction for {operation['table']}")
+                else:
+                    sql = generate_operation_sql(operation)
+                    for statement in sql.split(";"):
+                        statement = statement.strip()
+                        if statement:
+                            connection.execute(statement)
+                    executed.append(sql)
+
+                for insert_sql in enum_population_sql(operation, target_schema):
+                    connection.execute(insert_sql)
+                    executed.append(insert_sql)
+
+                connection.commit()
+                logger.info(f"Applied: {op_desc}")
+
+            except Exception as e:
+                try:
+                    connection.rollback()
+                except Exception:
+                    pass
+                skip_msg = f"{op_desc}: {e}"
+                skipped.append(skip_msg)
+                logger.warning(f"Skipped unsupported operation: {skip_msg}")
+
+        success = len(executed) > 0 or len(skipped) == 0
+        error_msg = None
+        if skipped:
+            error_msg = f"{len(skipped)} operation(s) skipped: {'; '.join(skipped)}"
+            if executed:
+                logger.info(
+                    f"Migration partial: {len(executed)} applied, {len(skipped)} skipped"
+                )
+
+        return {
+            "success": success,
+            "executed_sql": executed,
+            "operations_applied": len(executed),
+            "error": error_msg,
+            "error_operation": None,
+        }
+
+    def _execute_with_reconstruction_sync(
+        self, connection: Any, operation: Operation
+    ) -> None:
+        """Execute table reconstruction synchronously (raw sync connection)."""
+        from declaro_persistum.abstractions.reconstruction import execute_reconstruction_sync
+
+        table = operation["table"]
+
+        cursor = connection.execute(f"PRAGMA table_info('{table}')")
+        rows = cursor.fetchall()
+        columns = columns_from_pragma_rows(rows)
+
+        columns = apply_reconstruction_changes(columns, operation)
+
+        execute_reconstruction_sync(connection, table, columns)
 
     def generate_sql(
         self,

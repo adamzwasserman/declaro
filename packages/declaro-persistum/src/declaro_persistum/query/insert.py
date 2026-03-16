@@ -7,7 +7,6 @@ Provides an immutable, fluent API for building INSERT queries.
 from typing import Any
 
 from declaro_persistum.query.builder import Query
-from declaro_persistum.query.executor import detect_dialect
 from declaro_persistum.query.table import ColumnProxy, SQLFunction
 from declaro_persistum.types import Schema
 
@@ -23,6 +22,7 @@ class InsertQuery:
         "_returning",
         "_on_conflict",
         "_params",
+        "_pool",
     )
 
     def __init__(
@@ -34,6 +34,7 @@ class InsertQuery:
         returning: list[str] | None = None,
         on_conflict: str | None = None,
         params: dict[str, Any] | None = None,
+        pool: Any = None,
     ):
         self._table = table
         self._schema = schema
@@ -42,6 +43,7 @@ class InsertQuery:
         self._returning = returning
         self._on_conflict = on_conflict
         self._params = params or {}
+        self._pool = pool
 
         # Validate column names against schema
         for col_name in values:
@@ -67,6 +69,7 @@ class InsertQuery:
             returning=ret_cols,
             on_conflict=self._on_conflict,
             params=self._params,
+            pool=self._pool,
         )
 
     def on_conflict(self, clause: str) -> "InsertQuery":
@@ -79,6 +82,7 @@ class InsertQuery:
             returning=self._returning,
             on_conflict=clause,
             params=self._params,
+            pool=self._pool,
         )
 
     def params(self, **kwargs: Any) -> "InsertQuery":
@@ -91,6 +95,7 @@ class InsertQuery:
             returning=self._returning,
             on_conflict=self._on_conflict,
             params={**self._params, **kwargs},
+            pool=self._pool,
         )
 
     def to_sql(self, dialect: str = "postgresql") -> tuple[str, dict[str, Any]]:
@@ -137,19 +142,17 @@ class InsertQuery:
         sql, params = self.to_sql(dialect)
         return {"sql": sql, "params": params, "dialect": dialect}
 
-    async def execute(self, connection: Any) -> list[dict[str, Any]]:
+    async def execute(self) -> list[dict[str, Any]]:
         """Execute insert and return results (if RETURNING specified)."""
-        from declaro_persistum.query.executor import execute
+        from declaro_persistum.query.executor import execute_with_pool
 
-        dialect = detect_dialect(connection)
-        return await execute(self.to_query(dialect), connection)
+        return await execute_with_pool(self._pool, self.to_query, mode="all")
 
-    async def execute_one(self, connection: Any) -> dict[str, Any] | None:
+    async def execute_one(self) -> dict[str, Any] | None:
         """Execute insert and return single result (if RETURNING specified)."""
-        from declaro_persistum.query.executor import execute_one
+        from declaro_persistum.query.executor import execute_with_pool
 
-        dialect = detect_dialect(connection)
-        return await execute_one(self.to_query(dialect), connection)
+        return await execute_with_pool(self._pool, self.to_query, mode="one")
 
 
 def _translate_function(func: SQLFunction, dialect: str) -> str:

@@ -375,9 +375,9 @@ async def _connect(connection_string: str, dialect: str) -> Any:
         path = connection_string.replace("sqlite:///", "")
         return await aiosqlite.connect(path)
     elif dialect == "turso":
-        import libsql_experimental as libsql  # noqa: F401
+        import turso.aio
 
-        return await libsql.connect(connection_string)
+        return await turso.aio.connect(connection_string)
     else:
         raise ValueError(f"Unsupported dialect: {dialect}")
 

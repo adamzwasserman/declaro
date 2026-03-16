@@ -17,15 +17,18 @@ A simple todo application demonstrating declaro_persistum with **Prisma-style qu
 This demo uses **Prisma-style** queries:
 
 ```python
+from declaro_persistum import ConnectionPool
 from declaro_persistum.query.table import table
 from declaro_persistum.loader import load_schema
 
 schema = load_schema("./schema")
-todos = table("todos", schema=schema)
+pool = await ConnectionPool.sqlite("./todos.db")
 
-# Find many with where, order, pagination
+# Pool bound at table creation — no connection on the caller surface
+todos = table("todos", schema, pool)
+
+# Find many with where, order, pagination — no conn parameter
 active = await todos.prisma.find_many(
-    db,
     where={"completed": 0},
     order={"created_at": "desc"},
     take=10,
@@ -33,37 +36,33 @@ active = await todos.prisma.find_many(
 )
 
 # Find one by unique field
-todo = await todos.prisma.find_one(db, where={"id": todo_id})
+todo = await todos.prisma.find_one(where={"id": todo_id})
 
 # Find first matching
 first = await todos.prisma.find_first(
-    db,
     where={"completed": 0},
     order={"created_at": "desc"}
 )
 
 # Create
 new_todo = await todos.prisma.create(
-    db,
     data={"id": str(uuid4()), "title": "New task"}
 )
 
 # Update
 updated = await todos.prisma.update(
-    db,
     where={"id": todo_id},
     data={"completed": True}
 )
 
 # Delete
-deleted = await todos.prisma.delete(db, where={"id": todo_id})
+deleted = await todos.prisma.delete(where={"id": todo_id})
 
 # Count
-count = await todos.prisma.count(db, where={"completed": 0})
+count = await todos.prisma.count(where={"completed": 0})
 
 # Upsert
 result = await todos.prisma.upsert(
-    db,
     where={"id": todo_id},
     create={"id": todo_id, "title": "New"},
     update={"title": "Updated"}

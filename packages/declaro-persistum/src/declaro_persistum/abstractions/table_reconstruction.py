@@ -110,9 +110,8 @@ async def reconstruct_table(
         if fk_enabled:
             await connection.execute("PRAGMA foreign_keys = ON")
 
-            # Verify foreign key constraints (all tables — catches incoming FK
-            # references from other tables that may now be dangling)
-            check_cursor = await connection.execute("PRAGMA foreign_key_check")
+            # Verify foreign key constraints
+            check_cursor = await connection.execute(f'PRAGMA foreign_key_check("{table_name}")')
             violations = await check_cursor.fetchall()
             if violations:
                 raise ValueError(
@@ -249,48 +248,58 @@ async def _get_full_table_schema(connection: Any, table_name: str) -> dict[str, 
     """
     Extract full column schema from existing table.
 
-    Reads columns from PRAGMA table_info AND foreign keys from
-    PRAGMA foreign_key_list, merging FK data into column definitions.
-
-    Returns dict mapping column name to Column definition.
+    Returns dict mapping column name to Column definition, including
+    UNIQUE constraints and foreign key references.
     """
     from declaro_persistum.abstractions.pragma_compat import (
-        pragma_foreign_key_list,
-        pragma_index_info,
-        pragma_index_list,
         pragma_table_info,
-    )
-    from declaro_persistum.inspector.shared import (
-        apply_unique_columns,
-        columns_from_pragma_rows,
-        fk_list_from_pragma_rows,
-        unique_cols_from_index_rows,
+        pragma_index_list,
+        pragma_foreign_key_list,
     )
 
-    # Columns (type, nullable, default, pk)
     rows = await pragma_table_info(connection, table_name)
-    columns = columns_from_pragma_rows(rows)
+    columns: dict[str, Column] = {}
 
-    # Unique constraints from indexes
-    index_rows = await pragma_index_list(connection, table_name)
-    index_info: dict[str, list[tuple]] = {}
-    for idx_row in index_rows:
-        idx_name = idx_row[1]
-        index_info[idx_name] = await pragma_index_info(connection, idx_name)
-    unique_cols = unique_cols_from_index_rows(index_rows, index_info)
-    apply_unique_columns(columns, unique_cols)
+    for row in rows:
+        cid, name, type_str, notnull, dflt_value, pk = row
 
-    # Foreign keys — merge into column defs
-    fk_rows = await pragma_foreign_key_list(connection, table_name)
-    fk_list = fk_list_from_pragma_rows(fk_rows)
-    for fk in fk_list:
-        col_name = fk["from"]
-        if col_name in columns:
-            columns[col_name]["references"] = f"{fk['table']}.{fk['to']}"
-            if fk.get("on_delete") and fk["on_delete"] != "NO ACTION":
-                columns[col_name]["on_delete"] = fk["on_delete"].lower()
-            if fk.get("on_update") and fk["on_update"] != "NO ACTION":
-                columns[col_name]["on_update"] = fk["on_update"].lower()
+        col_def: Column = {
+            "type": type_str or "TEXT",
+            "nullable": not bool(notnull),
+        }
+
+        if pk:
+            col_def["primary_key"] = True
+
+        if dflt_value is not None:
+            col_def["default"] = dflt_value
+
+        columns[name] = col_def
+
+    # Detect inline UNIQUE constraints (auto-generated indexes with origin='u')
+    index_list = await pragma_index_list(connection, table_name)
+    for idx_row in index_list:
+        # (seq, name, unique, origin, partial)
+        if idx_row[3] == "u" and idx_row[2]:
+            cursor = await connection.execute(f'PRAGMA index_info("{idx_row[1]}")')
+            idx_info = await cursor.fetchall()
+            if len(idx_info) == 1:  # Single-column unique constraint
+                col_name = idx_info[0][2]
+                if col_name in columns:
+                    columns[col_name]["unique"] = True  # type: ignore
+
+    # Detect foreign key constraints
+    fk_list = await pragma_foreign_key_list(connection, table_name)
+    for fk_row in fk_list:
+        # (id, seq, table, from, to, on_update, on_delete, match)
+        from_col, ref_table, ref_col = fk_row[3], fk_row[2], fk_row[4]
+        on_delete, on_update = fk_row[6], fk_row[5]
+        if from_col in columns:
+            columns[from_col]["references"] = f"{ref_table}.{ref_col}"  # type: ignore
+            if on_delete and on_delete.upper() not in ("NO ACTION", "NONE", ""):
+                columns[from_col]["on_delete"] = on_delete.lower()  # type: ignore
+            if on_update and on_update.upper() not in ("NO ACTION", "NONE", ""):
+                columns[from_col]["on_update"] = on_update.lower()  # type: ignore
 
     return columns
 

@@ -155,7 +155,7 @@ async def pragma_index_list(conn: Any, table: str) -> list[tuple]:
     except Exception as e:
         # Check if it's a "not supported" error
         error_msg = str(e).lower()
-        if "not supported" in error_msg or "no such pragma" in error_msg or "unknown" in error_msg:
+        if "not supported" in error_msg or "no such pragma" in error_msg or "unknown" in error_msg or "not a valid" in error_msg:
             logger.info(f"Emulating PRAGMA index_list for table '{table}' (native not supported)")
             _emulation_counters["index_list"] += 1
             _affected_tables.add(table)
@@ -245,7 +245,7 @@ async def pragma_index_info(conn: Any, index_name: str) -> list[tuple]:
     except Exception as e:
         # Check if it's a "not supported" error
         error_msg = str(e).lower()
-        if "not supported" in error_msg or "no such pragma" in error_msg or "unknown" in error_msg:
+        if "not supported" in error_msg or "no such pragma" in error_msg or "unknown" in error_msg or "not a valid" in error_msg:
             logger.info(f"Emulating PRAGMA index_info for index '{index_name}' (native not supported)")
             _emulation_counters["index_info"] += 1
             return await _emulate_index_info(conn, index_name)
@@ -379,7 +379,7 @@ async def pragma_foreign_key_list(conn: Any, table: str) -> list[tuple]:
     except Exception as e:
         # Check if it's a "not supported" error
         error_msg = str(e).lower()
-        if "not supported" in error_msg or "no such pragma" in error_msg or "unknown" in error_msg:
+        if "not supported" in error_msg or "no such pragma" in error_msg or "unknown" in error_msg or "not a valid" in error_msg:
             logger.info(f"Emulating PRAGMA foreign_key_list for table '{table}' (native not supported)")
             _emulation_counters["foreign_key_list"] += 1
             _affected_tables.add(table)
@@ -479,15 +479,15 @@ def _unquote(identifier: str) -> str:
 
 def _is_turso_connection(conn: Any) -> bool:
     """
-    Detect if connection is Turso (libsql) vs SQLite.
+    Detect if connection is Turso (pyturso) vs SQLite.
 
     This is a heuristic check based on connection type/module.
     """
     conn_type = type(conn).__name__
     conn_module = type(conn).__module__
 
-    # Check if it's libsql
-    if "libsql" in conn_module.lower():
+    # Check if it's turso
+    if "turso" in conn_module.lower():
         return True
 
     # aiosqlite is definitely SQLite

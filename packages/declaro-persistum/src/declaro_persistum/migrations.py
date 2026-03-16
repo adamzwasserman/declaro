@@ -1,27 +1,167 @@
 """
 Automatic schema migration support for declaro_persistum.
 
-Loads target schema from Pydantic models, introspects current database state,
-computes diff, and applies changes.
+Provides async migration functions that:
+1. Load target schema from Pydantic models
+2. Introspect current database state
+3. Compute diff and apply changes
+
+Uses a SHA-256 hash of the schema file to skip introspection when the schema
+hasn't changed since the last successful migration (skip-if-clean).
 
 Usage:
+    # Async
     await apply_migrations_async(pool, dialect, schema_path)
 """
 
+import hashlib
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Union
 
 from declaro_persistum.applier.protocol import create_applier
 from declaro_persistum.differ import diff
 from declaro_persistum.inspector.protocol import create_inspector
-from declaro_persistum.inspector.shared import normalize_schema_for_sqlite
 from declaro_persistum.pydantic_loader import load_models_from_module
 from declaro_persistum.abstractions.enums import expand_schema_enums
+from declaro_persistum.types import ApplyResult, Operation, Schema
 
-_SQLITE_DIALECTS = frozenset(("sqlite", "turso", "libsql"))
+META_TABLE = "_declaro_meta"
 
 logger = logging.getLogger(__name__)
+
+
+def _acquire_write_or_read(pool: Any) -> Any:
+    """Return pool.acquire_write(concurrent=False) if available, else pool.acquire().
+
+    DDL and hash writes must go through the write connection on pools
+    with split read/write paths (e.g. TursoPool) so that changes reach
+    the cloud primary rather than only the local replica file.
+
+    concurrent=False because DDL (CREATE TABLE, ALTER TABLE, etc.)
+    requires exclusive transactions — BEGIN CONCURRENT is rejected by
+    Turso for DDL statements.
+    """
+    if hasattr(pool, "acquire_write"):
+        return pool.acquire_write(concurrent=False)
+    return pool.acquire()
+
+
+# ---------------------------------------------------------------------------
+# Schema hash helpers (skip-if-clean)
+# ---------------------------------------------------------------------------
+
+
+def _compute_schema_hash(schema_path: Path) -> str:
+    """Compute SHA-256 hex digest of a schema file's contents (pure)."""
+    return hashlib.sha256(schema_path.read_bytes()).hexdigest()
+
+
+async def _ensure_meta_table(conn: Any) -> None:
+    """Create the _declaro_meta table if it doesn't exist."""
+    sql = (
+        f'CREATE TABLE IF NOT EXISTS "{META_TABLE}" ('
+        f"key TEXT PRIMARY KEY, "
+        f"value TEXT NOT NULL, "
+        f"updated_at TEXT NOT NULL"
+        f")"
+    )
+    if hasattr(conn, "fetch"):
+        # asyncpg
+        await conn.execute(sql)
+    else:
+        await conn.execute(sql, ())
+        await conn.commit()
+
+
+async def _get_stored_hash(conn: Any, schema_name: str) -> str | None:
+    """Get the stored schema hash from _declaro_meta. Returns None if missing."""
+    key = f"schema_hash:{schema_name}"
+    if hasattr(conn, "fetch"):
+        row = await conn.fetchrow(
+            f'SELECT value FROM "{META_TABLE}" WHERE key = $1', key
+        )
+        return row["value"] if row else None
+    else:
+        cursor = await conn.execute(
+            f'SELECT value FROM "{META_TABLE}" WHERE key = ?', (key,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else None
+
+
+async def _store_hash(conn: Any, schema_name: str, schema_hash: str) -> None:
+    """Store (upsert) the schema hash in _declaro_meta."""
+    key = f"schema_hash:{schema_name}"
+    now = datetime.now(UTC).isoformat()
+    if hasattr(conn, "fetch"):
+        await conn.execute(
+            f'INSERT INTO "{META_TABLE}" (key, value, updated_at) '
+            f"VALUES ($1, $2, $3) "
+            f"ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = $3",
+            key, schema_hash, now,
+        )
+    else:
+        await conn.execute(
+            f'INSERT INTO "{META_TABLE}" (key, value, updated_at) '
+            f"VALUES (?, ?, ?) "
+            f"ON CONFLICT (key) DO UPDATE SET "
+            f"value = excluded.value, updated_at = excluded.updated_at",
+            (key, schema_hash, now),
+        )
+        await conn.commit()
+
+
+async def _schema_is_clean(
+    conn: Any, schema_path: Path, schema_hash: str
+) -> bool:
+    """Check if schema file hash matches the stored hash (skip-if-clean).
+
+    A hash match alone is not sufficient: if the cloud DB was destroyed and
+    recreated, the local replica retains the stale hash while the cloud is
+    empty.  We guard against this by verifying that at least one user table
+    (anything other than ``_declaro_meta``) exists — unless the schema itself
+    defines zero tables (empty module), in which case an empty DB is expected.
+    """
+    try:
+        await _ensure_meta_table(conn)
+        stored = await _get_stored_hash(conn, schema_path.name)
+        if stored != schema_hash:
+            return False
+        # Hash matches — verify cloud DB is not empty (stale-hash guard).
+        # Skip this check for empty schemas (no tables defined).
+        has_tables = await _has_user_tables(conn)
+        if has_tables:
+            return True
+        # No user tables — only trust the hash if the schema file itself
+        # produces no tables (empty module).  Otherwise, the DB was likely
+        # destroyed and recreated.
+        try:
+            target = load_models_from_module(schema_path)
+            return len(target) == 0
+        except Exception:
+            return False
+    except Exception:
+        # Meta table doesn't exist or query failed — treat as dirty
+        return False
+
+
+async def _has_user_tables(conn: Any) -> bool:
+    """Return True if the database has at least one table besides _declaro_meta."""
+    sql = (
+        "SELECT name FROM sqlite_master "
+        "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != ?"
+    )
+    if hasattr(conn, "fetch"):
+        # asyncpg — use information_schema instead
+        rows = await conn.fetch(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+        )
+        return any(r["tablename"] != META_TABLE for r in rows)
+    cursor = await conn.execute(sql, (META_TABLE,))
+    row = await cursor.fetchone()
+    return row is not None
 
 
 async def apply_migrations_async(
@@ -30,6 +170,7 @@ async def apply_migrations_async(
     schema_path: Union[str, Path],
     *,
     expand_enums: bool = True,
+    force: bool = False,
 ) -> dict[str, Any]:
     """
     Apply automatic schema migrations asynchronously.
@@ -37,11 +178,15 @@ async def apply_migrations_async(
     Loads schema from Pydantic models, compares with actual database,
     and applies changes if differences are found.
 
+    Uses a SHA-256 hash of the schema file to skip introspection when
+    the schema hasn't changed since the last successful migration.
+
     Args:
         pool: The database connection pool (async)
-        dialect: Database dialect ('sqlite', 'turso', 'libsql', 'postgresql')
+        dialect: Database dialect ('sqlite', 'turso', 'postgresql')
         schema_path: Path to Python module containing Pydantic models
         expand_enums: Whether to expand Literal types to lookup tables (default True)
+        force: Bypass the skip-if-clean check and always run full introspection
 
     Returns:
         Dict with migration result:
@@ -49,6 +194,7 @@ async def apply_migrations_async(
         - operations_applied: int
         - tables_in_schema: int
         - tables_in_database: int
+        - skipped: bool (True if schema was clean and migration was skipped)
         - error: str | None
 
     Raises:
@@ -63,19 +209,41 @@ async def apply_migrations_async(
             "operations_applied": 0,
             "tables_in_schema": 0,
             "tables_in_database": 0,
+            "skipped": False,
             "error": f"Schema file not found: {schema_path}",
         }
+
+    # Skip-if-clean: compare schema file hash with stored hash
+    schema_hash = _compute_schema_hash(schema_path)
+
+    if not force:
+        async with pool.acquire() as conn:
+            if await _schema_is_clean(conn, schema_path, schema_hash):
+                logger.info(f"Schema unchanged (hash match) — skipping migration")
+                return {
+                    "success": True,
+                    "operations_applied": 0,
+                    "tables_in_schema": 0,
+                    "tables_in_database": 0,
+                    "skipped": True,
+                    "error": None,
+                }
 
     logger.info(f"Loading schema from {schema_path}")
     target_schema = load_models_from_module(schema_path)
 
     if not target_schema:
         logger.warning("No tables found in schema models")
+        # Store hash so next call skips
+        async with _acquire_write_or_read(pool) as conn:
+            await _ensure_meta_table(conn)
+            await _store_hash(conn, schema_path.name, schema_hash)
         return {
             "success": True,
             "operations_applied": 0,
             "tables_in_schema": 0,
             "tables_in_database": 0,
+            "skipped": False,
             "error": None,
         }
 
@@ -95,20 +263,21 @@ async def apply_migrations_async(
 
     logger.info(f"Introspected {len(current_schema)} tables from database")
 
-    # Normalize target schema types to match what SQLite introspection reports
-    if dialect in _SQLITE_DIALECTS:
-        target_schema = normalize_schema_for_sqlite(target_schema)
-
     # Compute diff
     diff_result = diff(current_schema, target_schema)
 
     if not diff_result["operations"]:
         logger.info("Schema is up to date - no migrations needed")
+        # Store hash so next call skips introspection
+        async with _acquire_write_or_read(pool) as conn:
+            await _ensure_meta_table(conn)
+            await _store_hash(conn, schema_path.name, schema_hash)
         return {
             "success": True,
             "operations_applied": 0,
             "tables_in_schema": len(target_schema),
             "tables_in_database": len(current_schema),
+            "skipped": False,
             "error": None,
         }
 
@@ -126,25 +295,33 @@ async def apply_migrations_async(
             "operations_applied": 0,
             "tables_in_schema": len(target_schema),
             "tables_in_database": len(current_schema),
+            "skipped": False,
             "error": f"Ambiguous changes: {diff_result['ambiguities']}",
         }
 
-    # Apply migrations
+    # Apply migrations — must use write connection so DDL reaches cloud
     applier = create_applier(dialect)
-    async with pool.acquire() as conn:
+    async with _acquire_write_or_read(pool) as conn:
         result = await applier.apply(
             conn, diff_result["operations"], diff_result["execution_order"]
         )
 
     if result["success"]:
         logger.info(f"Successfully applied {result['operations_applied']} migrations")
+        if result.get("error"):
+            logger.warning(f"Migration completed with warnings: {result['error']}")
         for sql in result["executed_sql"]:
             logger.debug(f"  Executed: {sql}")
+        # Store hash after successful migration
+        async with _acquire_write_or_read(pool) as conn:
+            await _ensure_meta_table(conn)
+            await _store_hash(conn, schema_path.name, schema_hash)
         return {
             "success": True,
             "operations_applied": result["operations_applied"],
             "tables_in_schema": len(target_schema),
             "tables_in_database": len(current_schema) + result["operations_applied"],
+            "skipped": False,
             "error": None,
         }
     else:
@@ -155,5 +332,6 @@ async def apply_migrations_async(
             "operations_applied": 0,
             "tables_in_schema": len(target_schema),
             "tables_in_database": len(current_schema),
+            "skipped": False,
             "error": error_msg,
         }

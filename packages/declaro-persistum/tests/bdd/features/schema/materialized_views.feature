@@ -1,5 +1,5 @@
 @bdd
-Feature: Materialized View Emulation for SQLite/Turso/LibSQL
+Feature: Materialized View Emulation for SQLite/Turso
   As a developer using declaro_persistum
   I want materialized views to work on SQLite/Turso
   So that I can cache expensive queries without changing my schema definition

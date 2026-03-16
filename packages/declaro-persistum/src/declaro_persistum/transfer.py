@@ -7,7 +7,7 @@ handling FK ordering, progress tracking, and resumability.
 Usage:
     result = await bulk_transfer(
         source_pool, target_pool,
-        "sqlite", "libsql",
+        "sqlite", "turso",
         schema_path="/path/to/models.py",
     )
 """
@@ -161,7 +161,7 @@ async def _ensure_progress_table(conn: Any, loader: BulkLoader) -> None:
         # asyncpg
         await conn.execute(_CREATE_PROGRESS_TABLE_SQL)
     else:
-        # DB-API 2.0 style (aiosqlite, turso, libsql)
+        # DB-API 2.0 style (aiosqlite, turso)
         await conn.execute(_CREATE_PROGRESS_TABLE_SQL, ())
         await conn.commit()
 

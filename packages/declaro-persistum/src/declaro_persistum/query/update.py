@@ -7,7 +7,6 @@ Provides an immutable, fluent API for building UPDATE queries.
 from typing import Any
 
 from declaro_persistum.query.builder import Query
-from declaro_persistum.query.executor import detect_dialect
 from declaro_persistum.query.table import (
     ColumnProxy,
     Condition,
@@ -49,7 +48,7 @@ def _translate_function(func: SQLFunction, dialect: str) -> str:
 class UpdateQuery:
     """Immutable UPDATE query builder."""
 
-    __slots__ = ("_table", "_schema", "_values", "_columns_def", "_where", "_returning", "_params")
+    __slots__ = ("_table", "_schema", "_values", "_columns_def", "_where", "_returning", "_params", "_pool")
 
     def __init__(
         self,
@@ -60,6 +59,7 @@ class UpdateQuery:
         where: Condition | ConditionGroup | None = None,
         returning: list[str] | None = None,
         params: dict[str, Any] | None = None,
+        pool: Any = None,
     ):
         self._table = table
         self._schema = schema
@@ -68,6 +68,7 @@ class UpdateQuery:
         self._where = where
         self._returning = returning
         self._params = params or {}
+        self._pool = pool
 
         # Validate column names against schema
         for col_name in values:
@@ -87,6 +88,7 @@ class UpdateQuery:
             where=condition,
             returning=self._returning,
             params=self._params,
+            pool=self._pool,
         )
 
     def returning(self, *columns: ColumnProxy | str) -> "UpdateQuery":
@@ -105,6 +107,7 @@ class UpdateQuery:
             where=self._where,
             returning=ret_cols,
             params=self._params,
+            pool=self._pool,
         )
 
     def params(self, **kwargs: Any) -> "UpdateQuery":
@@ -117,6 +120,7 @@ class UpdateQuery:
             where=self._where,
             returning=self._returning,
             params={**self._params, **kwargs},
+            pool=self._pool,
         )
 
     def to_sql(self, dialect: str = "postgresql") -> tuple[str, dict[str, Any]]:
@@ -159,16 +163,14 @@ class UpdateQuery:
         sql, params = self.to_sql(dialect)
         return {"sql": sql, "params": params, "dialect": dialect}
 
-    async def execute(self, connection: Any) -> list[dict[str, Any]]:
+    async def execute(self) -> list[dict[str, Any]]:
         """Execute update and return results (if RETURNING specified)."""
-        from declaro_persistum.query.executor import execute
+        from declaro_persistum.query.executor import execute_with_pool
 
-        dialect = detect_dialect(connection)
-        return await execute(self.to_query(dialect), connection)
+        return await execute_with_pool(self._pool, self.to_query, mode="all")
 
-    async def execute_one(self, connection: Any) -> dict[str, Any] | None:
+    async def execute_one(self) -> dict[str, Any] | None:
         """Execute update and return single result (if RETURNING specified)."""
-        from declaro_persistum.query.executor import execute_one
+        from declaro_persistum.query.executor import execute_with_pool
 
-        dialect = detect_dialect(connection)
-        return await execute_one(self.to_query(dialect), connection)
+        return await execute_with_pool(self._pool, self.to_query, mode="one")

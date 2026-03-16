@@ -2,7 +2,9 @@
 
 **Source**: `declaro_persistum_architecture_addendum.md`
 **Date**: 2025-12-14
-**Status**: Ready for Implementation
+**Status**: Phase 0 COMPLETE; Phases 1-5 pending
+
+> **Phase 0 (Query Builder Redesign) is fully implemented.** `table()` now requires `schema` and `pool` as required parameters. All `execute()` methods take no connection parameter — pool is bound at table creation.
 
 ---
 
@@ -79,31 +81,36 @@ Replace the string-based query builder with a schema-validated, dot-notation API
 #### API Design
 
 ```python
+from declaro_persistum import ConnectionPool
 from declaro_persistum.query import table
+from declaro_persistum.loader import load_schema
 
-# Load schema-aware table proxies
-users = table("users")
-orders = table("orders")
+# Pool is required — bound at table creation (Phase 0 is COMPLETE)
+schema = load_schema("./schema")
+pool = await ConnectionPool.postgresql("postgresql://localhost/mydb")
+users = table("users", schema, pool)
+orders = table("orders", schema, pool)
 
-# SELECT with dot notation
-query = (
+# SELECT with dot notation — no conn parameter
+results: list[dict[str, Any]] = await (
     users
     .select(users.id, users.email, users.name)
     .where(users.status == "active")
     .order_by(users.created_at.desc())
     .limit(10)
+    .execute()
 )
-results: list[dict[str, Any]] = await query.execute(conn)
 
 # SELECT single row
-user = await users.select(users.id, users.email).where(users.id == ":id").params(id=user_id).execute_one(conn)
+user = await users.select(users.id, users.email).where(users.id == ":id").params(id=user_id).execute_one()
 
 # SELECT with JOIN
-query = (
+results = await (
     orders
     .select(orders.id, orders.total, users.email)
     .join(users, on=orders.user_id == users.id)
     .where(orders.status == "pending")
+    .execute()
 )
 
 # INSERT
@@ -111,7 +118,7 @@ await (
     users
     .insert(email=":email", name=":name")
     .params(email="alice@example.com", name="Alice")
-    .execute(conn)
+    .execute()
 )
 
 # UPDATE
@@ -120,7 +127,7 @@ await (
     .update(name=":name", updated_at=now_())
     .where(users.id == ":id")
     .params(id=user_id, name="New Name")
-    .execute(conn)
+    .execute()
 )
 
 # DELETE
@@ -129,11 +136,11 @@ await (
     .delete()
     .where(users.id == ":id")
     .params(id=user_id)
-    .execute(conn)
+    .execute()
 )
 
 # Scalar query
-count = await users.select(count_("*")).where(users.status == "active").execute_scalar(conn)
+count = await users.select(count_("*")).where(users.status == "active").execute_scalar()
 ```
 
 #### Type Definitions

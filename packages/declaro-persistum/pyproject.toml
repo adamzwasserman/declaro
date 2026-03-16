@@ -25,7 +25,7 @@ dependencies = [
 [project.optional-dependencies]
 postgresql = ["asyncpg>=0.28.0"]
 sqlite = ["aiosqlite>=0.19.0"]
-turso = ["libsql-experimental>=0.0.30"]
+turso = ["pyturso>=0.5.1"]
 all = [
     "declaro_persistum[postgresql]",
     "declaro_persistum[sqlite]",
@@ -56,13 +56,16 @@ examples = [
 declaro = "declaro_persistum.cli.main:main"
 
 [project.urls]
-Homepage = "https://github.com/adam/declaro_persistum"
-Documentation = "https://github.com/adam/declaro_persistum#readme"
-Repository = "https://github.com/adam/declaro_persistum"
+Homepage = "https://github.com/adamzwasserman/declaro"
+Documentation = "https://github.com/adamzwasserman/declaro#readme"
+Repository = "https://github.com/adamzwasserman/declaro"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/declaro_persistum"]
@@ -122,4 +125,9 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "raise NotImplementedError",
     "@overload",
+]
+
+[dependency-groups]
+dev = [
+    "python-dotenv>=1.2.2",
 ]

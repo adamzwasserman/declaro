@@ -65,15 +65,15 @@ from declaro_persistum.loader import load_schema
 pool = await ConnectionPool.postgresql("postgresql://localhost/mydb")
 schema = load_schema("./schema")
 
-# Query with the fluent API
-users = table("users", schema=schema)
-async with pool.acquire() as conn:
-    results = await (
-        users
-        .select(users.id, users.email)
-        .where(users.status == "active")
-        .execute(conn)
-    )
+# Bind table to pool — no connection on the caller surface
+users = table("users", schema, pool)
+
+results = await (
+    users
+    .select(users.id, users.email)
+    .where(users.status == "active")
+    .execute()
+)
 
 await pool.close()
 ```
@@ -100,14 +100,18 @@ from declaro_persistum.loader import load_schema
 
 schema = load_schema("./schema")
 pool = await ConnectionPool.sqlite("./app.db")
-users = table("users", schema=schema)
 
+# Bind table to pool — pool is a required parameter
+users = table("users", schema, pool)
+
+# All query methods acquire connections internally
 async with pool.acquire() as conn:
     await conn.execute("CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT)")
     await conn.commit()
-    await users.insert(id=str(uuid4()), name="alice").execute(conn)
-    rows = await users.select().execute(conn)
-    print(rows)
+
+await users.insert(id=str(uuid4()), name="alice").execute()
+rows = await users.select().execute()
+print(rows)
 await pool.close()
 ```
 
@@ -142,32 +146,11 @@ pool = await ConnectionPool.libsql(
     auth_token="...",
 )
 
-# Use with any backend
-async with pool.acquire() as conn:
-    results = await users.select().execute(conn)
+# Bind table to pool, then execute without managing connections
+users = table("users", schema, pool)
+results = await users.select().execute()
 
 await pool.close()
-```
-
-### Synchronous Pools (for Testing)
-
-For tests that don't work well with async:
-
-```python
-from declaro_persistum import SyncConnectionPool
-
-# SQLite (uses stdlib sqlite3)
-pool = SyncConnectionPool.sqlite("./test.db")
-with pool.acquire() as conn:
-    conn.execute("SELECT 1")
-    conn.commit()
-pool.close()
-
-# Turso (pyturso)
-pool = SyncConnectionPool.turso("./test.db")
-
-# LibSQL (Turso cloud)
-pool = SyncConnectionPool.libsql("libsql://...", auth_token="...")
 ```
 
 ### Schema-Validated Queries
@@ -175,7 +158,7 @@ pool = SyncConnectionPool.libsql("libsql://...", auth_token="...")
 Typos caught at build time, not runtime:
 
 ```python
-users = table("users", schema=schema)
+users = table("users", schema, pool)
 users.emial  # AttributeError: Table 'users' has no column 'emial'
 ```
 
@@ -214,15 +197,74 @@ Adding or removing enum values is handled automatically during migrations.
 Choose the API that feels natural:
 
 ```python
+# All styles — pool bound at table creation, no conn on caller surface
+
 # Native fluent API
-results = await users.select().where(users.active == True).execute(conn)
+results = await users.select().where(users.active == True).execute()
 
 # Django-style
-results = await users.objects.filter(status="active").execute(conn)
+results = await users.objects.filter(status="active").all()
 
 # Prisma-style
 results = await users.prisma.find_many(where={"status": "active"})
 ```
+
+### Latency Instrumentation
+
+Record every query's duration, op type, and success/failure:
+
+```python
+pool = await ConnectionPool.libsql(
+    "libsql://your-db.turso.io",
+    auth_token="...",
+    instrumentation=True,
+    tier_label="project",
+    latency_sink="jsonl",
+    latency_path="./data/db_latency.jsonl",
+)
+```
+
+Or attach a callable sink (Prometheus, StatsD, etc.):
+
+```python
+pool = await ConnectionPool.sqlite("./app.db")
+pool.configure_instrumentation(
+    tier_label="my-app",
+    callable_sink=lambda record: metrics.record(record),
+)
+```
+
+Each record is a `LatencyRecord` dict: `ts`, `tier`, `op`, `duration_ms`, `success`, `sql`, `error`.
+Zero overhead when disabled — no timing, no allocations.
+
+### Optimistic Write Queue
+
+For high-latency backends (Turso Cloud writes can take 750–1100ms), the write queue returns data to the caller immediately while persisting in the background:
+
+```python
+pool = await ConnectionPool.libsql(
+    "libsql://your-db.turso.io",
+    auth_token="...",
+    instrumentation=True,
+    tier_label="project",
+    write_queue_path="./data/pending_writes.jsonl",
+    write_queue_threshold_ms=50.0,
+)
+
+users = table("users", schema, pool)
+
+# Returns immediately — write continues in background if >50ms
+await users.insert(id=new_id, name="alice").execute()
+
+# Reads merge pending queue entries so inserts appear instantly
+rows = await users.select().execute()
+```
+
+The queue is:
+- **Transparent**: callers see no API difference
+- **Durable**: pending writes survive restarts (JSONL persistence)
+- **Self-healing**: supervisor retries with exponential backoff, CRITICAL log after 6 hours
+- **Read-aware**: SELECT results include pending entries merged by primary key
 
 ## Supported Databases
 

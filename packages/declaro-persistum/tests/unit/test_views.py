@@ -335,28 +335,6 @@ class TestViewIntrospection:
         assert views["active_users"]["materialized"] is False
         assert "SELECT" in views["active_users"]["query"]
 
-    async def test_introspect_views_turso(self):
-        """Introspect views from Turso."""
-        from declaro_persistum.inspector.turso import TursoInspector
-
-        class MockCursor:
-            def __init__(self, rows):
-                self._rows = rows
-
-            def fetchall(self):
-                return self._rows
-
-        class MockConn:
-            def execute(self, query):
-                return MockCursor([
-                    ("active_users", "CREATE VIEW active_users AS SELECT * FROM users WHERE active = 1"),
-                ])
-
-        inspector = TursoInspector()
-        views = await inspector.introspect_views(MockConn())
-
-        assert "active_users" in views
-        assert views["active_users"]["materialized"] is False
 
 
 class TestViewDiff:

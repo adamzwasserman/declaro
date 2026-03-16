@@ -8,7 +8,6 @@ Provides a familiar interface for Django developers:
 from typing import TYPE_CHECKING, Any
 
 from declaro_persistum.query.builder import Query
-from declaro_persistum.query.executor import detect_dialect
 from declaro_persistum.query.table import (
     ColumnProxy,
     Condition,
@@ -40,7 +39,7 @@ class QuerySet:
         "_ordering",
         "_limit",
         "_offset",
-        "_connection",
+        "_pool",
     )
 
     def __init__(
@@ -53,7 +52,7 @@ class QuerySet:
         ordering: list[OrderBy] | None = None,
         limit: int | None = None,
         offset: int | None = None,
-        connection: Any = None,
+        pool: Any = None,
     ):
         self._table_name = table_name
         self._schema = schema
@@ -63,7 +62,7 @@ class QuerySet:
         self._ordering = ordering or []
         self._limit = limit
         self._offset = offset
-        self._connection = connection
+        self._pool = pool
 
     def _clone(self, **kwargs: Any) -> "QuerySet":
         """Return a copy with updated attributes."""
@@ -76,7 +75,7 @@ class QuerySet:
             ordering=kwargs.get("ordering", list(self._ordering)),
             limit=kwargs.get("limit", self._limit),
             offset=kwargs.get("offset", self._offset),
-            connection=kwargs.get("connection", self._connection),
+            pool=kwargs.get("pool", self._pool),
         )
 
     def _kwargs_to_conditions(self, negate: bool = False, **kwargs: Any) -> list[Condition]:
@@ -196,10 +195,6 @@ class QuerySet:
     # Alias for Django compatibility
     order_by = order
 
-    def using(self, connection: Any) -> "QuerySet":
-        """Set the database connection to use."""
-        return self._clone(connection=connection)
-
     def __getitem__(self, key: Any) -> "QuerySet | dict[str, Any]":
         """
         Support slicing: queryset[:10], queryset[5:15], queryset[0]
@@ -267,32 +262,20 @@ class QuerySet:
         sql, params = self.to_sql(dialect)
         return {"sql": sql, "params": params, "dialect": dialect}
 
-    async def all(self, connection: Any | None = None) -> list[dict[str, Any]]:
+    async def all(self) -> list[dict[str, Any]]:
         """Execute query and return all results."""
-        from declaro_persistum.query.executor import execute
+        from declaro_persistum.query.executor import execute_with_pool
 
-        conn = connection or self._connection
-        if conn is None:
-            raise ValueError(
-                "No connection provided. Use .using(conn) or pass connection to .all()"
-            )
-        dialect = detect_dialect(conn)
-        return await execute(self.to_query(dialect), conn)
+        return await execute_with_pool(self._pool, self.to_query, mode="all")
 
-    async def first(self, connection: Any | None = None) -> dict[str, Any] | None:
+    async def first(self) -> dict[str, Any] | None:
         """Execute query and return first result or None."""
-        from declaro_persistum.query.executor import execute_one
+        from declaro_persistum.query.executor import execute_with_pool
 
-        conn = connection or self._connection
-        if conn is None:
-            raise ValueError(
-                "No connection provided. Use .using(conn) or pass connection to .first()"
-            )
         qs = self._clone(limit=1)
-        dialect = detect_dialect(conn)
-        return await execute_one(qs.to_query(dialect), conn)
+        return await execute_with_pool(self._pool, qs.to_query, mode="one")
 
-    async def get(self, connection: Any | None = None, **kwargs: Any) -> dict[str, Any]:
+    async def get(self, **kwargs: Any) -> dict[str, Any]:
         """
         Get a single object matching the given kwargs.
 
@@ -300,23 +283,17 @@ class QuerySet:
             DoesNotExist: If no object is found
             MultipleObjectsReturned: If more than one object is found
         """
+        from declaro_persistum.query.executor import execute_with_pool
+
         qs = self
         if kwargs:
             qs = qs.filter(**kwargs)
 
-        conn = connection or self._connection
-        if conn is None:
-            raise ValueError(
-                "No connection provided. Use .using(conn) or pass connection to .get()"
-            )
-
         # Fetch 2 to detect multiple results
         qs_limited = qs._clone(limit=2)
-        dialect = detect_dialect(conn)
-
-        from declaro_persistum.query.executor import execute
-
-        results: list[dict[str, Any]] = await execute(qs_limited.to_query(dialect), conn)
+        results: list[dict[str, Any]] = await execute_with_pool(
+            self._pool, qs_limited.to_query, mode="all"
+        )
 
         if len(results) == 0:
             raise DoesNotExist(f"{self._table_name} matching query does not exist")
@@ -325,40 +302,25 @@ class QuerySet:
 
         return results[0]
 
-    async def count(self, connection: Any | None = None) -> int:
+    async def count(self) -> int:
         """Return count of objects matching the query."""
-        from declaro_persistum.query.executor import execute_scalar
+        from declaro_persistum.query.executor import execute_with_pool
 
-        conn = connection or self._connection
-        if conn is None:
-            raise ValueError(
-                "No connection provided. Use .using(conn) or pass connection to .count()"
-            )
+        def _count_query(dialect: str) -> Query:
+            sql = f"SELECT COUNT(*) FROM {self._table_name}"
+            params: dict[str, Any] = {}
+            where_sql, where_params = self._build_where(dialect)
+            if where_sql:
+                sql += f" WHERE {where_sql}"
+                params.update(where_params)
+            return {"sql": sql, "params": params, "dialect": dialect}
 
-        dialect = detect_dialect(conn)
-
-        # Build count query
-        sql = f"SELECT COUNT(*) FROM {self._table_name}"
-        params: dict[str, Any] = {}
-
-        where_sql, where_params = self._build_where(dialect)
-        if where_sql:
-            sql += f" WHERE {where_sql}"
-            params.update(where_params)
-
-        query: Query = {"sql": sql, "params": params, "dialect": dialect}
-        result = await execute_scalar(query, conn)
+        result = await execute_with_pool(self._pool, _count_query, mode="scalar")
         return int(result) if result else 0
 
-    async def exists(self, connection: Any | None = None) -> bool:
+    async def exists(self) -> bool:
         """Return True if the query matches any objects."""
-        conn = connection or self._connection
-        if conn is None:
-            raise ValueError(
-                "No connection provided. Use .using(conn) or pass connection to .exists()"
-            )
-
-        result = await self._clone(limit=1).first(conn)
+        result = await self._clone(limit=1).first()
         return result is not None
 
     def values(self) -> "QuerySet":
