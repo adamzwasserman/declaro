@@ -1,11 +1,16 @@
 """
-Turso (libSQL) migration applier implementation.
+Turso migration applier implementation.
 
-Turso uses libSQL which is SQLite-compatible, so the SQL generation
-is shared with SQLite via applier.shared module.
-Connection handling uses LibSQLAsyncConnection (async wrapper over sync libsql_experimental).
+Turso is SQLite-compatible, so the SQL generation is shared with SQLite
+via applier.shared module.
+Connection handling uses TursoAsyncConnection (async wrapper over pyturso).
+
+Uses per-operation transactions: each operation gets its own BEGIN/COMMIT.
+Failed operations are logged and skipped so that one unsupported operation
+(e.g. ADD FOREIGN KEY) does not block valid ones (e.g. ADD COLUMN).
 """
 
+import logging
 from typing import Any, Literal
 
 from declaro_persistum.applier.shared import (
@@ -20,14 +25,20 @@ from declaro_persistum.applier.shared import (
 from declaro_persistum.exceptions import MigrationError
 from declaro_persistum.types import ApplyResult, Operation
 
+logger = logging.getLogger(__name__)
+
 
 class TursoApplier:
     """
     Turso implementation of MigrationApplier protocol.
 
-    Turso/libSQL is SQLite-compatible. SQL generation is shared
+    Turso is SQLite-compatible. SQL generation is shared
     with SQLite via applier.shared. Connection handling uses
-    LibSQLAsyncConnection (async wrapper over libsql_experimental).
+    TursoAsyncConnection (async wrapper over pyturso).
+
+    Uses per-operation transactions so that unsupported operations
+    (e.g. ADD FOREIGN KEY on SQLite) fail independently without
+    blocking valid operations like ADD COLUMN.
     """
 
     def get_dialect(self) -> str:
@@ -35,8 +46,8 @@ class TursoApplier:
         return "turso"
 
     def get_transaction_mode(self) -> Literal["all_or_nothing", "per_operation"]:
-        """Turso (libSQL) supports transactional DDL."""
-        return "all_or_nothing"
+        """Per-operation: each op gets its own transaction."""
+        return "per_operation"
 
     async def apply(
         self,
@@ -50,8 +61,13 @@ class TursoApplier:
         """
         Apply migration operations asynchronously.
 
+        Each operation runs in its own transaction. Failed operations
+        are rolled back individually and skipped — remaining operations
+        continue. This prevents one unsupported operation from blocking
+        the entire migration batch.
+
         Args:
-            connection: LibSQLAsyncConnection (async wrapper over libsql_experimental)
+            connection: TursoAsyncConnection (async wrapper over pyturso)
             operations: List of operations to apply
             execution_order: Order to execute operations
             dry_run: If True, only generate SQL without executing
@@ -61,55 +77,58 @@ class TursoApplier:
             return dry_run_preview(operations, execution_order)
 
         executed: list[str] = []
+        skipped: list[str] = []
 
-        try:
-            await connection.execute("BEGIN")
+        for op_idx in execution_order:
+            operation = operations[op_idx]
+            op_desc = f"{operation['op']} on {operation.get('table', 'N/A')}"
 
-            for op_idx in execution_order:
-                operation = operations[op_idx]
+            try:
+                await connection.execute("BEGIN")
 
+                if requires_reconstruction(operation):
+                    await self._execute_with_reconstruction(connection, operation)
+                    executed.append(f"Table reconstruction for {operation['table']}")
+                else:
+                    sql = generate_operation_sql(operation)
+                    for statement in sql.split(";"):
+                        statement = statement.strip()
+                        if statement:
+                            await connection.execute(statement)
+                    executed.append(sql)
+
+                for insert_sql in enum_population_sql(operation, target_schema):
+                    await connection.execute(insert_sql)
+                    executed.append(insert_sql)
+
+                await connection.commit()
+                logger.info(f"Applied: {op_desc}")
+
+            except Exception as e:
                 try:
-                    if requires_reconstruction(operation):
-                        await self._execute_with_reconstruction(connection, operation)
-                        executed.append(f"Table reconstruction for {operation['table']}")
-                    else:
-                        sql = generate_operation_sql(operation)
-                        for statement in sql.split(";"):
-                            statement = statement.strip()
-                            if statement:
-                                await connection.execute(statement)
-                        executed.append(sql)
-
-                    for insert_sql in enum_population_sql(operation, target_schema):
-                        await connection.execute(insert_sql)
-                        executed.append(insert_sql)
-
-                except Exception as e:
                     await connection.rollback()
-                    raise MigrationError(
-                        f"Failed to execute operation",
-                        operation=operation,
-                        original_error=e,
-                    ) from e
+                except Exception:
+                    pass
+                skip_msg = f"{op_desc}: {e}"
+                skipped.append(skip_msg)
+                logger.warning(f"Skipped unsupported operation: {skip_msg}")
 
-            await connection.commit()
+        success = len(executed) > 0 or len(skipped) == 0
+        error_msg = None
+        if skipped:
+            error_msg = f"{len(skipped)} operation(s) skipped: {'; '.join(skipped)}"
+            if executed:
+                logger.info(
+                    f"Migration partial: {len(executed)} applied, {len(skipped)} skipped"
+                )
 
-            return {
-                "success": True,
-                "executed_sql": executed,
-                "operations_applied": len(executed),
-                "error": None,
-                "error_operation": None,
-            }
-
-        except MigrationError:
-            raise
-        except Exception as e:
-            await connection.rollback()
-            raise MigrationError(
-                f"Migration failed: {e}",
-                original_error=e,
-            ) from e
+        return {
+            "success": success,
+            "executed_sql": executed,
+            "operations_applied": len(executed),
+            "error": error_msg,
+            "error_operation": None,
+        }
 
     async def _execute_with_reconstruction(
         self, connection: Any, operation: Operation
@@ -143,8 +162,10 @@ class TursoApplier:
         """
         Apply migration operations synchronously (raw sync connection).
 
+        Per-operation transactions, same as async apply().
+
         Args:
-            connection: Raw sync libsql_experimental or pyturso connection
+            connection: Raw sync pyturso connection
             operations: List of operations to apply
             execution_order: Order to execute operations
             dry_run: If True, only generate SQL without executing
@@ -154,55 +175,58 @@ class TursoApplier:
             return dry_run_preview(operations, execution_order)
 
         executed: list[str] = []
+        skipped: list[str] = []
 
-        try:
-            connection.execute("BEGIN")
+        for op_idx in execution_order:
+            operation = operations[op_idx]
+            op_desc = f"{operation['op']} on {operation.get('table', 'N/A')}"
 
-            for op_idx in execution_order:
-                operation = operations[op_idx]
+            try:
+                connection.execute("BEGIN")
 
+                if requires_reconstruction(operation):
+                    self._execute_with_reconstruction_sync(connection, operation)
+                    executed.append(f"Table reconstruction for {operation['table']}")
+                else:
+                    sql = generate_operation_sql(operation)
+                    for statement in sql.split(";"):
+                        statement = statement.strip()
+                        if statement:
+                            connection.execute(statement)
+                    executed.append(sql)
+
+                for insert_sql in enum_population_sql(operation, target_schema):
+                    connection.execute(insert_sql)
+                    executed.append(insert_sql)
+
+                connection.commit()
+                logger.info(f"Applied: {op_desc}")
+
+            except Exception as e:
                 try:
-                    if requires_reconstruction(operation):
-                        self._execute_with_reconstruction_sync(connection, operation)
-                        executed.append(f"Table reconstruction for {operation['table']}")
-                    else:
-                        sql = generate_operation_sql(operation)
-                        for statement in sql.split(";"):
-                            statement = statement.strip()
-                            if statement:
-                                connection.execute(statement)
-                        executed.append(sql)
-
-                    for insert_sql in enum_population_sql(operation, target_schema):
-                        connection.execute(insert_sql)
-                        executed.append(insert_sql)
-
-                except Exception as e:
                     connection.rollback()
-                    raise MigrationError(
-                        f"Failed to execute operation",
-                        operation=operation,
-                        original_error=e,
-                    ) from e
+                except Exception:
+                    pass
+                skip_msg = f"{op_desc}: {e}"
+                skipped.append(skip_msg)
+                logger.warning(f"Skipped unsupported operation: {skip_msg}")
 
-            connection.commit()
+        success = len(executed) > 0 or len(skipped) == 0
+        error_msg = None
+        if skipped:
+            error_msg = f"{len(skipped)} operation(s) skipped: {'; '.join(skipped)}"
+            if executed:
+                logger.info(
+                    f"Migration partial: {len(executed)} applied, {len(skipped)} skipped"
+                )
 
-            return {
-                "success": True,
-                "executed_sql": executed,
-                "operations_applied": len(executed),
-                "error": None,
-                "error_operation": None,
-            }
-
-        except MigrationError:
-            raise
-        except Exception as e:
-            connection.rollback()
-            raise MigrationError(
-                f"Migration failed: {e}",
-                original_error=e,
-            ) from e
+        return {
+            "success": success,
+            "executed_sql": executed,
+            "operations_applied": len(executed),
+            "error": error_msg,
+            "error_operation": None,
+        }
 
     def _execute_with_reconstruction_sync(
         self, connection: Any, operation: Operation

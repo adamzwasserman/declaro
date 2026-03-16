@@ -5,7 +5,7 @@ Records timing data for every execute() call through the pool.
 Zero overhead when disabled — no proxy wrapping, no timing, no logging.
 
 Usage:
-    pool = await ConnectionPool.libsql(
+    pool = await ConnectionPool.turso(
         url, auth_token=token,
         instrumentation=True,
         tier_label="project",

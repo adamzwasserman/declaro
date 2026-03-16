@@ -3,7 +3,7 @@ Bulk data loaders for cross-database transfer.
 
 Provides protocol + implementations for high-performance row reading/writing:
 - PostgreSQLBulkLoader: Uses asyncpg copy_records_to_table() for 10-100x faster writes
-- GenericBulkLoader: Uses executemany() for SQLite/Turso/LibSQL
+- GenericBulkLoader: Uses executemany() for SQLite/Turso
 
 Usage:
     loader = create_bulk_loader("postgresql")
@@ -161,7 +161,7 @@ class PostgreSQLBulkLoader:
 
 class GenericBulkLoader:
     """
-    Bulk loader for SQLite, Turso, and LibSQL using executemany().
+    Bulk loader for SQLite and Turso using executemany().
 
     Uses ORDER BY rowid for stable row ordering on reads.
     Works with any DB-API 2.0 compatible async connection wrapper.
@@ -237,7 +237,7 @@ def create_bulk_loader(dialect: str) -> BulkLoader:
     Factory function to create the appropriate bulk loader for a dialect.
 
     Args:
-        dialect: One of "postgresql", "sqlite", "turso", "libsql"
+        dialect: One of "postgresql", "sqlite", "turso"
 
     Returns:
         BulkLoader implementation for the specified dialect
@@ -247,10 +247,10 @@ def create_bulk_loader(dialect: str) -> BulkLoader:
     """
     if dialect == "postgresql":
         return PostgreSQLBulkLoader()  # type: ignore[return-value]
-    elif dialect in ("sqlite", "turso", "libsql"):
+    elif dialect in ("sqlite", "turso"):
         return GenericBulkLoader()  # type: ignore[return-value]
     else:
         raise ValueError(
             f"Unsupported dialect for bulk loading: {dialect}. "
-            f"Supported: postgresql, sqlite, turso, libsql"
+            f"Supported: postgresql, sqlite, turso"
         )

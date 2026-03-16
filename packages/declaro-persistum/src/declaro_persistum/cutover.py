@@ -15,7 +15,7 @@ decides when confidence is sufficient.
 Usage:
     mirror_pool = await begin_cutover(
         source_pool, target_pool,
-        "sqlite", "libsql",
+        "sqlite", "turso",
         schema_path="/path/to/models.py",
     )
 

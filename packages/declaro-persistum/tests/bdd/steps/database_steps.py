@@ -122,7 +122,7 @@ def when_insert_todo(bdd_context, title: str):
                     todo_id, title, False
                 )
             elif bdd_context.dialect == "turso":
-                # Turso uses sync libsql API with ? placeholders
+                # Turso uses sync pyturso API with ? placeholders
                 conn.execute(
                     "INSERT INTO todos (id, title, completed) VALUES (?, ?, ?)",
                     (todo_id, title, 0)
@@ -185,7 +185,7 @@ def when_query_completed(bdd_context):
                     (1,)
                 )
                 rows = cursor.fetchall()
-                # libsql returns tuples, need to convert to dicts
+                # turso returns tuples, need to convert to dicts
                 columns = ["id", "title", "completed"]
                 bdd_context.results = [dict(zip(columns, row)) for row in rows]
 

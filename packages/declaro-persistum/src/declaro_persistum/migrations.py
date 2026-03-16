@@ -33,14 +33,18 @@ logger = logging.getLogger(__name__)
 
 
 def _acquire_write_or_read(pool: Any) -> Any:
-    """Return pool.acquire_write() if available, else pool.acquire().
+    """Return pool.acquire_write(concurrent=False) if available, else pool.acquire().
 
     DDL and hash writes must go through the write connection on pools
-    with split read/write paths (e.g. LibSQLPool) so that changes reach
+    with split read/write paths (e.g. TursoPool) so that changes reach
     the cloud primary rather than only the local replica file.
+
+    concurrent=False because DDL (CREATE TABLE, ALTER TABLE, etc.)
+    requires exclusive transactions — BEGIN CONCURRENT is rejected by
+    Turso for DDL statements.
     """
     if hasattr(pool, "acquire_write"):
-        return pool.acquire_write()
+        return pool.acquire_write(concurrent=False)
     return pool.acquire()
 
 
@@ -179,7 +183,7 @@ async def apply_migrations_async(
 
     Args:
         pool: The database connection pool (async)
-        dialect: Database dialect ('sqlite', 'turso', 'libsql', 'postgresql')
+        dialect: Database dialect ('sqlite', 'turso', 'postgresql')
         schema_path: Path to Python module containing Pydantic models
         expand_enums: Whether to expand Literal types to lookup tables (default True)
         force: Bypass the skip-if-clean check and always run full introspection
@@ -304,6 +308,8 @@ async def apply_migrations_async(
 
     if result["success"]:
         logger.info(f"Successfully applied {result['operations_applied']} migrations")
+        if result.get("error"):
+            logger.warning(f"Migration completed with warnings: {result['error']}")
         for sql in result["executed_sql"]:
             logger.debug(f"  Executed: {sql}")
         # Store hash after successful migration

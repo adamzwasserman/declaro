@@ -11,7 +11,7 @@ is table reconstruction:
 
 This module provides:
 - Pure SQL generation functions (shared between sync/async)
-- Separate execution functions for async (SQLite, LibSQL) and sync (Turso Database/pyturso)
+- Separate execution functions for async (SQLite, Turso) and sync (Turso Database/pyturso)
 - Support for: alter_column, add_fk, drop_fk, drop_column operations
 - Fresh introspection before each reconstruction (no batching optimization)
 
@@ -261,7 +261,7 @@ def _apply_drop_foreign_key(columns: dict[str, Column], details: dict[str, Any])
 
 
 # =============================================================================
-# Async Execution (SQLite, LibSQL)
+# Async Execution (SQLite, Turso)
 # =============================================================================
 
 
@@ -279,7 +279,7 @@ async def execute_reconstruction_async(
     the current state (no caching/optimization across multiple operations).
 
     Args:
-        connection: Async database connection (aiosqlite, libsql_experimental)
+        connection: Async database connection (aiosqlite, pyturso)
         table_name: Name of table to reconstruct
         new_columns: New column definitions (full schema with FKs embedded)
         preserve_data: Whether to copy data from old table (default: True)

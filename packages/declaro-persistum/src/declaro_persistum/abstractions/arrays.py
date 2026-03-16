@@ -218,8 +218,8 @@ def array_reindex_sql(parent_table: str, column_name: str, dialect: str = "postg
     junction_name = f"{parent_table}_{column_name}"
     fk_column = f"{parent_table[:-1] if parent_table.endswith('s') else parent_table}_id"
 
-    if dialect in ("sqlite", "turso", "libsql"):
-        # SQLite/Turso/LibSQL version
+    if dialect in ("sqlite", "turso"):
+        # SQLite/Turso version
         return f"""UPDATE {junction_name}
 SET position = (
     SELECT COUNT(*) - 1

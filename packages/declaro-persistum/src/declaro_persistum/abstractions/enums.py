@@ -2,7 +2,7 @@
 Enum abstraction using lookup tables with foreign key constraints.
 
 Replaces CHECK constraints with FK references to lookup tables,
-ensuring compatibility across all backends (PostgreSQL, SQLite, Turso, LibSQL).
+ensuring compatibility across all backends (PostgreSQL, SQLite, Turso).
 
 Pattern:
     Literal["pending", "shipped", "delivered"]

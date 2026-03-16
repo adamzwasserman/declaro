@@ -1,7 +1,7 @@
-"""Integration tests for Turso (libSQL).
+"""Integration tests for Turso (pyturso).
 
 These tests can run against:
-1. Local libSQL file (default) - for CI/quick testing
+1. Local SQLite file via TursoPool (default) - for CI/quick testing
 2. Turso cloud database - set TEST_TURSO_URL and TEST_TURSO_AUTH_TOKEN
 """
 
@@ -18,13 +18,14 @@ USE_CLOUD = TURSO_URL and TURSO_TOKEN
 
 @pytest.fixture
 async def turso_connection():
-    """Create Turso/libSQL async connection via LibSQLPool."""
-    from declaro_persistum.pool import LibSQLPool
+    """Create Turso async connection via TursoPool."""
+    from declaro_persistum.pool import ConnectionPool
 
     if USE_CLOUD:
-        from declaro_persistum.pool import ConnectionPool
-
-        pool = await ConnectionPool.libsql(TURSO_URL, auth_token=TURSO_TOKEN)
+        pool = await ConnectionPool.turso(
+            "./db/test_integration.db",
+            remote_url=TURSO_URL,
+        )
         async with pool.acquire() as conn:
             # Clean up any existing test tables from prior runs
             cursor = await conn.execute(
@@ -50,12 +51,11 @@ async def turso_connection():
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
 
-        from declaro_persistum.pool import ConnectionPool
-
-        pool = await ConnectionPool.libsql(db_path)
+        pool = await ConnectionPool.turso(db_path)
         async with pool.acquire() as conn:
             yield conn
 
+        await pool.close()
         os.unlink(db_path)
 
 

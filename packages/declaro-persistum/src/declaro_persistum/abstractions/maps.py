@@ -98,8 +98,8 @@ def map_set_sql(parent_table: str, column_name: str, dialect: str = "postgresql"
     junction_name = f"{parent_table}_{column_name}"
     fk_column = f"{parent_table[:-1] if parent_table.endswith('s') else parent_table}_id"
 
-    if dialect in ("sqlite", "turso", "libsql"):
-        # SQLite/Turso/LibSQL use :value placeholder in UPDATE
+    if dialect in ("sqlite", "turso"):
+        # SQLite/Turso use :value placeholder in UPDATE
         return f"""INSERT INTO {junction_name} ({fk_column}, key, value)
 VALUES (:parent_id, :key, :value)
 ON CONFLICT ({fk_column}, key) DO UPDATE SET value = :value"""

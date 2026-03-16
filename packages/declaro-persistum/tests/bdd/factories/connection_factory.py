@@ -122,11 +122,11 @@ async def teardown_sqlite_schema(conn: Any, schema: Schema) -> None:
 
 
 # =============================================================================
-# Turso (libsql) Connection - Sync API
+# Turso Connection - Sync API
 # =============================================================================
 
 def setup_turso_schema(conn: Any, schema: Schema) -> None:
-    """Create tables in Turso/libsql from schema (sync API)."""
+    """Create tables in Turso from schema (sync API)."""
     for table_name, table_def in schema.items():
         columns = table_def.get("columns", {})
         col_defs = []
@@ -178,7 +178,7 @@ def setup_turso_schema(conn: Any, schema: Schema) -> None:
 
 
 def teardown_turso_schema(conn: Any, schema: Schema) -> None:
-    """Drop tables in Turso/libsql (sync API)."""
+    """Drop tables in Turso (sync API)."""
     for table_name in schema.keys():
         conn.execute(f"DROP TABLE IF EXISTS {table_name}")
     conn.commit()
@@ -263,8 +263,8 @@ class ConnectionFactory:
                 yield conn
         elif self.dialect == "turso":
             # Turso uses sync API
-            import libsql
-            conn = libsql.connect(get_turso_url(), auth_token=get_turso_auth_token())
+            import turso
+            conn = turso.connect(get_turso_url())
             try:
                 yield conn
             finally:
@@ -279,7 +279,7 @@ class ConnectionFactory:
         elif self.dialect == "postgresql":
             await setup_postgresql_schema(conn, schema)
         elif self.dialect == "turso":
-            # Turso uses sync libsql API with SQLite-like syntax
+            # Turso uses sync pyturso API with SQLite-like syntax
             setup_turso_schema(conn, schema)
 
     async def teardown_schema(self, conn: Any, schema: Schema) -> None:
@@ -289,7 +289,7 @@ class ConnectionFactory:
         elif self.dialect == "postgresql":
             await teardown_postgresql_schema(conn, schema)
         elif self.dialect == "turso":
-            # Turso uses sync libsql API
+            # Turso uses sync pyturso API
             teardown_turso_schema(conn, schema)
 
     @classmethod

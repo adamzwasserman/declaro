@@ -2,7 +2,7 @@
 Unit tests for the connection pool.
 
 Tests SQLite pool with in-memory database (no external dependencies).
-PostgreSQL, Turso, and LibSQL tests are integration tests that require real databases.
+PostgreSQL and Turso tests are integration tests that require real databases.
 """
 
 import asyncio
@@ -13,7 +13,6 @@ from declaro_persistum.pool import (
     SQLitePool,
     PostgreSQLPool,
     TursoPool,
-    LibSQLPool,
 )
 from declaro_persistum.exceptions import (
     PoolClosedError,
@@ -237,66 +236,6 @@ class TestTursoPool:
                 pass
 
 
-class TestLibSQLPool:
-    """Tests for LibSQL connection pool structure (Turso cloud)."""
-
-    def test_pool_initialization(self):
-        """LibSQLPool can be instantiated with sync_url and local_path."""
-        pool = LibSQLPool(
-            "libsql://db.turso.io",
-            "./db/test.db",
-            auth_token="secret",
-            max_size=5,
-            acquire_timeout=10.0,
-        )
-        assert pool._sync_url == "libsql://db.turso.io"
-        assert pool._local_path == "./db/test.db"
-        assert pool._auth_token == "secret"
-        assert pool._max_size == 5
-        assert pool._acquire_timeout == 10.0
-        assert not pool.closed
-
-    @pytest.mark.asyncio
-    async def test_pool_closed_before_use(self):
-        """Closing pool before use works."""
-        pool = LibSQLPool("libsql://localhost", "./db/test.db")
-        await pool.close()
-        assert pool.closed
-
-        with pytest.raises(PoolClosedError):
-            async with pool.acquire():
-                pass
-
-    def test_libsql_holder_uses_auto_commit(self, tmp_path):
-        """_LibSQLConnectionHolder.connect() uses isolation_level=None (auto-commit).
-
-        The local replica file is READ-ONLY — it is a pulled copy of the
-        Turso Cloud primary.  Any isolation_level other than None batches
-        writes into a local WAL transaction that is NEVER forwarded to
-        Turso Cloud.  commit() returns success but the write is silently
-        discarded when sync() overwrites local from remote.
-
-        With isolation_level=None each execute() is a direct HTTP call to
-        Turso Cloud.  Slow writes (cold-start ~10s) are handled by the
-        50ms write-race / write-queue in execute_with_pool.
-        """
-        import libsql
-
-        db_path = str(tmp_path / "test.db")
-        conn = libsql.connect(db_path, isolation_level=None)
-
-        assert conn.isolation_level is None
-
-        conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)")
-        conn.execute("INSERT INTO t VALUES (1, 'hello')")
-
-        cursor = conn.execute("SELECT COUNT(*) FROM t")
-        row = cursor.fetchone()
-        assert row[0] == 1
-
-        conn.close()
-
-
 class TestConnectionPoolFactory:
     """Tests for ConnectionPool factory methods."""
 
@@ -328,9 +267,6 @@ class TestConnectionPoolFactory:
         """ConnectionPool.turso() returns TursoPool type."""
         assert hasattr(ConnectionPool, "turso")
 
-    def test_libsql_returns_correct_type(self):
-        """ConnectionPool.libsql() returns LibSQLPool type."""
-        assert hasattr(ConnectionPool, "libsql")
 
 
 class TestPoolExceptions:

@@ -4,8 +4,7 @@ Unified connection pool for declaro_persistum.
 Provides a consistent async context manager API for:
 - PostgreSQL (asyncpg with native pooling)
 - SQLite (aiosqlite with semaphore-based limiting)
-- Turso (pyturso with semaphore-based limiting) - embedded SQLite-compatible DB
-- LibSQL (libsql) - Turso cloud connections
+- Turso (pyturso with semaphore-based limiting + optional cloud sync)
 
 Example:
     pool = await ConnectionPool.postgresql("postgresql://localhost/mydb")
@@ -49,9 +48,10 @@ class _TursoConnectionHolder:
     to enable push()/pull() cloud synchronisation.
     """
 
-    def __init__(self, database_path: str, remote_url: str | None = None) -> None:
+    def __init__(self, database_path: str, remote_url: str | None = None, auth_token: str | None = None) -> None:
         self.database_path = database_path
         self._remote_url = remote_url
+        self._auth_token = auth_token
         self.conn: Any = None
 
     # ------------------------------------------------------------------
@@ -66,6 +66,7 @@ class _TursoConnectionHolder:
             self.conn = await turso.aio.sync.connect(
                 self.database_path,
                 remote_url=self._remote_url,
+                auth_token=self._auth_token,
             )
         else:
             import turso.aio
@@ -138,7 +139,7 @@ class TursoAsyncConnection:
       run_in_executor so the sync driver never blocks the event loop.
     """
 
-    _declaro_dialect = "declaro_persistum.pool.async_libsql"
+    _declaro_dialect = "declaro_persistum.pool.turso"
 
     def __init__(
         self, holder: _TursoConnectionHolder, executor: ThreadPoolExecutor | None = None
@@ -348,6 +349,17 @@ class BasePool:
         queue.start_supervisor()
         self._write_queue = queue
 
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[Any]:
+        """No-op transaction passthrough until real transaction support ships.
+
+        Yields the pool itself.  Writes already go through acquire_write()
+        (auto-commit per statement for Turso) so a passthrough is
+        semantically correct for the current single-writer architecture.
+        Subclasses can override for real BEGIN/COMMIT semantics.
+        """
+        yield self
+
 
 class PostgreSQLPool(BasePool):
     """
@@ -524,302 +536,6 @@ class SQLitePool(BasePool):
         return self._max_size - self._active_connections
 
 
-class _LibSQLConnectionHolder:
-    """
-    Holds a libsql embedded replica connection on its creation thread.
-
-    Always uses embedded replica mode: a local SQLite file that syncs
-    from Turso Cloud. libsql provides a synchronous DB-API 2.0 interface.
-    """
-
-    def __init__(self, local_path: str, sync_url: str, auth_token: str | None) -> None:
-        import libsql
-
-        self._libsql = libsql
-        self.local_path = local_path
-        self.sync_url = sync_url
-        self.auth_token = auth_token
-        self.conn: Any = None
-
-    def connect(self) -> None:
-        """Open embedded replica connection (must be called on executor thread).
-
-        isolation_level=None (auto-commit) is required for writes to reach
-        Turso Cloud.
-
-        The local replica file is READ-ONLY — it is a pulled copy of the
-        Turso Cloud primary.  Any isolation_level other than None (DEFERRED,
-        IMMEDIATE) batches writes into a local WAL transaction that is NEVER
-        forwarded to Turso Cloud.  commit() returns success but the write is
-        silently discarded when the next sync() overwrites local from remote.
-
-        With isolation_level=None each execute() is a direct HTTP call to the
-        Turso Cloud primary.  The call may be slow on cold-start (~10s), but
-        this is handled by the 50ms write-race in _race_write / execute_with_pool:
-        the write continues in the background and the caller gets their data
-        back immediately from the write queue.
-        """
-        import os
-
-        os.makedirs(os.path.dirname(os.path.abspath(self.local_path)), exist_ok=True)
-        if self.auth_token:
-            self.conn = self._libsql.connect(
-                self.local_path,
-                sync_url=self.sync_url,
-                auth_token=self.auth_token,
-                isolation_level=None,
-            )
-        else:
-            self.conn = self._libsql.connect(
-                self.local_path,
-                sync_url=self.sync_url,
-                isolation_level=None,
-            )
-
-    def execute(self, sql: str, parameters: tuple) -> tuple[list, Any, int]:
-        cursor = self.conn.cursor()
-        cursor.execute(sql, parameters)
-        try:
-            rows = cursor.fetchall()
-        except Exception:
-            rows = []
-        return (rows, cursor.description, cursor.rowcount)
-
-    def executemany(self, sql: str, parameters: list) -> int:
-        cursor = self.conn.cursor()
-        cursor.executemany(sql, parameters)
-        return cursor.rowcount
-
-    def commit(self) -> None:
-        self.conn.commit()
-
-    def rollback(self) -> None:
-        self.conn.rollback()
-
-    def sync(self) -> None:
-        """Sync with Turso cloud then checkpoint WAL for aiosqlite readers.
-
-        sync() pulls remote writes into the local SQLite WAL.  Without a
-        subsequent WAL checkpoint the WAL pages are not merged into the main
-        database file, so aiosqlite connections opened after sync() still read
-        stale data from the main file.  PRAGMA wal_checkpoint(PASSIVE) is
-        non-blocking: it flushes WAL pages that have no active readers,
-        making them immediately visible to any standard SQLite client.
-        """
-        if hasattr(self.conn, "sync"):
-            try:
-                self.conn.sync()
-            except ValueError:
-                pass  # File-mode connections don't support sync — that's fine
-        try:
-            cursor = self.conn.cursor()
-            cursor.execute("PRAGMA wal_checkpoint(PASSIVE)")
-        except Exception:
-            pass  # Best-effort — don't let checkpoint failure block writes
-
-    def close(self) -> None:
-        """Close connection."""
-        if self.conn is not None:
-            self.conn.close()
-            self.conn = None
-
-
-class LibSQLAsyncConnection:
-    """
-    Async wrapper for libsql synchronous connections.
-
-    Provides an async interface by running sync operations in a
-    dedicated thread pool.
-    """
-
-    _declaro_dialect = "declaro_persistum.pool.async_libsql"
-
-    def __init__(self, holder: _LibSQLConnectionHolder, executor: ThreadPoolExecutor) -> None:
-        self._holder = holder
-        self._executor = executor
-        self._loop = asyncio.get_event_loop()
-        self._closed = False
-
-    async def execute(self, sql: str, parameters: tuple = ()) -> TursoAsyncCursor:
-        """Execute SQL and return an async cursor with pre-fetched results."""
-        rows, description, rowcount = await self._loop.run_in_executor(
-            self._executor, self._holder.execute, sql, parameters
-        )
-        return TursoAsyncCursor(rows, description, rowcount)
-
-    async def executemany(self, sql: str, parameters: list[tuple]) -> TursoAsyncCursor:
-        """Execute SQL with multiple parameter sets."""
-        rowcount = await self._loop.run_in_executor(
-            self._executor, self._holder.executemany, sql, parameters
-        )
-        return TursoAsyncCursor([], None, rowcount)
-
-    async def commit(self) -> None:
-        """Commit the current transaction and sync the local replica.
-
-        Embedded replicas write to Turso Cloud on commit() but reads come from
-        the local SQLite file. Without an immediate sync() after commit, reads
-        return stale pre-write data until the next connection is opened.
-        """
-        await self._loop.run_in_executor(self._executor, self._holder.commit)
-        await self.sync()
-
-    async def rollback(self) -> None:
-        """Rollback the current transaction."""
-        await self._loop.run_in_executor(self._executor, self._holder.rollback)
-
-    async def sync(self) -> None:
-        """Sync with Turso cloud."""
-        await self._loop.run_in_executor(self._executor, self._holder.sync)
-
-    async def close(self) -> None:
-        """Close the connection on its thread."""
-        if self._closed:
-            return
-        self._closed = True
-        await self._loop.run_in_executor(self._executor, self._holder.close)
-
-
-class LibSQLPool(BasePool):
-    """
-    LibSQL connection pool using libsql embedded replicas.
-
-    Always uses embedded replica mode: a local SQLite file synced from
-    Turso Cloud. Reads are sub-millisecond (local SQLite). Writes go
-    through Turso Cloud and are applied locally.
-
-    Call ConnectionPool.libsql() to create — it performs the initial
-    sync from Turso Cloud before returning the pool.
-    """
-
-    @property
-    def dialect(self) -> str:
-        return "turso"
-
-    def __init__(
-        self,
-        sync_url: str,
-        local_path: str,
-        *,
-        auth_token: str | None = None,
-        max_size: int = 10,
-        acquire_timeout: float = 30.0,
-    ) -> None:
-        self._sync_url = sync_url
-        self._local_path = local_path
-        self._auth_token = auth_token
-        self._max_size = max_size
-        self._acquire_timeout = acquire_timeout
-        self._closed = False
-        self._active_connections = 0
-        # Write: single persistent libsql connection, serialized via lock
-        self._write_holder: _LibSQLConnectionHolder | None = None
-        self._write_executor: ThreadPoolExecutor | None = None
-        self._write_lock = asyncio.Lock()
-        # Read: concurrent aiosqlite connections against local SQLite file
-        self._read_semaphore = asyncio.Semaphore(max_size)
-
-    async def _initial_sync(self) -> None:
-        """Connect write connection and sync from Turso Cloud at pool startup."""
-        loop = asyncio.get_event_loop()
-        self._write_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="libsql-write")
-        self._write_holder = _LibSQLConnectionHolder(self._local_path, self._sync_url, self._auth_token)
-        await loop.run_in_executor(self._write_executor, self._write_holder.connect)
-        await loop.run_in_executor(self._write_executor, self._write_holder.sync)
-
-    @asynccontextmanager
-    async def acquire(self) -> AsyncIterator[Any]:
-        """Read connection: aiosqlite against local SQLite file. No network, concurrent."""
-        import aiosqlite
-
-        if self._closed:
-            raise PoolClosedError("Pool has been closed")
-
-        try:
-            async with asyncio.timeout(self._acquire_timeout):
-                await self._read_semaphore.acquire()
-        except TimeoutError as err:
-            raise PoolExhaustedError(
-                f"Timed out waiting for connection after {self._acquire_timeout}s"
-            ) from err
-
-        self._active_connections += 1
-        conn = await aiosqlite.connect(self._local_path)
-        try:
-            yield conn
-        finally:
-            self._active_connections -= 1
-            await conn.close()
-            self._read_semaphore.release()
-
-    @asynccontextmanager
-    async def acquire_write(self) -> AsyncIterator[LibSQLAsyncConnection]:
-        """Write connection: libsql with sync_url. Serialized — one write at a time."""
-        if self._closed:
-            raise PoolClosedError("Pool has been closed")
-
-        try:
-            async with asyncio.timeout(self._acquire_timeout):
-                await self._write_lock.acquire()
-        except TimeoutError as err:
-            raise PoolExhaustedError(
-                f"Timed out waiting for write connection after {self._acquire_timeout}s"
-            ) from err
-
-        async_conn = LibSQLAsyncConnection(self._write_holder, self._write_executor)  # type: ignore[arg-type]
-        try:
-            yield async_conn
-        finally:
-            self._write_lock.release()
-
-    async def sync(self) -> None:
-        """Sync local replica from Turso Cloud."""
-        if self._write_holder and self._write_executor:
-            loop = asyncio.get_event_loop()
-            async with self._write_lock:
-                await loop.run_in_executor(self._write_executor, self._write_holder.sync)
-
-    async def close(self, *, cleanup_local: bool = False) -> None:
-        """Close write connection and mark pool as closed.
-
-        Args:
-            cleanup_local: If True, remove the local replica file and its
-                WAL/SHM/info sidecars after closing.  Prevents stale files
-                from accumulating across pool lifecycles.
-        """
-        if self._write_queue is not None:
-            await self._write_queue.stop_supervisor()
-        self._closed = True
-        if self._write_holder and self._write_executor:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(self._write_executor, self._write_holder.close)
-            self._write_executor.shutdown(wait=False)
-        if cleanup_local and self._local_path:
-            import glob as _glob
-            import os as _os
-
-            for path in _glob.glob(f"{self._local_path}*"):
-                try:
-                    _os.remove(path)
-                except OSError:
-                    pass
-
-    @property
-    def closed(self) -> bool:
-        """Whether the pool has been closed."""
-        return self._closed
-
-    @property
-    def size(self) -> int:
-        """Maximum number of concurrent connections."""
-        return self._max_size
-
-    @property
-    def available(self) -> int:
-        """Number of available read connection slots."""
-        return self._max_size - self._active_connections
-
-
 class TursoPool(BasePool):
     """
     Turso connection pool using pyturso with optional cloud sync.
@@ -840,12 +556,14 @@ class TursoPool(BasePool):
         database_path: str,
         *,
         remote_url: str | None = None,
+        auth_token: str | None = None,
         max_size: int = 5,
         acquire_timeout: float = 30.0,
         push_interval_s: float = 1.0,
     ) -> None:
         self._database_path = database_path
         self._remote_url = remote_url
+        self._auth_token = auth_token
         self._max_size = max_size
         self._acquire_timeout = acquire_timeout
         self._push_interval_s = push_interval_s
@@ -858,7 +576,7 @@ class TursoPool(BasePool):
     async def _initialize(self) -> None:
         """Bootstrap from cloud (if remote_url) and configure journal mode."""
         self._write_holder = _TursoConnectionHolder(
-            self._database_path, self._remote_url
+            self._database_path, self._remote_url, self._auth_token
         )
         await self._write_holder.connect_async()
         if self._remote_url:
@@ -876,7 +594,10 @@ class TursoPool(BasePool):
                 logger.info("MVCC not available (got %s), using WAL — writes are still sub-ms", mode)
         except Exception:
             self._mvcc = False
-        await self._write_holder.conn.execute("PRAGMA cache_size = -256")
+        try:
+            await self._write_holder.conn.execute("PRAGMA cache_size = -256")
+        except Exception:
+            logger.debug("PRAGMA cache_size not supported — using default")
         await self._write_holder.conn.commit()
         if self._remote_url:
             self._push_task = asyncio.create_task(self._push_loop())
@@ -905,7 +626,7 @@ class TursoPool(BasePool):
                 f"Timed out waiting for connection after {self._acquire_timeout}s"
             ) from err
 
-        holder = _TursoConnectionHolder(self._database_path, self._remote_url)
+        holder = _TursoConnectionHolder(self._database_path, self._remote_url, self._auth_token)
         async_conn = None
 
         try:
@@ -925,15 +646,20 @@ class TursoPool(BasePool):
             self._semaphore.release()
 
     @asynccontextmanager
-    async def acquire_write(self) -> AsyncIterator[TursoAsyncConnection]:
-        """Acquire a write connection. Uses BEGIN CONCURRENT when MVCC is available."""
+    async def acquire_write(self, *, concurrent: bool = True) -> AsyncIterator[TursoAsyncConnection]:
+        """Acquire a write connection.
+
+        Args:
+            concurrent: Use BEGIN CONCURRENT when MVCC is available (default True).
+                        Pass False for DDL operations which require exclusive transactions.
+        """
         if self._closed:
             raise PoolClosedError("Pool has been closed")
 
-        holder = _TursoConnectionHolder(self._database_path, self._remote_url)
+        holder = _TursoConnectionHolder(self._database_path, self._remote_url, self._auth_token)
         await holder.connect_async()
         async_conn = TursoAsyncConnection(holder)
-        if getattr(self, "_mvcc", False):
+        if concurrent and getattr(self, "_mvcc", False):
             await async_conn.execute("BEGIN CONCURRENT")
         try:
             yield async_conn
@@ -996,11 +722,11 @@ class ConnectionPool:
         # SQLite
         pool = await ConnectionPool.sqlite("./app.db")
 
-        # Turso (embedded, using pyturso)
+        # Turso (local)
         pool = await ConnectionPool.turso("./app.db")
 
-        # LibSQL (Turso cloud)
-        pool = await ConnectionPool.libsql("libsql://db.turso.io", auth_token="...")
+        # Turso (with cloud sync)
+        pool = await ConnectionPool.turso("./app.db", remote_url="https://db.turso.io")
 
         # Use with queries
         async with pool.acquire() as conn:
@@ -1116,6 +842,7 @@ class ConnectionPool:
         database_path: str,
         *,
         remote_url: str | None = None,
+        auth_token: str | None = None,
         max_size: int = 5,
         acquire_timeout: float = 30.0,
         push_interval_s: float = 1.0,
@@ -1137,6 +864,7 @@ class ConnectionPool:
         Args:
             database_path: Path to database (or ":memory:" for in-memory)
             remote_url: Turso Cloud URL for sync (e.g. "https://db.turso.io")
+            auth_token: Turso Cloud auth token for authenticated sync
             max_size: Maximum concurrent connections (default: 5)
             acquire_timeout: Timeout for acquiring connection in seconds (default: 30)
             push_interval_s: Seconds between background push cycles (default: 1.0)
@@ -1154,86 +882,12 @@ class ConnectionPool:
         pool = TursoPool(
             database_path,
             remote_url=remote_url,
+            auth_token=auth_token,
             max_size=max_size,
             acquire_timeout=acquire_timeout,
             push_interval_s=push_interval_s,
         )
         await pool._initialize()
-        if instrumentation:
-            pool.configure_instrumentation(
-                tier_label=tier_label, sink=latency_sink, path=latency_path
-            )
-        if write_queue_path is not None:
-            pool.configure_write_queue(
-                persistence_path=write_queue_path,
-                threshold_ms=write_queue_threshold_ms,
-                max_concurrent_drains=write_queue_concurrency,
-            )
-        return pool
-
-    @staticmethod
-    async def libsql(
-        url: str,
-        *,
-        auth_token: str | None = None,
-        local_path: str | None = None,
-        db_dir: str = "./db",
-        max_size: int = 10,
-        acquire_timeout: float = 30.0,
-        instrumentation: bool = False,
-        tier_label: str = "",
-        latency_sink: str | None = None,
-        latency_path: str | None = None,
-        write_queue_path: str | None = None,
-        write_queue_threshold_ms: float = 50.0,
-        write_queue_concurrency: int = 3,
-    ) -> LibSQLPool:
-        """
-        Create a LibSQL connection pool for Turso cloud using embedded replica.
-
-        Always uses embedded replica mode: a local SQLite file is synced from
-        Turso Cloud at startup, giving sub-millisecond read latency.
-
-        To reconstruct many replicas concurrently at startup (one per user):
-
-            pools = await asyncio.gather(*[
-                ConnectionPool.libsql(url, auth_token=token)
-                for url, token in user_configs
-            ])
-
-        Args:
-            url: LibSQL/Turso cloud URL (e.g., "libsql://db.turso.io")
-            auth_token: Authentication token for Turso cloud
-            local_path: Path for the local replica file. Defaults to
-                        ``./db/<sanitized_url>.db`` relative to CWD.
-            db_dir: Directory for auto-derived local paths (default: ``./db``)
-            max_size: Maximum concurrent connections (default: 10)
-            acquire_timeout: Timeout for acquiring connection in seconds (default: 30)
-            instrumentation: Enable latency recording (default: False)
-            tier_label: Label for every latency record from this pool
-            latency_sink: "jsonl" to write to latency_path, or None
-            latency_path: File path for JSONL sink
-            write_queue_path: JSONL path to persist write queue across restarts
-            write_queue_threshold_ms: Latency threshold before queuing (default: 50ms)
-            write_queue_concurrency: Max concurrent drain tasks (default: 3)
-
-        Returns:
-            LibSQLPool instance, already synced from Turso Cloud
-        """
-        import re
-
-        if local_path is None:
-            safe_name = re.sub(r"[^\w.-]", "_", url.replace("libsql://", "").replace("https://", ""))
-            local_path = f"{db_dir}/{safe_name}.db"
-
-        pool = LibSQLPool(
-            url,
-            local_path,
-            auth_token=auth_token,
-            max_size=max_size,
-            acquire_timeout=acquire_timeout,
-        )
-        await pool._initial_sync()
         if instrumentation:
             pool.configure_instrumentation(
                 tier_label=tier_label, sink=latency_sink, path=latency_path
@@ -1377,76 +1031,6 @@ class SyncTursoConnection:
         self.close()
 
 
-class SyncLibSQLPool:
-    """
-    Synchronous LibSQL connection pool for testing.
-
-    Provides a simple synchronous interface without async/await overhead.
-    """
-
-    def __init__(self, url: str, *, auth_token: str | None = None, max_size: int = 10) -> None:
-        self._url = url
-        self._auth_token = auth_token
-        self._max_size = max_size
-        self._closed = False
-
-    def acquire(self) -> SyncLibSQLConnection:
-        """Acquire a synchronous connection."""
-        if self._closed:
-            raise PoolClosedError("Pool has been closed")
-        import libsql
-
-        if self._auth_token:
-            conn = libsql.connect(self._url, auth_token=self._auth_token)
-        else:
-            conn = libsql.connect(self._url)
-        return SyncLibSQLConnection(conn)
-
-    def close(self) -> None:
-        """Mark pool as closed."""
-        self._closed = True
-
-    @property
-    def closed(self) -> bool:
-        return self._closed
-
-
-class SyncLibSQLConnection:
-    """Synchronous LibSQL connection wrapper."""
-
-    def __init__(self, conn: Any) -> None:
-        self._conn = conn
-
-    def execute(self, sql: str, parameters: tuple = ()) -> Any:
-        cursor = self._conn.cursor()
-        cursor.execute(sql, parameters)
-        return cursor
-
-    def executemany(self, sql: str, parameters: list) -> Any:
-        cursor = self._conn.cursor()
-        cursor.executemany(sql, parameters)
-        return cursor
-
-    def commit(self) -> None:
-        self._conn.commit()
-
-    def rollback(self) -> None:
-        self._conn.rollback()
-
-    def sync(self) -> None:
-        if hasattr(self._conn, "sync"):
-            self._conn.sync()
-
-    def close(self) -> None:
-        self._conn.close()
-
-    def __enter__(self) -> SyncLibSQLConnection:
-        return self
-
-    def __exit__(self, *args: Any) -> None:
-        self.close()
-
-
 class SyncConnectionPool:
     """
     Synchronous connection pool factory for testing.
@@ -1460,9 +1044,6 @@ class SyncConnectionPool:
 
         # Turso (pyturso)
         pool = SyncConnectionPool.turso("./test.db")
-
-        # LibSQL
-        pool = SyncConnectionPool.libsql("libsql://...")
     """
 
     @staticmethod
@@ -1474,12 +1055,6 @@ class SyncConnectionPool:
     def turso(database_path: str, *, max_size: int = 5) -> SyncTursoPool:
         """Create a synchronous Turso pool."""
         return SyncTursoPool(database_path, max_size=max_size)
-
-    @staticmethod
-    def libsql(url: str, *, auth_token: str | None = None, max_size: int = 10) -> SyncLibSQLPool:
-        """Create a synchronous LibSQL pool."""
-        return SyncLibSQLPool(url, auth_token=auth_token, max_size=max_size)
-
 
 class TursoCloudManager:
     """
@@ -1538,13 +1113,11 @@ class TursoCloudManager:
 
         # Cache for tenant tokens and pools
         self._tokens: dict[str, str] = {}
-        self._pools: dict[str, LibSQLPool] = {}
+        self._pools: dict[str, TursoPool] = {}
 
-    def _build_db_url(self, db_name: str) -> str:
-        """Build the libsql URL for a database."""
-        # Turso URLs follow pattern: libsql://{db_name}-{org}.{region}.turso.io
-        # The exact format is returned by the API, but we can construct it
-        return f"libsql://{db_name}-{self._org}.turso.io"
+    def _build_remote_url(self, db_name: str) -> str:
+        """Build the Turso Cloud remote URL for a database."""
+        return f"https://{db_name}-{self._org}.turso.io"
 
     async def _api_request(
         self,
@@ -1648,7 +1221,7 @@ class TursoCloudManager:
             await self.create_token(db_name)
         return self._tokens[db_name]
 
-    async def get_pool(self, db_name: str) -> LibSQLPool:
+    async def get_pool(self, db_name: str) -> TursoPool:
         """
         Get a connection pool for a tenant's database.
 
@@ -1658,14 +1231,16 @@ class TursoCloudManager:
             db_name: Database name (tenant identifier)
 
         Returns:
-            LibSQLPool for the tenant's database
+            TursoPool for the tenant's database
         """
         if db_name not in self._pools:
             token = await self.get_token(db_name)
-            url = self._build_db_url(db_name)
-            self._pools[db_name] = await ConnectionPool.libsql(
-                url,
-                auth_token=token,
+            remote_url = self._build_remote_url(db_name)
+            # TODO: local_path derivation for multi-tenant (db_dir/db_name.db)
+            local_path = f"./db/{db_name}.db"
+            self._pools[db_name] = await ConnectionPool.turso(
+                local_path,
+                remote_url=remote_url,
                 max_size=self._pool_max_size,
                 acquire_timeout=self._pool_acquire_timeout,
             )

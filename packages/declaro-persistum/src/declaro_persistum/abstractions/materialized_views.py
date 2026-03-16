@@ -1,5 +1,5 @@
 """
-Materialized view abstraction using tables for SQLite/Turso/LibSQL.
+Materialized view abstraction using tables for SQLite/Turso.
 
 This provides emulation of PostgreSQL materialized views on SQLite-family
 databases using regular tables with metadata tracking.

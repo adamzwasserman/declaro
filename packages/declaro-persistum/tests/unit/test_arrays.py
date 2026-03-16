@@ -222,7 +222,7 @@ class TestArrayUpdatePosition:
 
 
 class TestTursoDialect:
-    """Tests for Turso/LibSQL dialect support in arrays."""
+    """Tests for Turso dialect support in arrays."""
 
     def test_array_reindex_sql_turso(self):
         """Turso dialect uses SQLite-compatible syntax."""
@@ -234,24 +234,13 @@ class TestTursoDialect:
         assert "COUNT(*)" in sql
         assert "ROW_NUMBER()" not in sql
 
-    def test_array_reindex_sql_libsql(self):
-        """LibSQL dialect uses SQLite-compatible syntax."""
-        from declaro_persistum.abstractions.arrays import array_reindex_sql
-
-        sql = array_reindex_sql("users", "tags", "libsql")
-        assert "UPDATE users_tags" in sql
-        # SQLite version uses COUNT(*) subquery, not ROW_NUMBER()
-        assert "COUNT(*)" in sql
-        assert "ROW_NUMBER()" not in sql
-
     def test_array_reindex_sql_sqlite_vs_postgresql(self):
-        """SQLite/Turso/LibSQL use different syntax than PostgreSQL."""
+        """SQLite/Turso use different syntax than PostgreSQL."""
         from declaro_persistum.abstractions.arrays import array_reindex_sql
 
         pg_sql = array_reindex_sql("users", "tags", "postgresql")
         sqlite_sql = array_reindex_sql("users", "tags", "sqlite")
         turso_sql = array_reindex_sql("users", "tags", "turso")
-        libsql_sql = array_reindex_sql("users", "tags", "libsql")
 
         # PostgreSQL uses ROW_NUMBER()
         assert "ROW_NUMBER()" in pg_sql
@@ -259,7 +248,6 @@ class TestTursoDialect:
         # SQLite variants use COUNT(*) subquery
         assert "COUNT(*)" in sqlite_sql
         assert "COUNT(*)" in turso_sql
-        assert "COUNT(*)" in libsql_sql
 
-        # SQLite/Turso/LibSQL should generate identical SQL
-        assert sqlite_sql == turso_sql == libsql_sql
+        # SQLite/Turso should generate identical SQL
+        assert sqlite_sql == turso_sql
