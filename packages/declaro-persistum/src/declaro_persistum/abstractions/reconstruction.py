@@ -319,7 +319,11 @@ async def execute_reconstruction_async(
         if manage_foreign_keys:
             await connection.execute("PRAGMA foreign_keys = OFF")
 
-        # 4. Create new table with updated schema
+        # 4. Drop any leftover _new table (and its sqlite_autoindex_* entries)
+        #    from a previous failed reconstruction or orphaned recovery.
+        await connection.execute(f'DROP TABLE IF EXISTS "{temp_table}"')
+
+        # 5. Create new table with updated schema
         create_sql = generate_create_table_sql(temp_table, new_columns)
         logger.debug(f"Creating temp table: {create_sql}")
         await connection.execute(create_sql)

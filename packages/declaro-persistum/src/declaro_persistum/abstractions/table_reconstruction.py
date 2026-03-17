@@ -72,7 +72,10 @@ async def reconstruct_table(
             # 2. Disable foreign keys during reconstruction
             await connection.execute("PRAGMA foreign_keys = OFF")
 
-        # 3. Create new table with updated schema
+        # 3. Drop any leftover _new table from a previous failed reconstruction
+        await connection.execute(f'DROP TABLE IF EXISTS "{temp_table}"')
+
+        # 4. Create new table with updated schema
         create_sql = _generate_create_table_sql(temp_table, new_columns)
         logger.debug(f"Creating temp table: {create_sql}")
         await connection.execute(create_sql)
