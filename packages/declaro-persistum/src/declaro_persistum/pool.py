@@ -617,20 +617,13 @@ class TursoPool(BasePool):
         self._push_paused = False
 
     async def _push_loop(self) -> None:
-        """Periodically push local commits to Turso Cloud.
-
-        Reconnects before each push so the connection sees local changes
-        committed by other connections (e.g. acquire_write() during migrations).
-        """
+        """Periodically push local commits to Turso Cloud."""
         while not self._closed:
             await asyncio.sleep(self._push_interval_s)
             if getattr(self, "_push_paused", False):
                 continue
             try:
                 if self._write_holder:
-                    if self._write_holder.conn is not None:
-                        await self._write_holder.conn.close()
-                    await self._write_holder.connect_async()
                     await self._write_holder.push()
             except Exception:
                 logger.exception("push to cloud failed")
@@ -687,6 +680,13 @@ class TursoPool(BasePool):
         try:
             yield async_conn
             await async_conn.commit()
+            # Push from THIS connection — pyturso sync connections track
+            # their own changes and can only push what they committed.
+            if self._remote_url:
+                try:
+                    await holder.push()
+                except Exception:
+                    logger.warning("push after acquire_write commit failed")
         except Exception:
             await async_conn.rollback()
             raise
@@ -698,16 +698,11 @@ class TursoPool(BasePool):
         if self._write_queue is not None:
             await self._write_queue.stop_supervisor()
         self._closed = True
-        # Reopen _write_holder so it sees local changes committed by other
-        # connections (e.g. acquire_write() during migrations).  pull() only
-        # fetches from cloud, not the local file — a stale connection won't
-        # see local commits from other connections.
+        # Push any remaining changes from _write_holder, then close.
+        # Note: acquire_write() connections push their own changes on commit,
+        # so _write_holder only needs to push its own (init-time) changes.
         if self._write_holder:
-            if self._write_holder.conn is not None:
-                await self._write_holder.conn.close()
-                self._write_holder.conn = None
             try:
-                await self._write_holder.connect_async()
                 await self._write_holder.push()
             except Exception:
                 logger.exception("final push failed on close")
