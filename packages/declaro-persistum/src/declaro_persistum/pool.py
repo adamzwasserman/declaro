@@ -23,6 +23,8 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+logger = logging.getLogger(__name__)
+
 from declaro_persistum.exceptions import (
     PoolClosedError,
     PoolConnectionError,

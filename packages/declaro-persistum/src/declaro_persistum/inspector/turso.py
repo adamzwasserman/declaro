@@ -61,6 +61,7 @@ class TursoInspector:
                   AND name NOT LIKE '_litestream_%'
                   AND name NOT LIKE '_declaro_%'
                   AND name NOT LIKE '__turso_%'
+                  AND name NOT LIKE 'turso_%'
                 ORDER BY name
                 """
             ))
