@@ -59,7 +59,7 @@ async def reconstruct_table(
         ... }
         >>> await reconstruct_table(conn, "users", new_cols)
     """
-    temp_table = f"{table_name}_new"
+    temp_table = f"_declaro_tmp_{table_name}"
     fk_enabled = 0
 
     try:

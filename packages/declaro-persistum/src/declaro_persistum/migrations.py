@@ -164,64 +164,59 @@ async def _has_user_tables(conn: Any) -> bool:
     return row is not None
 
 
-async def _recover_orphaned_new_tables(pool: Any) -> int:
-    """Detect and recover orphaned _new tables from failed reconstruction.
+async def _recover_orphaned_tmp_tables(pool: Any) -> int:
+    """Detect and recover orphaned temp tables from failed reconstruction.
 
-    If a previous reconstruction partially committed (CREATE foo_new +
-    DROP foo) but failed before RENAME, the database has foo_new but no
-    foo.  This renames them back to recover.
+    Reconstruction uses temp tables named ``_declaro_tmp_<table>`` (current)
+    or ``<table>_new`` (legacy).  If reconstruction partially committed
+    (CREATE tmp + DROP original) but failed before RENAME, the database has
+    the tmp table but not the original.  This renames them back to recover.
 
     Returns the number of tables recovered.
     """
     async with _acquire_write_or_read(pool) as conn:
+        # Detect both naming patterns:
+        #   _declaro_tmp_<table>  (current)
+        #   <table>_new           (legacy)
         cursor = await conn.execute(
             "SELECT name FROM sqlite_master "
-            "WHERE type = 'table' AND name LIKE '%\\_new' ESCAPE '\\'"
+            "WHERE type = 'table' "
+            "  AND (name LIKE '_declaro_tmp_%' OR name LIKE '%\\_new' ESCAPE '\\')"
         )
-        new_tables = await cursor.fetchall()
+        tmp_tables = await cursor.fetchall()
 
         recovered = 0
-        for row in new_tables:
-            new_name = row[0]
-            original_name = new_name[:-4]  # strip "_new"
+        for row in tmp_tables:
+            tmp_name = row[0]
+
+            # Derive original table name from whichever pattern matched
+            if tmp_name.startswith("_declaro_tmp_"):
+                original_name = tmp_name[len("_declaro_tmp_"):]
+            elif tmp_name.endswith("_new"):
+                original_name = tmp_name[:-4]
+            else:
+                continue
 
             # Only recover if the original is missing
             check = await conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
                 (original_name,),
             )
-            exists = await check.fetchone()
-            if exists:
+            if await check.fetchone():
                 continue
 
             try:
-                # Drop autoindexes BEFORE rename — they reference the _new
-                # table and SQLite won't rename them automatically.  If not
-                # dropped, reconstructing the same table later collides on
-                # sqlite_autoindex_<table>_new_1.
-                idx_cursor = await conn.execute(
-                    "SELECT name FROM sqlite_master "
-                    "WHERE type = 'index' AND name LIKE ?",
-                    (f"%{new_name}%",),
-                )
-                leftover_indexes = await idx_cursor.fetchall()
-                for idx_row in leftover_indexes:
-                    try:
-                        await conn.execute(f'DROP INDEX IF EXISTS "{idx_row[0]}"')
-                    except Exception:
-                        pass
-
                 await conn.execute(
-                    f'ALTER TABLE "{new_name}" RENAME TO "{original_name}"'
+                    f'ALTER TABLE "{tmp_name}" RENAME TO "{original_name}"'
                 )
                 await conn.commit()
                 logger.warning(
-                    f"Recovered orphaned table: {new_name} → {original_name}"
+                    f"Recovered orphaned table: {tmp_name} → {original_name}"
                 )
                 recovered += 1
             except Exception as e:
                 logger.error(
-                    f"Failed to recover orphaned table {new_name}: {e}"
+                    f"Failed to recover orphaned table {tmp_name}: {e}"
                 )
 
         # Invalidate stored hash so migration re-runs after recovery
@@ -291,7 +286,7 @@ async def apply_migrations_async(
         }
 
     # Pre-flight: recover orphaned _new tables from failed reconstruction
-    await _recover_orphaned_new_tables(pool)
+    await _recover_orphaned_tmp_tables(pool)
 
     # Skip-if-clean: compare schema file hash with stored hash
     schema_hash = _compute_schema_hash(schema_path)

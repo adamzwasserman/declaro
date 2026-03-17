@@ -302,7 +302,7 @@ async def execute_reconstruction_async(
     # Validate column definitions before any destructive operations
     _validate_columns(table_name, new_columns)
 
-    temp_table = f"{table_name}_new"
+    temp_table = f"_declaro_tmp_{table_name}"
 
     # 1. Fresh introspection - get current state
     current_columns = await _get_table_columns_async(connection, table_name)
