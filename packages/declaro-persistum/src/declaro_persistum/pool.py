@@ -617,14 +617,20 @@ class TursoPool(BasePool):
         self._push_paused = False
 
     async def _push_loop(self) -> None:
-        """Periodically pull (refresh) then push to Turso Cloud."""
+        """Periodically push local commits to Turso Cloud.
+
+        Reconnects before each push so the connection sees local changes
+        committed by other connections (e.g. acquire_write() during migrations).
+        """
         while not self._closed:
             await asyncio.sleep(self._push_interval_s)
             if getattr(self, "_push_paused", False):
                 continue
             try:
                 if self._write_holder:
-                    await self._write_holder.pull()
+                    if self._write_holder.conn is not None:
+                        await self._write_holder.conn.close()
+                    await self._write_holder.connect_async()
                     await self._write_holder.push()
             except Exception:
                 logger.exception("push to cloud failed")
@@ -692,15 +698,16 @@ class TursoPool(BasePool):
         if self._write_queue is not None:
             await self._write_queue.stop_supervisor()
         self._closed = True
-        # Pull then push — other connections (e.g. acquire_write() during
-        # migrations) may have committed changes that _write_holder hasn't
-        # seen.  A pull refreshes its view before the final push.
+        # Reopen _write_holder so it sees local changes committed by other
+        # connections (e.g. acquire_write() during migrations).  pull() only
+        # fetches from cloud, not the local file — a stale connection won't
+        # see local commits from other connections.
         if self._write_holder:
+            if self._write_holder.conn is not None:
+                await self._write_holder.conn.close()
+                self._write_holder.conn = None
             try:
-                await self._write_holder.pull()
-            except Exception:
-                pass
-            try:
+                await self._write_holder.connect_async()
                 await self._write_holder.push()
             except Exception:
                 logger.exception("final push failed on close")
