@@ -195,15 +195,13 @@ async def _recover_orphaned_new_tables(pool: Any) -> int:
                 continue
 
             try:
-                await conn.execute(
-                    f'ALTER TABLE "{new_name}" RENAME TO "{original_name}"'
-                )
-                # Drop leftover indexes referencing the _new table name.
-                # sqlite_autoindex entries auto-rename, but explicit indexes
-                # created during reconstruction may not.
+                # Drop autoindexes BEFORE rename — they reference the _new
+                # table and SQLite won't rename them automatically.  If not
+                # dropped, reconstructing the same table later collides on
+                # sqlite_autoindex_<table>_new_1.
                 idx_cursor = await conn.execute(
                     "SELECT name FROM sqlite_master "
-                    "WHERE type = 'index' AND name LIKE ? AND name NOT LIKE 'sqlite_%'",
+                    "WHERE type = 'index' AND name LIKE ?",
                     (f"%{new_name}%",),
                 )
                 leftover_indexes = await idx_cursor.fetchall()
@@ -212,6 +210,10 @@ async def _recover_orphaned_new_tables(pool: Any) -> int:
                         await conn.execute(f'DROP INDEX IF EXISTS "{idx_row[0]}"')
                     except Exception:
                         pass
+
+                await conn.execute(
+                    f'ALTER TABLE "{new_name}" RENAME TO "{original_name}"'
+                )
                 await conn.commit()
                 logger.warning(
                     f"Recovered orphaned table: {new_name} → {original_name}"
