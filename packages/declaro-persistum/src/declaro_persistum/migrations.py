@@ -204,26 +204,34 @@ async def _recover_orphaned_tmp_tables(pool: Any) -> int:
             else:
                 continue
 
-            # Only recover if the original is missing
+            # Check if the original table exists
             check = await conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
                 (original_name,),
             )
-            if await check.fetchone():
-                continue
+            original_exists = await check.fetchone()
 
             try:
-                await conn.execute(
-                    f'ALTER TABLE "{tmp_name}" RENAME TO "{original_name}"'
-                )
-                await conn.commit()
-                logger.warning(
-                    f"Recovered orphaned table: {tmp_name} → {original_name}"
-                )
-                recovered += 1
+                if original_exists:
+                    # Original exists — tmp is leftover junk, drop it
+                    await conn.execute(f'DROP TABLE "{tmp_name}"')
+                    await conn.commit()
+                    logger.warning(
+                        f"Dropped leftover tmp table: {tmp_name}"
+                    )
+                else:
+                    # Original missing — rename tmp to recover
+                    await conn.execute(
+                        f'ALTER TABLE "{tmp_name}" RENAME TO "{original_name}"'
+                    )
+                    await conn.commit()
+                    logger.warning(
+                        f"Recovered orphaned table: {tmp_name} → {original_name}"
+                    )
+                    recovered += 1
             except Exception as e:
                 logger.error(
-                    f"Failed to recover orphaned table {tmp_name}: {e}"
+                    f"Failed to clean up tmp table {tmp_name}: {e}"
                 )
 
         # Invalidate stored hash so migration re-runs after recovery
@@ -381,12 +389,21 @@ async def apply_migrations_async(
             "error": f"Ambiguous changes: {diff_result['ambiguities']}",
         }
 
+    # Pause cloud push during DDL — reconstruction temporarily drops and
+    # renames tables, and a push mid-transaction would sync partial state.
+    if hasattr(pool, "pause_push"):
+        pool.pause_push()
+
     # Apply migrations — must use write connection so DDL reaches cloud
     applier = create_applier(dialect)
-    async with _acquire_write_or_read(pool) as conn:
-        result = await applier.apply(
-            conn, diff_result["operations"], diff_result["execution_order"]
-        )
+    try:
+        async with _acquire_write_or_read(pool) as conn:
+            result = await applier.apply(
+                conn, diff_result["operations"], diff_result["execution_order"]
+            )
+    finally:
+        if hasattr(pool, "resume_push"):
+            pool.resume_push()
 
     if result["success"]:
         logger.info(f"Successfully applied {result['operations_applied']} migrations")

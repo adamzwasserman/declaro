@@ -608,10 +608,20 @@ class TursoPool(BasePool):
         if self._remote_url:
             self._push_task = asyncio.create_task(self._push_loop())
 
+    def pause_push(self) -> None:
+        """Pause the background push loop (e.g. during migrations)."""
+        self._push_paused = True
+
+    def resume_push(self) -> None:
+        """Resume the background push loop."""
+        self._push_paused = False
+
     async def _push_loop(self) -> None:
         """Periodically push local commits to Turso Cloud."""
         while not self._closed:
             await asyncio.sleep(self._push_interval_s)
+            if getattr(self, "_push_paused", False):
+                continue
             try:
                 if self._write_holder:
                     await self._write_holder.push()
