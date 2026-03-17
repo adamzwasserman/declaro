@@ -79,10 +79,30 @@ class TursoApplier:
         executed: list[str] = []
         skipped: list[str] = []
 
+        # Coalesce reconstruction ops by table — multiple alter_column ops
+        # on the same table must merge into one reconstruction pass to avoid
+        # sqlite_autoindex collisions from creating the temp table twice.
+        coalesced_ops: list[tuple[str, bool, list[Operation]]] = []
+        reconstruction_groups: dict[str, list[Operation]] = {}
+
         for op_idx in execution_order:
             operation = operations[op_idx]
-            op_desc = f"{operation['op']} on {operation.get('table', 'N/A')}"
-            is_reconstruction = requires_reconstruction(operation)
+            if requires_reconstruction(operation):
+                table = operation["table"]
+                if table not in reconstruction_groups:
+                    reconstruction_groups[table] = []
+                    # Insert placeholder in execution order
+                    coalesced_ops.append((table, True, reconstruction_groups[table]))
+                reconstruction_groups[table].append(operation)
+            else:
+                coalesced_ops.append(("", False, [operation]))
+
+        for table_or_empty, is_reconstruction, ops in coalesced_ops:
+            if is_reconstruction:
+                op_descs = [f"{o['op']} on {o.get('table', 'N/A')}" for o in ops]
+                op_desc = f"reconstruct {table_or_empty} ({len(ops)} ops)"
+            else:
+                op_desc = f"{ops[0]['op']} on {ops[0].get('table', 'N/A')}"
 
             try:
                 if is_reconstruction:
@@ -93,9 +113,12 @@ class TursoApplier:
                 await connection.execute("BEGIN")
 
                 if is_reconstruction:
-                    await self._execute_with_reconstruction(connection, operation)
-                    executed.append(f"Table reconstruction for {operation['table']}")
+                    await self._execute_coalesced_reconstruction(
+                        connection, table_or_empty, ops
+                    )
+                    executed.append(f"Table reconstruction for {table_or_empty}")
                 else:
+                    operation = ops[0]
                     sql = generate_operation_sql(operation)
                     for statement in sql.split(";"):
                         statement = statement.strip()
@@ -103,9 +126,9 @@ class TursoApplier:
                             await connection.execute(statement)
                     executed.append(sql)
 
-                for insert_sql in enum_population_sql(operation, target_schema):
-                    await connection.execute(insert_sql)
-                    executed.append(insert_sql)
+                    for insert_sql in enum_population_sql(operation, target_schema):
+                        await connection.execute(insert_sql)
+                        executed.append(insert_sql)
 
                 await connection.commit()
 
@@ -128,9 +151,9 @@ class TursoApplier:
                 # never skip them. Only skip non-reconstruction ops.
                 if is_reconstruction:
                     raise MigrationError(
-                        f"Table reconstruction failed for {operation.get('table', 'N/A')}. "
-                        f"Check for orphaned _new tables.",
-                        operation=operation,
+                        f"Table reconstruction failed for {table_or_empty}. "
+                        f"Check for orphaned _declaro_tmp tables.",
+                        operation=ops[0],
                         original_error=e,
                     ) from e
                 skip_msg = f"{op_desc}: {e}"
@@ -154,24 +177,22 @@ class TursoApplier:
             "error_operation": None,
         }
 
-    async def _execute_with_reconstruction(
-        self, connection: Any, operation: Operation
+    async def _execute_coalesced_reconstruction(
+        self, connection: Any, table: str, ops: list[Operation]
     ) -> None:
         """
-        Execute an operation using table reconstruction (async).
+        Apply multiple reconstruction ops to the same table in one pass.
 
-        FK pragmas are managed by the caller (apply/apply_sync) OUTSIDE the
-        transaction to avoid implicit commits that break atomicity.
+        Introspects once, applies all column changes, reconstructs once.
         """
         from declaro_persistum.abstractions.reconstruction import execute_reconstruction_async
-
-        table = operation["table"]
 
         cursor = await connection.execute(f"PRAGMA table_info('{table}')")
         rows = await cursor.fetchall()
         columns = columns_from_pragma_rows(rows)
 
-        columns = apply_reconstruction_changes(columns, operation)
+        for op in ops:
+            columns = apply_reconstruction_changes(columns, op)
 
         await execute_reconstruction_async(
             connection, table, columns, manage_foreign_keys=False
@@ -204,10 +225,26 @@ class TursoApplier:
         executed: list[str] = []
         skipped: list[str] = []
 
+        # Coalesce reconstruction ops by table (same as async apply)
+        coalesced_ops: list[tuple[str, bool, list[Operation]]] = []
+        reconstruction_groups: dict[str, list[Operation]] = {}
+
         for op_idx in execution_order:
             operation = operations[op_idx]
-            op_desc = f"{operation['op']} on {operation.get('table', 'N/A')}"
-            is_reconstruction = requires_reconstruction(operation)
+            if requires_reconstruction(operation):
+                table = operation["table"]
+                if table not in reconstruction_groups:
+                    reconstruction_groups[table] = []
+                    coalesced_ops.append((table, True, reconstruction_groups[table]))
+                reconstruction_groups[table].append(operation)
+            else:
+                coalesced_ops.append(("", False, [operation]))
+
+        for table_or_empty, is_reconstruction, ops in coalesced_ops:
+            if is_reconstruction:
+                op_desc = f"reconstruct {table_or_empty} ({len(ops)} ops)"
+            else:
+                op_desc = f"{ops[0]['op']} on {ops[0].get('table', 'N/A')}"
 
             try:
                 if is_reconstruction:
@@ -216,9 +253,12 @@ class TursoApplier:
                 connection.execute("BEGIN")
 
                 if is_reconstruction:
-                    self._execute_with_reconstruction_sync(connection, operation)
-                    executed.append(f"Table reconstruction for {operation['table']}")
+                    self._execute_coalesced_reconstruction_sync(
+                        connection, table_or_empty, ops
+                    )
+                    executed.append(f"Table reconstruction for {table_or_empty}")
                 else:
+                    operation = ops[0]
                     sql = generate_operation_sql(operation)
                     for statement in sql.split(";"):
                         statement = statement.strip()
@@ -226,9 +266,9 @@ class TursoApplier:
                             connection.execute(statement)
                     executed.append(sql)
 
-                for insert_sql in enum_population_sql(operation, target_schema):
-                    connection.execute(insert_sql)
-                    executed.append(insert_sql)
+                    for insert_sql in enum_population_sql(operation, target_schema):
+                        connection.execute(insert_sql)
+                        executed.append(insert_sql)
 
                 connection.commit()
 
@@ -249,9 +289,9 @@ class TursoApplier:
                         pass
                 if is_reconstruction:
                     raise MigrationError(
-                        f"Table reconstruction failed for {operation.get('table', 'N/A')}. "
-                        f"Check for orphaned _new tables.",
-                        operation=operation,
+                        f"Table reconstruction failed for {table_or_empty}. "
+                        f"Check for orphaned _declaro_tmp tables.",
+                        operation=ops[0],
                         original_error=e,
                     ) from e
                 skip_msg = f"{op_desc}: {e}"
@@ -275,19 +315,18 @@ class TursoApplier:
             "error_operation": None,
         }
 
-    def _execute_with_reconstruction_sync(
-        self, connection: Any, operation: Operation
+    def _execute_coalesced_reconstruction_sync(
+        self, connection: Any, table: str, ops: list[Operation]
     ) -> None:
-        """Execute table reconstruction synchronously (raw sync connection)."""
+        """Apply multiple reconstruction ops to the same table in one sync pass."""
         from declaro_persistum.abstractions.reconstruction import execute_reconstruction_sync
-
-        table = operation["table"]
 
         cursor = connection.execute(f"PRAGMA table_info('{table}')")
         rows = cursor.fetchall()
         columns = columns_from_pragma_rows(rows)
 
-        columns = apply_reconstruction_changes(columns, operation)
+        for op in ops:
+            columns = apply_reconstruction_changes(columns, op)
 
         execute_reconstruction_sync(connection, table, columns)
 
