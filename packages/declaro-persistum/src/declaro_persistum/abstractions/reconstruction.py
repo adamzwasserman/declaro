@@ -271,6 +271,7 @@ async def execute_reconstruction_async(
     new_columns: dict[str, Column],
     *,
     preserve_data: bool = True,
+    manage_foreign_keys: bool = True,
 ) -> None:
     """
     Execute table reconstruction asynchronously.
@@ -283,6 +284,10 @@ async def execute_reconstruction_async(
         table_name: Name of table to reconstruct
         new_columns: New column definitions (full schema with FKs embedded)
         preserve_data: Whether to copy data from old table (default: True)
+        manage_foreign_keys: Whether to toggle PRAGMA foreign_keys on/off.
+            Set to False when the caller manages FK pragmas externally
+            (required when reconstruction runs inside an explicit transaction,
+            since PRAGMA foreign_keys inside a transaction may implicitly commit).
 
     Raises:
         Exception: If reconstruction fails (caller should handle transaction rollback)
@@ -303,13 +308,16 @@ async def execute_reconstruction_async(
     current_columns = await _get_table_columns_async(connection, table_name)
 
     # 2. Get current foreign key state
-    fk_cursor = await connection.execute("PRAGMA foreign_keys")
-    fk_row = await fk_cursor.fetchone()
-    fk_enabled = fk_row[0] if fk_row else 0
+    fk_enabled = 0
+    if manage_foreign_keys:
+        fk_cursor = await connection.execute("PRAGMA foreign_keys")
+        fk_row = await fk_cursor.fetchone()
+        fk_enabled = fk_row[0] if fk_row else 0
 
     try:
         # 3. Disable foreign keys during reconstruction
-        await connection.execute("PRAGMA foreign_keys = OFF")
+        if manage_foreign_keys:
+            await connection.execute("PRAGMA foreign_keys = OFF")
 
         # 4. Create new table with updated schema
         create_sql = generate_create_table_sql(temp_table, new_columns)
@@ -346,8 +354,8 @@ async def execute_reconstruction_async(
             logger.debug(f"Recreating index: {recreate_sql}")
             await connection.execute(recreate_sql)
 
-        # 10. Re-enable foreign keys if they were enabled
-        if fk_enabled:
+        # 10. Re-enable foreign keys if we managed them
+        if manage_foreign_keys and fk_enabled:
             await connection.execute("PRAGMA foreign_keys = ON")
 
             # Verify foreign key constraints (all tables — catches incoming FK
@@ -364,11 +372,12 @@ async def execute_reconstruction_async(
     except Exception as e:
         logger.error(f"Table reconstruction failed for '{table_name}': {e}")
         # Re-enable foreign keys before re-raising
-        try:
-            if fk_enabled:
-                await connection.execute("PRAGMA foreign_keys = ON")
-        except Exception:
-            pass
+        if manage_foreign_keys:
+            try:
+                if fk_enabled:
+                    await connection.execute("PRAGMA foreign_keys = ON")
+            except Exception:
+                pass
         raise
 
 

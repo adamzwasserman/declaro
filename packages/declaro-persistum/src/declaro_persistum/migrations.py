@@ -164,6 +164,67 @@ async def _has_user_tables(conn: Any) -> bool:
     return row is not None
 
 
+async def _recover_orphaned_new_tables(pool: Any) -> int:
+    """Detect and recover orphaned _new tables from failed reconstruction.
+
+    If a previous reconstruction partially committed (CREATE foo_new +
+    DROP foo) but failed before RENAME, the database has foo_new but no
+    foo.  This renames them back to recover.
+
+    Returns the number of tables recovered.
+    """
+    async with _acquire_write_or_read(pool) as conn:
+        cursor = await conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'table' AND name LIKE '%\\_new' ESCAPE '\\'"
+        )
+        new_tables = await cursor.fetchall()
+
+        recovered = 0
+        for row in new_tables:
+            new_name = row[0]
+            original_name = new_name[:-4]  # strip "_new"
+
+            # Only recover if the original is missing
+            check = await conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (original_name,),
+            )
+            exists = await check.fetchone()
+            if exists:
+                continue
+
+            try:
+                await conn.execute(
+                    f'ALTER TABLE "{new_name}" RENAME TO "{original_name}"'
+                )
+                await conn.commit()
+                logger.warning(
+                    f"Recovered orphaned table: {new_name} → {original_name}"
+                )
+                recovered += 1
+            except Exception as e:
+                logger.error(
+                    f"Failed to recover orphaned table {new_name}: {e}"
+                )
+
+        # Invalidate stored hash so migration re-runs after recovery
+        if recovered:
+            try:
+                await conn.execute(
+                    f'DELETE FROM "{META_TABLE}" WHERE key LIKE ?',
+                    ("schema_hash:%",),
+                )
+                await conn.commit()
+                logger.info(
+                    f"Cleared schema hash after recovering {recovered} orphaned table(s)"
+                )
+            except Exception:
+                pass  # Meta table might not exist yet
+
+    return recovered
+
+
 async def apply_migrations_async(
     pool: Any,
     dialect: str,
@@ -212,6 +273,9 @@ async def apply_migrations_async(
             "skipped": False,
             "error": f"Schema file not found: {schema_path}",
         }
+
+    # Pre-flight: recover orphaned _new tables from failed reconstruction
+    await _recover_orphaned_new_tables(pool)
 
     # Skip-if-clean: compare schema file hash with stored hash
     schema_hash = _compute_schema_hash(schema_path)

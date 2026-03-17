@@ -82,11 +82,17 @@ class TursoApplier:
         for op_idx in execution_order:
             operation = operations[op_idx]
             op_desc = f"{operation['op']} on {operation.get('table', 'N/A')}"
+            is_reconstruction = requires_reconstruction(operation)
 
             try:
+                if is_reconstruction:
+                    # PRAGMA foreign_keys must be set OUTSIDE a transaction —
+                    # setting it inside implicitly commits, breaking atomicity.
+                    await connection.execute("PRAGMA foreign_keys = OFF")
+
                 await connection.execute("BEGIN")
 
-                if requires_reconstruction(operation):
+                if is_reconstruction:
                     await self._execute_with_reconstruction(connection, operation)
                     executed.append(f"Table reconstruction for {operation['table']}")
                 else:
@@ -102,6 +108,10 @@ class TursoApplier:
                     executed.append(insert_sql)
 
                 await connection.commit()
+
+                if is_reconstruction:
+                    await connection.execute("PRAGMA foreign_keys = ON")
+
                 logger.info(f"Applied: {op_desc}")
 
             except Exception as e:
@@ -109,6 +119,20 @@ class TursoApplier:
                     await connection.rollback()
                 except Exception:
                     pass
+                if is_reconstruction:
+                    try:
+                        await connection.execute("PRAGMA foreign_keys = ON")
+                    except Exception:
+                        pass
+                # Reconstruction failures are catastrophic (orphaned tables) —
+                # never skip them. Only skip non-reconstruction ops.
+                if is_reconstruction:
+                    raise MigrationError(
+                        f"Table reconstruction failed for {operation.get('table', 'N/A')}. "
+                        f"Check for orphaned _new tables.",
+                        operation=operation,
+                        original_error=e,
+                    ) from e
                 skip_msg = f"{op_desc}: {e}"
                 skipped.append(skip_msg)
                 logger.warning(f"Skipped unsupported operation: {skip_msg}")
@@ -136,7 +160,8 @@ class TursoApplier:
         """
         Execute an operation using table reconstruction (async).
 
-        Fresh introspection → pure column transform → async reconstruction.
+        FK pragmas are managed by the caller (apply/apply_sync) OUTSIDE the
+        transaction to avoid implicit commits that break atomicity.
         """
         from declaro_persistum.abstractions.reconstruction import execute_reconstruction_async
 
@@ -148,7 +173,9 @@ class TursoApplier:
 
         columns = apply_reconstruction_changes(columns, operation)
 
-        await execute_reconstruction_async(connection, table, columns)
+        await execute_reconstruction_async(
+            connection, table, columns, manage_foreign_keys=False
+        )
 
     def apply_sync(
         self,
@@ -180,11 +207,15 @@ class TursoApplier:
         for op_idx in execution_order:
             operation = operations[op_idx]
             op_desc = f"{operation['op']} on {operation.get('table', 'N/A')}"
+            is_reconstruction = requires_reconstruction(operation)
 
             try:
+                if is_reconstruction:
+                    connection.execute("PRAGMA foreign_keys = OFF")
+
                 connection.execute("BEGIN")
 
-                if requires_reconstruction(operation):
+                if is_reconstruction:
                     self._execute_with_reconstruction_sync(connection, operation)
                     executed.append(f"Table reconstruction for {operation['table']}")
                 else:
@@ -200,6 +231,10 @@ class TursoApplier:
                     executed.append(insert_sql)
 
                 connection.commit()
+
+                if is_reconstruction:
+                    connection.execute("PRAGMA foreign_keys = ON")
+
                 logger.info(f"Applied: {op_desc}")
 
             except Exception as e:
@@ -207,6 +242,18 @@ class TursoApplier:
                     connection.rollback()
                 except Exception:
                     pass
+                if is_reconstruction:
+                    try:
+                        connection.execute("PRAGMA foreign_keys = ON")
+                    except Exception:
+                        pass
+                if is_reconstruction:
+                    raise MigrationError(
+                        f"Table reconstruction failed for {operation.get('table', 'N/A')}. "
+                        f"Check for orphaned _new tables.",
+                        operation=operation,
+                        original_error=e,
+                    ) from e
                 skip_msg = f"{op_desc}: {e}"
                 skipped.append(skip_msg)
                 logger.warning(f"Skipped unsupported operation: {skip_msg}")
