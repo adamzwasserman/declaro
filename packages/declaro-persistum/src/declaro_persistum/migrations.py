@@ -191,7 +191,14 @@ async def _recover_orphaned_tmp_tables(pool: Any) -> int:
 
             # Derive original table name from whichever pattern matched
             if tmp_name.startswith("_declaro_tmp_"):
-                original_name = tmp_name[len("_declaro_tmp_"):]
+                # Strip prefix and UUID suffix: _declaro_tmp_<table>_<8hex>
+                remainder = tmp_name[len("_declaro_tmp_"):]
+                # The last 9 chars are _{8hex} — strip them
+                if len(remainder) > 9 and remainder[-9] == "_":
+                    original_name = remainder[:-9]
+                else:
+                    # No UUID suffix (old format) — use remainder as-is
+                    original_name = remainder
             elif tmp_name.endswith("_new"):
                 original_name = tmp_name[:-4]
             else:

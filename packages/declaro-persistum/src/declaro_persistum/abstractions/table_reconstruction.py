@@ -59,7 +59,8 @@ async def reconstruct_table(
         ... }
         >>> await reconstruct_table(conn, "users", new_cols)
     """
-    temp_table = f"_declaro_tmp_{table_name}"
+    import uuid
+    temp_table = f"_declaro_tmp_{table_name}_{uuid.uuid4().hex[:8]}"
     fk_enabled = 0
 
     try:
