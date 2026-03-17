@@ -617,13 +617,14 @@ class TursoPool(BasePool):
         self._push_paused = False
 
     async def _push_loop(self) -> None:
-        """Periodically push local commits to Turso Cloud."""
+        """Periodically pull (refresh) then push to Turso Cloud."""
         while not self._closed:
             await asyncio.sleep(self._push_interval_s)
             if getattr(self, "_push_paused", False):
                 continue
             try:
                 if self._write_holder:
+                    await self._write_holder.pull()
                     await self._write_holder.push()
             except Exception:
                 logger.exception("push to cloud failed")
@@ -691,8 +692,14 @@ class TursoPool(BasePool):
         if self._write_queue is not None:
             await self._write_queue.stop_supervisor()
         self._closed = True
-        # Final push before shutdown
+        # Pull then push — other connections (e.g. acquire_write() during
+        # migrations) may have committed changes that _write_holder hasn't
+        # seen.  A pull refreshes its view before the final push.
         if self._write_holder:
+            try:
+                await self._write_holder.pull()
+            except Exception:
+                pass
             try:
                 await self._write_holder.push()
             except Exception:
