@@ -642,11 +642,10 @@ class TursoPool(BasePool):
                 f"Timed out waiting for connection after {self._acquire_timeout}s"
             ) from err
 
-        # Read connections open the local file WITHOUT remote_url.
-        # This ensures they see tables committed locally (e.g. by migrations)
-        # even if those changes haven't been pushed to cloud yet.
-        # Only write connections (acquire_write / _write_holder) use remote_url.
-        holder = _TursoConnectionHolder(self._database_path)
+        # Read connections use the same sync driver as the write holder
+        # (turso.aio.sync) so they share WAL state on the local file.
+        # No pull() is called — they just read whatever is local.
+        holder = _TursoConnectionHolder(self._database_path, self._remote_url, self._auth_token)
         async_conn = None
 
         try:
