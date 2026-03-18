@@ -298,15 +298,19 @@ async def cmd_migrate_remote(
     schema_path: str,
     dialect: str,
     expand_enums: bool,
+    init: bool,
+    dry_run: bool,
     verbose: bool,
 ) -> int:
     """
     Apply schema migrations directly to a remote Turso cloud DB.
 
     Bypasses the embedded replica sync engine (which cannot replicate DDL).
-    Connects directly to the cloud URL, loads Pydantic models from schema_path,
-    diffs, and applies.  After this, embedded replicas can pull the schema
-    and sync DML normally.
+    Uses a temp local file with turso.aio.sync to pull/push cloud state.
+
+    Safety: if the cloud DB appears empty (0 tables introspected) and the
+    diff produces create_table ops, the --init flag is required.  This
+    prevents accidental data loss when pull fails to sync cloud state.
 
     Returns:
         0 if migrations applied successfully (or no changes needed)
@@ -355,11 +359,14 @@ async def cmd_migrate_remote(
         )
 
         try:
-            # Pull current cloud state into temp file
-            await conn.pull()
+            # Pull current cloud state into temp file — try both methods
+            try:
+                await conn.sync()
+            except Exception:
+                await conn.pull()
 
             if verbose:
-                print("Pulled current schema from cloud")
+                print("Synced current schema from cloud")
 
             # Introspect cloud DB (via local replica)
             inspector = create_inspector(dialect)
@@ -375,6 +382,26 @@ async def cmd_migrate_remote(
                 print("Cloud schema is up to date — no changes needed.")
                 return 0
 
+            # Safety guard: detect when pull failed silently
+            create_ops = [
+                op for op in diff_result["operations"]
+                if op["op"] == "create_table"
+            ]
+            if len(current_schema) == 0 and create_ops:
+                if not init:
+                    print(
+                        f"ABORT: Cloud DB appears empty (0 tables) but schema "
+                        f"defines {len(target_schema)} tables.\n"
+                        f"This would create all tables from scratch.\n\n"
+                        f"If the cloud DB is genuinely empty (first-time setup), "
+                        f"re-run with --init.\n"
+                        f"If the cloud DB should have tables, the sync/pull may "
+                        f"have failed — do NOT use --init or you will lose data.",
+                        file=sys.stderr,
+                    )
+                    return 1
+                print(f"--init: creating {len(create_ops)} tables on empty cloud DB")
+
             print(f"Found {len(diff_result['operations'])} schema differences:")
             for op in diff_result["operations"]:
                 print(f"  - {op['op']} on {op.get('table', 'N/A')}")
@@ -383,6 +410,10 @@ async def cmd_migrate_remote(
                 print(f"\nAmbiguous changes detected: {diff_result['ambiguities']}")
                 print("Aborting — resolve ambiguities first.")
                 return 1
+
+            if dry_run:
+                print("\n(dry run — no changes applied)")
+                return 0
 
             # Apply DDL locally
             applier = create_applier(dialect)

@@ -192,6 +192,16 @@ Examples:
         action="store_true",
         help="Skip Literal type expansion to lookup tables",
     )
+    remote_parser.add_argument(
+        "--init",
+        action="store_true",
+        help="Allow creating all tables from scratch (required when cloud DB is empty)",
+    )
+    remote_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show operations without executing",
+    )
 
     # generate command
     generate_parser = subparsers.add_parser(
@@ -316,6 +326,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     schema_path=args.schema,
                     dialect="turso",
                     expand_enums=not getattr(args, "no_enums", False),
+                    init=getattr(args, "init", False),
+                    dry_run=getattr(args, "dry_run", False),
                     verbose=args.verbose,
                 )
             )
