@@ -630,7 +630,13 @@ class TursoPool(BasePool):
 
     @asynccontextmanager
     async def acquire(self) -> AsyncIterator[TursoAsyncConnection]:
-        """Acquire a natively async connection."""
+        """Acquire a read connection backed by the write holder.
+
+        Returns a wrapper around the _write_holder connection so reads
+        always see the same local state as writes — no driver mismatch,
+        no stale pulls from cloud.  The semaphore still limits concurrency.
+        The connection is NOT closed on release (it's shared).
+        """
         if self._closed:
             raise PoolClosedError("Pool has been closed")
 
@@ -642,26 +648,17 @@ class TursoPool(BasePool):
                 f"Timed out waiting for connection after {self._acquire_timeout}s"
             ) from err
 
-        # Read connections use the same sync driver as the write holder
-        # (turso.aio.sync) so they share WAL state on the local file.
-        # No pull() is called — they just read whatever is local.
-        holder = _TursoConnectionHolder(self._database_path, self._remote_url, self._auth_token)
-        async_conn = None
-
-        try:
-            await holder.connect_async()
-            async_conn = TursoAsyncConnection(holder)
-        except Exception as e:
+        if self._write_holder is None or self._write_holder.conn is None:
             self._semaphore.release()
-            raise PoolConnectionError(f"Failed to connect to Turso: {e}") from e
+            raise PoolConnectionError("Write holder not initialized")
 
+        async_conn = TursoAsyncConnection(self._write_holder)
         self._active_connections += 1
         try:
             yield async_conn
         finally:
             self._active_connections -= 1
-            if async_conn:
-                await async_conn.close()
+            # Do NOT close — the connection is shared with _write_holder
             self._semaphore.release()
 
     @asynccontextmanager
