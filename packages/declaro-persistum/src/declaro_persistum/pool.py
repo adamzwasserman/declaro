@@ -582,7 +582,27 @@ class TursoPool(BasePool):
         )
         await self._write_holder.connect_async()
         if self._remote_url:
-            await self._write_holder.pull()
+            # Only pull from cloud if the local DB is empty.  If local has
+            # tables, it's authoritative — pulling from an empty cloud would
+            # wipe locally-migrated tables (push may not have succeeded yet).
+            try:
+                cursor = await self._write_holder.conn.execute(
+                    "SELECT count(*) FROM sqlite_master "
+                    "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+                )
+                row = await cursor.fetchone()
+                local_table_count = row[0] if row else 0
+            except Exception:
+                local_table_count = 0
+
+            if local_table_count == 0:
+                logger.info("Local DB empty — pulling from cloud")
+                await self._write_holder.pull()
+            else:
+                logger.info(
+                    "Local DB has %d tables — skipping cloud pull (local is authoritative)",
+                    local_table_count,
+                )
         # MVCC and cache_size pragmas are only for local-only connections.
         # Cloud sync (CDC replication) has its own journaling — MVCC is
         # incompatible and the commit() triggers a CDC sync that fails.
@@ -686,7 +706,7 @@ class TursoPool(BasePool):
                 try:
                     await holder.push()
                 except Exception:
-                    logger.warning("push after acquire_write commit failed")
+                    logger.warning("push after acquire_write commit failed", exc_info=True)
         except Exception:
             await async_conn.rollback()
             raise
