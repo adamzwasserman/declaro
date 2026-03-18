@@ -337,56 +337,72 @@ async def cmd_migrate_remote(
     if verbose:
         print(f"Loaded {len(target_schema)} tables from {schema_file}")
 
-    # Connect directly to cloud
-    import turso.aio
+    # Connect via sync driver with a temp local file.
+    # pyturso has no direct-to-cloud connection — turso.aio.connect() is
+    # local-only.  turso.aio.sync.connect() requires a local path but
+    # syncs with cloud via push/pull.
+    import os
+    import tempfile
 
-    try:
-        conn = await turso.aio.connect(remote_url, auth_token=auth_token)
-    except TypeError:
-        # Older pyturso may not accept auth_token kwarg
-        conn = await turso.aio.connect(remote_url)
+    import turso.aio.sync
 
-    try:
-        # Introspect cloud DB
-        inspector = create_inspector(dialect)
-        current_schema = await inspector.introspect(conn)
-
-        if verbose:
-            print(f"Introspected {len(current_schema)} tables from cloud DB")
-
-        # Diff
-        diff_result = diff(current_schema, target_schema)
-
-        if not diff_result["operations"]:
-            print("Cloud schema is up to date — no changes needed.")
-            return 0
-
-        print(f"Found {len(diff_result['operations'])} schema differences:")
-        for op in diff_result["operations"]:
-            print(f"  - {op['op']} on {op.get('table', 'N/A')}")
-
-        if diff_result.get("ambiguities"):
-            print(f"\nAmbiguous changes detected: {diff_result['ambiguities']}")
-            print("Aborting — resolve ambiguities first.")
-            return 1
-
-        # Apply DDL directly on cloud
-        applier = create_applier(dialect)
-        result = await applier.apply(
-            conn, diff_result["operations"], diff_result["execution_order"]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        local_path = os.path.join(tmpdir, "migrate_remote.db")
+        conn = await turso.aio.sync.connect(
+            local_path,
+            remote_url=remote_url,
+            auth_token=auth_token,
         )
 
-        if result["success"]:
-            print(f"\nApplied {result['operations_applied']} operations to cloud DB")
-            if result.get("error"):
-                print(f"Warnings: {result['error']}")
-            return 0
-        else:
-            print(f"\nMigration failed: {result.get('error', 'Unknown error')}", file=sys.stderr)
-            return 1
+        try:
+            # Pull current cloud state into temp file
+            await conn.pull()
 
-    finally:
-        await conn.close()
+            if verbose:
+                print("Pulled current schema from cloud")
+
+            # Introspect cloud DB (via local replica)
+            inspector = create_inspector(dialect)
+            current_schema = await inspector.introspect(conn)
+
+            if verbose:
+                print(f"Introspected {len(current_schema)} tables from cloud DB")
+
+            # Diff
+            diff_result = diff(current_schema, target_schema)
+
+            if not diff_result["operations"]:
+                print("Cloud schema is up to date — no changes needed.")
+                return 0
+
+            print(f"Found {len(diff_result['operations'])} schema differences:")
+            for op in diff_result["operations"]:
+                print(f"  - {op['op']} on {op.get('table', 'N/A')}")
+
+            if diff_result.get("ambiguities"):
+                print(f"\nAmbiguous changes detected: {diff_result['ambiguities']}")
+                print("Aborting — resolve ambiguities first.")
+                return 1
+
+            # Apply DDL locally
+            applier = create_applier(dialect)
+            result = await applier.apply(
+                conn, diff_result["operations"], diff_result["execution_order"]
+            )
+
+            if result["success"]:
+                # Push DDL changes to cloud
+                await conn.push()
+                print(f"\nApplied {result['operations_applied']} operations to cloud DB")
+                if result.get("error"):
+                    print(f"Warnings: {result['error']}")
+                return 0
+            else:
+                print(f"\nMigration failed: {result.get('error', 'Unknown error')}", file=sys.stderr)
+                return 1
+
+        finally:
+            await conn.close()
 
 
 async def cmd_generate(

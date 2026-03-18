@@ -732,46 +732,6 @@ class TursoPool(BasePool):
         finally:
             await async_conn.close()
 
-    @asynccontextmanager
-    async def acquire_remote(self) -> AsyncIterator[TursoAsyncConnection]:
-        """Acquire a DIRECT connection to the cloud DB (no local replica).
-
-        Bypasses the embedded replica sync engine entirely.  Used for DDL
-        (CREATE TABLE, ALTER TABLE) which must execute directly on cloud
-        because pyturso's sync engine cannot replicate DDL.
-
-        Only available when remote_url is set.  Falls back to acquire_write
-        if no remote_url (local-only mode).
-        """
-        if self._closed:
-            raise PoolClosedError("Pool has been closed")
-
-        if not self._remote_url:
-            async with self.acquire_write(concurrent=False) as conn:
-                yield conn
-            return
-
-        import turso.aio
-
-        raw_conn = await turso.aio.connect(self._remote_url, auth_token=self._auth_token)
-        holder = _TursoConnectionHolder(self._remote_url)
-        holder.conn = raw_conn  # inject the direct connection
-        async_conn = TursoAsyncConnection(holder)
-        try:
-            yield async_conn
-            await async_conn.commit()
-        except Exception:
-            await async_conn.rollback()
-            raise
-        finally:
-            await async_conn.close()
-            # Pull cloud changes into local replica so reads see new schema
-            if self._write_holder:
-                try:
-                    await self._write_holder.pull()
-                except Exception:
-                    logger.warning("pull after remote DDL failed", exc_info=True)
-
     async def close(self) -> None:
         """Final push, cancel push loop, close write holder."""
         if self._write_queue is not None:
