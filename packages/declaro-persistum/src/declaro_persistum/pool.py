@@ -628,6 +628,25 @@ class TursoPool(BasePool):
         if self._remote_url:
             self._push_task = asyncio.create_task(self._push_loop())
 
+    async def refresh_connections(self) -> None:
+        """Close and reopen _write_holder to pick up schema changes.
+
+        Call after DDL migrations — the write holder's cached connection
+        state doesn't see tables created via acquire_remote() or by
+        other connections, even after pull().
+        """
+        if self._write_holder:
+            if self._write_holder.conn is not None:
+                await self._write_holder.conn.close()
+                self._write_holder.conn = None
+            await self._write_holder.connect_async()
+            if self._remote_url:
+                try:
+                    await self._write_holder.pull()
+                except Exception:
+                    pass
+            logger.info("Write holder connection refreshed after migration")
+
     def pause_push(self) -> None:
         """Pause the background push loop (e.g. during migrations)."""
         self._push_paused = True

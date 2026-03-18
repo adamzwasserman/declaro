@@ -414,6 +414,10 @@ async def apply_migrations_async(
         if hasattr(pool, "resume_push"):
             pool.resume_push()
 
+    # Refresh the write holder so reads see newly-created tables
+    if hasattr(pool, "refresh_connections"):
+        await pool.refresh_connections()
+
     if result["success"]:
         logger.info(f"Successfully applied {result['operations_applied']} migrations")
         if result.get("error"):
