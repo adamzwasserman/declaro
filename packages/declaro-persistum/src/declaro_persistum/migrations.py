@@ -389,25 +389,59 @@ async def apply_migrations_async(
             "error": f"Ambiguous changes: {diff_result['ambiguities']}",
         }
 
-    # Pause cloud push during DDL — reconstruction temporarily drops and
-    # renames tables, and a push mid-transaction would sync partial state.
+    # On embedded replicas (remote_url set), skip reconstruction ops —
+    # the sync engine can't replicate DDL, and partial sync (DROP reaches
+    # cloud but CREATE doesn't) destroys tables on both sides.
+    # Use `declaro migrate-remote` for schema changes that need reconstruction.
+    is_cloud_replica = hasattr(pool, "_remote_url") and pool._remote_url
+    operations = diff_result["operations"]
+    execution_order = diff_result["execution_order"]
+
+    if is_cloud_replica:
+        from declaro_persistum.applier.shared import requires_reconstruction
+
+        safe_indices = set()
+        for op_idx in execution_order:
+            op = operations[op_idx]
+            if requires_reconstruction(op):
+                logger.warning(
+                    f"Skipping {op['op']} on {op.get('table', 'N/A')} — "
+                    f"reconstruction is unsafe on embedded replicas. "
+                    f"Run 'declaro migrate-remote' to apply this change to cloud."
+                )
+            else:
+                safe_indices.add(op_idx)
+        execution_order = [i for i in execution_order if i in safe_indices]
+
+        if not execution_order:
+            logger.info(
+                "All pending operations require reconstruction — "
+                "skipping auto-migration. Use 'declaro migrate-remote'."
+            )
+            return {
+                "success": True,
+                "operations_applied": 0,
+                "tables_in_schema": len(target_schema),
+                "tables_in_database": len(current_schema),
+                "skipped": True,
+                "error": None,
+            }
+
+    # Pause cloud push during DDL — a push mid-transaction would sync
+    # partial state.
     if hasattr(pool, "pause_push"):
         pool.pause_push()
 
-    # Apply migrations — DDL goes directly to cloud via acquire_remote
+    # Apply safe migrations
     applier = create_applier(dialect)
     try:
         async with _acquire_write_or_read(pool) as conn:
             result = await applier.apply(
-                conn, diff_result["operations"], diff_result["execution_order"]
+                conn, operations, execution_order
             )
     finally:
         if hasattr(pool, "resume_push"):
             pool.resume_push()
-
-    # Refresh the write holder so reads see newly-created tables
-    if hasattr(pool, "refresh_connections"):
-        await pool.refresh_connections()
 
     if result["success"]:
         logger.info(f"Successfully applied {result['operations_applied']} migrations")
