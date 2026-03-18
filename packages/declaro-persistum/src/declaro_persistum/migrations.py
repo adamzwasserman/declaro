@@ -32,25 +32,16 @@ META_TABLE = "_declaro_meta"
 logger = logging.getLogger(__name__)
 
 
-def _acquire_ddl(pool: Any) -> Any:
-    """Acquire a connection suitable for DDL (CREATE TABLE, ALTER TABLE, etc.).
-
-    Uses acquire_remote() when available — executes DDL directly on the
-    cloud DB, bypassing the embedded replica sync engine which cannot
-    replicate DDL.  Falls back to acquire_write(concurrent=False), then
-    pool.acquire().
-    """
-    if hasattr(pool, "acquire_remote"):
-        return pool.acquire_remote()
-    if hasattr(pool, "acquire_write"):
-        return pool.acquire_write(concurrent=False)
-    return pool.acquire()
-
-
 def _acquire_write_or_read(pool: Any) -> Any:
-    """Acquire a connection for DML writes (INSERT, UPDATE, DELETE, meta hash).
+    """Return pool.acquire_write(concurrent=False) if available, else pool.acquire().
 
-    Uses acquire_write(concurrent=False) when available, else pool.acquire().
+    DDL and hash writes must go through the write connection on pools
+    with split read/write paths (e.g. TursoPool) so that changes reach
+    the cloud primary rather than only the local replica file.
+
+    concurrent=False because DDL (CREATE TABLE, ALTER TABLE, etc.)
+    requires exclusive transactions — BEGIN CONCURRENT is rejected by
+    Turso for DDL statements.
     """
     if hasattr(pool, "acquire_write"):
         return pool.acquire_write(concurrent=False)
@@ -183,7 +174,7 @@ async def _recover_orphaned_tmp_tables(pool: Any) -> int:
 
     Returns the number of tables recovered.
     """
-    async with _acquire_ddl(pool) as conn:
+    async with _acquire_write_or_read(pool) as conn:
         # Detect both naming patterns:
         #   _declaro_tmp_<table>  (current)
         #   <table>_new           (legacy)
@@ -406,7 +397,7 @@ async def apply_migrations_async(
     # Apply migrations — DDL goes directly to cloud via acquire_remote
     applier = create_applier(dialect)
     try:
-        async with _acquire_ddl(pool) as conn:
+        async with _acquire_write_or_read(pool) as conn:
             result = await applier.apply(
                 conn, diff_result["operations"], diff_result["execution_order"]
             )

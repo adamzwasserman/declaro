@@ -291,6 +291,104 @@ def cmd_validate(
     return 0
 
 
+async def cmd_migrate_remote(
+    *,
+    remote_url: str,
+    auth_token: str | None,
+    schema_path: str,
+    dialect: str,
+    expand_enums: bool,
+    verbose: bool,
+) -> int:
+    """
+    Apply schema migrations directly to a remote Turso cloud DB.
+
+    Bypasses the embedded replica sync engine (which cannot replicate DDL).
+    Connects directly to the cloud URL, loads Pydantic models from schema_path,
+    diffs, and applies.  After this, embedded replicas can pull the schema
+    and sync DML normally.
+
+    Returns:
+        0 if migrations applied successfully (or no changes needed)
+        1 if errors
+    """
+    from pathlib import Path
+
+    from declaro_persistum.abstractions.enums import expand_schema_enums
+    from declaro_persistum.applier.protocol import create_applier
+    from declaro_persistum.differ import diff
+    from declaro_persistum.inspector.protocol import create_inspector
+    from declaro_persistum.pydantic_loader import load_models_from_module
+
+    schema_file = Path(schema_path)
+    if not schema_file.exists():
+        print(f"Error: Schema file not found: {schema_file}", file=sys.stderr)
+        return 1
+
+    # Load target schema from Pydantic models
+    target_schema = load_models_from_module(schema_file)
+    if not target_schema:
+        print("No @table decorated models found in schema file.", file=sys.stderr)
+        return 1
+
+    if expand_enums:
+        target_schema = expand_schema_enums(target_schema)
+
+    if verbose:
+        print(f"Loaded {len(target_schema)} tables from {schema_file}")
+
+    # Connect directly to cloud
+    import turso.aio
+
+    try:
+        conn = await turso.aio.connect(remote_url, auth_token=auth_token)
+    except TypeError:
+        # Older pyturso may not accept auth_token kwarg
+        conn = await turso.aio.connect(remote_url)
+
+    try:
+        # Introspect cloud DB
+        inspector = create_inspector(dialect)
+        current_schema = await inspector.introspect(conn)
+
+        if verbose:
+            print(f"Introspected {len(current_schema)} tables from cloud DB")
+
+        # Diff
+        diff_result = diff(current_schema, target_schema)
+
+        if not diff_result["operations"]:
+            print("Cloud schema is up to date — no changes needed.")
+            return 0
+
+        print(f"Found {len(diff_result['operations'])} schema differences:")
+        for op in diff_result["operations"]:
+            print(f"  - {op['op']} on {op.get('table', 'N/A')}")
+
+        if diff_result.get("ambiguities"):
+            print(f"\nAmbiguous changes detected: {diff_result['ambiguities']}")
+            print("Aborting — resolve ambiguities first.")
+            return 1
+
+        # Apply DDL directly on cloud
+        applier = create_applier(dialect)
+        result = await applier.apply(
+            conn, diff_result["operations"], diff_result["execution_order"]
+        )
+
+        if result["success"]:
+            print(f"\nApplied {result['operations_applied']} operations to cloud DB")
+            if result.get("error"):
+                print(f"Warnings: {result['error']}")
+            return 0
+        else:
+            print(f"\nMigration failed: {result.get('error', 'Unknown error')}", file=sys.stderr)
+            return 1
+
+    finally:
+        await conn.close()
+
+
 async def cmd_generate(
     *,
     connection_string: str,

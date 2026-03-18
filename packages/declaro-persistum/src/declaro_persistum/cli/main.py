@@ -23,6 +23,7 @@ from declaro_persistum.cli.commands import (
     cmd_apply,
     cmd_diff,
     cmd_generate,
+    cmd_migrate_remote,
     cmd_snapshot,
     cmd_validate,
 )
@@ -164,6 +165,34 @@ Examples:
         help="Fail on warnings (not just errors)",
     )
 
+    # migrate-remote command
+    remote_parser = subparsers.add_parser(
+        "migrate-remote",
+        help="Apply schema migrations directly to a remote Turso cloud DB",
+    )
+    remote_parser.add_argument(
+        "--remote",
+        required=True,
+        metavar="URL",
+        help="Turso cloud URL (libsql://your-db.turso.io)",
+    )
+    remote_parser.add_argument(
+        "--token",
+        metavar="TOKEN",
+        help="Auth token (or TURSO_AUTH_TOKEN env)",
+    )
+    remote_parser.add_argument(
+        "--schema",
+        required=True,
+        metavar="FILE",
+        help="Path to Python file with @table Pydantic models",
+    )
+    remote_parser.add_argument(
+        "--no-enums",
+        action="store_true",
+        help="Skip Literal type expansion to lookup tables",
+    )
+
     # generate command
     generate_parser = subparsers.add_parser(
         "generate",
@@ -275,6 +304,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                     schema_dir=args.schema_dir,
                     dialect=dialect,
                     force=args.force,
+                    verbose=args.verbose,
+                )
+            )
+        elif args.command == "migrate-remote":
+            token = getattr(args, "token", None) or os.environ.get("TURSO_AUTH_TOKEN")
+            return asyncio.run(
+                cmd_migrate_remote(
+                    remote_url=args.remote,
+                    auth_token=token,
+                    schema_path=args.schema,
+                    dialect="turso",
+                    expand_enums=not getattr(args, "no_enums", False),
                     verbose=args.verbose,
                 )
             )
