@@ -563,10 +563,12 @@ class TursoPool(BasePool):
         acquire_timeout: float = 30.0,
         push_interval_s: float = 1.0,
         push_retry_base_s: float = 0.1,
+        push_max_retries: int = 10,
     ) -> None:
         self._database_path = database_path
         self._remote_url = remote_url
         self._push_retry_base_s = push_retry_base_s
+        self._push_max_retries = push_max_retries
         self._auth_token = auth_token
         self._max_size = max_size
         self._acquire_timeout = acquire_timeout
@@ -763,11 +765,28 @@ class TursoPool(BasePool):
         try:
             yield async_conn
             await async_conn.commit()
-            # Attempt immediate push — best-effort.  If it fails, the
-            # data is safe on the local file and the push loop will
-            # deliver it to cloud (guaranteed eventual consistency).
+            # Push is MANDATORY — without persistent local storage,
+            # data not pushed before shutdown is lost permanently.
+            # Retry with backoff; if all attempts fail, raise so the
+            # caller knows the write did not reach cloud.
             if self._remote_url:
-                await self._push_once()
+                pushed = False
+                for attempt in range(self._push_max_retries):
+                    if await self._push_once():
+                        pushed = True
+                        break
+                    delay = min(self._push_retry_base_s * (2 ** attempt), 5.0)
+                    logger.warning(
+                        "Push failed (attempt %d/%d), retrying in %.1fs",
+                        attempt + 1, self._push_max_retries, delay,
+                    )
+                    await asyncio.sleep(delay)
+                if not pushed:
+                    raise PoolConnectionError(
+                        f"Write committed locally but failed to push to cloud "
+                        f"after {self._push_max_retries} attempts. "
+                        f"Data will be lost on restart."
+                    )
         except Exception:
             await async_conn.rollback()
             raise
