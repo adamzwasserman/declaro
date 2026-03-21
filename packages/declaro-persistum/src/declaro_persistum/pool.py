@@ -562,12 +562,10 @@ class TursoPool(BasePool):
         max_size: int = 5,
         acquire_timeout: float = 30.0,
         push_interval_s: float = 1.0,
-        push_max_retries: int = 10,
         push_retry_base_s: float = 0.1,
     ) -> None:
         self._database_path = database_path
         self._remote_url = remote_url
-        self._push_max_retries = push_max_retries
         self._push_retry_base_s = push_retry_base_s
         self._auth_token = auth_token
         self._max_size = max_size
@@ -659,43 +657,53 @@ class TursoPool(BasePool):
         """Resume the background push loop."""
         self._push_paused = False
 
-    async def _push_with_retry(self) -> None:
-        """Push to cloud with exponential backoff. Raises after max retries."""
-        last_error: Exception | None = None
-        for attempt in range(self._push_max_retries):
-            try:
-                if self._write_holder:
-                    await self._write_holder.push()
-                return  # success
-            except Exception as e:
-                last_error = e
-                delay = self._push_retry_base_s * (2 ** attempt)
-                logger.warning(
-                    "Push to cloud failed (attempt %d/%d), retrying in %.1fs: %s",
-                    attempt + 1, self._push_max_retries, delay, e,
-                )
-                await asyncio.sleep(delay)
-        # All retries exhausted
-        logger.error(
-            "Push to cloud failed after %d attempts — data committed locally but NOT on cloud",
-            self._push_max_retries,
-        )
-        raise PoolConnectionError(
-            f"Failed to push to Turso Cloud after {self._push_max_retries} attempts: {last_error}"
-        ) from last_error
+    async def _push_once(self) -> bool:
+        """Attempt a single push. Returns True on success, False on failure."""
+        try:
+            if self._write_holder:
+                await self._write_holder.push()
+            return True
+        except Exception as e:
+            logger.warning("Push to cloud failed: %s", e)
+            return False
 
     async def _push_loop(self) -> None:
-        """Periodically push local commits to Turso Cloud with retry."""
+        """Guaranteed eventual consistency loop.
+
+        Retries indefinitely with exponential backoff (capped at 30s).
+        The local file is the durable queue — all accumulated WAL changes
+        are included in each push attempt.  As long as the local file
+        persists across restarts, no data is lost.
+        """
+        consecutive_failures = 0
+        max_backoff = 30.0
+
         while not self._closed:
-            await asyncio.sleep(self._push_interval_s)
             if getattr(self, "_push_paused", False):
+                await asyncio.sleep(self._push_interval_s)
                 continue
-            try:
-                await self._push_with_retry()
-            except Exception:
-                # _push_with_retry exhausted all retries — log but
-                # don't crash the loop, it will retry next cycle.
-                logger.error("push loop: all retries exhausted this cycle")
+
+            success = await self._push_once()
+
+            if success:
+                if consecutive_failures > 0:
+                    logger.info(
+                        "Push to cloud recovered after %d failures",
+                        consecutive_failures,
+                    )
+                consecutive_failures = 0
+                await asyncio.sleep(self._push_interval_s)
+            else:
+                consecutive_failures += 1
+                delay = min(
+                    self._push_retry_base_s * (2 ** consecutive_failures),
+                    max_backoff,
+                )
+                logger.warning(
+                    "Push to cloud: %d consecutive failures, retrying in %.1fs",
+                    consecutive_failures, delay,
+                )
+                await asyncio.sleep(delay)
 
     @asynccontextmanager
     async def acquire(self) -> AsyncIterator[TursoAsyncConnection]:
@@ -755,10 +763,11 @@ class TursoPool(BasePool):
         try:
             yield async_conn
             await async_conn.commit()
-            # Push to cloud — retry until it succeeds.  The caller does
-            # not get control back until cloud has the data.
+            # Attempt immediate push — best-effort.  If it fails, the
+            # data is safe on the local file and the push loop will
+            # deliver it to cloud (guaranteed eventual consistency).
             if self._remote_url:
-                await self._push_with_retry()
+                await self._push_once()
         except Exception:
             await async_conn.rollback()
             raise
@@ -769,10 +778,22 @@ class TursoPool(BasePool):
         if self._write_queue is not None:
             await self._write_queue.stop_supervisor()
         self._closed = True
-        # Final push with retry — all reads and writes go through
-        # _write_holder, so this must succeed or data is lost.
+        # Final push — retry a few times on shutdown.  If it fails,
+        # data is still on the local file and will be pushed on next
+        # startup (the push loop picks up where it left off).
         if self._write_holder and self._remote_url:
-            await self._push_with_retry()
+            for attempt in range(5):
+                if await self._push_once():
+                    break
+                delay = self._push_retry_base_s * (2 ** attempt)
+                logger.warning("Final push attempt %d/5 failed, retrying in %.1fs", attempt + 1, delay)
+                await asyncio.sleep(delay)
+            else:
+                logger.error(
+                    "Final push failed after 5 attempts — data is safe on local file "
+                    "and will sync on next startup"
+                )
+        if self._write_holder:
             if self._write_holder.conn is not None:
                 await self._write_holder.conn.close()
                 self._write_holder.conn = None
