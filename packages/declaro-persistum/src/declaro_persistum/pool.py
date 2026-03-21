@@ -562,9 +562,13 @@ class TursoPool(BasePool):
         max_size: int = 5,
         acquire_timeout: float = 30.0,
         push_interval_s: float = 1.0,
+        push_max_retries: int = 10,
+        push_retry_base_s: float = 0.1,
     ) -> None:
         self._database_path = database_path
         self._remote_url = remote_url
+        self._push_max_retries = push_max_retries
+        self._push_retry_base_s = push_retry_base_s
         self._auth_token = auth_token
         self._max_size = max_size
         self._acquire_timeout = acquire_timeout
@@ -655,17 +659,43 @@ class TursoPool(BasePool):
         """Resume the background push loop."""
         self._push_paused = False
 
+    async def _push_with_retry(self) -> None:
+        """Push to cloud with exponential backoff. Raises after max retries."""
+        last_error: Exception | None = None
+        for attempt in range(self._push_max_retries):
+            try:
+                if self._write_holder:
+                    await self._write_holder.push()
+                return  # success
+            except Exception as e:
+                last_error = e
+                delay = self._push_retry_base_s * (2 ** attempt)
+                logger.warning(
+                    "Push to cloud failed (attempt %d/%d), retrying in %.1fs: %s",
+                    attempt + 1, self._push_max_retries, delay, e,
+                )
+                await asyncio.sleep(delay)
+        # All retries exhausted
+        logger.error(
+            "Push to cloud failed after %d attempts — data committed locally but NOT on cloud",
+            self._push_max_retries,
+        )
+        raise PoolConnectionError(
+            f"Failed to push to Turso Cloud after {self._push_max_retries} attempts: {last_error}"
+        ) from last_error
+
     async def _push_loop(self) -> None:
-        """Periodically push local commits to Turso Cloud."""
+        """Periodically push local commits to Turso Cloud with retry."""
         while not self._closed:
             await asyncio.sleep(self._push_interval_s)
             if getattr(self, "_push_paused", False):
                 continue
             try:
-                if self._write_holder:
-                    await self._write_holder.push()
+                await self._push_with_retry()
             except Exception:
-                logger.exception("push to cloud failed")
+                # _push_with_retry exhausted all retries — log but
+                # don't crash the loop, it will retry next cycle.
+                logger.error("push loop: all retries exhausted this cycle")
 
     @asynccontextmanager
     async def acquire(self) -> AsyncIterator[TursoAsyncConnection]:
@@ -702,7 +732,12 @@ class TursoPool(BasePool):
 
     @asynccontextmanager
     async def acquire_write(self, *, concurrent: bool = True) -> AsyncIterator[TursoAsyncConnection]:
-        """Acquire a write connection.
+        """Acquire the write connection (shared with _write_holder).
+
+        All writes go through _write_holder so the push loop and
+        explicit push after commit push the ACTUAL changes to cloud.
+        Creating separate connections per write caused push failures
+        because each connection tracked its own sync state independently.
 
         Args:
             concurrent: Use BEGIN CONCURRENT when MVCC is available (default True).
@@ -711,40 +746,33 @@ class TursoPool(BasePool):
         if self._closed:
             raise PoolClosedError("Pool has been closed")
 
-        holder = _TursoConnectionHolder(self._database_path, self._remote_url, self._auth_token)
-        await holder.connect_async()
-        async_conn = TursoAsyncConnection(holder)
+        if self._write_holder is None or self._write_holder.conn is None:
+            raise PoolConnectionError("Write holder not initialized")
+
+        async_conn = TursoAsyncConnection(self._write_holder)
         if concurrent and getattr(self, "_mvcc", False):
             await async_conn.execute("BEGIN CONCURRENT")
         try:
             yield async_conn
             await async_conn.commit()
-            # Push from THIS connection — pyturso sync connections track
-            # their own changes and can only push what they committed.
+            # Push to cloud — retry until it succeeds.  The caller does
+            # not get control back until cloud has the data.
             if self._remote_url:
-                try:
-                    await holder.push()
-                except Exception:
-                    logger.warning("push after acquire_write commit failed", exc_info=True)
+                await self._push_with_retry()
         except Exception:
             await async_conn.rollback()
             raise
-        finally:
-            await async_conn.close()
+        # Do NOT close — connection is shared with _write_holder
 
     async def close(self) -> None:
         """Final push, cancel push loop, close write holder."""
         if self._write_queue is not None:
             await self._write_queue.stop_supervisor()
         self._closed = True
-        # Push any remaining changes from _write_holder, then close.
-        # Note: acquire_write() connections push their own changes on commit,
-        # so _write_holder only needs to push its own (init-time) changes.
-        if self._write_holder:
-            try:
-                await self._write_holder.push()
-            except Exception:
-                logger.exception("final push failed on close")
+        # Final push with retry — all reads and writes go through
+        # _write_holder, so this must succeed or data is lost.
+        if self._write_holder and self._remote_url:
+            await self._push_with_retry()
             if self._write_holder.conn is not None:
                 await self._write_holder.conn.close()
                 self._write_holder.conn = None
