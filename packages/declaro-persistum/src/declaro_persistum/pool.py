@@ -563,12 +563,10 @@ class TursoPool(BasePool):
         acquire_timeout: float = 30.0,
         push_interval_s: float = 1.0,
         push_retry_base_s: float = 0.1,
-        push_max_retries: int = 10,
     ) -> None:
         self._database_path = database_path
         self._remote_url = remote_url
         self._push_retry_base_s = push_retry_base_s
-        self._push_max_retries = push_max_retries
         self._auth_token = auth_token
         self._max_size = max_size
         self._acquire_timeout = acquire_timeout
@@ -765,28 +763,20 @@ class TursoPool(BasePool):
         try:
             yield async_conn
             await async_conn.commit()
-            # Push is MANDATORY — without persistent local storage,
-            # data not pushed before shutdown is lost permanently.
-            # Retry with backoff; if all attempts fail, raise so the
-            # caller knows the write did not reach cloud.
+            # Push is MANDATORY — no persistent local storage means
+            # data not pushed is lost on restart.  Retry indefinitely
+            # with exponential backoff (capped at 30s).  The caller
+            # is blocked until cloud confirms receipt.
             if self._remote_url:
-                pushed = False
-                for attempt in range(self._push_max_retries):
-                    if await self._push_once():
-                        pushed = True
-                        break
-                    delay = min(self._push_retry_base_s * (2 ** attempt), 5.0)
+                attempt = 0
+                while not await self._push_once():
+                    attempt += 1
+                    delay = min(self._push_retry_base_s * (2 ** attempt), 30.0)
                     logger.warning(
-                        "Push failed (attempt %d/%d), retrying in %.1fs",
-                        attempt + 1, self._push_max_retries, delay,
+                        "Push failed (attempt %d), retrying in %.1fs",
+                        attempt, delay,
                     )
                     await asyncio.sleep(delay)
-                if not pushed:
-                    raise PoolConnectionError(
-                        f"Write committed locally but failed to push to cloud "
-                        f"after {self._push_max_retries} attempts. "
-                        f"Data will be lost on restart."
-                    )
         except Exception:
             await async_conn.rollback()
             raise
@@ -797,21 +787,15 @@ class TursoPool(BasePool):
         if self._write_queue is not None:
             await self._write_queue.stop_supervisor()
         self._closed = True
-        # Final push — retry a few times on shutdown.  If it fails,
-        # data is still on the local file and will be pushed on next
-        # startup (the push loop picks up where it left off).
+        # Final push — retry indefinitely.  No persistent disk means
+        # data not pushed is lost permanently.
         if self._write_holder and self._remote_url:
-            for attempt in range(5):
-                if await self._push_once():
-                    break
-                delay = self._push_retry_base_s * (2 ** attempt)
-                logger.warning("Final push attempt %d/5 failed, retrying in %.1fs", attempt + 1, delay)
+            attempt = 0
+            while not await self._push_once():
+                attempt += 1
+                delay = min(self._push_retry_base_s * (2 ** attempt), 30.0)
+                logger.warning("Final push attempt %d failed, retrying in %.1fs", attempt, delay)
                 await asyncio.sleep(delay)
-            else:
-                logger.error(
-                    "Final push failed after 5 attempts — data is safe on local file "
-                    "and will sync on next startup"
-                )
         if self._write_holder:
             if self._write_holder.conn is not None:
                 await self._write_holder.conn.close()
