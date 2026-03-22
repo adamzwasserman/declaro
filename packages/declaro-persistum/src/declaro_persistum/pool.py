@@ -748,9 +748,10 @@ class TursoPool(BasePool):
             except Exception:
                 await async_conn.rollback()
                 raise
-        # Push OUTSIDE the lock — cloud I/O doesn't block reads/writes
+        # Fire-and-forget push — cloud I/O must not block the caller.
+        # The push loop guarantees eventual delivery.
         if self._remote_url:
-            await self._push_once()
+            asyncio.create_task(self._push_once())
 
     async def close(self) -> None:
         """Final push, cancel push loop, close write holder."""
