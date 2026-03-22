@@ -202,6 +202,11 @@ Examples:
         action="store_true",
         help="Show operations without executing",
     )
+    remote_parser.add_argument(
+        "--no-fks",
+        action="store_true",
+        help="Strip foreign key constraints from cloud schema (avoids sync engine FK violations)",
+    )
 
     # generate command
     generate_parser = subparsers.add_parser(
@@ -328,6 +333,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     expand_enums=not getattr(args, "no_enums", False),
                     init=getattr(args, "init", False),
                     dry_run=getattr(args, "dry_run", False),
+                    no_fks=getattr(args, "no_fks", False),
                     verbose=args.verbose,
                 )
             )

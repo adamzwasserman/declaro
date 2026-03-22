@@ -300,6 +300,7 @@ async def cmd_migrate_remote(
     expand_enums: bool,
     init: bool,
     dry_run: bool,
+    no_fks: bool,
     verbose: bool,
 ) -> int:
     """
@@ -307,6 +308,10 @@ async def cmd_migrate_remote(
 
     Bypasses the embedded replica sync engine (which cannot replicate DDL).
     Uses a temp local file with turso.aio.sync to pull/push cloud state.
+
+    When --no-fks is set, FK constraints are stripped from the target schema
+    before diffing.  This creates cloud tables without FK enforcement, avoiding
+    sync engine replay-order violations.  FKs remain on local replicas.
 
     Safety: if the cloud DB appears empty (0 tables introspected) and the
     diff produces create_table ops, the --init flag is required.  This
@@ -337,6 +342,12 @@ async def cmd_migrate_remote(
 
     if expand_enums:
         target_schema = expand_schema_enums(target_schema)
+
+    if no_fks:
+        from declaro_persistum.fk_ordering import strip_foreign_keys
+        target_schema = strip_foreign_keys(target_schema)
+        if verbose:
+            print("Stripped FK constraints from target schema (--no-fks)")
 
     if verbose:
         print(f"Loaded {len(target_schema)} tables from {schema_file}")
