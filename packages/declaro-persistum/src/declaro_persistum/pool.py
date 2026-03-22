@@ -572,6 +572,7 @@ class TursoPool(BasePool):
         self._acquire_timeout = acquire_timeout
         self._push_interval_s = push_interval_s
         self._semaphore = asyncio.Semaphore(max_size)
+        self._conn_lock = asyncio.Lock()
         self._closed = False
         self._active_connections = 0
         self._push_task: asyncio.Task[None] | None = None
@@ -638,10 +639,11 @@ class TursoPool(BasePool):
         self._push_paused = False
 
     async def _push_once(self) -> bool:
-        """Attempt a single push. Returns True on success, False on failure."""
+        """Attempt a single push under the connection lock."""
         try:
             if self._write_holder:
-                await self._write_holder.push()
+                async with self._conn_lock:
+                    await self._write_holder.push()
             return True
         except Exception as e:
             logger.warning("Push to cloud failed: %s", e)
@@ -651,9 +653,8 @@ class TursoPool(BasePool):
         """Guaranteed eventual consistency loop.
 
         Retries indefinitely with exponential backoff (capped at 30s).
-        The local file is the durable queue — all accumulated WAL changes
-        are included in each push attempt.  As long as the local file
-        persists across restarts, no data is lost.
+        Acquires _conn_lock for push, then releases — reads and writes
+        can proceed between push attempts without waiting for cloud I/O.
         """
         consecutive_failures = 0
         max_backoff = 30.0
@@ -709,13 +710,13 @@ class TursoPool(BasePool):
             self._semaphore.release()
             raise PoolConnectionError("Write holder not initialized")
 
-        async_conn = TursoAsyncConnection(self._write_holder)
         self._active_connections += 1
         try:
-            yield async_conn
+            async with self._conn_lock:
+                async_conn = TursoAsyncConnection(self._write_holder)
+                yield async_conn
         finally:
             self._active_connections -= 1
-            # Do NOT close — the connection is shared with _write_holder
             self._semaphore.release()
 
     @asynccontextmanager
@@ -737,23 +738,19 @@ class TursoPool(BasePool):
         if self._write_holder is None or self._write_holder.conn is None:
             raise PoolConnectionError("Write holder not initialized")
 
-        async_conn = TursoAsyncConnection(self._write_holder)
-        if concurrent and getattr(self, "_mvcc", False):
-            await async_conn.execute("BEGIN CONCURRENT")
-        try:
-            yield async_conn
-            await async_conn.commit()
-            # Non-blocking push: attempt once, let the push loop handle
-            # retries in the background.  The caller gets sub-ms write
-            # latency.  Guaranteed delivery happens via:
-            # - push loop (retries indefinitely every push_interval_s)
-            # - close() (blocks until all data reaches cloud)
-            if self._remote_url:
-                await self._push_once()
-        except Exception:
-            await async_conn.rollback()
-            raise
-        # Do NOT close — connection is shared with _write_holder
+        async with self._conn_lock:
+            async_conn = TursoAsyncConnection(self._write_holder)
+            if concurrent and getattr(self, "_mvcc", False):
+                await async_conn.execute("BEGIN CONCURRENT")
+            try:
+                yield async_conn
+                await async_conn.commit()
+            except Exception:
+                await async_conn.rollback()
+                raise
+        # Push OUTSIDE the lock — cloud I/O doesn't block reads/writes
+        if self._remote_url:
+            await self._push_once()
 
     async def close(self) -> None:
         """Final push, cancel push loop, close write holder."""
