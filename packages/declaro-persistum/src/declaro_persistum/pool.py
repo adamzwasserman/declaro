@@ -743,20 +743,13 @@ class TursoPool(BasePool):
         try:
             yield async_conn
             await async_conn.commit()
-            # Push is MANDATORY — no persistent local storage means
-            # data not pushed is lost on restart.  Retry indefinitely
-            # with exponential backoff (capped at 30s).  The caller
-            # is blocked until cloud confirms receipt.
+            # Non-blocking push: attempt once, let the push loop handle
+            # retries in the background.  The caller gets sub-ms write
+            # latency.  Guaranteed delivery happens via:
+            # - push loop (retries indefinitely every push_interval_s)
+            # - close() (blocks until all data reaches cloud)
             if self._remote_url:
-                attempt = 0
-                while not await self._push_once():
-                    attempt += 1
-                    delay = min(self._push_retry_base_s * (2 ** attempt), 30.0)
-                    logger.warning(
-                        "Push failed (attempt %d), retrying in %.1fs",
-                        attempt, delay,
-                    )
-                    await asyncio.sleep(delay)
+                await self._push_once()
         except Exception:
             await async_conn.rollback()
             raise
