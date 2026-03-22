@@ -752,8 +752,30 @@ class TursoPool(BasePool):
         # Any push attempt (even fire-and-forget) acquires _conn_lock
         # and blocks reads during the cloud round-trip.
 
+    async def flush(self) -> None:
+        """Block until all pending local writes have been pushed to cloud.
+
+        Retries indefinitely with exponential backoff.  Does NOT close
+        the pool — the connection remains usable after flush returns.
+        """
+        if self._write_holder and self._remote_url:
+            attempt = 0
+            while not await self._push_once():
+                attempt += 1
+                delay = min(self._push_retry_base_s * (2 ** attempt), 30.0)
+                logger.warning("Flush attempt %d failed, retrying in %.1fs", attempt, delay)
+                await asyncio.sleep(delay)
+
     async def close(self) -> None:
-        """Final push, cancel push loop, close write holder."""
+        """Flush all pending writes to cloud, then close.
+
+        Retries push indefinitely until cloud confirms receipt.
+        After this method returns, all local writes are guaranteed
+        to be on cloud.  It is safe to delete local DB files after
+        close() completes.
+
+        Call this on SIGTERM / application shutdown before exiting.
+        """
         if self._write_queue is not None:
             await self._write_queue.stop_supervisor()
         self._closed = True
