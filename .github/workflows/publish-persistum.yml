@@ -3,19 +3,48 @@ name: Publish declaro-persistum to PyPI
 # Fires when a tag matching `persistum-v*` is pushed (e.g. `persistum-v0.1.1`).
 # Uses PyPI trusted publishing (OIDC) — no API tokens.
 #
-# One-time PyPI setup (required before first automated publish):
-#   https://pypi.org/manage/project/declaro-persistum/settings/publishing/
-#   Add a new trusted publisher with:
-#     Owner:                adamzwasserman
-#     Repository name:      declaro
-#     Workflow name:        publish-persistum.yml
-#     Environment name:     pypi
+# ONE-TIME SETUP (required before first automated publish)
+# ========================================================
 #
-# Release flow:
+# 1. PyPI trusted publisher
+#    URL: https://pypi.org/manage/project/declaro-persistum/settings/publishing/
+#    Add a new publisher with:
+#      Owner:                adamzwasserman
+#      Repository name:      declaro
+#      Workflow name:        publish-persistum.yml
+#      Environment name:     pypi
+#
+# 2. GitHub Environment `pypi`
+#    URL: https://github.com/adamzwasserman/declaro/settings/environments
+#    Create an environment named `pypi`. Optionally add required reviewers
+#    for a manual approval gate on every publish.
+#
+# 3. GitHub Environment deployment restriction — TAG type, not branch
+#    Same environment settings page → "Deployment branches and tags" →
+#    "Selected branches and tags" → "Add deployment branch or tag rule".
+#
+#    CRITICAL: the GitHub UI groups branches and tags under one heading
+#    ("Deployment branches and tags") but the rule type must match the
+#    ref type being deployed. Tags pushed to this workflow (persistum-v*)
+#    require a TAG rule, not a BRANCH rule. A rule of the right pattern
+#    but the wrong type rejects the deployment with:
+#
+#      "Tag 'persistum-vX.Y.Z' is not allowed to deploy to pypi due to
+#       environment protection rules."
+#
+#    Via the UI: when adding the rule, select "Ref type" → Tag.
+#    Via gh CLI:
+#      gh api --method POST \
+#        /repos/adamzwasserman/declaro/environments/pypi/deployment-branch-policies \
+#        -f name="persistum-v*" -f type="tag"
+#
+# RELEASE FLOW
+# ============
 #   1. Bump `version` in packages/declaro-persistum/pyproject.toml
-#   2. Commit the bump to main
-#   3. git tag persistum-v0.1.1 && git push origin persistum-v0.1.1
-#   4. Workflow runs → approve in GitHub Environments → publish
+#   2. Add a CHANGELOG.md entry
+#   3. Commit the bump to main
+#   4. git tag persistum-vX.Y.Z && git push origin main persistum-vX.Y.Z
+#   5. Workflow runs → approve in GitHub Environments → publish
 
 on:
   push:
