@@ -162,6 +162,39 @@ users = table("users", schema, pool)
 users.emial  # AttributeError: Table 'users' has no column 'emial'
 ```
 
+### Query Hooks (pre / post)
+
+Pass functions in — don't register them. `table_factory(...)` returns a closure that produces `TableProxy` instances with your pre-hook and post-hook pre-wired. Pre-hooks transform the query builder *before* SQL is built; post-hooks transform rows *after* the DB returns them.
+
+```python
+from declaro_persistum import table_factory
+from declaro_persistum.query.select import SelectQuery
+from declaro_persistum.query.table import table
+
+# Your app-defined hook — a pure function, testable without declaro.
+def apply_rls(query):
+    user = current_user_id.get()
+    if isinstance(query, SelectQuery):
+        proxy = table(query._table, query._schema, query._pool)
+        return query.where(proxy.owner == user)
+    return query
+
+def log_audit(rows, meta):
+    audit_log.append({"sql": meta["sql"], "rows": len(rows)})
+    return rows
+
+# Bind once at app startup:
+get_table = table_factory(schema, pool, pre=apply_rls, post=log_audit)
+
+# Use normally — hooks fire automatically on every .execute():
+items = get_table("items")
+rows = await items.select().where(items.owner == user_id).execute()
+```
+
+Because hooks are just function arguments, nothing is registered globally, nothing runs at import time, and you can compose them with ordinary Python — different scopes use different factories with different hook functions. Pre-hooks can structurally rewrite queries (DELETE → UPDATE for soft delete) by returning a different query type; the executor runs whatever comes back.
+
+Full API + RLS / audit / soft-delete recipes: [`docs/hooks.md`](docs/hooks.md).
+
 ### Enum Support via Literal Types
 
 Use Python's `Literal` type for enum fields - declaro_persistum automatically creates lookup tables with foreign key constraints (providing consistent enum enforcement across all backends):

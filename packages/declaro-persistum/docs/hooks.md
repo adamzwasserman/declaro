@@ -5,9 +5,31 @@ Declaro-persistum gives you two hook slots per table:
 - **pre-hook** — runs before SQL is built. Receives the query builder object, returns a (possibly modified) query object.
 - **post-hook** — runs after the DB returns rows. Receives `(rows, QueryMeta)`, returns (possibly transformed) rows.
 
-Hooks are **passed in**, not registered. You hand a function to `table_factory(...)` (or directly to `.execute()`) and it runs at the expected point in the flow. There is no module-level registry, no decorator magic, no ContextVar reads inside declaro. Hooks are composition data, exactly like any other callback argument.
-
 This is the primitive you build row-level security, audit logging, soft deletes, tenant isolation, dev/test query rewriting, and read-replica routing on top of. Declaro itself ships none of those policies — you write them in your app, where the auth model lives.
+
+## Design: hooks are passed in, not registered
+
+Hooks are ordinary function references that you **pass as arguments** to `table_factory(...)` (or directly to `.execute()`). They are not decorators, not entries in a registry, not attached to a class by metaclass magic. The control flow is explicit at the call site:
+
+```python
+# Hooks are data. You bind them where the table proxy is created:
+get_table = table_factory(schema, pool, pre=apply_rls, post=log_audit)
+
+# …and they are visible function references, testable in isolation:
+assert apply_rls(some_query).to_sql("sqlite")[0] == expected_sql
+```
+
+There is no module-level registry of hooks. There is no decorator like `@register_pre_hook("items")` that runs at import time. Declaro never reaches outside the arguments you handed it — no `ContextVar` reads inside the library, no reflection over module globals, no side effects from importing.
+
+This is deliberate. It means:
+
+- **You can trace every hook to a line of your code.** No "where did this filter come from?" archaeology.
+- **You can compose externally.** If you want two pre-hooks, you write `pre=lambda q: second(first(q))`. Declaro does not pick an ordering for you because ordering is application semantics.
+- **You can test hooks as pure functions.** A hook is `(query) -> query` or `(rows, meta) -> rows`. No declaro setup, no mocks, no fixtures — just `assert apply_rls(q).to_sql(...) == expected`.
+- **Different scopes use different factories.** Web requests use `make_request_table(...)` with RLS; background jobs use `make_job_table(...)` with no RLS; admin scripts use plain `table(...)` with nothing. Each is a different factory binding different hook functions. Same declaro, different composition.
+- **Declaro never mutates its own state.** Calling `table_factory(...)` twice with different hooks produces two independent closures. There is nothing global to be out of sync with, nothing to clear between tests, nothing that can leak from one request into another.
+
+The inverse — decorator-based registration — was considered and rejected. A `@pre_hook(table="items")` decorator would require a module-level registry, which means declaro carrying state the user cannot see, initialization order dependencies, and the exact "action at a distance" Honest Code avoids.
 
 ## Quick example
 

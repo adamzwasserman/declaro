@@ -61,9 +61,11 @@ class PrismaQueryBuilder:
         self._pre = pre
         self._post = post
 
-    def _where_to_conditions(self, where: dict[str, Any]) -> list[Condition]:
-        """Convert Prisma-style where dict to Condition objects."""
-        conditions = []
+    def _where_to_conditions(
+        self, where: dict[str, Any]
+    ) -> list[Condition | ConditionGroup]:
+        """Convert Prisma-style where dict to Condition/ConditionGroup objects."""
+        conditions: list[Condition | ConditionGroup] = []
 
         for key, value in where.items():
             # Handle nested conditions
@@ -74,7 +76,7 @@ class PrismaQueryBuilder:
                 continue
             elif key == "OR":
                 # OR creates a ConditionGroup
-                or_conditions = []
+                or_conditions: list[Condition | ConditionGroup] = []
                 for sub_where in value:
                     sub_conds = self._where_to_conditions(sub_where)
                     if sub_conds:
@@ -84,7 +86,7 @@ class PrismaQueryBuilder:
                     combined: Condition | ConditionGroup = or_conditions[0]
                     for c in or_conditions[1:]:
                         combined = combined | c
-                    conditions.append(combined)  # type: ignore[arg-type]
+                    conditions.append(combined)
                 continue
             elif key == "NOT":
                 # NOT negates the conditions - for now just skip unsupported
