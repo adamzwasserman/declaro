@@ -1,0 +1,71 @@
+name: Publish declaro-persistum to PyPI
+
+# Fires when a tag matching `persistum-v*` is pushed (e.g. `persistum-v0.1.1`).
+# Uses PyPI trusted publishing (OIDC) — no API tokens.
+#
+# One-time PyPI setup (required before first automated publish):
+#   https://pypi.org/manage/project/declaro-persistum/settings/publishing/
+#   Add a new trusted publisher with:
+#     Owner:                adamzwasserman
+#     Repository name:      declaro
+#     Workflow name:        publish-persistum.yml
+#     Environment name:     pypi
+#
+# Release flow:
+#   1. Bump `version` in packages/declaro-persistum/pyproject.toml
+#   2. Commit the bump to main
+#   3. git tag persistum-v0.1.1 && git push origin persistum-v0.1.1
+#   4. Workflow runs → approve in GitHub Environments → publish
+
+on:
+  push:
+    tags:
+      - "persistum-v*"
+
+jobs:
+  publish:
+    name: Build and publish declaro-persistum
+    runs-on: ubuntu-latest
+
+    environment:
+      name: pypi
+      url: https://pypi.org/project/declaro-persistum/
+
+    permissions:
+      id-token: write        # REQUIRED for PyPI trusted publishing
+      contents: read
+
+    defaults:
+      run:
+        working-directory: packages/declaro-persistum
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify tag matches pyproject.toml version
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME#persistum-v}"
+          PKG=$(grep -E '^version\s*=' pyproject.toml | head -1 | sed -E 's/.*"(.+)".*/\1/')
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag 'persistum-v$TAG' does not match pyproject.toml version '$PKG'"
+            exit 1
+          fi
+          echo "Tag and pyproject version both at: $PKG"
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: packages/declaro-persistum/dist/
