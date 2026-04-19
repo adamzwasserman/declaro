@@ -17,7 +17,8 @@ from declaro_persistum.query.table import (
 from declaro_persistum.types import Schema
 
 if TYPE_CHECKING:
-    pass
+    from declaro_persistum.query.hooks import PostHook, PreHook
+    from declaro_persistum.query.select import SelectQuery
 
 
 class QuerySet:
@@ -40,6 +41,8 @@ class QuerySet:
         "_limit",
         "_offset",
         "_pool",
+        "_pre",
+        "_post",
     )
 
     def __init__(
@@ -53,6 +56,9 @@ class QuerySet:
         limit: int | None = None,
         offset: int | None = None,
         pool: Any = None,
+        *,
+        pre: "PreHook | None" = None,
+        post: "PostHook | None" = None,
     ):
         self._table_name = table_name
         self._schema = schema
@@ -63,6 +69,8 @@ class QuerySet:
         self._limit = limit
         self._offset = offset
         self._pool = pool
+        self._pre = pre
+        self._post = post
 
     def _clone(self, **kwargs: Any) -> "QuerySet":
         """Return a copy with updated attributes."""
@@ -76,6 +84,32 @@ class QuerySet:
             limit=kwargs.get("limit", self._limit),
             offset=kwargs.get("offset", self._offset),
             pool=kwargs.get("pool", self._pool),
+            pre=kwargs.get("pre", self._pre),
+            post=kwargs.get("post", self._post),
+        )
+
+    def _to_select_query(self) -> "SelectQuery":
+        """Build an equivalent SelectQuery so hooks fire through the standard path."""
+        from declaro_persistum.query.select import SelectQuery
+
+        combined: Condition | ConditionGroup | None = None
+        all_conditions = self._filters + self._excludes
+        if all_conditions:
+            combined = all_conditions[0]
+            for c in all_conditions[1:]:
+                combined = combined & c
+
+        return SelectQuery(
+            self._table_name,
+            self._schema,
+            (),  # SELECT *
+            where=combined,
+            order_by=list(self._ordering),
+            limit_val=self._limit,
+            offset_val=self._offset,
+            pool=self._pool,
+            pre=self._pre,
+            post=self._post,
         )
 
     def _kwargs_to_conditions(self, negate: bool = False, **kwargs: Any) -> list[Condition]:
@@ -263,37 +297,28 @@ class QuerySet:
         return {"sql": sql, "params": params, "dialect": dialect}
 
     async def all(self) -> list[dict[str, Any]]:
-        """Execute query and return all results."""
-        from declaro_persistum.query.executor import execute_with_pool
-
-        return await execute_with_pool(self._pool, self.to_query, mode="all")
+        """Execute query and return all results. Routes through hooks if configured."""
+        return await self._to_select_query().execute()
 
     async def first(self) -> dict[str, Any] | None:
-        """Execute query and return first result or None."""
-        from declaro_persistum.query.executor import execute_with_pool
-
-        qs = self._clone(limit=1)
-        return await execute_with_pool(self._pool, qs.to_query, mode="one")
+        """Execute query and return first result or None. Routes through hooks if configured."""
+        return await self._clone(limit=1)._to_select_query().execute_one()
 
     async def get(self, **kwargs: Any) -> dict[str, Any]:
         """
-        Get a single object matching the given kwargs.
+        Get a single object matching the given kwargs. Routes through hooks if configured.
 
         Raises:
             DoesNotExist: If no object is found
             MultipleObjectsReturned: If more than one object is found
         """
-        from declaro_persistum.query.executor import execute_with_pool
-
         qs = self
         if kwargs:
             qs = qs.filter(**kwargs)
 
         # Fetch 2 to detect multiple results
         qs_limited = qs._clone(limit=2)
-        results: list[dict[str, Any]] = await execute_with_pool(
-            self._pool, qs_limited.to_query, mode="all"
-        )
+        results: list[dict[str, Any]] = await qs_limited._to_select_query().execute()
 
         if len(results) == 0:
             raise DoesNotExist(f"{self._table_name} matching query does not exist")
@@ -303,23 +328,31 @@ class QuerySet:
         return results[0]
 
     async def count(self) -> int:
-        """Return count of objects matching the query."""
-        from declaro_persistum.query.executor import execute_with_pool
+        """Return count of objects matching the query. Routes through hooks if configured."""
+        from declaro_persistum.query.select import SelectQuery
+        from declaro_persistum.query.table import count_
 
-        def _count_query(dialect: str) -> Query:
-            sql = f"SELECT COUNT(*) FROM {self._table_name}"
-            params: dict[str, Any] = {}
-            where_sql, where_params = self._build_where(dialect)
-            if where_sql:
-                sql += f" WHERE {where_sql}"
-                params.update(where_params)
-            return {"sql": sql, "params": params, "dialect": dialect}
+        combined: Condition | ConditionGroup | None = None
+        all_conditions = self._filters + self._excludes
+        if all_conditions:
+            combined = all_conditions[0]
+            for c in all_conditions[1:]:
+                combined = combined & c
 
-        result = await execute_with_pool(self._pool, _count_query, mode="scalar")
+        count_q = SelectQuery(
+            self._table_name,
+            self._schema,
+            (count_("*"),),
+            where=combined,
+            pool=self._pool,
+            pre=self._pre,
+            post=self._post,
+        )
+        result = await count_q.execute_scalar()
         return int(result) if result else 0
 
     async def exists(self) -> bool:
-        """Return True if the query matches any objects."""
+        """Return True if the query matches any objects. Routes through hooks if configured."""
         result = await self._clone(limit=1).first()
         return result is not None
 

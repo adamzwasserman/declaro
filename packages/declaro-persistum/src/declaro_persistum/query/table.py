@@ -45,13 +45,21 @@ from declaro_persistum.types import Column, Schema
 if TYPE_CHECKING:
     from declaro_persistum.query.delete import DeleteQuery
     from declaro_persistum.query.django_style import QuerySet
+    from declaro_persistum.query.hooks import PostHook, PreHook
     from declaro_persistum.query.insert import InsertQuery
     from declaro_persistum.query.prisma_style import PrismaQueryBuilder
     from declaro_persistum.query.select import SelectQuery
     from declaro_persistum.query.update import UpdateQuery
 
 
-def table(name: str, schema: Schema, pool: Any = None) -> "TableProxy":
+def table(
+    name: str,
+    schema: Schema,
+    pool: Any = None,
+    *,
+    pre: "PreHook | None" = None,
+    post: "PostHook | None" = None,
+) -> "TableProxy":
     """
     Create a schema-validated table proxy.
 
@@ -59,6 +67,8 @@ def table(name: str, schema: Schema, pool: Any = None) -> "TableProxy":
         name: Table name (must exist in schema)
         schema: Schema dict
         pool: Connection pool with acquire() context manager
+        pre: Optional pre-hook — runs before SQL is built, transforms the query object.
+        post: Optional post-hook — runs after DB returns, transforms rows.
 
     Returns:
         TableProxy for building queries
@@ -68,7 +78,7 @@ def table(name: str, schema: Schema, pool: Any = None) -> "TableProxy":
     """
     if name not in schema:
         raise ValueError(f"Table '{name}' not found in schema. Available: {list(schema.keys())}")
-    return TableProxy(name, schema, pool)
+    return TableProxy(name, schema, pool, pre=pre, post=post)
 
 
 class TableProxy:
@@ -79,13 +89,24 @@ class TableProxy:
     All query methods return new immutable query objects.
     """
 
-    __slots__ = ("_name", "_schema", "_columns", "_pool", "_alias")
+    __slots__ = ("_name", "_schema", "_columns", "_pool", "_alias", "_pre", "_post")
 
-    def __init__(self, name: str, schema: Schema, pool: Any, alias: str | None = None):
+    def __init__(
+        self,
+        name: str,
+        schema: Schema,
+        pool: Any,
+        alias: str | None = None,
+        *,
+        pre: "PreHook | None" = None,
+        post: "PostHook | None" = None,
+    ):
         self._name = name
         self._schema = schema
         self._pool = pool
         self._alias = alias
+        self._pre = pre
+        self._post = post
         # Column refs use the alias as table prefix when aliasing is active
         col_table_ref = alias if alias is not None else name
         table_def = schema[name]
@@ -120,7 +141,14 @@ class TableProxy:
                 .execute()
             )
         """
-        return TableProxy(self._name, self._schema, self._pool, alias=alias_name)
+        return TableProxy(
+            self._name,
+            self._schema,
+            self._pool,
+            alias=alias_name,
+            pre=self._pre,
+            post=self._post,
+        )
 
     def __getattr__(self, name: str) -> "ColumnProxy":
         if name.startswith("_"):
@@ -136,25 +164,54 @@ class TableProxy:
         """Start a SELECT query on this table."""
         from declaro_persistum.query.select import SelectQuery
 
-        return SelectQuery(self._name, self._schema, columns, pool=self._pool)
+        return SelectQuery(
+            self._name,
+            self._schema,
+            columns,
+            pool=self._pool,
+            pre=self._pre,
+            post=self._post,
+        )
 
     def insert(self, **values: Any) -> "InsertQuery":
         """Start an INSERT query on this table."""
         from declaro_persistum.query.insert import InsertQuery
 
-        return InsertQuery(self._name, self._schema, values, self._columns, pool=self._pool)
+        return InsertQuery(
+            self._name,
+            self._schema,
+            values,
+            self._columns,
+            pool=self._pool,
+            pre=self._pre,
+            post=self._post,
+        )
 
     def update(self, **values: Any) -> "UpdateQuery":
         """Start an UPDATE query on this table."""
         from declaro_persistum.query.update import UpdateQuery
 
-        return UpdateQuery(self._name, self._schema, values, self._columns, pool=self._pool)
+        return UpdateQuery(
+            self._name,
+            self._schema,
+            values,
+            self._columns,
+            pool=self._pool,
+            pre=self._pre,
+            post=self._post,
+        )
 
     def delete(self) -> "DeleteQuery":
         """Start a DELETE query on this table."""
         from declaro_persistum.query.delete import DeleteQuery
 
-        return DeleteQuery(self._name, self._schema, pool=self._pool)
+        return DeleteQuery(
+            self._name,
+            self._schema,
+            pool=self._pool,
+            pre=self._pre,
+            post=self._post,
+        )
 
     # =========================================================================
     # Django-style API
@@ -170,7 +227,14 @@ class TableProxy:
         """
         from declaro_persistum.query.django_style import QuerySet
 
-        return QuerySet(self._name, self._schema, self._columns, pool=self._pool)
+        return QuerySet(
+            self._name,
+            self._schema,
+            self._columns,
+            pool=self._pool,
+            pre=self._pre,
+            post=self._post,
+        )
 
     def filter(self, **kwargs: Any) -> "QuerySet":
         """
@@ -252,7 +316,14 @@ class TableProxy:
         """
         from declaro_persistum.query.prisma_style import PrismaQueryBuilder
 
-        return PrismaQueryBuilder(self._name, self._schema, self._columns, pool=self._pool)
+        return PrismaQueryBuilder(
+            self._name,
+            self._schema,
+            self._columns,
+            pool=self._pool,
+            pre=self._pre,
+            post=self._post,
+        )
 
     async def find_many(
         self,

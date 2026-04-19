@@ -12,11 +12,11 @@ Provides a dict-based interface familiar to Prisma users:
 from typing import TYPE_CHECKING, Any
 
 from declaro_persistum.query.builder import Query
-from declaro_persistum.query.table import ColumnProxy, Condition, ConditionGroup
+from declaro_persistum.query.table import ColumnProxy, Condition, ConditionGroup, OrderBy
 from declaro_persistum.types import Schema
 
 if TYPE_CHECKING:
-    pass
+    from declaro_persistum.query.hooks import PostHook, PreHook
 
 
 def _find_pk_column(schema: Schema, table_name: str) -> str:
@@ -42,7 +42,7 @@ class PrismaQueryBuilder:
         upsert(where={}, create={}, update={})
     """
 
-    __slots__ = ("_table_name", "_schema", "_columns", "_pool")
+    __slots__ = ("_table_name", "_schema", "_columns", "_pool", "_pre", "_post")
 
     def __init__(
         self,
@@ -50,11 +50,16 @@ class PrismaQueryBuilder:
         schema: Schema,
         columns: dict[str, ColumnProxy],
         pool: Any = None,
+        *,
+        pre: "PreHook | None" = None,
+        post: "PostHook | None" = None,
     ):
         self._table_name = table_name
         self._schema = schema
         self._columns = columns
         self._pool = pool
+        self._pre = pre
+        self._post = post
 
     def _where_to_conditions(self, where: dict[str, Any]) -> list[Condition]:
         """Convert Prisma-style where dict to Condition objects."""
@@ -191,6 +196,65 @@ class PrismaQueryBuilder:
 
         return sql, params
 
+    def _combine_where(
+        self, where: dict[str, Any] | None
+    ) -> "Condition | ConditionGroup | None":
+        """Merge a Prisma where-dict into a single Condition/ConditionGroup."""
+        if not where:
+            return None
+        conditions = self._where_to_conditions(where)
+        if not conditions:
+            return None
+        combined: Condition | ConditionGroup = conditions[0]
+        for c in conditions[1:]:
+            combined = combined & c
+        return combined
+
+    def _order_to_orderby(
+        self, order: dict[str, str] | list[dict[str, str]] | None
+    ) -> list[OrderBy]:
+        """Convert Prisma-style order into a list of OrderBy."""
+        if not order:
+            return []
+        if isinstance(order, dict):
+            order = [order]
+        result: list[OrderBy] = []
+        for item in order:
+            for field, direction in item.items():
+                if field not in self._columns:
+                    available = ", ".join(sorted(self._columns.keys()))
+                    raise AttributeError(
+                        f"Table '{self._table_name}' has no column '{field}'.\n"
+                        f"Available columns: {available}"
+                    )
+                dir_sql = "DESC" if direction.lower() == "desc" else "ASC"
+                result.append(OrderBy(f"{self._table_name}.{field}", dir_sql))
+        return result
+
+    def _build_select_query(
+        self,
+        *,
+        where: dict[str, Any] | None,
+        order: dict[str, str] | list[dict[str, str]] | None,
+        take: int | None,
+        skip: int | None,
+    ) -> "Any":
+        """Build a SelectQuery so hooks fire through the standard path."""
+        from declaro_persistum.query.select import SelectQuery
+
+        return SelectQuery(
+            self._table_name,
+            self._schema,
+            (),
+            where=self._combine_where(where),
+            order_by=self._order_to_orderby(order),
+            limit_val=take,
+            offset_val=skip,
+            pool=self._pool,
+            pre=self._pre,
+            post=self._post,
+        )
+
     async def find_many(
         self,
         *,
@@ -200,7 +264,7 @@ class PrismaQueryBuilder:
         skip: int | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Find multiple records matching the criteria.
+        Find multiple records matching the criteria. Routes through hooks if configured.
 
         Example:
             users = await db.users.find_many(
@@ -209,20 +273,8 @@ class PrismaQueryBuilder:
                 take=10
             )
         """
-        from declaro_persistum.query.executor import execute_with_pool
-
-        pool = self._pool
-
-        def _query(dialect: str) -> Query:
-            sql, params = self._build_select_sql(where, order, take, skip, dialect)
-            return {"sql": sql, "params": params, "dialect": dialect}
-
-        pk_col = _find_pk_column(self._schema, self._table_name)
-        return await execute_with_pool(
-            pool, _query, mode="all",
-            table_name=self._table_name,
-            pk_column=pk_col,
-        )
+        sq = self._build_select_query(where=where, order=order, take=take, skip=skip)
+        return await sq.execute()
 
     async def find_one(
         self,
@@ -230,27 +282,13 @@ class PrismaQueryBuilder:
         where: dict[str, Any],
     ) -> dict[str, Any] | None:
         """
-        Find a single record by unique constraint.
+        Find a single record by unique constraint. Routes through hooks if configured.
 
         Example:
             user = await db.users.find_one(where={"id": user_id})
         """
-        from declaro_persistum.query.executor import execute_with_pool
-
-        pool = self._pool
-
-        def _query(dialect: str) -> Query:
-            sql, params = self._build_select_sql(where, None, 1, None, dialect)
-            return {"sql": sql, "params": params, "dialect": dialect}
-
-        pk_col = _find_pk_column(self._schema, self._table_name)
-        pk_val = where.get(pk_col) if pk_col else None
-        return await execute_with_pool(
-            pool, _query, mode="one",
-            table_name=self._table_name,
-            pk_column=pk_col,
-            pk_value=pk_val,
-        )
+        sq = self._build_select_query(where=where, order=None, take=1, skip=None)
+        return await sq.execute_one()
 
     async def find_first(
         self,
@@ -259,7 +297,7 @@ class PrismaQueryBuilder:
         order: dict[str, str] | list[dict[str, str]] | None = None,
     ) -> dict[str, Any] | None:
         """
-        Find the first record matching the criteria.
+        Find the first record matching the criteria. Routes through hooks if configured.
 
         Example:
             user = await db.users.find_first(
@@ -267,22 +305,8 @@ class PrismaQueryBuilder:
                 order={"created_at": "desc"}
             )
         """
-        from declaro_persistum.query.executor import execute_with_pool
-
-        pool = self._pool
-
-        def _query(dialect: str) -> Query:
-            sql, params = self._build_select_sql(where, order, 1, None, dialect)
-            return {"sql": sql, "params": params, "dialect": dialect}
-
-        pk_col = _find_pk_column(self._schema, self._table_name)
-        pk_val = (where or {}).get(pk_col) if pk_col else None
-        return await execute_with_pool(
-            pool, _query, mode="one",
-            table_name=self._table_name,
-            pk_column=pk_col,
-            pk_value=pk_val,
-        )
+        sq = self._build_select_query(where=where, order=order, take=1, skip=None)
+        return await sq.execute_one()
 
     async def create(
         self,
@@ -290,45 +314,27 @@ class PrismaQueryBuilder:
         data: dict[str, Any],
     ) -> dict[str, Any]:
         """
-        Create a new record.
+        Create a new record. Routes through hooks if configured.
 
         Example:
             user = await db.users.create(
                 data={"email": "alice@example.com", "name": "Alice"}
             )
         """
-        from declaro_persistum.query.executor import execute_with_pool
+        from declaro_persistum.query.insert import InsertQuery
 
-        pool = self._pool
-
-        # Validate columns
-        for key in data:
-            if key not in self._columns:
-                available = ", ".join(sorted(self._columns.keys()))
-                raise AttributeError(
-                    f"Table '{self._table_name}' has no column '{key}'.\n"
-                    f"Available columns: {available}"
-                )
-
-        columns = list(data.keys())
-        placeholders = ", ".join(f":ins_{c}" for c in columns)
-        cols_sql = ", ".join(columns)
-
-        sql = f"INSERT INTO {self._table_name} ({cols_sql}) VALUES ({placeholders}) RETURNING *"
-        params = {f"ins_{k}": v for k, v in data.items()}
-
-        def _query(dialect: str) -> Query:
-            return {"sql": sql, "params": params, "dialect": dialect}
-
-        pk_col = _find_pk_column(self._schema, self._table_name)
-        pk_val = data.get(pk_col) if pk_col else None
-        result = await execute_with_pool(
-            pool, _query, mode="one",
-            table_name=self._table_name,
-            pk_column=pk_col,
-            pk_value=pk_val,
-            data=data,
+        # InsertQuery.__init__ validates columns against schema.
+        iq = InsertQuery(
+            self._table_name,
+            self._schema,
+            data,
+            self._columns,
+            returning=["*"],
+            pool=self._pool,
+            pre=self._pre,
+            post=self._post,
         )
+        result = await iq.execute_one()
         return result or data  # Return input if RETURNING not supported
 
     async def update(
@@ -338,7 +344,7 @@ class PrismaQueryBuilder:
         data: dict[str, Any],
     ) -> dict[str, Any] | None:
         """
-        Update a record matching the where clause.
+        Update a record matching the where clause. Routes through hooks if configured.
 
         Example:
             user = await db.users.update(
@@ -346,53 +352,20 @@ class PrismaQueryBuilder:
                 data={"name": "New Name"}
             )
         """
-        from declaro_persistum.query.executor import execute_with_pool
+        from declaro_persistum.query.update import UpdateQuery
 
-        pool = self._pool
-
-        # Validate columns
-        for key in data:
-            if key not in self._columns:
-                available = ", ".join(sorted(self._columns.keys()))
-                raise AttributeError(
-                    f"Table '{self._table_name}' has no column '{key}'.\n"
-                    f"Available columns: {available}"
-                )
-
-        def _query(dialect: str) -> Query:
-            # Build SET clause
-            set_parts = []
-            params: dict[str, Any] = {}
-            for col, val in data.items():
-                param_name = f"upd_{col}"
-                set_parts.append(f"{col} = :{param_name}")
-                params[param_name] = val
-
-            set_sql = ", ".join(set_parts)
-            sql = f"UPDATE {self._table_name} SET {set_sql}"
-
-            # Build WHERE clause
-            conditions = self._where_to_conditions(where)
-            if conditions:
-                combined: Condition | ConditionGroup = conditions[0]
-                for c in conditions[1:]:
-                    combined = combined & c
-                where_sql, where_params = combined.to_sql(dialect)
-                sql += f" WHERE {where_sql}"
-                params.update(where_params)
-
-            sql += " RETURNING *"
-            return {"sql": sql, "params": params, "dialect": dialect}
-
-        pk_col = _find_pk_column(self._schema, self._table_name)
-        pk_val = where.get(pk_col) if pk_col else None
-        return await execute_with_pool(
-            pool, _query, mode="one",
-            table_name=self._table_name,
-            pk_column=pk_col,
-            pk_value=pk_val,
-            data=data,
+        uq = UpdateQuery(
+            self._table_name,
+            self._schema,
+            data,
+            self._columns,
+            where=self._combine_where(where),
+            returning=["*"],
+            pool=self._pool,
+            pre=self._pre,
+            post=self._post,
         )
+        return await uq.execute_one()
 
     async def delete(
         self,
@@ -400,41 +373,23 @@ class PrismaQueryBuilder:
         where: dict[str, Any],
     ) -> dict[str, Any] | None:
         """
-        Delete a record matching the where clause.
+        Delete a record matching the where clause. Routes through hooks if configured.
 
         Example:
             user = await db.users.delete(where={"id": user_id})
         """
-        from declaro_persistum.query.executor import execute_with_pool
+        from declaro_persistum.query.delete import DeleteQuery
 
-        pool = self._pool
-
-        def _query(dialect: str) -> Query:
-            sql = f"DELETE FROM {self._table_name}"
-            params: dict[str, Any] = {}
-
-            # Build WHERE clause
-            conditions = self._where_to_conditions(where)
-            if conditions:
-                combined: Condition | ConditionGroup = conditions[0]
-                for c in conditions[1:]:
-                    combined = combined & c
-                where_sql, where_params = combined.to_sql(dialect)
-                sql += f" WHERE {where_sql}"
-                params.update(where_params)
-
-            sql += " RETURNING *"
-            return {"sql": sql, "params": params, "dialect": dialect}
-
-        pk_col = _find_pk_column(self._schema, self._table_name)
-        pk_val = where.get(pk_col) if pk_col else None
-        return await execute_with_pool(
-            pool, _query, mode="one",
-            table_name=self._table_name,
-            pk_column=pk_col,
-            pk_value=pk_val,
-            data={},
+        dq = DeleteQuery(
+            self._table_name,
+            self._schema,
+            where=self._combine_where(where),
+            returning=["*"],
+            pool=self._pool,
+            pre=self._pre,
+            post=self._post,
         )
+        return await dq.execute_one()
 
     async def upsert(
         self,
@@ -468,35 +423,22 @@ class PrismaQueryBuilder:
         where: dict[str, Any] | None = None,
     ) -> int:
         """
-        Count records matching the criteria.
+        Count records matching the criteria. Routes through hooks if configured.
 
         Example:
             count = await db.users.count(where={"status": "active"})
         """
-        from declaro_persistum.query.executor import execute_with_pool
+        from declaro_persistum.query.select import SelectQuery
+        from declaro_persistum.query.table import count_
 
-        pool = self._pool
-
-        def _query(dialect: str) -> Query:
-            sql = f"SELECT COUNT(*) FROM {self._table_name}"
-            params: dict[str, Any] = {}
-
-            if where:
-                conditions = self._where_to_conditions(where)
-                if conditions:
-                    combined: Condition | ConditionGroup = conditions[0]
-                    for c in conditions[1:]:
-                        combined = combined & c
-                    where_sql, where_params = combined.to_sql(dialect)
-                    sql += f" WHERE {where_sql}"
-                    params.update(where_params)
-
-            return {"sql": sql, "params": params, "dialect": dialect}
-
-        pk_col = _find_pk_column(self._schema, self._table_name)
-        result = await execute_with_pool(
-            pool, _query, mode="scalar",
-            table_name=self._table_name,
-            pk_column=pk_col,
+        sq = SelectQuery(
+            self._table_name,
+            self._schema,
+            (count_("*"),),
+            where=self._combine_where(where),
+            pool=self._pool,
+            pre=self._pre,
+            post=self._post,
         )
+        result = await sq.execute_scalar()
         return int(result) if result else 0

@@ -4,7 +4,7 @@ DELETE query builder.
 Provides an immutable, fluent API for building DELETE queries.
 """
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from declaro_persistum.query.builder import Query
 from declaro_persistum.query.table import (
@@ -14,11 +14,25 @@ from declaro_persistum.query.table import (
 )
 from declaro_persistum.types import Schema
 
+if TYPE_CHECKING:
+    from declaro_persistum.query.hooks import PostHook, PreHook
+
 
 class DeleteQuery:
     """Immutable DELETE query builder."""
 
-    __slots__ = ("_table", "_schema", "_where", "_returning", "_params", "_pool")
+    _OPERATION = "delete"
+
+    __slots__ = (
+        "_table",
+        "_schema",
+        "_where",
+        "_returning",
+        "_params",
+        "_pool",
+        "_pre",
+        "_post",
+    )
 
     def __init__(
         self,
@@ -28,6 +42,9 @@ class DeleteQuery:
         returning: list[str] | None = None,
         params: dict[str, Any] | None = None,
         pool: Any = None,
+        *,
+        pre: "PreHook | None" = None,
+        post: "PostHook | None" = None,
     ):
         self._table = table
         self._schema = schema
@@ -35,6 +52,8 @@ class DeleteQuery:
         self._returning = returning
         self._params = params or {}
         self._pool = pool
+        self._pre = pre
+        self._post = post
 
     def where(self, condition: Condition | ConditionGroup) -> "DeleteQuery":
         """Add WHERE clause (returns new query)."""
@@ -45,6 +64,8 @@ class DeleteQuery:
             returning=self._returning,
             params=self._params,
             pool=self._pool,
+            pre=self._pre,
+            post=self._post,
         )
 
     def returning(self, *columns: ColumnProxy | str) -> "DeleteQuery":
@@ -62,6 +83,8 @@ class DeleteQuery:
             returning=ret_cols,
             params=self._params,
             pool=self._pool,
+            pre=self._pre,
+            post=self._post,
         )
 
     def params(self, **kwargs: Any) -> "DeleteQuery":
@@ -73,6 +96,8 @@ class DeleteQuery:
             returning=self._returning,
             params={**self._params, **kwargs},
             pool=self._pool,
+            pre=self._pre,
+            post=self._post,
         )
 
     def to_sql(self, dialect: str = "postgresql") -> tuple[str, dict[str, Any]]:
@@ -98,14 +123,32 @@ class DeleteQuery:
         sql, params = self.to_sql(dialect)
         return {"sql": sql, "params": params, "dialect": dialect}
 
-    async def execute(self) -> list[dict[str, Any]]:
-        """Execute delete and return results (if RETURNING specified)."""
+    async def _run_raw(self, mode: str = "all") -> Any:
+        """Internal seam — execute without hook logic. API may change."""
         from declaro_persistum.query.executor import execute_with_pool
 
-        return await execute_with_pool(self._pool, self.to_query, mode="all")
+        return await execute_with_pool(self._pool, self.to_query, mode=mode)
 
-    async def execute_one(self) -> dict[str, Any] | None:
-        """Execute delete and return single result (if RETURNING specified)."""
-        from declaro_persistum.query.executor import execute_with_pool
+    async def execute(
+        self,
+        *,
+        pre: "PreHook | None" = None,
+        post: "PostHook | None" = None,
+        without_hooks: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Execute delete and return results (if RETURNING specified). Runs hooks if configured."""
+        from declaro_persistum.query.hooks import _execute_with_hooks
 
-        return await execute_with_pool(self._pool, self.to_query, mode="one")
+        return await _execute_with_hooks(self, pre, post, without_hooks, "all")
+
+    async def execute_one(
+        self,
+        *,
+        pre: "PreHook | None" = None,
+        post: "PostHook | None" = None,
+        without_hooks: bool = False,
+    ) -> dict[str, Any] | None:
+        """Execute delete and return single result (if RETURNING specified). Runs hooks if configured."""
+        from declaro_persistum.query.hooks import _execute_with_hooks
+
+        return await _execute_with_hooks(self, pre, post, without_hooks, "one")

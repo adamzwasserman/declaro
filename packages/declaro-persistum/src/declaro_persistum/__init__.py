@@ -53,6 +53,12 @@ from declaro_persistum.transfer import (
     BulkTransferResult,
 )
 from declaro_persistum.cutover import begin_cutover
+from declaro_persistum.query.hooks import (
+    PostHook,
+    PreHook,
+    QueryMeta,
+    table_factory,
+)
 
 __version__ = "0.1.0"
 
@@ -103,6 +109,11 @@ __all__ = [
     "PendingEntry",
     # Instrumentation
     "LatencyRecord",
+    # Query hooks
+    "PreHook",
+    "PostHook",
+    "QueryMeta",
+    "table_factory",
     # Version
     "__version__",
 ]

@@ -20,11 +20,14 @@ from declaro_persistum.query.table import (
 from declaro_persistum.types import Schema
 
 if TYPE_CHECKING:
+    from declaro_persistum.query.hooks import PostHook, PreHook
     from declaro_persistum.query.table import TableProxy
 
 
 class SelectQuery:
     """Immutable SELECT query builder."""
+
+    _OPERATION = "select"
 
     __slots__ = (
         "_table",
@@ -39,6 +42,8 @@ class SelectQuery:
         "_having",
         "_params",
         "_pool",
+        "_pre",
+        "_post",
     )
 
     def __init__(
@@ -55,6 +60,9 @@ class SelectQuery:
         having: Condition | ConditionGroup | None = None,
         params: dict[str, Any] | None = None,
         pool: Any = None,
+        *,
+        pre: "PreHook | None" = None,
+        post: "PostHook | None" = None,
     ):
         self._table = table
         self._schema = schema
@@ -68,6 +76,8 @@ class SelectQuery:
         self._having = having
         self._params = params or {}
         self._pool = pool
+        self._pre = pre
+        self._post = post
 
     def where(self, condition: Condition | ConditionGroup) -> "SelectQuery":
         """Add WHERE clause (returns new query)."""
@@ -84,6 +94,8 @@ class SelectQuery:
             having=self._having,
             params=self._params,
             pool=self._pool,
+            pre=self._pre,
+            post=self._post,
         )
 
     def order_by(self, *orders: "OrderBy | ColumnProxy | CaseOrderBy") -> "SelectQuery":
@@ -109,6 +121,8 @@ class SelectQuery:
             having=self._having,
             params=self._params,
             pool=self._pool,
+            pre=self._pre,
+            post=self._post,
         )
 
     def limit(self, n: int) -> "SelectQuery":
@@ -126,6 +140,8 @@ class SelectQuery:
             having=self._having,
             params=self._params,
             pool=self._pool,
+            pre=self._pre,
+            post=self._post,
         )
 
     def offset(self, n: int) -> "SelectQuery":
@@ -143,6 +159,8 @@ class SelectQuery:
             having=self._having,
             params=self._params,
             pool=self._pool,
+            pre=self._pre,
+            post=self._post,
         )
 
     def join(
@@ -166,6 +184,8 @@ class SelectQuery:
             having=self._having,
             params=self._params,
             pool=self._pool,
+            pre=self._pre,
+            post=self._post,
         )
 
     def group_by(self, *columns: ColumnProxy) -> "SelectQuery":
@@ -183,6 +203,8 @@ class SelectQuery:
             having=self._having,
             params=self._params,
             pool=self._pool,
+            pre=self._pre,
+            post=self._post,
         )
 
     def having(self, condition: Condition | ConditionGroup) -> "SelectQuery":
@@ -200,6 +222,8 @@ class SelectQuery:
             having=condition,
             params=self._params,
             pool=self._pool,
+            pre=self._pre,
+            post=self._post,
         )
 
     def params(self, **kwargs: Any) -> "SelectQuery":
@@ -217,6 +241,8 @@ class SelectQuery:
             having=self._having,
             params={**self._params, **kwargs},
             pool=self._pool,
+            pre=self._pre,
+            post=self._post,
         )
 
     def to_sql(self, dialect: str = "postgresql") -> tuple[str, dict[str, Any]]:
@@ -287,20 +313,44 @@ class SelectQuery:
         sql, params = self.to_sql(dialect)
         return {"sql": sql, "params": params, "dialect": dialect}
 
-    async def execute(self) -> list[dict[str, Any]]:
-        """Execute query and return all rows."""
+    async def _run_raw(self, mode: str = "all") -> Any:
+        """Internal seam — execute without hook logic. API may change."""
         from declaro_persistum.query.executor import execute_with_pool
 
-        return await execute_with_pool(self._pool, self.to_query, mode="all")
+        return await execute_with_pool(self._pool, self.to_query, mode=mode)
 
-    async def execute_one(self) -> dict[str, Any] | None:
-        """Execute query and return single row or None."""
-        from declaro_persistum.query.executor import execute_with_pool
+    async def execute(
+        self,
+        *,
+        pre: "PreHook | None" = None,
+        post: "PostHook | None" = None,
+        without_hooks: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Execute query and return all rows. Runs pre/post hooks if configured."""
+        from declaro_persistum.query.hooks import _execute_with_hooks
 
-        return await execute_with_pool(self._pool, self.to_query, mode="one")
+        return await _execute_with_hooks(self, pre, post, without_hooks, "all")
 
-    async def execute_scalar(self) -> Any:
-        """Execute query and return scalar value."""
-        from declaro_persistum.query.executor import execute_with_pool
+    async def execute_one(
+        self,
+        *,
+        pre: "PreHook | None" = None,
+        post: "PostHook | None" = None,
+        without_hooks: bool = False,
+    ) -> dict[str, Any] | None:
+        """Execute query and return single row or None. Runs pre/post hooks if configured."""
+        from declaro_persistum.query.hooks import _execute_with_hooks
 
-        return await execute_with_pool(self._pool, self.to_query, mode="scalar")
+        return await _execute_with_hooks(self, pre, post, without_hooks, "one")
+
+    async def execute_scalar(
+        self,
+        *,
+        pre: "PreHook | None" = None,
+        post: "PostHook | None" = None,
+        without_hooks: bool = False,
+    ) -> Any:
+        """Execute query and return scalar value. Runs pre/post hooks if configured."""
+        from declaro_persistum.query.hooks import _execute_with_hooks
+
+        return await _execute_with_hooks(self, pre, post, without_hooks, "scalar")
