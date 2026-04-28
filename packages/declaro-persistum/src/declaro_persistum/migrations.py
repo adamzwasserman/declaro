@@ -300,8 +300,12 @@ async def apply_migrations_async(
             "error": f"Schema file not found: {schema_path}",
         }
 
-    # Pre-flight: recover orphaned _new tables from failed reconstruction
-    await _recover_orphaned_tmp_tables(pool)
+    # Pre-flight: recover orphaned _new tables from failed reconstruction.
+    # SQLite/Turso only — Postgres reconstruction does not produce these temp
+    # tables, and `_recover_orphaned_tmp_tables` queries `sqlite_master` which
+    # does not exist on Postgres (would crash startup).
+    if dialect in ("sqlite", "turso"):
+        await _recover_orphaned_tmp_tables(pool)
 
     # Skip-if-clean: compare schema file hash with stored hash
     schema_hash = _compute_schema_hash(schema_path)
