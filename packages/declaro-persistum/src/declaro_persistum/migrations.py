@@ -54,8 +54,27 @@ def _acquire_write_or_read(pool: Any) -> Any:
 
 
 def _compute_schema_hash(schema_path: Path) -> str:
-    """Compute SHA-256 hex digest of a schema file's contents (pure)."""
-    return hashlib.sha256(schema_path.read_bytes()).hexdigest()
+    """Compute SHA-256 hex digest of a schema file's contents + declaro version.
+
+    The declaro_persistum version is mixed into the hash so that any version
+    bump invalidates the skip-if-clean cache. Without this, fixing a loader
+    or applier bug in declaro would leave consumers with a stale "clean"
+    hash from the buggy version, silently hiding the fix until the user
+    edited their model file or passed force=True.
+
+    First startup after a declaro upgrade therefore performs one
+    introspection pass even if the schema file is unchanged. Cost is
+    measured in milliseconds for typical schemas; the alternative is
+    silent schema corruption persisting across upgrades.
+    """
+    # Late import to avoid circular dependency at module load time.
+    from declaro_persistum import __version__
+
+    h = hashlib.sha256()
+    h.update(schema_path.read_bytes())
+    h.update(b"\x00")  # delimiter so file content can't collide with version
+    h.update(__version__.encode("ascii"))
+    return h.hexdigest()
 
 
 async def _ensure_meta_table(conn: Any) -> None:

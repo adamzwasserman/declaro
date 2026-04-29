@@ -2,6 +2,38 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## 0.1.4 — 2026-04-28
+
+### Bugfixes
+- **Skip-if-clean cache hid loader/applier fixes from upgrades.** The
+  schema-hash optimization stored a hash representing "the result of
+  running this version of declaro against this file." After a buggy
+  version stamped a "clean" hash, upgrading to a fixed version did
+  nothing on next startup — the hash still matched the unchanged source
+  file, so the runner skipped re-introspection and the corrupted schema
+  silently persisted until the user edited their model file or passed
+  `force=True`. The 0.1.3 PEP-563 fix was visible to consumers only after
+  manual cache invalidation.
+- **Fix:** `_compute_schema_hash` now mixes `declaro_persistum.__version__`
+  into the hash input (with a NUL delimiter so file content cannot collide
+  with the version string). Any version bump invalidates the cache,
+  triggering exactly one re-introspection pass on first startup after an
+  upgrade. Cost is milliseconds for typical schemas; the alternative is
+  silent persistence of bugs across upgrades.
+
+### Operational note
+- After upgrading from 0.1.3 (or earlier) to 0.1.4, your app will perform
+  one introspection pass on first startup even if your schema file is
+  unchanged. This is intentional — it ensures any fixes shipped in 0.1.4
+  (or future versions) take effect against your existing database. No
+  action required.
+
+### Internal
+- `__version__` moved to the top of `declaro_persistum/__init__.py`
+  (above submodule imports) so submodules can read it without circular
+  imports.
+- Regression tests added in `tests/unit/test_schema_hash_version.py`.
+
 ## 0.1.3 — 2026-04-28
 
 ### Bugfixes

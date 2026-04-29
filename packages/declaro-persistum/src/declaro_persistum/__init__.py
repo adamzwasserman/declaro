@@ -9,6 +9,10 @@ A replacement for SQLAlchemy ORM and Alembic that uses:
 - Enum Abstraction: Literal types auto-generate lookup tables with FK constraints
 """
 
+# __version__ is declared before submodule imports so submodules
+# (e.g. migrations._compute_schema_hash) can read it without circular import.
+__version__ = "0.1.4"
+
 from declaro_persistum.exceptions import (
     AmbiguityError,
     ConnectionError,
@@ -59,8 +63,6 @@ from declaro_persistum.query.hooks import (
     QueryMeta,
     table_factory,
 )
-
-__version__ = "0.1.0"
 
 __all__ = [
     # Types
