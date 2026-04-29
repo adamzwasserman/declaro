@@ -10,7 +10,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
-from typing import Any, Literal, get_args, get_origin
+from typing import Any, Literal, get_args, get_origin, get_type_hints
 
 from declaro_persistum.exceptions import LoaderError
 from declaro_persistum.types import Column, Schema, Table
@@ -171,8 +171,22 @@ def pydantic_model_to_table(model_cls: type) -> tuple[str, Table] | None:
     if table_name is None:
         return None
 
-    # Get annotations and fields
-    annotations = getattr(model_cls, "__annotations__", {})
+    # Get annotations and fields.
+    #
+    # Use typing.get_type_hints rather than reading __annotations__ directly:
+    # under PEP 563 (`from __future__ import annotations`) and for any string
+    # forward reference (`name: "User"`), __annotations__ contains *strings*,
+    # not types. Direct access then makes downstream type lookups (e.g.
+    # `bool: "boolean"` in PYTHON_TO_SQL_TYPE) miss, silently emitting
+    # `text` columns where the user wrote `bool`. get_type_hints resolves
+    # string annotations to actual types using the model's module globals.
+    try:
+        annotations = get_type_hints(model_cls)
+    except (NameError, TypeError):
+        # Fall back if a forward reference is unresolvable. Caller will see
+        # the same wrong-but-consistent behavior as pre-0.1.3 — better than
+        # crashing during schema load.
+        annotations = getattr(model_cls, "__annotations__", {})
     model_fields = getattr(model_cls, "model_fields", {})
 
     columns: dict[str, Column] = {}

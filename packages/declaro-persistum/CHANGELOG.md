@@ -2,6 +2,26 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## 0.1.3 — 2026-04-28
+
+### Bugfixes
+- **`bool` columns silently became `text`; `T | None` columns silently became
+  `NOT NULL`** — for any model file that used `from __future__ import
+  annotations` (PEP 563) or any string forward reference. `pydantic_loader`
+  read `cls.__annotations__` directly, which under PEP 563 returns *strings*
+  ("bool", "datetime | None") rather than types. Strings missed every
+  type-keyed lookup in `python_type_to_sql` (falling through to the `text`
+  default) and `is_optional_type` couldn't introspect them (returning False
+  for every union). The result: silent schema corruption — wrong column
+  types and NOT NULL where the user wrote `T | None`. The loader now uses
+  `typing.get_type_hints(model_cls)`, which resolves string annotations
+  against the model's module globals regardless of PEP 563. Falls back to
+  `__annotations__` only if `get_type_hints` raises (unresolvable forward
+  ref). Reported via downstream bug report; thank you.
+- Regression tests added in `tests/unit/test_pydantic_loader_pep563.py`
+  cover `bool`, `T | None`, and a byte-identity check between PEP-563 and
+  non-PEP-563 model files.
+
 ## 0.1.2 — 2026-04-28
 
 ### Bugfixes
