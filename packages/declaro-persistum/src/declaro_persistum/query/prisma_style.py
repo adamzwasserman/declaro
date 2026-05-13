@@ -343,23 +343,120 @@ class PrismaQueryBuilder:
         self,
         *,
         where: dict[str, Any],
-        data: dict[str, Any],
+        data: dict[str, Any] | None = None,
+        increment: dict[str, int | float] | None = None,
     ) -> dict[str, Any] | None:
         """
         Update a record matching the where clause. Routes through hooks if configured.
 
+        ``data`` sets columns to literal values; ``increment`` applies atomic
+        ``col = col + delta`` at the storage layer. The two compose — a single
+        UPDATE statement can do both.
+
         Example:
             user = await db.users.update(
                 where={"id": user_id},
-                data={"name": "New Name"}
+                data={"name": "New Name"},
             )
+
+            # Atomic counter increment (no read-modify-write race):
+            await db.tags.update(
+                where={"tag_id": tag_id},
+                increment={"card_count": 1},
+            )
+
+            # Both at once:
+            await db.tags.update(
+                where={"tag_id": tag_id},
+                data={"last_touched": "now()"},
+                increment={"card_count": -1},
+            )
+
+        Raises:
+            ValueError: If neither ``data`` nor ``increment`` is supplied.
         """
+        values = self._compose_update_values(data, increment)
+        return await self._build_update_query(where, values).execute_one()
+
+    async def update_many(
+        self,
+        *,
+        where: dict[str, Any],
+        data: dict[str, Any] | None = None,
+        increment: dict[str, int | float] | None = None,
+    ) -> int:
+        """
+        Apply the same data and/or increment to every row matching ``where``.
+
+        Returns the number of rows updated. Mirrors Prisma's bulk update API.
+
+        Example:
+            # Decrement card_count by 1 for every tag in removed_tags:
+            removed = await db.tags.update_many(
+                where={"tag_id": {"in": list(removed_tags)}},
+                increment={"card_count": -1},
+            )
+            # → SQL: UPDATE tags SET card_count = card_count + :inc_card_count
+            #        WHERE tag_id IN (?,?,...)
+            # → returns: number of rows updated (int)
+
+        The implementation uses ``RETURNING *`` and counts the returned rows
+        so the count reflects rows actually modified, including any
+        transformation done by post-hooks.
+
+        Raises:
+            ValueError: If neither ``data`` nor ``increment`` is supplied.
+        """
+        values = self._compose_update_values(data, increment)
+        rows = await self._build_update_query(where, values).execute()
+        return len(rows)
+
+    def _compose_update_values(
+        self,
+        data: dict[str, Any] | None,
+        increment: dict[str, int | float] | None,
+    ) -> dict[str, Any]:
+        """Combine literal ``data`` with ``increment`` markers into the values dict."""
+        from declaro_persistum.query.update import Increment
+
+        if not data and not increment:
+            raise ValueError(
+                "update / update_many requires data= or increment= "
+                "(or both); both were empty/None"
+            )
+
+        values: dict[str, Any] = dict(data) if data else {}
+        if increment:
+            for col, delta in increment.items():
+                if col in values:
+                    raise ValueError(
+                        f"Column '{col}' appears in both data and increment — "
+                        "use one or the other for a given column"
+                    )
+                values[col] = Increment(delta)
+        return values
+
+    def _build_update_query(
+        self, where: dict[str, Any], values: dict[str, Any]
+    ) -> Any:
+        """Build an UpdateQuery configured with the merged values and hook wiring."""
         from declaro_persistum.query.update import UpdateQuery
 
-        uq = UpdateQuery(
+        # Validate increment / data column names against the schema before
+        # constructing UpdateQuery so the error message points at the right
+        # source (caller passed an unknown column in data= or increment=).
+        for col in values:
+            if col not in self._columns:
+                available = ", ".join(sorted(self._columns.keys()))
+                raise AttributeError(
+                    f"Table '{self._table_name}' has no column '{col}'.\n"
+                    f"Available columns: {available}"
+                )
+
+        return UpdateQuery(
             self._table_name,
             self._schema,
-            data,
+            values,
             self._columns,
             where=self._combine_where(where),
             returning=["*"],
@@ -367,7 +464,6 @@ class PrismaQueryBuilder:
             pre=self._pre,
             post=self._post,
         )
-        return await uq.execute_one()
 
     async def delete(
         self,

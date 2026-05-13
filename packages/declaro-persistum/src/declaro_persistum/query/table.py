@@ -396,18 +396,49 @@ class TableProxy:
         self,
         *,
         where: dict[str, Any],
-        data: dict[str, Any],
+        data: dict[str, Any] | None = None,
+        increment: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         """
         Prisma-style update. Updates a record matching the where clause.
 
+        ``data`` sets literal values; ``increment`` applies atomic
+        ``col = col + delta``. Both may be supplied in the same call.
+
         Example:
             user = await db.users.update_one(
                 where={"id": user_id},
-                data={"name": "New Name"}
+                data={"name": "New Name"},
+            )
+
+            # Atomic increment, no read-modify-write race:
+            await db.tags.update_one(
+                where={"tag_id": tag_id},
+                increment={"card_count": 1},
             )
         """
-        return await self.prisma.update(where=where, data=data)
+        return await self.prisma.update(where=where, data=data, increment=increment)
+
+    async def update_many(
+        self,
+        *,
+        where: dict[str, Any],
+        data: dict[str, Any] | None = None,
+        increment: dict[str, Any] | None = None,
+    ) -> int:
+        """
+        Prisma-style bulk update. Applies ``data`` and/or ``increment`` to
+        every row matching ``where``. Returns the number of rows updated.
+
+        Example:
+            removed = await db.tags.update_many(
+                where={"tag_id": {"in": list(removed_tags)}},
+                increment={"card_count": -1},
+            )
+        """
+        return await self.prisma.update_many(
+            where=where, data=data, increment=increment
+        )
 
     async def delete_one(
         self,

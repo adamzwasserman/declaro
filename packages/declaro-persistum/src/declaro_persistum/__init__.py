@@ -11,7 +11,7 @@ A replacement for SQLAlchemy ORM and Alembic that uses:
 
 # __version__ is declared before submodule imports so submodules
 # (e.g. migrations._compute_schema_hash) can read it without circular import.
-__version__ = "0.1.4"
+__version__ = "0.1.5"
 
 from declaro_persistum.exceptions import (
     AmbiguityError,
@@ -63,6 +63,7 @@ from declaro_persistum.query.hooks import (
     QueryMeta,
     table_factory,
 )
+from declaro_persistum.query.update import Increment, increment
 
 __all__ = [
     # Types
@@ -116,6 +117,9 @@ __all__ = [
     "PostHook",
     "QueryMeta",
     "table_factory",
+    # Atomic increment helper
+    "Increment",
+    "increment",
     # Version
     "__version__",
 ]

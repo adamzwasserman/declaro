@@ -19,6 +19,42 @@ if TYPE_CHECKING:
     from declaro_persistum.query.hooks import PostHook, PreHook
 
 
+class Increment:
+    """
+    Marker for atomic SET col = col + delta in an UPDATE statement.
+
+    Stateless slotted data wrapper (same pattern as SQLFunction). Pass an
+    instance as a value in UpdateQuery's values dict (typically via the
+    public ``increment(delta)`` factory):
+
+        await items.update(card_count=increment(1)).where(items.id == "x").execute()
+        # UPDATE items SET card_count = card_count + :inc_card_count WHERE id = :_p_1
+        # params: {inc_card_count: 1, _p_1: "x"}
+
+    Negative deltas are supported (``increment(-1)``) — the SQL stays
+    ``col = col + :param`` with the negative value bound to the parameter,
+    so no special-casing of subtraction is needed.
+
+    The operation is atomic at the storage layer: the read of the old value
+    and the write of the new value happen inside the same statement, with
+    no application-side round trip in between.
+    """
+
+    __slots__ = ("delta",)
+
+    def __init__(self, delta: int | float):
+        self.delta = delta
+
+
+def increment(delta: int | float) -> Increment:
+    """
+    Mark a column for atomic increment in an UPDATE statement.
+
+    See :class:`Increment` for SQL emission details.
+    """
+    return Increment(delta)
+
+
 def _translate_function(func: SQLFunction, dialect: str) -> str:
     """Translate SQL function to dialect-specific SQL."""
     name = func.name.upper()
@@ -160,7 +196,13 @@ class UpdateQuery:
         all_params = dict(self._params)
 
         for col, value in self._values.items():
-            if isinstance(value, SQLFunction):
+            if isinstance(value, Increment):
+                # SET col = col + :inc_col — atomic counter math at the DB.
+                # Negative deltas work via the signed parameter binding.
+                param_name = f"inc_{col}"
+                set_parts.append(f"{col} = {col} + :{param_name}")
+                all_params[param_name] = value.delta
+            elif isinstance(value, SQLFunction):
                 set_parts.append(f"{col} = {_translate_function(value, dialect)}")
             elif isinstance(value, str) and value.startswith(":"):
                 set_parts.append(f"{col} = {value}")

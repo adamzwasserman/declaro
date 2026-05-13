@@ -2,6 +2,35 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## 0.1.5 — 2026-05-13
+
+### Features
+- **Atomic `increment={"col": delta}`** on Prisma-style `update_one` /
+  `TableProxy.update_one`. Emits `SET col = col + :inc_col` so the read and
+  the write happen inside a single statement — no application-side RMW
+  round trip, no race window between concurrent writers, no need to fetch
+  the old value first. Negative deltas are supported (the signed value
+  binds to the parameter; SQL stays `col + :param`). `data=` and
+  `increment=` compose in the same UPDATE.
+- **`update_many(where=, data=, increment=) -> int`** on Prisma-style API
+  and `TableProxy`. Applies a uniform update to every matching row in one
+  statement and returns the count of rows updated. Replaces the
+  `1 + N`-round-trip pattern (one batched read + N per-row updates) with
+  a single UPDATE for the uniform-delta case. Counter maintenance against
+  large `IN` lists is the motivating use case (e.g. tag card-counts).
+- **`increment(delta)` factory** exported at the top level
+  (`from declaro_persistum import increment`). Pass as a value in the
+  native `UpdateQuery` API for fluent atomic increments:
+  `items.update(card_count=increment(1)).where(...).execute()`. Same
+  semantics whether you use the native, Prisma, or `TableProxy` surface.
+
+### Tests
+- `tests/unit/test_increment_and_update_many.py` covers SQL emission,
+  composition with `data=`, negative deltas, integration against real
+  SQLite for atomicity, `update_many` row-count semantics, error cases
+  (missing data/increment, column-in-both, unknown column), and hook
+  integration (post-hook row count flows through to the returned count).
+
 ## 0.1.4 — 2026-04-28
 
 ### Bugfixes

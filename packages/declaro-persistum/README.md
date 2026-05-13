@@ -162,6 +162,52 @@ users = table("users", schema, pool)
 users.emial  # AttributeError: Table 'users' has no column 'emial'
 ```
 
+### Atomic Increment & Bulk Updates
+
+Atomic counter math at the storage layer — no read-modify-write round trip, no race window:
+
+```python
+from declaro_persistum import increment
+
+# Single-row atomic increment via the Prisma-style API:
+await db.tags.update_one(
+    where={"tag_id": tag_id},
+    increment={"card_count": 1},
+)
+# → UPDATE tags SET card_count = card_count + :inc_card_count WHERE tag_id = :tag_id
+
+# Bulk update — apply the same delta to every row matching an IN clause:
+removed = await db.tags.update_many(
+    where={"tag_id": {"in": list(removed_tags)}},
+    increment={"card_count": -1},
+)
+# → UPDATE tags SET card_count = card_count + :inc_card_count WHERE tag_id IN (?,?,...)
+# Returns the number of rows updated (int).
+
+# data= and increment= compose in a single UPDATE statement:
+await db.tags.update_one(
+    where={"tag_id": tag_id},
+    data={"last_touched": "now()"},
+    increment={"card_count": -1},
+)
+```
+
+The native query layer accepts `increment(delta)` directly as a column value, so update-many is also expressible without the Prisma shortcut:
+
+```python
+from declaro_persistum import increment
+from declaro_persistum.query.table import table
+
+tags = table("tags", schema, pool)
+await (
+    tags.update(card_count=increment(1))
+        .where(tags.tag_id.in_(added_tag_ids))
+        .execute()
+)
+```
+
+Negative deltas are supported (`increment(-1)`). The emitted SQL stays `col = col + :param` with the negative value bound to the parameter — no special-casing of subtraction, no separate decrement function. The operation is atomic at the storage layer regardless of dialect.
+
 ### Query Hooks (pre / post)
 
 Pass functions in — don't register them. `table_factory(...)` returns a closure that produces `TableProxy` instances with your pre-hook and post-hook pre-wired. Pre-hooks transform the query builder *before* SQL is built; post-hooks transform rows *after* the DB returns them.
