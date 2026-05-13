@@ -10,17 +10,22 @@ Bug-class fixed in 0.1.4:
     skipped re-introspection and the corrupted schema persisted silently
     until the user edited their model file or passed force=True.
 
-    Fix: include `declaro_persistum.__version__` in the hash input.
-    Any version bump invalidates the cache, forcing one re-introspection
-    pass on first startup after upgrade. This ensures fixes ship to
-    consumers automatically.
+    Fix: include the declaro version in the hash input. Any version bump
+    invalidates the cache.
+
+Honest-test refactor in 0.1.6:
+    ``_compute_schema_hash`` now takes ``version`` as a parameter rather
+    than reading ``declaro_persistum.__version__`` from a module-level
+    constant. The tests below are pure-function assertions —
+    ``assert _compute_schema_hash(file, "X") != _compute_schema_hash(file, "Y")``
+    — with no monkeypatching of module globals.
 """
 
 from pathlib import Path
 
 import pytest
 
-from declaro_persistum import migrations as m
+from declaro_persistum.migrations import _compute_schema_hash
 
 
 @pytest.fixture
@@ -32,62 +37,49 @@ def schema_file(tmp_path: Path) -> Path:
 
 def test_hash_is_stable_across_calls_at_same_version(schema_file: Path) -> None:
     """Two calls at the same version on the same file must produce identical hashes."""
-    h1 = m._compute_schema_hash(schema_file)
-    h2 = m._compute_schema_hash(schema_file)
+    h1 = _compute_schema_hash(schema_file, "1.0.0")
+    h2 = _compute_schema_hash(schema_file, "1.0.0")
     assert h1 == h2
 
 
-def test_hash_changes_when_declaro_version_changes(
-    schema_file: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Regression: bumping declaro_persistum.__version__ must invalidate the hash.
+def test_hash_changes_when_version_changes(schema_file: Path) -> None:
+    """Regression: bumping declaro version invalidates the hash.
 
-    Without this guarantee, a buggy version's "clean" hash would survive an
-    upgrade and silently hide the fix from any consumer whose schema file
-    didn't change.
+    Without this guarantee, a buggy version's stored "clean" hash would
+    survive an upgrade and silently hide the fix from any consumer whose
+    schema file did not change.
     """
-    import declaro_persistum
-
-    monkeypatch.setattr(declaro_persistum, "__version__", "9.9.9-test-a")
-    h_a = m._compute_schema_hash(schema_file)
-
-    monkeypatch.setattr(declaro_persistum, "__version__", "9.9.9-test-b")
-    h_b = m._compute_schema_hash(schema_file)
-
+    h_a = _compute_schema_hash(schema_file, "9.9.9-test-a")
+    h_b = _compute_schema_hash(schema_file, "9.9.9-test-b")
     assert h_a != h_b, (
-        "Schema hash must differ when declaro_persistum.__version__ differs. "
+        "Schema hash must differ when declaro version differs. "
         "Otherwise upgrades cannot invalidate stale clean-hashes from buggy versions."
     )
 
 
 def test_hash_changes_when_file_changes_at_same_version(schema_file: Path) -> None:
     """Sanity: file content changes still invalidate the hash."""
-    h_before = m._compute_schema_hash(schema_file)
+    h_before = _compute_schema_hash(schema_file, "1.0.0")
 
     schema_file.write_text("# different content\n")
-    h_after = m._compute_schema_hash(schema_file)
+    h_after = _compute_schema_hash(schema_file, "1.0.0")
 
     assert h_before != h_after
 
 
-def test_delimiter_prevents_file_version_collision(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_delimiter_prevents_file_version_collision(tmp_path: Path) -> None:
     """The hash uses a NUL delimiter between file content and version,
-    so a file ending with a literal version string can't collide with an
+    so a file ending with a literal version string cannot collide with an
     empty file at that version.
     """
-    import declaro_persistum
-
     file_a = tmp_path / "a.py"
     file_a.write_bytes(b"")
 
     file_b = tmp_path / "b.py"
     file_b.write_bytes(b"X.Y.Z")
 
-    monkeypatch.setattr(declaro_persistum, "__version__", "X.Y.Z")
-    h_a = m._compute_schema_hash(file_a)
-    h_b = m._compute_schema_hash(file_b)
+    h_a = _compute_schema_hash(file_a, "X.Y.Z")
+    h_b = _compute_schema_hash(file_b, "X.Y.Z")
 
     # Without a delimiter, hashing concat("", "X.Y.Z") and concat("X.Y.Z", "")
     # would produce the same bytes. With the NUL delimiter, they differ.

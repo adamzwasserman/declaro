@@ -15,6 +15,7 @@ Usage:
 """
 
 import logging
+import re
 import time
 from datetime import UTC, datetime
 from typing import Any, TypedDict
@@ -56,6 +57,23 @@ def classify_sql(sql: str) -> str:
 def is_write_op(op: str) -> bool:
     """Return True if the op type is a write (insert/update/delete)."""
     return op in _WRITE_OPS
+
+
+# RETURNING is whole-word, case-insensitive, and not inside a string literal
+# or identifier. The regex below uses ``\b`` word boundaries so column names
+# like ``returning_user`` do not match. RETURNING only appears at top level
+# in declaro-generated SQL — we do not emit it inside CTEs or subqueries.
+_RETURNING_RE = re.compile(r"\bRETURNING\b", re.IGNORECASE)
+
+
+def has_returning_clause(sql: str) -> bool:
+    """Return True if the SQL has a RETURNING clause.
+
+    Used by the executor to decide whether a write op should be routed
+    through the fetch path (RETURNING present, rows expected) or the
+    count path (no RETURNING, just rowcount). Pure function.
+    """
+    return _RETURNING_RE.search(sql) is not None
 
 
 def build_record(

@@ -53,28 +53,37 @@ def _acquire_write_or_read(pool: Any) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def _compute_schema_hash(schema_path: Path) -> str:
-    """Compute SHA-256 hex digest of a schema file's contents + declaro version.
+def _compute_schema_hash(schema_path: Path, version: str) -> str:
+    """Compute SHA-256 hex digest of (schema file bytes, NUL, version) — pure.
 
-    The declaro_persistum version is mixed into the hash so that any version
-    bump invalidates the skip-if-clean cache. Without this, fixing a loader
-    or applier bug in declaro would leave consumers with a stale "clean"
-    hash from the buggy version, silently hiding the fix until the user
-    edited their model file or passed force=True.
+    ``version`` is the declaro_persistum version string the caller wants
+    mixed into the hash so that any version bump invalidates the
+    skip-if-clean cache. Passing it explicitly (rather than reading the
+    module-level constant inside this function) keeps the hash a pure
+    function of its arguments — testable with explicit version values, no
+    monkeypatching of module globals required.
 
-    First startup after a declaro upgrade therefore performs one
-    introspection pass even if the schema file is unchanged. Cost is
-    measured in milliseconds for typical schemas; the alternative is
-    silent schema corruption persisting across upgrades.
+    Mixing the version in is what makes loader/applier fixes propagate to
+    existing deployments: a buggy version's stored "clean" hash differs
+    from the new version's computed hash, so the runner performs a fresh
+    introspection on first startup after upgrade.
     """
-    # Late import to avoid circular dependency at module load time.
-    from declaro_persistum import __version__
-
     h = hashlib.sha256()
     h.update(schema_path.read_bytes())
-    h.update(b"\x00")  # delimiter so file content can't collide with version
-    h.update(__version__.encode("ascii"))
+    h.update(b"\x00")  # delimiter so file content cannot collide with version
+    h.update(version.encode("ascii"))
     return h.hexdigest()
+
+
+def _dialect_needs_orphan_recovery(dialect: str) -> bool:
+    """True iff this dialect uses the sqlite_master-based temp-table scheme
+    that `_recover_orphaned_tmp_tables` was written for.
+
+    Postgres reconstruction does not produce ``_declaro_tmp_*`` tables and
+    has no ``sqlite_master`` system table, so running the recovery scan on
+    a Postgres pool crashes startup with UndefinedTableError.
+    """
+    return dialect in ("sqlite", "turso")
 
 
 async def _ensure_meta_table(conn: Any) -> None:
@@ -320,14 +329,16 @@ async def apply_migrations_async(
         }
 
     # Pre-flight: recover orphaned _new tables from failed reconstruction.
-    # SQLite/Turso only — Postgres reconstruction does not produce these temp
-    # tables, and `_recover_orphaned_tmp_tables` queries `sqlite_master` which
-    # does not exist on Postgres (would crash startup).
-    if dialect in ("sqlite", "turso"):
+    # Decision lives in the pure helper so it can be tested without mocks.
+    if _dialect_needs_orphan_recovery(dialect):
         await _recover_orphaned_tmp_tables(pool)
 
-    # Skip-if-clean: compare schema file hash with stored hash
-    schema_hash = _compute_schema_hash(schema_path)
+    # Skip-if-clean: compare schema file hash with stored hash.
+    # Version is passed explicitly so _compute_schema_hash stays a pure
+    # function of its arguments (Honest Code: configuration as parameters).
+    from declaro_persistum import __version__
+
+    schema_hash = _compute_schema_hash(schema_path, __version__)
 
     if not force:
         async with pool.acquire() as conn:

@@ -29,25 +29,25 @@ class TestComputeSchemaHash:
         """Hash is a 64-char hex string (SHA-256)."""
         schema = tmp_path / "models.py"
         schema.write_text("class Foo: pass")
-        h = _compute_schema_hash(schema)
+        h = _compute_schema_hash(schema, "1.0.0")
         assert len(h) == 64
         assert all(c in "0123456789abcdef" for c in h)
 
     def test_same_content_same_hash(self, tmp_path: Path):
-        """Identical file contents produce identical hash."""
+        """Identical file contents at same version produce identical hash."""
         a = tmp_path / "a.py"
         b = tmp_path / "b.py"
         a.write_text("x = 1")
         b.write_text("x = 1")
-        assert _compute_schema_hash(a) == _compute_schema_hash(b)
+        assert _compute_schema_hash(a, "1.0.0") == _compute_schema_hash(b, "1.0.0")
 
     def test_different_content_different_hash(self, tmp_path: Path):
-        """Different contents produce different hashes."""
+        """Different contents at same version produce different hashes."""
         a = tmp_path / "a.py"
         b = tmp_path / "b.py"
         a.write_text("x = 1")
         b.write_text("x = 2")
-        assert _compute_schema_hash(a) != _compute_schema_hash(b)
+        assert _compute_schema_hash(a, "1.0.0") != _compute_schema_hash(b, "1.0.0")
 
 
 class TestMetaTable:
@@ -119,7 +119,7 @@ class TestSchemaIsClean:
         """Returns True when stored hash matches file hash and user tables exist."""
         schema = tmp_path / "models.py"
         schema.write_text("x = 1")
-        file_hash = _compute_schema_hash(schema)
+        file_hash = _compute_schema_hash(schema, "1.0.0")
 
         pool = await ConnectionPool.sqlite(":memory:")
         async with pool.acquire() as conn:
@@ -140,16 +140,23 @@ class TestSchemaIsClean:
         hash but the cloud DB is empty.  The schema defines a table, so
         an empty DB means the hash is stale.
         """
+        # Use __tablename__ (declaro's actual convention). Earlier versions of
+        # this test used `class Meta: table_name = 'users'` — which
+        # pydantic_loader does not recognize, so load_models_from_module
+        # returned {}, the empty-schema branch of _schema_is_clean fired, and
+        # the test silently asserted on a schema that defined no tables. The
+        # test's docstring claims "the schema defines a table"; this setup
+        # now actually does that.
         schema = tmp_path / "models.py"
         schema.write_text(
             "from pydantic import BaseModel\n"
+            "\n"
             "class User(BaseModel):\n"
-            "    class Meta:\n"
-            "        table_name = 'users'\n"
+            "    __tablename__ = 'users'\n"
             "    id: int\n"
             "    name: str\n"
         )
-        file_hash = _compute_schema_hash(schema)
+        file_hash = _compute_schema_hash(schema, "1.0.0")
 
         pool = await ConnectionPool.sqlite(":memory:")
         async with pool.acquire() as conn:
@@ -169,7 +176,7 @@ class TestSchemaIsClean:
         async with pool.acquire() as conn:
             await _ensure_meta_table(conn)
             await _store_hash(conn, "models.py", "old_hash")
-            new_hash = _compute_schema_hash(schema)
+            new_hash = _compute_schema_hash(schema, "1.0.0")
             assert await _schema_is_clean(conn, schema, new_hash) is False
         await pool.close()
 
@@ -178,7 +185,7 @@ class TestSchemaIsClean:
         """Returns False when no hash has been stored (first run)."""
         schema = tmp_path / "models.py"
         schema.write_text("x = 1")
-        file_hash = _compute_schema_hash(schema)
+        file_hash = _compute_schema_hash(schema, "1.0.0")
 
         pool = await ConnectionPool.sqlite(":memory:")
         async with pool.acquire() as conn:
@@ -191,7 +198,7 @@ class TestSchemaIsClean:
         """Returns False when _declaro_meta table doesn't exist (first run)."""
         schema = tmp_path / "models.py"
         schema.write_text("x = 1")
-        file_hash = _compute_schema_hash(schema)
+        file_hash = _compute_schema_hash(schema, "1.0.0")
 
         pool = await ConnectionPool.sqlite(":memory:")
         async with pool.acquire() as conn:

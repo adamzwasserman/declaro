@@ -399,7 +399,12 @@ async def execute_with_pool(
         join_tables: Additional tables (unused, kept for compat)
         schema: Full schema dict (unused, kept for compat)
     """
-    from declaro_persistum.instrumentation import classify_sql, is_write_op, record_execution
+    from declaro_persistum.instrumentation import (
+        classify_sql,
+        has_returning_clause,
+        is_write_op,
+        record_execution,
+    )
 
     _MODE_DISPATCH: dict[str, Callable[..., Any]] = {
         "all": execute,
@@ -415,13 +420,27 @@ async def execute_with_pool(
         sql = query.get("sql", "")
         op = classify_sql(sql)
 
-        # Write via acquire_write when pool supports it (e.g. MVCC)
+        # Write via acquire_write when pool supports it (e.g. MVCC).
+        # Two sub-cases:
+        #   - SQL has RETURNING → use the fetch path on the write conn so
+        #     the caller gets the returned rows (the documented contract
+        #     for prisma create / update / update_many / delete).
+        #   - SQL has no RETURNING → use the count path; result is rowcount.
+        # Without this split, every write op on an acquire_write pool went
+        # through the count path and silently returned int instead of rows,
+        # crashing prisma update_many's len() and breaking the documented
+        # dict return type of update_one / create / delete.
         if is_write_op(op) and hasattr(pool, "acquire_write"):
             t0 = time.monotonic()
             try:
                 async with pool.acquire_write() as wconn:
-                    prepared_sql, prepared_params = _prepare_query(query, wconn)
-                    result = await _execute_update(wconn, prepared_sql, prepared_params)
+                    if has_returning_clause(sql):
+                        result = await executor_fn(query, wconn)
+                    else:
+                        prepared_sql, prepared_params = _prepare_query(query, wconn)
+                        result = await _execute_update(
+                            wconn, prepared_sql, prepared_params
+                        )
                 duration_ms = (time.monotonic() - t0) * 1000
                 record_execution(pool, sql, duration_ms, success=True)
                 return result
@@ -441,9 +460,15 @@ async def execute_with_pool(
         t0 = time.monotonic()
         try:
             if is_write_op(op) and hasattr(pool, "acquire_write"):
+                # Same split as the fast path above: RETURNING -> fetch, else -> count.
                 async with pool.acquire_write() as wconn:
-                    prepared_sql, prepared_params = _prepare_query(query, wconn)
-                    result = await _execute_update(wconn, prepared_sql, prepared_params)
+                    if has_returning_clause(sql):
+                        result = await executor_fn(query, wconn)
+                    else:
+                        prepared_sql, prepared_params = _prepare_query(query, wconn)
+                        result = await _execute_update(
+                            wconn, prepared_sql, prepared_params
+                        )
             else:
                 result = await executor_fn(query, conn)
                 # aiosqlite and turso require explicit commit after DML.

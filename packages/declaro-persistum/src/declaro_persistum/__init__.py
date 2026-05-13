@@ -9,9 +9,11 @@ A replacement for SQLAlchemy ORM and Alembic that uses:
 - Enum Abstraction: Literal types auto-generate lookup tables with FK constraints
 """
 
-# __version__ is declared before submodule imports so submodules
-# (e.g. migrations._compute_schema_hash) can read it without circular import.
-__version__ = "0.1.5"
+# __version__ is declared before submodule imports so callers in this
+# package (e.g. migrations.apply_migrations_async, which passes the
+# current version into _compute_schema_hash) can import it without a
+# circular dependency through __init__.
+__version__ = "0.1.6"
 
 from declaro_persistum.exceptions import (
     AmbiguityError,

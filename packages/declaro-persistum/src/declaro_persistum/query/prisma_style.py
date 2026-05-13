@@ -28,6 +28,40 @@ def _find_pk_column(schema: Schema, table_name: str) -> str:
     return ""
 
 
+def compose_update_values(
+    data: dict[str, Any] | None,
+    increment: dict[str, int | float] | None,
+) -> dict[str, Any]:
+    """Combine literal ``data`` with ``increment`` markers into the values dict
+    used by ``UpdateQuery``.
+
+    Pure function — independent of any table proxy / pool / schema. Lives at
+    module scope so it is callable and testable without a PrismaQueryBuilder
+    instance.
+
+    Raises ValueError if both inputs are empty (no-op update) or if any column
+    appears in both inputs (ambiguous intent — set or increment, not both).
+    """
+    from declaro_persistum.query.update import Increment
+
+    if not data and not increment:
+        raise ValueError(
+            "update / update_many requires data= or increment= "
+            "(or both); both were empty/None"
+        )
+
+    values: dict[str, Any] = dict(data) if data else {}
+    if increment:
+        for col, delta in increment.items():
+            if col in values:
+                raise ValueError(
+                    f"Column '{col}' appears in both data and increment — "
+                    "use one or the other for a given column"
+                )
+            values[col] = Increment(delta)
+    return values
+
+
 class PrismaQueryBuilder:
     """
     Prisma-style query builder.
@@ -375,7 +409,7 @@ class PrismaQueryBuilder:
         Raises:
             ValueError: If neither ``data`` nor ``increment`` is supplied.
         """
-        values = self._compose_update_values(data, increment)
+        values = compose_update_values(data, increment)
         return await self._build_update_query(where, values).execute_one()
 
     async def update_many(
@@ -407,34 +441,9 @@ class PrismaQueryBuilder:
         Raises:
             ValueError: If neither ``data`` nor ``increment`` is supplied.
         """
-        values = self._compose_update_values(data, increment)
+        values = compose_update_values(data, increment)
         rows = await self._build_update_query(where, values).execute()
         return len(rows)
-
-    def _compose_update_values(
-        self,
-        data: dict[str, Any] | None,
-        increment: dict[str, int | float] | None,
-    ) -> dict[str, Any]:
-        """Combine literal ``data`` with ``increment`` markers into the values dict."""
-        from declaro_persistum.query.update import Increment
-
-        if not data and not increment:
-            raise ValueError(
-                "update / update_many requires data= or increment= "
-                "(or both); both were empty/None"
-            )
-
-        values: dict[str, Any] = dict(data) if data else {}
-        if increment:
-            for col, delta in increment.items():
-                if col in values:
-                    raise ValueError(
-                        f"Column '{col}' appears in both data and increment — "
-                        "use one or the other for a given column"
-                    )
-                values[col] = Increment(delta)
-        return values
 
     def _build_update_query(
         self, where: dict[str, Any], values: dict[str, Any]

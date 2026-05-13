@@ -2,6 +2,61 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## 0.1.6 — 2026-05-13
+
+### Bugfixes
+- **`update_many(..., increment=...)` crashed on Turso / MVCC pools** with
+  `TypeError: object of type 'int' has no len()`. Root cause was in the
+  executor: every write op on a pool with ``acquire_write`` was routed
+  through ``_execute_update`` (cursor rowcount path), regardless of
+  whether the SQL had a ``RETURNING`` clause. Reported via downstream
+  bug report; thank you.
+- **`update_one` / `create` / `delete` silently returned `int` instead of
+  the documented `dict | None`** on Turso / MVCC pools, for the same
+  reason. The bug surfaced loudly only in `update_many`'s `len()` call,
+  but the others were silently corrupting return types — any consumer
+  that dereferenced the result on Turso would have hit
+  `TypeError: 'int' object is not subscriptable`.
+- **Fix:** the executor now consults `has_returning_clause(sql)` for
+  write ops on `acquire_write` pools. SQL with `RETURNING` is routed
+  through the fetch path (rows) on the write connection; SQL without
+  `RETURNING` keeps the count path (int rowcount). One dispatch
+  decision, two correct behaviors. Same fix resolves all four reported
+  symptoms.
+
+### Honest Code refactors (no behavior change for honest callers)
+- `_compute_schema_hash(schema_path, version)` — version is now passed as
+  a parameter rather than read from a module-level constant inside the
+  function. Tests no longer monkeypatch `declaro_persistum.__version__`
+  to verify version-mixing; they call the pure function with explicit
+  version arguments. (Honest Code Rule 11: Configuration as Parameters.)
+- `_dialect_needs_orphan_recovery(dialect) -> bool` — the dispatch
+  decision that gates the SQLite-specific orphaned-tmp-table recovery
+  scan is now a pure helper. Tests assert it directly instead of
+  monkeypatching `_recover_orphaned_tmp_tables` and using a fake pool
+  with a sentinel exception to short-circuit `apply_migrations_async`.
+- `compose_update_values(data, increment)` — moved from method on
+  `PrismaQueryBuilder` to module-level pure function. The method form
+  read nothing from `self` and was masquerading as instance-tied.
+  (Honest Code Rule 3: Pure Functions Over Methods.)
+- `has_returning_clause(sql)` — new pure helper in
+  `declaro_persistum.instrumentation`, used by the executor to route
+  write ops. Tested with whole-word matching to prevent false positives
+  on column / table names containing the substring `returning`.
+
+### Test cleanups
+- `test_dirty_when_hash_matches_but_no_user_tables` previously declared
+  a Pydantic model with `class Meta: table_name = 'users'`, which
+  declaro's loader does not recognize. The loader returned an empty
+  schema, the empty-schema branch of `_schema_is_clean` fired, and the
+  test silently asserted on the wrong code path. Now uses
+  `__tablename__` (the actual convention) so the test exercises what
+  its docstring claims.
+- `test_migrations_dialect_dispatch.py` and `test_schema_hash_version.py`
+  rewritten as pure-function assertions against the new helpers
+  (`_dialect_needs_orphan_recovery`, `_compute_schema_hash(schema, version)`)
+  — no monkeypatching, no fake pools, no sentinel exceptions.
+
 ## 0.1.5 — 2026-05-13
 
 ### Features
