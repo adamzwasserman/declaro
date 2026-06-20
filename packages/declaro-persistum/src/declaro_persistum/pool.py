@@ -1199,6 +1199,7 @@ class TursoCloudManager:
         region: str | None = None,
         pool_max_size: int = 10,
         pool_acquire_timeout: float = 30.0,
+        use_tursodb: bool = False,
     ) -> None:
         """
         Initialize the Turso cloud manager.
@@ -1210,6 +1211,9 @@ class TursoCloudManager:
             region: Optional region hint for new databases
             pool_max_size: Max connections per tenant pool (default: 10)
             pool_acquire_timeout: Connection acquire timeout (default: 30s)
+            use_tursodb: Beta — create databases on the new tursodb (Rust)
+                engine by default. Overridable per-call. Keep False until the
+                compatibility gate passes. (default: False)
         """
         self._org = org
         self._api_token = api_token
@@ -1217,6 +1221,7 @@ class TursoCloudManager:
         self._region = region
         self._pool_max_size = pool_max_size
         self._pool_acquire_timeout = pool_acquire_timeout
+        self._use_tursodb = use_tursodb
         self._base_url = "https://api.turso.tech/v1"
 
         # Cache for tenant tokens and pools
@@ -1260,6 +1265,7 @@ class TursoCloudManager:
         db_name: str,
         *,
         size_limit: str | None = None,
+        use_tursodb: bool | None = None,
     ) -> dict:
         """
         Create a new database for a tenant.
@@ -1267,6 +1273,9 @@ class TursoCloudManager:
         Args:
             db_name: Database name (lowercase, numbers, dashes; max 64 chars)
             size_limit: Optional size limit (e.g., "256mb", "1gb")
+            use_tursodb: Beta — create on the new tursodb (Rust) engine.
+                None (default) inherits the manager's use_tursodb setting;
+                an explicit True/False overrides it for this call.
 
         Returns:
             Dict with database info (DbId, Hostname, Name)
@@ -1277,6 +1286,12 @@ class TursoCloudManager:
         }
         if size_limit:
             payload["size_limit"] = size_limit
+
+        resolved_use_tursodb = (
+            self._use_tursodb if use_tursodb is None else use_tursodb
+        )
+        if resolved_use_tursodb:
+            payload["use_tursodb"] = True
 
         result = await self._api_request("POST", "/databases", payload)
         return result.get("database", result)

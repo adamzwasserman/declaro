@@ -13,6 +13,7 @@ from declaro_persistum.pool import (
     SQLitePool,
     PostgreSQLPool,
     TursoPool,
+    TursoCloudManager,
 )
 from declaro_persistum.exceptions import (
     PoolClosedError,
@@ -356,3 +357,65 @@ class TestPoolContextManager:
 
         assert sorted(results) == [1, 2, 3]
         await pool.close()
+
+
+class TestTursoCloudManagerUseTursodb:
+    """Tests for the use_tursodb opt-in flag on create_database.
+
+    These tests exercise payload construction only — _api_request (the HTTP
+    boundary) is captured, so no network call is made.
+    """
+
+    @staticmethod
+    def _manager_capturing_payload(captured: dict, **kwargs):
+        """Build a manager whose _api_request records the payload it receives."""
+        manager = TursoCloudManager(org="acme", api_token="tok", **kwargs)
+
+        async def _capture(method, endpoint, data=None):
+            captured["method"] = method
+            captured["endpoint"] = endpoint
+            captured["payload"] = data
+            return {"database": {"Name": "db"}}
+
+        manager._api_request = _capture  # type: ignore[method-assign]
+        return manager
+
+    @pytest.mark.asyncio
+    async def test_default_omits_flag(self):
+        """No manager default, no per-call arg → use_tursodb absent from payload."""
+        captured: dict = {}
+        manager = self._manager_capturing_payload(captured)
+        await manager.create_database("tenant-1")
+        assert "use_tursodb" not in captured["payload"]
+
+    @pytest.mark.asyncio
+    async def test_manager_default_sets_flag(self):
+        """Manager-level use_tursodb=True → payload carries use_tursodb=True."""
+        captured: dict = {}
+        manager = self._manager_capturing_payload(captured, use_tursodb=True)
+        await manager.create_database("tenant-1")
+        assert captured["payload"]["use_tursodb"] is True
+
+    @pytest.mark.asyncio
+    async def test_per_call_true_overrides_manager_false(self):
+        """Per-call True wins over a manager that defaults False."""
+        captured: dict = {}
+        manager = self._manager_capturing_payload(captured, use_tursodb=False)
+        await manager.create_database("tenant-1", use_tursodb=True)
+        assert captured["payload"]["use_tursodb"] is True
+
+    @pytest.mark.asyncio
+    async def test_per_call_false_overrides_manager_true(self):
+        """Per-call False wins over a manager that defaults True (the bool|None case)."""
+        captured: dict = {}
+        manager = self._manager_capturing_payload(captured, use_tursodb=True)
+        await manager.create_database("tenant-1", use_tursodb=False)
+        assert "use_tursodb" not in captured["payload"]
+
+    @pytest.mark.asyncio
+    async def test_per_call_none_inherits_manager_default(self):
+        """Per-call None inherits the manager default rather than overriding it."""
+        captured: dict = {}
+        manager = self._manager_capturing_payload(captured, use_tursodb=True)
+        await manager.create_database("tenant-1", use_tursodb=None)
+        assert captured["payload"]["use_tursodb"] is True
