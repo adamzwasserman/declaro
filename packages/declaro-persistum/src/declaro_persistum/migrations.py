@@ -86,6 +86,31 @@ def _dialect_needs_orphan_recovery(dialect: str) -> bool:
     return dialect in ("sqlite", "turso")
 
 
+def partition_replica_operations(
+    operations: list[dict[str, Any]], execution_order: list[int]
+) -> tuple[list[int], list[dict[str, Any]]]:
+    """Partition migration ops for an embedded replica.
+
+    Reconstruction ops (add/drop FK, alter column) can't replicate through the
+    sync engine, so they are deferred to ``declaro migrate-remote``. Returns
+    ``(safe_order, skipped)`` where ``safe_order`` is ``execution_order`` filtered
+    to safe ops, and ``skipped`` describes each deferred op as ``{"op", "table"}``
+    so callers can see what was NOT applied instead of mistaking a no-op for
+    success.
+    """
+    from declaro_persistum.applier.shared import requires_reconstruction
+
+    safe_order: list[int] = []
+    skipped: list[dict[str, Any]] = []
+    for op_idx in execution_order:
+        op = operations[op_idx]
+        if requires_reconstruction(op):
+            skipped.append({"op": op["op"], "table": op.get("table")})
+        else:
+            safe_order.append(op_idx)
+    return safe_order, skipped
+
+
 async def _ensure_meta_table(conn: Any) -> None:
     """Create the _declaro_meta table if it doesn't exist."""
     sql = (
@@ -430,22 +455,18 @@ async def apply_migrations_async(
     is_cloud_replica = hasattr(pool, "_remote_url") and pool._remote_url
     operations = diff_result["operations"]
     execution_order = diff_result["execution_order"]
+    skipped_operations: list[dict[str, Any]] = []
 
     if is_cloud_replica:
-        from declaro_persistum.applier.shared import requires_reconstruction
-
-        safe_indices = set()
-        for op_idx in execution_order:
-            op = operations[op_idx]
-            if requires_reconstruction(op):
-                logger.warning(
-                    f"Skipping {op['op']} on {op.get('table', 'N/A')} — "
-                    f"reconstruction is unsafe on embedded replicas. "
-                    f"Run 'declaro migrate-remote' to apply this change to cloud."
-                )
-            else:
-                safe_indices.add(op_idx)
-        execution_order = [i for i in execution_order if i in safe_indices]
+        execution_order, skipped_operations = partition_replica_operations(
+            operations, execution_order
+        )
+        for skipped in skipped_operations:
+            logger.warning(
+                f"Skipping {skipped['op']} on {skipped.get('table', 'N/A')} — "
+                f"reconstruction is unsafe on embedded replicas. "
+                f"Run 'declaro migrate-remote' to apply this change to cloud."
+            )
 
         if not execution_order:
             logger.info(
@@ -458,6 +479,7 @@ async def apply_migrations_async(
                 "tables_in_schema": len(target_schema),
                 "tables_in_database": len(current_schema),
                 "skipped": True,
+                "skipped_operations": skipped_operations,
                 "error": None,
             }
 
@@ -492,7 +514,8 @@ async def apply_migrations_async(
             "operations_applied": result["operations_applied"],
             "tables_in_schema": len(target_schema),
             "tables_in_database": len(current_schema) + result["operations_applied"],
-            "skipped": False,
+            "skipped": bool(skipped_operations),
+            "skipped_operations": skipped_operations,
             "error": None,
         }
     else:
@@ -504,5 +527,6 @@ async def apply_migrations_async(
             "tables_in_schema": len(target_schema),
             "tables_in_database": len(current_schema),
             "skipped": False,
+            "skipped_operations": skipped_operations,
             "error": error_msg,
         }

@@ -65,13 +65,22 @@ class WriteQueue:
         persistence_path: str | None = None,
         threshold_ms: float = 50.0,
         max_concurrent_drains: int = 3,
+        max_drain_attempts: int | None = None,
     ) -> None:
         self._pool = pool
         self._persistence_path = persistence_path
         self._threshold_ms = threshold_ms
         self._max_concurrent_drains = max_concurrent_drains
+        # W4: after this many failed drain attempts, quarantine the entry into
+        # the dead-letter set instead of retrying forever. None = unbounded
+        # (legacy behaviour). A permanently-unwritable row (e.g. it violates a
+        # primary-side constraint) otherwise retries indefinitely and blocks
+        # nothing else, but wastes resources and hides behind endless retry.
+        self._max_drain_attempts = max_drain_attempts
         # Key: "{table}:{pk_value}"
         self._queue: dict[str, PendingEntry] = {}
+        # Quarantined entries that exhausted their drain attempts.
+        self._dead_letter: dict[str, PendingEntry] = {}
         self._supervisor_task: asyncio.Task[None] | None = None
         self._semaphore = asyncio.Semaphore(max_concurrent_drains)
         # Track when each key first started failing continuously
@@ -125,6 +134,23 @@ class WriteQueue:
     def is_pending(self, table: str, pk_value: Any) -> bool:
         """Return True if there is a pending write for this row."""
         return f"{table}:{pk_value}" in self._queue
+
+    def dead_letters(self) -> list[PendingEntry]:
+        """Return entries quarantined after exhausting their drain attempts."""
+        return list(self._dead_letter.values())
+
+    def _quarantine(self, key: str, entry: PendingEntry) -> None:
+        """Move an entry from the active queue into the dead-letter set."""
+        self._queue.pop(key, None)
+        self._first_failure_time.pop(key, None)
+        self._dead_letter[key] = entry
+        self._persist_to_disk()
+        logger.error(
+            "WRITE_QUEUE_QUARANTINED: entry %s for %s:%s dead-lettered after %d "
+            "failed attempts. Last error: %s",
+            entry["entry_id"], entry["table"], entry["pk_value"],
+            entry["attempt_count"], entry["last_error"],
+        )
 
     def get_pending_for_table(self, table: str) -> list[PendingEntry]:
         """Return all pending entries for a given table."""
@@ -230,6 +256,15 @@ class WriteQueue:
                         self._queue[key]["attempt_count"] += 1
                         self._queue[key]["last_error"] = error_str[:200]
                         self._persist_to_disk()
+                        # W4: quarantine once attempts are exhausted so a
+                        # permanently-unwritable row stops retrying and becomes
+                        # observable via dead_letters().
+                        if (
+                            self._max_drain_attempts is not None
+                            and self._queue[key]["attempt_count"] >= self._max_drain_attempts
+                        ):
+                            self._quarantine(key, self._queue[key])
+                            return False
                     self._check_critical_threshold(key, entry, exc)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2.0, 60.0)

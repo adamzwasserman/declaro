@@ -330,6 +330,7 @@ class BasePool:
         persistence_path: str | None = None,
         threshold_ms: float = 50.0,
         max_concurrent_drains: int = 3,
+        max_drain_attempts: int | None = None,
     ) -> None:
         """
         Attach a write queue to this pool and start the supervisor.
@@ -338,6 +339,8 @@ class BasePool:
             persistence_path: JSONL file to persist queue across restarts
             threshold_ms: Write latency threshold before queuing (default: 50ms)
             max_concurrent_drains: Max concurrent drain tasks (default: 3)
+            max_drain_attempts: Quarantine an entry to the dead-letter set after
+                this many failed drain attempts. None = retry forever (default).
         """
         from declaro_persistum.write_queue import WriteQueue
 
@@ -346,6 +349,7 @@ class BasePool:
             persistence_path=persistence_path,
             threshold_ms=threshold_ms,
             max_concurrent_drains=max_concurrent_drains,
+            max_drain_attempts=max_drain_attempts,
         )
         queue.load_from_disk()
         queue.start_supervisor()
@@ -577,6 +581,13 @@ class TursoPool(BasePool):
         self._active_connections = 0
         self._push_task: asyncio.Task[None] | None = None
         self._write_holder: _TursoConnectionHolder | None = None
+        # Push-durability state (W2): a persistently failing push must be
+        # observable by the application, not merely logged.
+        self._consecutive_push_failures = 0
+        self._last_push_error: Exception | None = None
+        self._push_failure_callback: Any = None
+        self._push_failure_threshold = 0
+        self._push_failure_notified = False
 
     async def _initialize(self) -> None:
         """Bootstrap from cloud (if remote_url) and configure journal mode."""
@@ -585,6 +596,11 @@ class TursoPool(BasePool):
         )
         await self._write_holder.connect_async()
         if self._remote_url:
+            # W3: deliver any writes a prior process committed locally but never
+            # pushed BEFORE pull() can overwrite them with cloud state. On a
+            # brand-new replica this is a harmless no-op; a persistent failure
+            # is surfaced via last_push_error / the push-failure callback.
+            await self._push_once()
             await self._write_holder.pull()
         # MVCC and cache_size pragmas are only for local-only connections.
         # Cloud sync (CDC replication) has its own journaling — MVCC is
@@ -608,8 +624,28 @@ class TursoPool(BasePool):
             await self._write_holder.conn.commit()
         else:
             self._mvcc = False
+            # Cloud-sync replicas must enforce the same FK constraints as the
+            # primary. The FK *definition* bootstraps down with the schema, but
+            # pyturso leaves enforcement OFF per connection by default — so a
+            # write that violates a primary FK commits locally, fails to push
+            # ("FOREIGN KEY constraint failed"), and is silently lost on the
+            # next re-sync. Enabling enforcement makes that write fail fast at
+            # commit instead. Must run outside any transaction (fresh conn here).
+            await self._enable_replica_fk_enforcement()
         if self._remote_url:
             self._push_task = asyncio.create_task(self._push_loop())
+
+    async def _enable_replica_fk_enforcement(self) -> None:
+        """Turn on FK enforcement for the replica write-holder connection."""
+        if not self._write_holder or self._write_holder.conn is None:
+            return
+        try:
+            await self._write_holder.conn.execute("PRAGMA foreign_keys = ON")
+        except Exception:
+            logger.warning(
+                "PRAGMA foreign_keys = ON not accepted on replica connection — "
+                "FK-violating writes may commit locally and fail to push"
+            )
 
     async def refresh_connections(self) -> None:
         """Close and reopen _write_holder to pick up schema changes.
@@ -624,10 +660,13 @@ class TursoPool(BasePool):
                 self._write_holder.conn = None
             await self._write_holder.connect_async()
             if self._remote_url:
+                # W3: push un-pushed local frames before pull() (see _initialize).
+                await self._push_once()
                 try:
                     await self._write_holder.pull()
                 except Exception:
                     pass
+                await self._enable_replica_fk_enforcement()
             logger.info("Write holder connection refreshed after migration")
 
     def pause_push(self) -> None:
@@ -638,16 +677,65 @@ class TursoPool(BasePool):
         """Resume the background push loop."""
         self._push_paused = False
 
+    def set_push_failure_callback(self, callback: Any, *, threshold: int = 1) -> None:
+        """Register a callback invoked when the push loop crosses ``threshold``
+        consecutive failures.
+
+        The callback is called as ``callback(error, consecutive_failures)`` once
+        per failure episode (re-armed after the next successful push). Use this
+        to surface non-durable writes — a committed write whose push keeps
+        failing is otherwise only visible as a WARNING log line.
+        """
+        self._push_failure_callback = callback
+        self._push_failure_threshold = threshold
+
+    @property
+    def last_push_error(self) -> Exception | None:
+        """The most recent push failure, or None if the last push succeeded."""
+        return self._last_push_error
+
+    @property
+    def push_healthy(self) -> bool:
+        """True when the last push attempt succeeded (or none has failed)."""
+        return self._last_push_error is None
+
+    def _record_push_failure(self, error: Exception) -> None:
+        self._consecutive_push_failures += 1
+        self._last_push_error = error
+        logger.warning("Push to cloud failed: %s", error)
+        if (
+            self._push_failure_callback is not None
+            and self._push_failure_threshold
+            and self._consecutive_push_failures >= self._push_failure_threshold
+            and not self._push_failure_notified
+        ):
+            self._push_failure_notified = True
+            try:
+                self._push_failure_callback(error, self._consecutive_push_failures)
+            except Exception:
+                logger.exception("push failure callback raised")
+
+    def _record_push_success(self) -> None:
+        if self._consecutive_push_failures > 0:
+            logger.info(
+                "Push to cloud recovered after %d failures",
+                self._consecutive_push_failures,
+            )
+        self._consecutive_push_failures = 0
+        self._last_push_error = None
+        self._push_failure_notified = False
+
     async def _push_once(self) -> bool:
-        """Attempt a single push under the connection lock."""
+        """Attempt a single push under the connection lock, recording outcome."""
         try:
             if self._write_holder:
                 async with self._conn_lock:
                     await self._write_holder.push()
-            return True
         except Exception as e:
-            logger.warning("Push to cloud failed: %s", e)
+            self._record_push_failure(e)
             return False
+        self._record_push_success()
+        return True
 
     async def _push_loop(self) -> None:
         """Guaranteed eventual consistency loop.
@@ -655,8 +743,8 @@ class TursoPool(BasePool):
         Retries indefinitely with exponential backoff (capped at 30s).
         Acquires _conn_lock for push, then releases — reads and writes
         can proceed between push attempts without waiting for cloud I/O.
+        Failure/recovery state is tracked on the pool (see _record_push_*).
         """
-        consecutive_failures = 0
         max_backoff = 30.0
 
         while not self._closed:
@@ -667,22 +755,15 @@ class TursoPool(BasePool):
             success = await self._push_once()
 
             if success:
-                if consecutive_failures > 0:
-                    logger.info(
-                        "Push to cloud recovered after %d failures",
-                        consecutive_failures,
-                    )
-                consecutive_failures = 0
                 await asyncio.sleep(self._push_interval_s)
             else:
-                consecutive_failures += 1
                 delay = min(
-                    self._push_retry_base_s * (2 ** consecutive_failures),
+                    self._push_retry_base_s * (2 ** self._consecutive_push_failures),
                     max_backoff,
                 )
                 logger.warning(
                     "Push to cloud: %d consecutive failures, retrying in %.1fs",
-                    consecutive_failures, delay,
+                    self._consecutive_push_failures, delay,
                 )
                 await asyncio.sleep(delay)
 
@@ -961,6 +1042,7 @@ class ConnectionPool:
         write_queue_path: str | None = None,
         write_queue_threshold_ms: float = 50.0,
         write_queue_concurrency: int = 3,
+        write_queue_max_attempts: int | None = None,
     ) -> "TursoPool":
         """
         Create a Turso connection pool using pyturso.
@@ -1005,6 +1087,7 @@ class ConnectionPool:
                 persistence_path=write_queue_path,
                 threshold_ms=write_queue_threshold_ms,
                 max_concurrent_drains=write_queue_concurrency,
+                max_drain_attempts=write_queue_max_attempts,
             )
         return pool
 
