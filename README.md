@@ -1,8 +1,16 @@
 # Declaro
 
-> **Note:** This repository is public but not yet released. The APIs are unstable and packages are under active development. If you're looking for production-ready software, check back later.
+[![PyPI version](https://img.shields.io/pypi/v/declaro.svg)](https://pypi.org/project/declaro/) [![Python versions](https://img.shields.io/pypi/pyversions/declaro.svg)](https://pypi.org/project/declaro/)
+
+> **Note:** Declaro is available on PyPI as early-access software. The APIs are still unstable and under active development, so pin your version and expect breaking changes before 1.0. Not yet recommended for production.
 
 **The Functional Python Stack**
+
+## Install
+
+```bash
+pip install declaro
+```
 
 > Pure functions. Typed data. No class magic.
 
@@ -124,3 +132,7 @@ Read our [MANIFESTO.md](MANIFESTO.md) for the full philosophy.
 ## License
 
 MIT
+
+---
+
+Built by [Adam Zachary Wasserman](https://adamzacharywasserman.com).
