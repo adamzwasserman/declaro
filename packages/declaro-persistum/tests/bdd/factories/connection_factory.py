@@ -17,6 +17,9 @@ from declaro_persistum.types import Schema
 # Use a temp file for SQLite tests so tables persist across connections
 _SQLITE_TEMP_DB = os.path.join(tempfile.gettempdir(), "declaro_test.db")
 
+# Same for Turso — a local file so tables persist across connections.
+_TURSO_TEMP_DB = os.path.join(tempfile.gettempdir(), "declaro_test_turso.db")
+
 
 def get_sqlite_url() -> str:
     """Get SQLite connection URL (file path).
@@ -36,13 +39,16 @@ def get_postgresql_url() -> str:
 
 
 def get_turso_url() -> str:
-    """Get Turso connection URL."""
-    return os.environ.get("TEST_TURSO_URL", "")
+    """Get the local Turso database path for BDD runs.
 
-
-def get_turso_auth_token() -> str:
-    """Get Turso auth token."""
-    return os.environ.get("TURSO_AUTH_TOKEN", "")
+    Deliberately a local temp file, and deliberately NOT read from
+    TEST_TURSO_URL. That variable holds a *remote* libsql:// URL, and it was
+    being handed to turso.connect(), which takes a local filesystem path —
+    the engine tried to open a file literally named "libsql://..." and failed
+    with "IoError: open: NotFound". Pointing these BDD scenarios at a real
+    remote database is also not something a default test run should do.
+    """
+    return _TURSO_TEMP_DB
 
 
 # =============================================================================

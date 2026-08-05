@@ -4,7 +4,10 @@ PRAGMA compatibility abstraction for Turso Database (Rust).
 Turso Database (Rust) supports most PRAGMAs needed for introspection:
 - Supported: table_info, table_list, table_xinfo, index_list, index_info, index_xinfo,
              foreign_keys, integrity_check, schema_version, and more
-- NOT Supported: foreign_key_list (requires emulation)
+- foreign_key_list: natively supported by current Turso (verified against
+  pyturso 0.7.2, where PRAGMA foreign_key_list returns correct rows). It is
+  NOT available on pyturso 0.5.1, which raises "Not a valid pragma name", so
+  the sqlite_master emulation below remains the fallback for older engines.
 
 This module provides compatibility functions that:
 1. Try native PRAGMA first
@@ -412,13 +415,27 @@ async def _emulate_foreign_key_list(conn: Any, table: str) -> list[tuple]:
 
     # Pattern 1: Inline foreign key
     # col_name TYPE REFERENCES table(col) [ON DELETE action] [ON UPDATE action]
+    # The column-name group is anchored to the start of a column definition -
+    # the '(' opening the column list or the ',' ending the previous column.
+    # Without that anchor, and with an unbounded '.*?' spanning the optional
+    # constraints, the scan started at the top of the DDL and captured
+    # "CREATE" as the referencing column: "CREATE TABLE o (id TEXT PRIMARY
+    # KEY, user_id TEXT REFERENCES u(id))" yielded from_col="CREATE". The
+    # inspector then found no column by that name and dropped the foreign key
+    # from the introspected schema entirely - a wrong answer, silently.
+    # It only ever worked on DDL with newlines between columns, since '.'
+    # does not cross a newline without re.DOTALL.
+    #
+    # The constraint gap is bounded to [^,()]* so it cannot span into an
+    # adjacent column definition.
     inline_pattern = re.compile(
+        r'[(,]\s*'  # Start of a column definition
         r'(\w+|"[^"]+"|\'[^\']+\'|`[^`]+`)\s+'  # Column name
-        r'[^\s,]+\s+'  # Type
-        r'(?:.*?\s+)?'  # Optional constraints
+        r'[A-Za-z][A-Za-z0-9_ ]*?(?:\s*\([^)]*\))?'  # Type, incl. VARCHAR(50)
+        r'(?:\s+[^,()]*?)?\s+'  # Optional constraints, no boundary crossing
         r'REFERENCES\s+'
         r'(\w+|"[^"]+"|\'[^\']+\'|`[^`]+`)\s*'  # Referenced table
-        r'\((\w+|"[^"]+"|\'[^\']+\'|`[^`]+`)\)'  # Referenced column
+        r'\(\s*(\w+|"[^"]+"|\'[^\']+\'|`[^`]+`)\s*\)'  # Referenced column
         r'(?:\s+ON\s+DELETE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION))?'
         r'(?:\s+ON\s+UPDATE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION))?',
         re.IGNORECASE

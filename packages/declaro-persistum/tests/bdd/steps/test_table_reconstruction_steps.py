@@ -56,6 +56,11 @@ def recon_context(event_loop):
             self.table_data = []
             self.indexes = []
             self.initial_row_count = 0
+            # Pre-failure snapshots, captured by _snapshot_table() before any
+            # step expected to fail. None means "never captured", which the
+            # rollback assertions treat as a failure rather than a pass.
+            self.schema_snapshot = None
+            self.rows_snapshot = None
 
         def run(self, coro):
             """Run async coroutine."""
@@ -121,6 +126,30 @@ async def _build_full_schema(conn, table_name: str) -> dict[str, Column]:
 def _enable_fk(recon_context):
     """Enable foreign keys on the connection."""
     recon_context.run(recon_context.conn.execute("PRAGMA foreign_keys = ON"))
+
+
+def _snapshot_table(recon_context, table_name=None):
+    """Capture schema and rows before a step that is expected to fail.
+
+    "The original table is unchanged" and "the original data is intact"
+    previously asserted only that an error had been raised — the first
+    re-checked recon_context.error and the second was a bare pass. Neither
+    looked at the table, so a reconstruction that failed *after* mutating
+    the table would have satisfied both. These snapshots give them real
+    prior state to compare against.
+    """
+    t = table_name or recon_context.table_name
+    if not t:
+        return
+
+    schema = recon_context.run(pragma_table_info(recon_context.conn, t))
+    cursor = recon_context.run(
+        recon_context.conn.execute(f'SELECT * FROM "{t}" ORDER BY rowid')
+    )
+    rows = recon_context.run(cursor.fetchall())
+
+    recon_context.schema_snapshot = [tuple(r) for r in schema]
+    recon_context.rows_snapshot = [tuple(r) for r in rows]
 
 
 def _track_row_count(recon_context, table_name=None):
@@ -545,6 +574,10 @@ def when_alter_column_not_null(recon_context, column):
         table_name = recon_context.table_name
         column_name = column
 
+    # Captured before the attempt so that, if it fails, the rollback
+    # assertions have real prior state to compare against.
+    _snapshot_table(recon_context, table_name)
+
     try:
         _enable_fk(recon_context)
         recon_context.run(
@@ -593,6 +626,9 @@ def when_alter_column_nullable(recon_context, column):
 @when(parsers.parse('I alter column "{column}" to type "{new_type}"'))
 def when_alter_column_type(recon_context, column, new_type):
     """Change column type. Pre-validates data for strict type enforcement."""
+    # Captured before the attempt so that, if it fails, the rollback
+    # assertions have real prior state to compare against.
+    _snapshot_table(recon_context)
     try:
         _enable_fk(recon_context)
 
@@ -703,14 +739,30 @@ def when_perform_reconstruction(recon_context):
 
 @when("reconstruction fails during data copy")
 def when_reconstruction_fails(recon_context):
-    """Trigger reconstruction failure by pre-creating the temp table."""
+    """Force a genuine failure in the data-copy phase.
+
+    Insert a row whose "value" is NULL, then reconstruct with "value" NOT
+    NULL: the INSERT ... SELECT that copies rows into the temp table
+    violates the new constraint, so the copy aborts.
+
+    The previous injection pre-created a table named "{table}_new" and
+    relied on a name collision. Reconstruction now names its temp table
+    _declaro_tmp_{table}_{uuid8} and drops any leftover temp table before
+    creating it, so that collision became impossible and nothing failed —
+    the scenario went on asserting a rollback that was never triggered.
+    """
     table = recon_context.table_name
-    # Pre-create temp table so reconstruction fails with "table already exists"
+
     recon_context.run(
-        recon_context.conn.execute(f'CREATE TABLE "{table}_new" (id TEXT NOT NULL)')
+        recon_context.conn.execute(f'INSERT INTO "{table}" (id, value) VALUES (2, NULL)')
     )
     recon_context.run(recon_context.conn.commit())
-    # Now try to alter column — reconstruction will fail because temp table exists
+
+    # Snapshot after the setup insert: this is the state the rollback must
+    # restore, and it is what the following Then steps compare against.
+    _snapshot_table(recon_context)
+    _track_row_count(recon_context)
+
     try:
         recon_context.run(
             alter_column_nullability(recon_context.conn, table, "value", False)
@@ -1174,14 +1226,47 @@ def then_only_explicit_indexes(recon_context):
 
 @then("the original table is unchanged")
 def then_table_unchanged(recon_context):
-    """Verify table unchanged after rollback."""
-    assert recon_context.error is not None
+    """The failed operation must leave the table's schema exactly as it was."""
+    assert recon_context.error is not None, "Expected the operation to fail"
+    assert recon_context.schema_snapshot is not None, (
+        "No pre-failure snapshot was captured, so this step would verify "
+        "nothing. The failing When step must call _snapshot_table()."
+    )
+
+    current = [
+        tuple(r)
+        for r in recon_context.run(
+            pragma_table_info(recon_context.conn, recon_context.table_name)
+        )
+    ]
+
+    assert current == recon_context.schema_snapshot, (
+        f"Schema changed despite rollback.\n"
+        f"  before: {recon_context.schema_snapshot}\n"
+        f"  after:  {current}"
+    )
 
 
 @then("the original data is intact")
 def then_data_intact(recon_context):
-    """Verify data intact (checked via error state)."""
-    pass
+    """Every row must survive the rolled-back reconstruction unaltered."""
+    assert recon_context.rows_snapshot is not None, (
+        "No pre-failure snapshot was captured, so this step would verify "
+        "nothing. The failing When step must call _snapshot_table()."
+    )
+
+    cursor = recon_context.run(
+        recon_context.conn.execute(
+            f'SELECT * FROM "{recon_context.table_name}" ORDER BY rowid'
+        )
+    )
+    current = [tuple(r) for r in recon_context.run(cursor.fetchall())]
+
+    assert current == recon_context.rows_snapshot, (
+        f"Data changed despite rollback.\n"
+        f"  before: {recon_context.rows_snapshot}\n"
+        f"  after:  {current}"
+    )
 
 
 @then("foreign keys are temporarily disabled")
