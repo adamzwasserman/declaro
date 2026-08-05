@@ -2,6 +2,59 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## 0.1.10 — 2026-08-05
+
+### Bugfixes
+
+- **Foreign keys were silently dropped from introspected Turso schemas.** The `sqlite_master` fallback for `PRAGMA foreign_key_list` returned the wrong referencing column, so foreign keys vanished from the introspected schema with no error raised. The inline-FK pattern left its column-name group unanchored and let an unbounded `.*?` span the optional constraints, so matching began at the top of the DDL and captured `CREATE` as the referencing column — `CREATE TABLE o (id TEXT PRIMARY KEY, user_id TEXT REFERENCES u(id))` yielded `from_col="CREATE"`. The inspector found no column by that name and dropped the foreign key entirely. It only ever produced correct results on DDL that put each column on its own line, because `.` does not cross a newline without `re.DOTALL`. The column name is now anchored to the start of a column definition and the constraint gap is bounded so it cannot run into an adjacent column.
+- **Scope:** Turso only, and only on engines without native `PRAGMA foreign_key_list` — notably pyturso 0.5.1, the current pinned floor, where the PRAGMA raises "Not a valid pragma name". Current Turso supports it natively (verified against pyturso 0.7.2, where the native path returns correct rows and the emulation is never reached). No PostgreSQL or SQLite code path is involved.
+- **Because the failure was silent, there is no local signal that it occurred** — introspection simply reported a schema with no foreign keys on it. If you use Turso on pyturso 0.5.x, re-run a migration after upgrading and confirm your foreign keys are present.
+- Regression tests added in `tests/unit/test_pragma_compat_fk_emulation.py`, covering the referencing column across nine DDL shapes (first column, later column, multiple inline FKs, quoted identifiers, sized and multi-word types, a default preceding `REFERENCES`, multi-line DDL, and no FKs at all).
+
+### Test suite
+
+- Cloud mode in the Turso integration tests is now opt-in via `TEST_TURSO_CLOUD` rather than engaging whenever credentials happen to be set. Because `tests/conftest.py` calls `load_dotenv()`, credentials present in a `.env` file previously pointed an ordinary test run at a real remote database, where the fixture drops every table matching `test_%`. The fixture also read its auth token and never passed it to `ConnectionPool.turso`, so every cloud run failed with `401 ... empty JWT token` — which read as absent credentials rather than a dropped argument.
+- The BDD connection factory passed `TEST_TURSO_URL`, a remote `libsql://` URL, to `turso.connect()`, which takes a local filesystem path; it tried to open a file by that literal name and failed with `IoError: open: NotFound`. BDD runs now use a local temp database, matching the SQLite factory.
+- The "Rollback on reconstruction failure" scenario forced its failure by pre-creating a table named `{table}_new`. Reconstruction now names its temp table `_declaro_tmp_{table}_{uuid8}` and drops any leftover first, so that collision became impossible and nothing failed — the scenario went on asserting a rollback that was never triggered. It is now failed genuinely, in the data-copy phase it names, by copying a NULL row into a NOT NULL column. Its two follow-up assertions verified nothing (one re-checked the error flag, the other was a bare `pass`), so a reconstruction that failed *after* mutating the table would have satisfied both; they now compare schema and rows against a snapshot taken before the failure.
+
+## 0.1.9 — 2026-08-05
+
+### Action required if you are on 0.1.7 or 0.1.8
+
+`__version__` was frozen at `"0.1.6"` through both of those releases. It is mixed into the schema hash (see 0.1.4) specifically so that a version bump invalidates the skip-if-clean cache and forces one fresh introspection on upgrade — that is the mechanism by which loader, differ and inspector fixes reach an existing deployment.
+
+With the constant frozen, that mechanism did not run. For any consumer on 0.1.7 or 0.1.8 **whose schema file has not changed**, there is no symptom: the stored hash matches, `apply_migrations_async` returns `{'success': True, 'skipped': True}`, and the old introspection path keeps running indefinitely with no local signal that anything is stale. Only consumers who happened to edit their model file ever picked up the newer code.
+
+This is a correction to something that was quietly not happening, not an optional improvement. Upgrading invalidates the stale hash and performs exactly one full re-introspection on first startup. That re-introspection is the remedy; it is expected, and it is what makes the fixes below take effect.
+
+### Bugfixes
+
+- **`drop_index` crashed on PostgreSQL.** `PostgreSQLApplier._drop_index_sql` was declared `(self, details)` while the dispatch in `generate_operation_sql` calls every generator as `generator(table, details)`, so any migration emitting a `drop_index` died with `TypeError: _drop_index_sql() takes 2 positional arguments but 3 were given`. It was the only generator in that dispatch table with the wrong arity; SQLite and Turso route `drop_index` through `applier/shared.py` and were unaffected.
+- **A UNIQUE constraint's backing index was scheduled for dropping.** PostgreSQL introspection filtered indexes on `NOT indisprimary` alone, so the index PostgreSQL builds to implement a UNIQUE constraint was reported as an ordinary index. A model declares that as `unique: True` on the column and never as an index entry, so the differ saw it in `current - target` and emitted a `drop_index` for a constraint the model still declares. Introspection now excludes indexes owned by a PRIMARY KEY, UNIQUE or EXCLUDE constraint via `pg_constraint.conindid`. Standalone `CREATE [UNIQUE] INDEX` definitions are still reported and still diffed, so an index you genuinely remove from your models is still dropped. PostgreSQL refuses to drop a constraint-backed index, so this surfaced as a hard migration failure rather than a silent loss of the uniqueness guarantee. Any schema with a `unique: True` column was affected. Reported via downstream bug report; thank you.
+- **`__version__` reported a stale value.** It is now derived from installed package metadata rather than written as a literal, so it cannot drift from `pyproject.toml` again. See the note above for why the drift mattered.
+- **Boolean defaults churned an `alter_column` on every migration.** The loader emits `"FALSE"` for a Python `False` default while PostgreSQL introspects the same default back as `"false"`, and the two were compared verbatim — so every PostgreSQL model with a boolean field re-emitted an `alter_column` that changed nothing, forever. Boolean literals are now folded to a canonical spelling before comparison. Only boolean literals are folded; every other default is an opaque SQL expression where case can carry meaning, and those are still compared verbatim.
+- Regression tests added in `tests/unit/test_postgresql_unique_index_regression.py` and `tests/integration/test_postgresql.py`.
+
+### Internal
+
+- `pydantic` added to the `dev` extra. The loader duck-types Pydantic model modules rather than importing pydantic, so it is deliberately not a runtime dependency and your install profile is unchanged — but the test suite execs Pydantic model fixtures and could not run from a clean checkout without it.
+
+## 0.1.8 — 2026-07-05
+
+### Bugfixes
+
+- Embedded-replica FK-push durability (defense-in-depth) for Turso embedded replicas.
+
+Note: because `__version__` was frozen at `"0.1.6"` in this release, the changes above did not reach consumers whose schema file was unchanged. See the 0.1.9 entry.
+
+## 0.1.7 — 2026-06-22
+
+### Features
+
+- Opt-in `use_tursodb` support in `TursoCloudManager`.
+
+Note: because `__version__` was frozen at `"0.1.6"` in this release, the changes above did not reach consumers whose schema file was unchanged. See the 0.1.9 entry.
+
 ## 0.1.6 — 2026-05-13
 
 ### Bugfixes
