@@ -419,3 +419,111 @@ class TestTursoCloudManagerUseTursodb:
         manager = self._manager_capturing_payload(captured, use_tursodb=True)
         await manager.create_database("tenant-1", use_tursodb=None)
         assert captured["payload"]["use_tursodb"] is True
+
+
+class TestTursoCloudManagerSeed:
+    """Tests for the seed pass-through on create_database.
+
+    Seeding lets a tenant database be provisioned as a copy of a template
+    rather than created empty and then migrated and populated.
+
+    Payload construction only — _api_request (the HTTP boundary) is
+    captured, so no network call is made.
+    """
+
+    _manager_capturing_payload = staticmethod(
+        TestTursoCloudManagerUseTursodb._manager_capturing_payload
+    )
+
+    @pytest.mark.asyncio
+    async def test_omitted_by_default(self):
+        """No seed argument → no seed key, so ordinary creates are unchanged."""
+        captured: dict = {}
+        manager = self._manager_capturing_payload(captured)
+        await manager.create_database("tenant-1")
+        assert "seed" not in captured["payload"]
+
+    @pytest.mark.asyncio
+    async def test_database_seed_passed_through(self):
+        """A type=database seed reaches the payload verbatim."""
+        captured: dict = {}
+        manager = self._manager_capturing_payload(captured)
+        seed = {"type": "database", "name": "tenant-template"}
+
+        await manager.create_database("tenant-1", seed=seed)
+
+        assert captured["payload"]["seed"] == seed
+
+    @pytest.mark.asyncio
+    async def test_seed_is_not_rewritten(self):
+        """Unknown and future seed keys survive: the dict is opaque here.
+
+        The timestamp form selects a recovery point rather than current
+        state, and is the reason this is a dict pass-through rather than a
+        seed_from_database="name" parameter, which would discard it.
+        """
+        captured: dict = {}
+        manager = self._manager_capturing_payload(captured)
+        seed = {
+            "type": "database",
+            "name": "tpl",
+            "timestamp": "2026-08-05T12:00:00Z",
+            "some_future_field": {"nested": True},
+        }
+
+        await manager.create_database("tenant-1", seed=seed)
+
+        assert captured["payload"]["seed"] == seed
+
+    @pytest.mark.asyncio
+    async def test_upload_seed_passed_through(self):
+        """The database_upload form carries no extra fields and still passes."""
+        captured: dict = {}
+        manager = self._manager_capturing_payload(captured)
+
+        await manager.create_database("tenant-1", seed={"type": "database_upload"})
+
+        assert captured["payload"]["seed"] == {"type": "database_upload"}
+
+    @pytest.mark.asyncio
+    async def test_seed_composes_with_other_options(self):
+        """seed does not displace size_limit, use_tursodb, name or group."""
+        captured: dict = {}
+        manager = self._manager_capturing_payload(captured)
+
+        await manager.create_database(
+            "tenant-1",
+            size_limit="256mb",
+            use_tursodb=True,
+            seed={"type": "database", "name": "tpl"},
+        )
+
+        payload = captured["payload"]
+        assert payload["name"] == "tenant-1"
+        assert payload["size_limit"] == "256mb"
+        assert payload["use_tursodb"] is True
+        assert payload["seed"] == {"type": "database", "name": "tpl"}
+        assert "group" in payload
+
+    @pytest.mark.asyncio
+    async def test_caller_dict_not_mutated(self):
+        """Building the payload must not write back into the caller's dict."""
+        captured: dict = {}
+        manager = self._manager_capturing_payload(captured)
+        seed = {"type": "database", "name": "tpl"}
+        original = dict(seed)
+
+        await manager.create_database("tenant-1", seed=seed)
+
+        assert seed == original
+
+    @pytest.mark.asyncio
+    async def test_still_posts_to_databases_endpoint(self):
+        """Seeding uses the same POST /databases call, not a different route."""
+        captured: dict = {}
+        manager = self._manager_capturing_payload(captured)
+
+        await manager.create_database("tenant-1", seed={"type": "database", "name": "t"})
+
+        assert captured["method"] == "POST"
+        assert captured["endpoint"] == "/databases"

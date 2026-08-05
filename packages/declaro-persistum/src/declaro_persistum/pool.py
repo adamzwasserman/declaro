@@ -1349,6 +1349,7 @@ class TursoCloudManager:
         *,
         size_limit: str | None = None,
         use_tursodb: bool | None = None,
+        seed: dict[str, Any] | None = None,
     ) -> dict:
         """
         Create a new database for a tenant.
@@ -1359,6 +1360,27 @@ class TursoCloudManager:
             use_tursodb: Beta — create on the new tursodb (Rust) engine.
                 None (default) inherits the manager's use_tursodb setting;
                 an explicit True/False overrides it for this call.
+            seed: Optional seed spec, passed through to the Turso API
+                unmodified so the new database is created as a copy of an
+                existing one rather than empty. Provisioning a tenant from a
+                pre-built template becomes a single copy instead of
+                create-empty then migrate then insert.
+
+                Passed through as an opaque dict rather than being modelled
+                as named parameters, so seed variants the API grows are
+                usable without a release here. Two forms are documented today:
+
+                    {"type": "database", "name": "<source-db>"}
+                    {"type": "database_upload"}
+
+                With type "database", an optional "timestamp" (ISO 8601)
+                selects a recovery point rather than the current state —
+                within the last 24 hours, or 30 days on the scaler plan:
+
+                    {"type": "database", "name": "tpl", "timestamp": "..."}
+
+                Not validated here; the API is the authority on which
+                combinations are legal and reports violations itself.
 
         Returns:
             Dict with database info (DbId, Hostname, Name)
@@ -1369,6 +1391,8 @@ class TursoCloudManager:
         }
         if size_limit:
             payload["size_limit"] = size_limit
+        if seed is not None:
+            payload["seed"] = seed
 
         resolved_use_tursodb = (
             self._use_tursodb if use_tursodb is None else use_tursodb

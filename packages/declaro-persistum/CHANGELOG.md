@@ -2,6 +2,12 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## Unreleased
+
+### Features
+
+- **`TursoCloudManager.create_database(..., seed=...)`** — optional pass-through to the Turso create-database API's `seed` object, so a new database can be created as a copy of an existing one instead of empty. Provisioning a tenant from a pre-built template becomes a single copy rather than create-empty, then migrate, then insert rows, which matters under concurrent onboarding. Passed through as an opaque dict rather than modelled as named parameters, so seed variants the API grows are usable without a release here — and so the `timestamp` field, which selects an ISO 8601 recovery point rather than current state, is available for free. Requested downstream; thank you.
+
 ## 0.1.10 — 2026-08-05
 
 ### Bugfixes
