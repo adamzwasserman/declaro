@@ -245,7 +245,7 @@ class PostgreSQLApplier:
         cols_sql = ", ".join(f'"{c}"' for c in columns)
         return f'CREATE {unique}INDEX "{idx_name}" ON "{table}"{using} ({cols_sql}){where}'
 
-    def _drop_index_sql(self, details: dict[str, Any]) -> str:
+    def _drop_index_sql(self, _table: str, details: dict[str, Any]) -> str:
         """Generate DROP INDEX statement."""
         idx_name = details["index"]
         return f'DROP INDEX "{idx_name}"'

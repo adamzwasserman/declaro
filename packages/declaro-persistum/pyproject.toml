@@ -1,6 +1,6 @@
 [project]
 name = "declaro_persistum"
-version = "0.1.8"
+version = "0.1.9"
 description = "Pure functional SQL library with declarative schema migrations"
 readme = "README.md"
 license = { text = "MIT" }
@@ -32,6 +32,10 @@ all = [
     "declaro_persistum[turso]",
 ]
 dev = [
+    # The loader duck-types Pydantic model modules rather than importing
+    # pydantic, so it is deliberately not a runtime dependency. The tests
+    # do need it: they write model fixtures and exec them.
+    "pydantic>=2.0.0",
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "pytest-bdd>=7.0.0",

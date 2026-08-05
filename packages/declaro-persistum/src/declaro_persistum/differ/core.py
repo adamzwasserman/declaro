@@ -315,10 +315,28 @@ def _compute_column_alterations(
     # Default change
     current_default = current.get("default")
     target_default = target.get("default")
-    if current_default != target_default:
+    if _normalize_default(current_default) != _normalize_default(target_default):
         changes["default"] = {"from": current_default, "to": target_default}
 
     return changes if changes else None
+
+
+def _normalize_default(value: Any) -> Any:
+    """Fold boolean-literal defaults to a canonical spelling — pure.
+
+    Boolean literals are spelled inconsistently across the two sides of the
+    diff: the loader emits "TRUE"/"FALSE" for a Python bool default, while
+    PostgreSQL normalises the same default to "false" on the way back out of
+    introspection. Compared verbatim those never match, so every migration
+    re-emits an alter_column that changes nothing.
+
+    Only boolean literals are folded. Every other default is an opaque SQL
+    expression where case can carry meaning (string literals, quoted
+    identifiers, collations), so those are compared verbatim.
+    """
+    if isinstance(value, str) and value.strip().lower() in ("true", "false"):
+        return value.strip().lower()
+    return value
 
 
 def _diff_foreign_keys(

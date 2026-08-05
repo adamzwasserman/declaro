@@ -87,6 +87,83 @@ class TestPostgreSQLInspector:
         assert user_id_col["references"] == "users.id"
         assert user_id_col["on_delete"] == "cascade"
 
+    async def test_constraint_backed_index_not_reported_as_index(self, pg_connection):
+        """A UNIQUE constraint's backing index is not a declared index.
+
+        Regression: introspection filtered only on NOT indisprimary, so the
+        index PostgreSQL builds for a UNIQUE constraint (users_email_key)
+        was reported as an ordinary index. The model declares that as
+        unique: True on the column and never as an index entry, so the
+        differ saw it in current - target and scheduled a drop_index for it.
+        """
+        from declaro_persistum.inspector.postgresql import PostgreSQLInspector
+
+        await pg_connection.execute("""
+            CREATE TABLE users (
+                id UUID PRIMARY KEY,
+                email TEXT NOT NULL UNIQUE,
+                nick TEXT,
+                tag TEXT
+            );
+            CREATE UNIQUE INDEX users_nick_uidx ON users (nick);
+            CREATE INDEX users_tag_idx ON users (tag);
+        """)
+
+        inspector = PostgreSQLInspector()
+        schema = await inspector.introspect(pg_connection, schema_name="declaro_test")
+
+        indexes = schema["users"].get("indexes", {})
+
+        # The constraint's backing index is owned by the constraint.
+        assert "users_email_key" not in indexes
+        # ...but the uniqueness itself is still reported, on the column.
+        assert schema["users"]["columns"]["email"]["unique"] is True
+
+        # Standalone indexes are genuinely declared and must survive.
+        assert "users_nick_uidx" in indexes
+        assert indexes["users_nick_uidx"].get("unique") is True
+        assert "users_tag_idx" in indexes
+
+    async def test_unique_model_produces_no_operations(self, pg_connection):
+        """End-to-end: a unique column round-trips to an empty diff.
+
+        This is the downstream failure in full: introspect a table created
+        from a model with unique: True, diff it against that same model
+        shape, and confirm no drop_index (or anything else) is scheduled.
+        """
+        from declaro_persistum.differ.core import diff
+        from declaro_persistum.inspector.postgresql import PostgreSQLInspector
+
+        await pg_connection.execute("""
+            CREATE TABLE users (
+                id UUID PRIMARY KEY,
+                email TEXT NOT NULL UNIQUE,
+                active BOOLEAN NOT NULL DEFAULT FALSE
+            )
+        """)
+
+        inspector = PostgreSQLInspector()
+        current = await inspector.introspect(pg_connection, schema_name="declaro_test")
+
+        # Diffing introspected state against itself must be a no-op; any
+        # operation here is drift the differ invented out of nothing.
+        result = diff(current=current, target=current)
+        assert result["operations"] == []
+
+        # And the model-side spelling of that boolean default ("FALSE", as
+        # the loader emits for a Python False) must not churn either.
+        target = {
+            "users": {
+                **current["users"],
+                "columns": {
+                    **current["users"]["columns"],
+                    "active": {**current["users"]["columns"]["active"], "default": "FALSE"},
+                },
+            }
+        }
+        result = diff(current=current, target=target)
+        assert result["operations"] == []
+
 
 class TestPostgreSQLApplier:
     """Integration tests for PostgreSQL applier."""

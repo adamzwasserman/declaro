@@ -13,9 +13,19 @@ A replacement for SQLAlchemy ORM and Alembic that uses:
 # package (e.g. migrations.apply_migrations_async, which passes the
 # current version into _compute_schema_hash) can import it without a
 # circular dependency through __init__.
-__version__ = "0.1.6"
+#
+# It is read from installed package metadata rather than written as a
+# literal here. A literal is a second source of truth that the release
+# process has to remember to bump, and when it drifts it does so silently:
+# it sat at "0.1.6" through the 0.1.7 and 0.1.8 releases, which meant the
+# version mixed into the schema hash never changed and the skip-if-clean
+# cache was never invalidated on upgrade — the exact propagation those
+# releases depended on. Derived from pyproject, it cannot drift.
+from importlib.metadata import version as _pkg_version
 
-from declaro_persistum.exceptions import (
+__version__ = _pkg_version("declaro-persistum")
+
+from declaro_persistum.exceptions import (  # noqa: I001 - must follow __version__, see above
     AmbiguityError,
     ConnectionError,
     CycleError,

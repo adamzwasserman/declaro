@@ -276,7 +276,18 @@ class PostgreSQLInspector:
         table_name: str,
         schema_name: str,
     ) -> dict[str, Index]:
-        """Get non-primary-key indexes for a table."""
+        """Get non-primary-key, non-constraint-backed indexes for a table.
+
+        Indexes that implement a PRIMARY KEY, UNIQUE or EXCLUDE constraint
+        are owned by the constraint, not independently declared, so they are
+        excluded here. A model declares those via ``unique: True`` on the
+        column and never as an index entry; surfacing them as indexes would
+        put them in the differ's ``current - target`` set and schedule a
+        ``drop_index`` for a constraint the model still declares.
+
+        Standalone indexes built with CREATE [UNIQUE] INDEX have no owning
+        constraint and are still reported — those are genuinely declared.
+        """
         rows = await connection.fetch(
             """
             SELECT
@@ -292,7 +303,11 @@ class PostgreSQLInspector:
             JOIN pg_am am ON am.oid = i.relam
             CROSS JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, n)
             JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+            LEFT JOIN pg_constraint c
+              ON c.conindid = ix.indexrelid
+              AND c.contype IN ('p', 'u', 'x')
             WHERE NOT ix.indisprimary
+              AND c.oid IS NULL
               AND n.nspname = $1
               AND t.relname = $2
             GROUP BY i.relname, ix.indisunique, ix.indpred, ix.indrelid, am.amname
