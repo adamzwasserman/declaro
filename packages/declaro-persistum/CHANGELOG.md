@@ -2,7 +2,7 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
-## Unreleased
+## 0.1.11 — 2026-08-05
 
 ### Features
 
