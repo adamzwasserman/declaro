@@ -1,13 +1,16 @@
 """
 Automatic schema migration support for declaro_persistum.
 
-Loads target schema from Pydantic models, introspects current database state,
-computes diff, and applies changes.
+Provides async migration functions that:
+1. Load target schema from Pydantic models
+2. Introspect current database state
+3. Compute diff and apply changes
 
 Uses a SHA-256 hash of the schema file to skip introspection when the schema
 hasn't changed since the last successful migration (skip-if-clean).
 
 Usage:
+    # Async
     await apply_migrations_async(pool, dialect, schema_path)
 """
 
@@ -20,15 +23,29 @@ from typing import Any, Union
 from declaro_persistum.applier.protocol import create_applier
 from declaro_persistum.differ import diff
 from declaro_persistum.inspector.protocol import create_inspector
-from declaro_persistum.inspector.shared import normalize_schema_for_sqlite
 from declaro_persistum.pydantic_loader import load_models_from_module
 from declaro_persistum.abstractions.enums import expand_schema_enums
-
-_SQLITE_DIALECTS = frozenset(("sqlite", "turso", "libsql"))
+from declaro_persistum.types import ApplyResult, Operation, Schema
 
 META_TABLE = "_declaro_meta"
 
 logger = logging.getLogger(__name__)
+
+
+def _acquire_write_or_read(pool: Any) -> Any:
+    """Return pool.acquire_write(concurrent=False) if available, else pool.acquire().
+
+    DDL and hash writes must go through the write connection on pools
+    with split read/write paths (e.g. TursoPool) so that changes reach
+    the cloud primary rather than only the local replica file.
+
+    concurrent=False because DDL (CREATE TABLE, ALTER TABLE, etc.)
+    requires exclusive transactions — BEGIN CONCURRENT is rejected by
+    Turso for DDL statements.
+    """
+    if hasattr(pool, "acquire_write"):
+        return pool.acquire_write(concurrent=False)
+    return pool.acquire()
 
 
 # ---------------------------------------------------------------------------
@@ -36,9 +53,62 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _compute_schema_hash(schema_path: Path) -> str:
-    """Compute SHA-256 hex digest of a schema file's contents (pure)."""
-    return hashlib.sha256(schema_path.read_bytes()).hexdigest()
+def _compute_schema_hash(schema_path: Path, version: str) -> str:
+    """Compute SHA-256 hex digest of (schema file bytes, NUL, version) — pure.
+
+    ``version`` is the declaro_persistum version string the caller wants
+    mixed into the hash so that any version bump invalidates the
+    skip-if-clean cache. Passing it explicitly (rather than reading the
+    module-level constant inside this function) keeps the hash a pure
+    function of its arguments — testable with explicit version values, no
+    monkeypatching of module globals required.
+
+    Mixing the version in is what makes loader/applier fixes propagate to
+    existing deployments: a buggy version's stored "clean" hash differs
+    from the new version's computed hash, so the runner performs a fresh
+    introspection on first startup after upgrade.
+    """
+    h = hashlib.sha256()
+    h.update(schema_path.read_bytes())
+    h.update(b"\x00")  # delimiter so file content cannot collide with version
+    h.update(version.encode("ascii"))
+    return h.hexdigest()
+
+
+def _dialect_needs_orphan_recovery(dialect: str) -> bool:
+    """True iff this dialect uses the sqlite_master-based temp-table scheme
+    that `_recover_orphaned_tmp_tables` was written for.
+
+    Postgres reconstruction does not produce ``_declaro_tmp_*`` tables and
+    has no ``sqlite_master`` system table, so running the recovery scan on
+    a Postgres pool crashes startup with UndefinedTableError.
+    """
+    return dialect in ("sqlite", "turso")
+
+
+def partition_replica_operations(
+    operations: list[dict[str, Any]], execution_order: list[int]
+) -> tuple[list[int], list[dict[str, Any]]]:
+    """Partition migration ops for an embedded replica.
+
+    Reconstruction ops (add/drop FK, alter column) can't replicate through the
+    sync engine, so they are deferred to ``declaro migrate-remote``. Returns
+    ``(safe_order, skipped)`` where ``safe_order`` is ``execution_order`` filtered
+    to safe ops, and ``skipped`` describes each deferred op as ``{"op", "table"}``
+    so callers can see what was NOT applied instead of mistaking a no-op for
+    success.
+    """
+    from declaro_persistum.applier.shared import requires_reconstruction
+
+    safe_order: list[int] = []
+    skipped: list[dict[str, Any]] = []
+    for op_idx in execution_order:
+        op = operations[op_idx]
+        if requires_reconstruction(op):
+            skipped.append({"op": op["op"], "table": op.get("table")})
+        else:
+            safe_order.append(op_idx)
+    return safe_order, skipped
 
 
 async def _ensure_meta_table(conn: Any) -> None:
@@ -99,14 +169,139 @@ async def _store_hash(conn: Any, schema_name: str, schema_hash: str) -> None:
 async def _schema_is_clean(
     conn: Any, schema_path: Path, schema_hash: str
 ) -> bool:
-    """Check if schema file hash matches the stored hash (skip-if-clean)."""
+    """Check if schema file hash matches the stored hash (skip-if-clean).
+
+    A hash match alone is not sufficient: if the cloud DB was destroyed and
+    recreated, the local replica retains the stale hash while the cloud is
+    empty.  We guard against this by verifying that at least one user table
+    (anything other than ``_declaro_meta``) exists — unless the schema itself
+    defines zero tables (empty module), in which case an empty DB is expected.
+    """
     try:
         await _ensure_meta_table(conn)
         stored = await _get_stored_hash(conn, schema_path.name)
-        return stored == schema_hash
+        if stored != schema_hash:
+            return False
+        # Hash matches — verify cloud DB is not empty (stale-hash guard).
+        # Skip this check for empty schemas (no tables defined).
+        has_tables = await _has_user_tables(conn)
+        if has_tables:
+            return True
+        # No user tables — only trust the hash if the schema file itself
+        # produces no tables (empty module).  Otherwise, the DB was likely
+        # destroyed and recreated.
+        try:
+            target = load_models_from_module(schema_path)
+            return len(target) == 0
+        except Exception:
+            return False
     except Exception:
         # Meta table doesn't exist or query failed — treat as dirty
         return False
+
+
+async def _has_user_tables(conn: Any) -> bool:
+    """Return True if the database has at least one table besides _declaro_meta."""
+    sql = (
+        "SELECT name FROM sqlite_master "
+        "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != ?"
+    )
+    if hasattr(conn, "fetch"):
+        # asyncpg — use information_schema instead
+        rows = await conn.fetch(
+            "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+        )
+        return any(r["tablename"] != META_TABLE for r in rows)
+    cursor = await conn.execute(sql, (META_TABLE,))
+    row = await cursor.fetchone()
+    return row is not None
+
+
+async def _recover_orphaned_tmp_tables(pool: Any) -> int:
+    """Detect and recover orphaned temp tables from failed reconstruction.
+
+    Reconstruction uses temp tables named ``_declaro_tmp_<table>`` (current)
+    or ``<table>_new`` (legacy).  If reconstruction partially committed
+    (CREATE tmp + DROP original) but failed before RENAME, the database has
+    the tmp table but not the original.  This renames them back to recover.
+
+    Returns the number of tables recovered.
+    """
+    async with _acquire_write_or_read(pool) as conn:
+        # Detect both naming patterns:
+        #   _declaro_tmp_<table>  (current)
+        #   <table>_new           (legacy)
+        cursor = await conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'table' "
+            "  AND (name LIKE '_declaro_tmp_%' OR name LIKE '%\\_new' ESCAPE '\\')"
+        )
+        tmp_tables = await cursor.fetchall()
+
+        recovered = 0
+        for row in tmp_tables:
+            tmp_name = row[0]
+
+            # Derive original table name from whichever pattern matched
+            if tmp_name.startswith("_declaro_tmp_"):
+                # Strip prefix and UUID suffix: _declaro_tmp_<table>_<8hex>
+                remainder = tmp_name[len("_declaro_tmp_"):]
+                # The last 9 chars are _{8hex} — strip them
+                if len(remainder) > 9 and remainder[-9] == "_":
+                    original_name = remainder[:-9]
+                else:
+                    # No UUID suffix (old format) — use remainder as-is
+                    original_name = remainder
+            elif tmp_name.endswith("_new"):
+                original_name = tmp_name[:-4]
+            else:
+                continue
+
+            # Check if the original table exists
+            check = await conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (original_name,),
+            )
+            original_exists = await check.fetchone()
+
+            try:
+                if original_exists:
+                    # Original exists — tmp is leftover junk, drop it
+                    await conn.execute(f'DROP TABLE "{tmp_name}"')
+                    await conn.commit()
+                    logger.warning(
+                        f"Dropped leftover tmp table: {tmp_name}"
+                    )
+                else:
+                    # Original missing — rename tmp to recover
+                    await conn.execute(
+                        f'ALTER TABLE "{tmp_name}" RENAME TO "{original_name}"'
+                    )
+                    await conn.commit()
+                    logger.warning(
+                        f"Recovered orphaned table: {tmp_name} → {original_name}"
+                    )
+                    recovered += 1
+            except Exception as e:
+                logger.error(
+                    f"Failed to clean up tmp table {tmp_name}: {e}"
+                )
+
+        # Invalidate stored hash so migration re-runs after recovery
+        if recovered:
+            try:
+                await conn.execute(
+                    f'DELETE FROM "{META_TABLE}" WHERE key LIKE ?',
+                    ("schema_hash:%",),
+                )
+                await conn.commit()
+                logger.info(
+                    f"Cleared schema hash after recovering {recovered} orphaned table(s)"
+                )
+            except Exception:
+                pass  # Meta table might not exist yet
+
+    return recovered
 
 
 async def apply_migrations_async(
@@ -128,7 +323,7 @@ async def apply_migrations_async(
 
     Args:
         pool: The database connection pool (async)
-        dialect: Database dialect ('sqlite', 'turso', 'libsql', 'postgresql')
+        dialect: Database dialect ('sqlite', 'turso', 'postgresql')
         schema_path: Path to Python module containing Pydantic models
         expand_enums: Whether to expand Literal types to lookup tables (default True)
         force: Bypass the skip-if-clean check and always run full introspection
@@ -158,8 +353,17 @@ async def apply_migrations_async(
             "error": f"Schema file not found: {schema_path}",
         }
 
-    # Skip-if-clean: compare schema file hash with stored hash
-    schema_hash = _compute_schema_hash(schema_path)
+    # Pre-flight: recover orphaned _new tables from failed reconstruction.
+    # Decision lives in the pure helper so it can be tested without mocks.
+    if _dialect_needs_orphan_recovery(dialect):
+        await _recover_orphaned_tmp_tables(pool)
+
+    # Skip-if-clean: compare schema file hash with stored hash.
+    # Version is passed explicitly so _compute_schema_hash stays a pure
+    # function of its arguments (Honest Code: configuration as parameters).
+    from declaro_persistum import __version__
+
+    schema_hash = _compute_schema_hash(schema_path, __version__)
 
     if not force:
         async with pool.acquire() as conn:
@@ -180,7 +384,7 @@ async def apply_migrations_async(
     if not target_schema:
         logger.warning("No tables found in schema models")
         # Store hash so next call skips
-        async with pool.acquire() as conn:
+        async with _acquire_write_or_read(pool) as conn:
             await _ensure_meta_table(conn)
             await _store_hash(conn, schema_path.name, schema_hash)
         return {
@@ -208,17 +412,13 @@ async def apply_migrations_async(
 
     logger.info(f"Introspected {len(current_schema)} tables from database")
 
-    # Normalize target schema types to match what SQLite introspection reports
-    if dialect in _SQLITE_DIALECTS:
-        target_schema = normalize_schema_for_sqlite(target_schema)
-
     # Compute diff
     diff_result = diff(current_schema, target_schema)
 
     if not diff_result["operations"]:
         logger.info("Schema is up to date - no migrations needed")
         # Store hash so next call skips introspection
-        async with pool.acquire() as conn:
+        async with _acquire_write_or_read(pool) as conn:
             await _ensure_meta_table(conn)
             await _store_hash(conn, schema_path.name, schema_hash)
         return {
@@ -248,19 +448,65 @@ async def apply_migrations_async(
             "error": f"Ambiguous changes: {diff_result['ambiguities']}",
         }
 
-    # Apply migrations
-    applier = create_applier(dialect)
-    async with pool.acquire() as conn:
-        result = await applier.apply(
-            conn, diff_result["operations"], diff_result["execution_order"]
+    # On embedded replicas (remote_url set), skip reconstruction ops —
+    # the sync engine can't replicate DDL, and partial sync (DROP reaches
+    # cloud but CREATE doesn't) destroys tables on both sides.
+    # Use `declaro migrate-remote` for schema changes that need reconstruction.
+    is_cloud_replica = hasattr(pool, "_remote_url") and pool._remote_url
+    operations = diff_result["operations"]
+    execution_order = diff_result["execution_order"]
+    skipped_operations: list[dict[str, Any]] = []
+
+    if is_cloud_replica:
+        execution_order, skipped_operations = partition_replica_operations(
+            operations, execution_order
         )
+        for skipped in skipped_operations:
+            logger.warning(
+                f"Skipping {skipped['op']} on {skipped.get('table', 'N/A')} — "
+                f"reconstruction is unsafe on embedded replicas. "
+                f"Run 'declaro migrate-remote' to apply this change to cloud."
+            )
+
+        if not execution_order:
+            logger.info(
+                "All pending operations require reconstruction — "
+                "skipping auto-migration. Use 'declaro migrate-remote'."
+            )
+            return {
+                "success": True,
+                "operations_applied": 0,
+                "tables_in_schema": len(target_schema),
+                "tables_in_database": len(current_schema),
+                "skipped": True,
+                "skipped_operations": skipped_operations,
+                "error": None,
+            }
+
+    # Pause cloud push during DDL — a push mid-transaction would sync
+    # partial state.
+    if hasattr(pool, "pause_push"):
+        pool.pause_push()
+
+    # Apply safe migrations
+    applier = create_applier(dialect)
+    try:
+        async with _acquire_write_or_read(pool) as conn:
+            result = await applier.apply(
+                conn, operations, execution_order
+            )
+    finally:
+        if hasattr(pool, "resume_push"):
+            pool.resume_push()
 
     if result["success"]:
         logger.info(f"Successfully applied {result['operations_applied']} migrations")
+        if result.get("error"):
+            logger.warning(f"Migration completed with warnings: {result['error']}")
         for sql in result["executed_sql"]:
             logger.debug(f"  Executed: {sql}")
         # Store hash after successful migration
-        async with pool.acquire() as conn:
+        async with _acquire_write_or_read(pool) as conn:
             await _ensure_meta_table(conn)
             await _store_hash(conn, schema_path.name, schema_hash)
         return {
@@ -268,7 +514,8 @@ async def apply_migrations_async(
             "operations_applied": result["operations_applied"],
             "tables_in_schema": len(target_schema),
             "tables_in_database": len(current_schema) + result["operations_applied"],
-            "skipped": False,
+            "skipped": bool(skipped_operations),
+            "skipped_operations": skipped_operations,
             "error": None,
         }
     else:
@@ -280,5 +527,6 @@ async def apply_migrations_async(
             "tables_in_schema": len(target_schema),
             "tables_in_database": len(current_schema),
             "skipped": False,
+            "skipped_operations": skipped_operations,
             "error": error_msg,
         }
