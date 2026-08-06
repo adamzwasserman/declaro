@@ -13,7 +13,9 @@ All notable changes to `declaro-persistum` are recorded here.
 - A background sync that fails does not raise on open — there is no caller to catch it, and a failed refresh must not kill a pool whose replica is still readable; the push loop keeps retrying. The error is recorded and re-raised by `initial_pull_complete()`, so a caller that did ask for a consistent view is told it did not get one.
 - `background_pull=False` restores fully inline syncing.
 
-The blocking push in `acquire_write()` is deliberately unchanged. On ephemeral disks (Render and similar) the local file is not durable, so a write that returned before its push could be lost outright; that barrier guards against data loss rather than latency.
+No consumer request path waits on remote Turso. `acquire()` and `acquire_write()` contain no remote I/O at all — writes commit locally and the background push loop delivers them. The remaining blocking remote calls are all off the request path: the initial sync when no local replica exists (once per replica), the post-migration connection refresh, and `sync()` / `flush()` / `close()`, which a consumer invokes deliberately.
+
+Durability on ephemeral disks (Render and similar), where the local file is wiped on restart, is handled at those deliberate points rather than by blocking writes: `close()` retries the final push indefinitely, `flush()` blocks until pending writes are pushed, and `configure_write_queue(persistence_path=...)` persists a queue across restarts.
 
 ## 0.1.11 — 2026-08-05
 
