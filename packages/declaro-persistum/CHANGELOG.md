@@ -2,6 +2,19 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## 0.1.12 — 2026-08-06
+
+### Performance
+
+- **Opening a cloud-backed Turso pool no longer waits on the network.** `_initialize` awaited `push()` then `pull()` inline on every open, so every open paid a full round trip — measured downstream at ~1.35s against an existing 20-card replica, which is the round trip rather than data transfer, and which dominated request latency once pools were re-opened after idle eviction. Whether a usable local replica exists is observable, so it is now observed rather than assumed (checked before `connect_async`, which would otherwise bootstrap the file into existence and make the check trivially true). With a populated replica on disk the initial sync runs as a background task and the pool is usable as soon as the connection opens.
+- **When no local replica exists the sync is still awaited inline.** There is nothing on disk to serve, so returning early would hand out a pool that reads an empty database and reports success. That is a once-per-replica cost, not a per-open one.
+- **`initial_pull_complete()`** is the barrier for callers that must not observe a stale replica. `apply_migrations_async` awaits it before the skip-if-clean probe and before introspection: a diff computed against a replica that has not caught up produces operations that correct code then faithfully applies — the same stale-input class as the foreign-key defect fixed in 0.1.10. The guarantee sits at the one call site that needs it rather than being charged to every open.
+- `_push_once()` still strictly precedes `pull()` on both the inline and background paths, so frames a prior process committed locally but never pushed are delivered before `pull()` can overwrite them.
+- A background sync that fails does not raise on open — there is no caller to catch it, and a failed refresh must not kill a pool whose replica is still readable; the push loop keeps retrying. The error is recorded and re-raised by `initial_pull_complete()`, so a caller that did ask for a consistent view is told it did not get one.
+- `background_pull=False` restores fully inline syncing.
+
+The blocking push in `acquire_write()` is deliberately unchanged. On ephemeral disks (Render and similar) the local file is not durable, so a write that returned before its push could be lost outright; that barrier guards against data loss rather than latency.
+
 ## 0.1.11 — 2026-08-05
 
 ### Features
