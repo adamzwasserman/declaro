@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -567,6 +568,7 @@ class TursoPool(BasePool):
         acquire_timeout: float = 30.0,
         push_interval_s: float = 1.0,
         push_retry_base_s: float = 0.1,
+        background_pull: bool = True,
     ) -> None:
         self._database_path = database_path
         self._remote_url = remote_url
@@ -575,6 +577,13 @@ class TursoPool(BasePool):
         self._max_size = max_size
         self._acquire_timeout = acquire_timeout
         self._push_interval_s = push_interval_s
+        self._background_pull = background_pull
+        # Initial-sync state. The event is created in _initialize, on the
+        # running loop, rather than here — a pool may be constructed outside
+        # the loop that later runs it.
+        self._initial_sync_event: asyncio.Event | None = None
+        self._initial_sync_task: asyncio.Task[None] | None = None
+        self._initial_sync_error: Exception | None = None
         self._semaphore = asyncio.Semaphore(max_size)
         self._conn_lock = asyncio.Lock()
         self._closed = False
@@ -594,14 +603,34 @@ class TursoPool(BasePool):
         self._write_holder = _TursoConnectionHolder(
             self._database_path, self._remote_url, self._auth_token
         )
+        # Whether a usable local replica already exists is observable, so
+        # observe it rather than assuming. Checked BEFORE connect_async,
+        # which bootstraps the file into existence when it is missing and
+        # would make the check trivially true afterwards.
+        had_local_data = self._local_replica_has_data()
+
         await self._write_holder.connect_async()
         if self._remote_url:
-            # W3: deliver any writes a prior process committed locally but never
-            # pushed BEFORE pull() can overwrite them with cloud state. On a
-            # brand-new replica this is a harmless no-op; a persistent failure
-            # is surfaced via last_push_error / the push-failure callback.
-            await self._push_once()
-            await self._write_holder.pull()
+            self._initial_sync_event = asyncio.Event()
+            if self._background_pull and had_local_data:
+                # There is a populated replica on disk, so reads can be served
+                # the instant connect_async returns. The initial sync is then
+                # a freshness step, not a correctness precondition, and
+                # blocking the open on it would push network latency onto
+                # every caller for no benefit.
+                #
+                # Callers needing a primary-consistent view await
+                # initial_pull_complete(). apply_migrations_async does exactly
+                # that before introspecting, so a backgrounded sync can never
+                # feed the differ a stale schema.
+                self._initial_sync_task = asyncio.create_task(self._initial_sync())
+            else:
+                # No local data to serve (first creation, or a wiped ephemeral
+                # disk). Returning here without syncing would hand out a pool
+                # that reads an empty database and reports success — silently
+                # wrong. Blocking is the only correct option in this case, and
+                # it is a once-per-replica cost, not a per-open one.
+                await self._initial_sync()
         # MVCC and cache_size pragmas are only for local-only connections.
         # Cloud sync (CDC replication) has its own journaling — MVCC is
         # incompatible and the commit() triggers a CDC sync that fails.
@@ -724,6 +753,70 @@ class TursoPool(BasePool):
         self._consecutive_push_failures = 0
         self._last_push_error = None
         self._push_failure_notified = False
+
+    def _local_replica_has_data(self) -> bool:
+        """True when a non-empty local replica file already exists.
+
+        Decides whether the initial sync can be backgrounded: with data on
+        disk the pool can serve reads immediately, without it the pool would
+        otherwise hand out an empty database.
+
+        An unreadable or missing path answers False — the conservative
+        direction, since a False answer only costs a blocking sync while a
+        wrong True serves empty results.
+        """
+        try:
+            return os.path.getsize(self._database_path) > 0
+        except OSError:
+            return False
+
+    async def _initial_sync(self) -> None:
+        """Deliver un-pushed local writes, then pull cloud state.
+
+        The push must precede the pull: a prior process may have committed
+        locally and died before pushing, and pull() would overwrite those
+        frames with cloud state (W3). That ordering holds whether this runs
+        inline or as a background task.
+
+        Never raises. When backgrounded there is no caller to catch it, and a
+        failed refresh must not kill the pool — the replica stays readable at
+        its current revision and the push loop keeps retrying. The error is
+        recorded for initial_pull_complete() to re-raise at a call site that
+        did ask to wait.
+        """
+        try:
+            await self._push_once()
+            if self._write_holder:
+                await self._write_holder.pull()
+        except Exception as e:
+            self._initial_sync_error = e
+            logger.warning(
+                "Initial sync failed for %s; serving the local replica at its "
+                "current revision and retrying via the push loop: %s",
+                self._database_path,
+                e,
+            )
+        finally:
+            if self._initial_sync_event:
+                self._initial_sync_event.set()
+
+    async def initial_pull_complete(self) -> None:
+        """Wait until the pool's initial cloud sync has finished.
+
+        Await this before any operation that must not observe a stale
+        replica — schema introspection above all, where a stale read makes
+        the differ compute against a schema that is not the primary's and
+        emit operations that correct code then faithfully applies.
+
+        Returns immediately for local-only pools, and for pools whose sync
+        already ran inline. Re-raises the initial sync's failure, so a caller
+        that asked for a consistent view is told it did not get one rather
+        than proceeding on stale data.
+        """
+        if self._initial_sync_event is not None:
+            await self._initial_sync_event.wait()
+        if self._initial_sync_error is not None:
+            raise self._initial_sync_error
 
     async def _push_once(self) -> bool:
         """Attempt a single push under the connection lock, recording outcome."""
@@ -1035,6 +1128,7 @@ class ConnectionPool:
         max_size: int = 5,
         acquire_timeout: float = 30.0,
         push_interval_s: float = 1.0,
+        background_pull: bool = True,
         instrumentation: bool = False,
         tier_label: str = "",
         latency_sink: str | None = None,
@@ -1047,9 +1141,23 @@ class ConnectionPool:
         """
         Create a Turso connection pool using pyturso.
 
-        When remote_url is provided, the pool bootstraps from Turso Cloud
-        via pull() at startup and pushes local commits in the background
-        every push_interval_s seconds.
+        When remote_url is provided, the pool syncs with Turso Cloud at
+        startup and pushes local commits in the background every
+        push_interval_s seconds.
+
+        background_pull (default True) keeps network latency off the open
+        path. When a populated local replica already exists, the pool becomes
+        usable as soon as the connection is open and the initial sync runs as
+        a background task; opening does not wait on the cloud. When no local
+        replica exists there is nothing to serve, so the sync is awaited
+        inline — a once-per-replica cost, not a per-open one.
+
+        Reads issued before the background sync finishes see the replica at
+        its last-synced revision. Callers that must not observe a stale
+        replica await initial_pull_complete(); apply_migrations_async does so
+        before introspecting, so schema diffs are never computed against
+        stale state. Pass background_pull=False to restore fully inline
+        syncing.
 
         Args:
             database_path: Path to database (or ":memory:" for in-memory)
@@ -1076,6 +1184,7 @@ class ConnectionPool:
             max_size=max_size,
             acquire_timeout=acquire_timeout,
             push_interval_s=push_interval_s,
+            background_pull=background_pull,
         )
         await pool._initialize()
         if instrumentation:

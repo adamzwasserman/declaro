@@ -353,6 +353,16 @@ async def apply_migrations_async(
             "error": f"Schema file not found: {schema_path}",
         }
 
+    # Everything below reads the database to decide what to change: the
+    # skip-if-clean probe, then introspection feeding the differ. A pool that
+    # backgrounded its initial cloud sync may still be at an older revision,
+    # and a diff computed against a stale replica produces operations that
+    # correct code then faithfully applies. Wait for the sync here, at the one
+    # call site that genuinely needs a primary-consistent view, rather than
+    # making every pool open pay for it.
+    if hasattr(pool, "initial_pull_complete"):
+        await pool.initial_pull_complete()
+
     # Pre-flight: recover orphaned _new tables from failed reconstruction.
     # Decision lives in the pure helper so it can be tested without mocks.
     if _dialect_needs_orphan_recovery(dialect):
