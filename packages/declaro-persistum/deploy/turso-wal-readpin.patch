@@ -1,0 +1,158 @@
+diff --git a/core/connection.rs b/core/connection.rs
+index f2c19a408..02c8ae8a1 100644
+--- a/core/connection.rs
++++ b/core/connection.rs
+@@ -2074,10 +2074,16 @@ impl Connection {
+         page: &mut [u8],
+         frame_watermark: Option<u64>,
+     ) -> Result<bool> {
+-        let Some((page_ref, c)) =
+-            self.try_wal_watermark_read_page_begin(page_idx, frame_watermark)?
+-        else {
+-            return Ok(false);
++        let (page_ref, c) = match self.try_wal_watermark_read_page_begin(page_idx, frame_watermark) {
++            Ok(Some(pc)) => pc,
++            Ok(None) => return Ok(false),
++            // The snapshot at this watermark was checkpointed away by a concurrent
++            // checkpoint. Skip the page — the same skip path an absent page takes
++            // below. The condition is global to the watermark, so the whole
++            // revert-read cycle skips, yielding an empty revert snapshot rather
++            // than aborting the worker.
++            Err(LimboError::WatermarkBelowBackfill { .. }) => return Ok(false),
++            Err(e) => return Err(e),
+         };
+         match self.get_pager().io.wait_for_completion(c) {
+             Err(LimboError::CompletionError(err))
+diff --git a/core/error.rs b/core/error.rs
+index fa6e7ed35..3f6ff5e23 100644
+--- a/core/error.rs
++++ b/core/error.rs
+@@ -27,6 +27,8 @@ pub enum LimboError {
+     TxError(String),
+     #[error(transparent)]
+     CompletionError(#[from] CompletionError),
++    #[error("watermark {frame_watermark} is below the WAL backfill point {nbackfills}: snapshot checkpointed away")]
++    WatermarkBelowBackfill { frame_watermark: u64, nbackfills: u64 },
+     #[error("Locking error: {0}")]
+     LockingError(String),
+     #[error("Parse error: {0}")]
+diff --git a/core/storage/wal.rs b/core/storage/wal.rs
+index 4df69a302..3ddbb4227 100644
+--- a/core/storage/wal.rs
++++ b/core/storage/wal.rs
+@@ -3490,16 +3490,26 @@ impl Wal for WalFile {
+             "frame_watermark must be <= than current WAL max_frame value"
+         );
+ 
+-        // we can guarantee correctness of the method, only if frame_watermark is strictly after the current checkpointed prefix
++        // A watermark-read is only correct while frame_watermark is at or after
++        // the checkpointed prefix: pages in WAL range [frame_watermark..nbackfills]
++        // have already been folded into the DB file, so the version at
++        // frame_watermark is no longer recoverable from the WAL.
+         //
+-        // if it's not, than pages from WAL range [frame_watermark..nBackfill] are already in the DB file,
+-        // and in case if page first occurrence in WAL was after frame_watermark - we will be unable to read proper previous version of the page
++        // Unlike the `<= max_frame` check above (a future watermark IS a caller
++        // bug), this is NOT an invariant: a concurrent checkpoint can advance
++        // nbackfills past a watermark a sync revert-read is still holding. That is
++        // a recoverable race outcome, so surface it as a typed error the
++        // watermark-read wrapper turns into a skip, rather than aborting.
+         let nbackfills = self.load_coordination_snapshot().nbackfills;
+-        turso_assert!(
+-            frame_watermark.is_none() || frame_watermark.unwrap() >= nbackfills,
+-            "frame_watermark must be >= than current WAL backfill amount",
+-            { "frame_watermark": frame_watermark, "nbackfills": nbackfills }
+-        );
++        match frame_watermark {
++            Some(w) if w < nbackfills => {
++                return Err(LimboError::WatermarkBelowBackfill {
++                    frame_watermark: w,
++                    nbackfills,
++                });
++            }
++            _ => {}
++        }
+ 
+         // if we are holding read_lock 0 and didn't write anything to the WAL, skip and read right from db file.
+         //
+@@ -6286,6 +6296,56 @@ pub mod test {
+         );
+     }
+ 
++    /// The stock free-threading crash, made deterministic and single-threaded: a
++    /// sync revert-read at a watermark that a concurrent checkpoint has backfilled
++    /// past must return a recoverable error, not abort the worker.
++    ///
++    /// Capture watermark W, extend the WAL past it, passive-checkpoint (no reader
++    /// pinned) so `nbackfills` overruns W, then read at W. Before the core fix this
++    /// tripped the `frame_watermark >= nbackfills` assert and panicked; now it
++    /// returns `LimboError::WatermarkBelowBackfill`, which the watermark-read
++    /// wrapper turns into a skip (see `try_wal_watermark_read_page`).
++    ///
++    /// Requires `conn_raw_api` (the `Some(frame_watermark)` read path).
++    #[test]
++    #[cfg(feature = "conn_raw_api")]
++    fn test_watermark_read_below_backfill_returns_error_not_panic() {
++        let (db, _path) = get_database();
++        let wal_shared = db.shared_wal.clone();
++        let conn = db.connect().unwrap();
++        conn.execute("create table test(id integer primary key, value text)")
++            .unwrap();
++
++        bulk_inserts(&conn, 2, 4);
++        let watermark = wal_shared.read().metadata.max_frame.load(Ordering::SeqCst);
++        assert!(watermark > 0, "need a positive watermark to read at");
++
++        bulk_inserts(&conn, 4, 8);
++        let pager = conn.pager.load();
++        run_checkpoint_until_done(
++            &pager,
++            CheckpointMode::Passive {
++                upper_bound_inclusive: None,
++            },
++        );
++        let nbackfills = wal_shared.read().metadata.nbackfills.load(Ordering::SeqCst);
++        assert!(
++            nbackfills > watermark,
++            "checkpoint must overrun the watermark for this repro (nbackfills={nbackfills}, watermark={watermark})"
++        );
++
++        let wal = pager.wal.as_ref().unwrap();
++        let result = wal.find_frame(2, Some(watermark));
++        assert!(
++            matches!(
++                result,
++                Err(crate::LimboError::WatermarkBelowBackfill { frame_watermark, nbackfills: nb })
++                    if frame_watermark == watermark && nb == nbackfills
++            ),
++            "expected graceful WatermarkBelowBackfill, got {result:?}"
++        );
++    }
++
+     fn make_test_wal() -> (Arc<RwLock<WalFileShared>>, WalFile) {
+         let io = shared_wal_test_io();
+         let buffer_pool = BufferPool::begin_init(&io, BufferPool::TEST_ARENA_SIZE);
+diff --git a/sync/engine/src/database_tape.rs b/sync/engine/src/database_tape.rs
+index d68129b8e..56f23e89c 100644
+--- a/sync/engine/src/database_tape.rs
++++ b/sync/engine/src/database_tape.rs
+@@ -52,9 +52,16 @@ pub(crate) async fn try_wal_watermark_read_page<Ctx>(
+     page: &mut [u8],
+     frame_watermark: Option<u64>,
+ ) -> Result<bool> {
+-    let Some((page_ref, c)) = conn.try_wal_watermark_read_page_begin(page_idx, frame_watermark)?
+-    else {
+-        return Ok(false);
++    let (page_ref, c) = match conn.try_wal_watermark_read_page_begin(page_idx, frame_watermark) {
++        Ok(Some(pc)) => pc,
++        Ok(None) => return Ok(false),
++        // The snapshot at this watermark was checkpointed away by a concurrent
++        // checkpoint (the salt-mismatch reset-to-0 path). Skip this page — the
++        // condition is global to the watermark, so the whole revert-read cycle
++        // skips, yielding an empty revert snapshot rather than failing the sync.
++        // Same skip the absent-page case takes below.
++        Err(LimboError::WatermarkBelowBackfill { .. }) => return Ok(false),
++        Err(e) => return Err(e.into()),
+     };
+     while !c.finished() {
+         coro.yield_(SyncEngineIoResult::IO).await?;
