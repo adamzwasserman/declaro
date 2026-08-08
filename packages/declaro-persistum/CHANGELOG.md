@@ -2,6 +2,16 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## 0.1.20 — 2026-08-06
+
+### Performance
+
+- **Opening a cloud pool pays one cloud handshake instead of two.** `_initialize` opened the write connection *and* the dedicated push connection. A sync connection costs a handshake — measured downstream at ~790ms against a real remote — so pool open paid it twice when only the write connection is needed before the pool can serve a caller.
+
+  The push connection now opens on the push loop's first iteration, which runs in a background task. The handshake still happens immediately; it is simply no longer on the path a caller awaits.
+
+  This does not shrink the handshake itself, which belongs to the engine and the network. It removes the second one. Downstream measurement put pool open at ~1077ms against a raw `turso.aio.sync` connect of ~788ms; the difference was the connection this release defers.
+
 ## 0.1.19 — 2026-08-06
 
 ### Concurrency

@@ -235,3 +235,59 @@ class TestNoLockAndNoCapExist:
         assert pool._push_holder.conn is not write_conn, (
             "the push borrowed the write connection"
         )
+
+
+class TestPoolOpenPaysOneHandshake:
+    """Opening a pool must not pay a cloud handshake it does not need yet."""
+
+    @staticmethod
+    async def _open_only(tmp_path, monkeypatch):
+        """Run _initialize with the background sync stubbed out.
+
+        The background initial sync may open the push connection shortly
+        after open, which is fine — it runs in a task, not on the path a
+        caller awaits. Stubbing it isolates _initialize's own work.
+        """
+        import declaro_persistum.pool as pool_mod
+
+        _Holder.instances = []
+        monkeypatch.setattr(pool_mod, "_TursoConnectionHolder", _Holder)
+        db = tmp_path / "r.db"
+        db.write_bytes(b"x" * 64)
+        pool = TursoPool(str(db), remote_url="https://example.turso.io", auth_token="t")
+        pool._push_loop = lambda: asyncio.sleep(0)
+        pool._enable_replica_fk_enforcement = lambda: asyncio.sleep(0)
+        pool._initial_sync = lambda: asyncio.sleep(0)
+        await pool._initialize()
+        return pool
+
+    @pytest.mark.asyncio
+    async def test_pool_open_pays_only_the_write_handshake(self, tmp_path, monkeypatch):
+        """_initialize must open exactly one sync connection.
+
+        A sync connection costs a cloud handshake — measured at ~790ms
+        against a real remote. Opening the write connection and the push
+        connection during _initialize made pool open pay two of them when
+        only one is needed before the pool can serve a caller.
+        """
+        pool = await self._open_only(tmp_path, monkeypatch)
+
+        assert len(_Holder.instances) == 1, (
+            f"pool open opened {len(_Holder.instances)} sync connections; it "
+            f"must open only the write connection, since each costs a "
+            f"handshake on the path a caller waits on"
+        )
+        assert pool._push_holder is None
+
+    @pytest.mark.asyncio
+    async def test_the_push_still_opens_its_own_connection_when_it_runs(
+        self, tmp_path, monkeypatch
+    ):
+        """Deferring the open must not mean never opening it."""
+        pool = await self._open_only(tmp_path, monkeypatch)
+        assert pool._push_holder is None
+
+        await pool._push_once()
+
+        assert pool._push_holder is not None
+        assert pool._push_holder is not pool._write_holder

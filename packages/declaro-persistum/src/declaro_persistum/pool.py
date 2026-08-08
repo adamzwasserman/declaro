@@ -713,7 +713,14 @@ class TursoPool(BasePool):
             # commit instead. Must run outside any transaction (fresh conn here).
             await self._enable_replica_fk_enforcement()
         if self._remote_url:
-            await self._open_push_connection()
+            # The push connection is NOT opened here. Opening a sync
+            # connection costs a cloud handshake — measured at ~790ms — and
+            # opening two of them made pool open cost two handshakes when
+            # only one is needed before the pool can serve.
+            #
+            # _push_once opens it on the push loop's first iteration, which
+            # runs in a background task. The handshake still happens
+            # immediately, but off the path a caller is waiting on.
             self._push_task = asyncio.create_task(self._push_loop())
 
     async def _enable_replica_fk_enforcement(self) -> None:
