@@ -666,11 +666,29 @@ class TursoPool(BasePool):
                 mode = rows[0][0] if rows else "unknown"
                 if mode == "mvcc":
                     self._mvcc = True
+                    # Logged on grant as well as refusal. Only the refusal was
+                    # logged before, so an operator could not tell which of
+                    # the two had happened on a given host — which is exactly
+                    # what you need when comparing write latency between two
+                    # boxes where one may have been granted MVCC and the other
+                    # refused it.
+                    logger.info(
+                        "MVCC granted for %s (remote_url=%s) — acquire_write will "
+                        "use BEGIN CONCURRENT",
+                        self._database_path,
+                        bool(self._remote_url),
+                    )
                 else:
                     self._mvcc = False
-                    logger.info("MVCC not available (got %s), using WAL — writes are still sub-ms", mode)
-            except Exception:
+                    logger.info(
+                        "MVCC not available for %s (got %s), using WAL",
+                        self._database_path,
+                        mode,
+                    )
+            except Exception as e:
                 self._mvcc = False
+                logger.info("MVCC request failed for %s (%s), using WAL",
+                            self._database_path, e)
         else:
             self._mvcc = False
 
