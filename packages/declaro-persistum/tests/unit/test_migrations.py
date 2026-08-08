@@ -84,7 +84,7 @@ class TestMetaTable:
         async with pool.acquire() as conn:
             await _ensure_meta_table(conn)
             await _store_hash(conn, "models.py", "abc123")
-            result = await _get_stored_hash(conn, "models.py")
+            result = await _get_stored_hash(conn, "models.py", "abc123")
             assert result == "abc123"
         await pool.close()
 
@@ -94,20 +94,39 @@ class TestMetaTable:
         pool = await ConnectionPool.sqlite(":memory:")
         async with pool.acquire() as conn:
             await _ensure_meta_table(conn)
-            result = await _get_stored_hash(conn, "nonexistent.py")
+            result = await _get_stored_hash(conn, "nonexistent.py", "whatever")
             assert result is None
         await pool.close()
 
     @pytest.mark.asyncio
-    async def test_store_hash_upserts(self):
-        """Storing a hash twice updates the value."""
+    async def test_storing_the_same_hash_twice_is_idempotent(self):
+        """The same schema and version records one row, not two."""
+        pool = await ConnectionPool.sqlite(":memory:")
+        async with pool.acquire() as conn:
+            await _ensure_meta_table(conn)
+            await _store_hash(conn, "models.py", "same")
+            await _store_hash(conn, "models.py", "same")
+            assert await _get_stored_hash(conn, "models.py", "same") == "same"
+        await pool.close()
+
+    @pytest.mark.asyncio
+    async def test_two_hashes_for_one_filename_coexist(self):
+        """Distinct hashes under one filename must not evict each other.
+
+        This is what lets two services share a database. The hash covers the
+        schema contents and the library version, so a second service with its
+        own models.py, or the same service on another version, computes a
+        different hash. Storing the second must leave the first readable —
+        otherwise each boot invalidates the other's stamp, forever.
+        """
         pool = await ConnectionPool.sqlite(":memory:")
         async with pool.acquire() as conn:
             await _ensure_meta_table(conn)
             await _store_hash(conn, "models.py", "first")
             await _store_hash(conn, "models.py", "second")
-            result = await _get_stored_hash(conn, "models.py")
-            assert result == "second"
+
+            assert await _get_stored_hash(conn, "models.py", "first") == "first"
+            assert await _get_stored_hash(conn, "models.py", "second") == "second"
         await pool.close()
 
 

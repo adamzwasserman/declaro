@@ -128,9 +128,32 @@ async def _ensure_meta_table(conn: Any) -> None:
         await conn.commit()
 
 
-async def _get_stored_hash(conn: Any, schema_name: str) -> str | None:
-    """Get the stored schema hash from _declaro_meta. Returns None if missing."""
-    key = f"schema_hash:{schema_name}"
+def _stamp_key(schema_name: str, schema_hash: str) -> str:
+    """Build the skip-if-clean stamp key — pure.
+
+    The hash is part of the key, not only the value. The key used to be the
+    schema file's name alone, so two services migrating one database wrote
+    the same row. They disagree whenever their hashes differ — different
+    models files sharing a filename, or different library versions, since the
+    version is mixed into the hash on purpose. Each then read the other's
+    stamp, saw a mismatch, re-introspected and re-stamped, forever. Neither
+    was wrong and neither could win.
+
+    With the hash in the key, each distinct (schema, version) records its own
+    row and no service can evict another's. Two services applying genuinely
+    the same schema on the same version still share one row, which is
+    correct: they are recording the same fact.
+
+    Rows for superseded hashes are left behind rather than pruned. Pruning by
+    schema name is what caused the collision — it would delete the other
+    service's stamp. The cost is a few rows in a metadata table.
+    """
+    return f"schema_hash:{schema_name}:{schema_hash}"
+
+
+async def _get_stored_hash(conn: Any, schema_name: str, schema_hash: str) -> str | None:
+    """Return the stored stamp for this exact schema and version, else None."""
+    key = _stamp_key(schema_name, schema_hash)
     if hasattr(conn, "fetch"):
         row = await conn.fetchrow(
             f'SELECT value FROM "{META_TABLE}" WHERE key = $1', key
@@ -146,7 +169,7 @@ async def _get_stored_hash(conn: Any, schema_name: str) -> str | None:
 
 async def _store_hash(conn: Any, schema_name: str, schema_hash: str) -> None:
     """Store (upsert) the schema hash in _declaro_meta."""
-    key = f"schema_hash:{schema_name}"
+    key = _stamp_key(schema_name, schema_hash)
     now = datetime.now(UTC).isoformat()
     if hasattr(conn, "fetch"):
         await conn.execute(
@@ -179,7 +202,7 @@ async def _schema_is_clean(
     """
     try:
         await _ensure_meta_table(conn)
-        stored = await _get_stored_hash(conn, schema_path.name)
+        stored = await _get_stored_hash(conn, schema_path.name, schema_hash)
         if stored != schema_hash:
             return False
         # Hash matches — verify cloud DB is not empty (stale-hash guard).

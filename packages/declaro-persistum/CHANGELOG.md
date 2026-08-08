@@ -2,6 +2,24 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## 0.1.15 — 2026-08-06
+
+### Bugfixes
+
+- **Two services sharing one database no longer fight over the skip-if-clean stamp.** The stamp key was built from the schema file's *name* alone, so two services migrating the same database wrote the same row in `_declaro_meta`. They disagree whenever their computed hash differs — two services each with their own `models.py`, or two services on different library versions, since the version is mixed into the hash deliberately. Each read the other's stamp, saw a mismatch, re-introspected and re-stamped. Neither was wrong and neither could win, so the pair stayed permanently unclean with operations re-proposed on every boot.
+
+  That is also the symptom of genuine schema drift, and of the foreign-key defect fixed in 0.1.10, so it was easy to misdiagnose. Do not attribute never-clearing operations to a differ defect without first confirming that only one service, on one version, migrates that database.
+
+  The hash is now part of the key rather than only the value, so each distinct (schema, version) records its own row and no service can evict another's. Two services applying genuinely the same schema on the same version still share one row, which is correct — they are recording the same fact.
+
+  Rows for superseded hashes are left behind rather than pruned. Pruning by schema name is what caused the collision, since it would delete the other service's stamp. The cost is a few rows in a metadata table.
+
+  Reported by a consumer whose stage service pointed its central pool at the production central database.
+
+### Internal
+
+- `scripts/publish.sh` builds, tests, uploads and then **verifies the release is installable from PyPI**. `uv publish` exits 0 whether or not an upload lands, so its exit code carries no information and a release can appear to succeed while nothing reached the index. The script polls the index — which lags the upload — and fails loudly if the version is not installable. It also refuses to publish a version that already exists.
+
 ## 0.1.14 — 2026-08-06
 
 ### Concurrency
