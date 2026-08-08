@@ -135,6 +135,11 @@ async def _connect_no_loop(pool, path, remote_url, token):
     holder = _FakeHolder(path, remote_url, token)
     await holder.connect_async()
     pool._write_holder = holder
+    # The push runs on its own connection and no longer borrows the write
+    # connection, so a test that exercises pushes must supply one.
+    push_holder = _FakeHolder(path, remote_url, token)
+    await push_holder.connect_async()
+    pool._push_holder = push_holder
     return holder
 
 
@@ -189,7 +194,9 @@ class TestW3ProtectUnpushedFramesOnResync:
                          auth_token="t", push_interval_s=1000)
         await pool._initialize()
         holder = fake_holder["holder"]
-        init_events = list(holder.events)   # captured before any further await
+        # Read across connections: init pushes on the push connection and
+        # pulls on the write connection.
+        init_events = list(_FakeHolder.shared_events)
         await pool.close()
         assert init_events == ["push", "pull"], (
             "init must push un-pushed local frames BEFORE pull() overwrites them; "

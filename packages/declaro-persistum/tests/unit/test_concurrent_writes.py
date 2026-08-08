@@ -157,10 +157,15 @@ class TestWritersRunConcurrently:
         )
 
     @pytest.mark.asyncio
-    async def test_never_exceeds_max_size_write_connections(
+    async def test_retention_is_bounded_but_concurrency_is_not(
         self, tmp_path, monkeypatch
     ):
-        """More callers than max_size must queue, not open unbounded connections."""
+        """More callers than max_size must proceed, and not be retained after.
+
+        max_size bounds how many idle connections are kept, not how many
+        callers may run. Ten concurrent writers all proceed; at most
+        max_size connections are still held afterwards.
+        """
         pool = await _pool(tmp_path, monkeypatch, max_size=2)
 
         async def writer():
@@ -169,10 +174,8 @@ class TestWritersRunConcurrently:
 
         await asyncio.gather(*(writer() for _ in range(10)))
 
-        writers = [h for h in _Holder.instances if h._remote_url]
-        assert len(writers) <= 2 + 2, (
-            f"opened {len(writers)} sync connections with max_size=2"
-        )
+        retained = pool._free_writers.qsize() if pool._free_writers else 0
+        assert retained <= 2, f"retained {retained} idle write connections"
 
 
 class TestRefreshCoversEveryConnection:
@@ -232,25 +235,37 @@ class TestRefreshCoversEveryConnection:
         )
 
     @pytest.mark.asyncio
-    async def test_refresh_waits_for_in_flight_writers(self, tmp_path, monkeypatch):
-        """Refresh must not close a connection a writer is using."""
+    async def test_refresh_does_not_block_an_in_flight_writer(
+        self, tmp_path, monkeypatch
+    ):
+        """A migration must not stall a write that is already running.
+
+        Refresh marks in-use connections stale and disposes of them on
+        release, rather than waiting for writers to drain. The writer keeps
+        its connection to the end of its own operation and is never
+        interrupted.
+        """
         pool = await _pool(tmp_path, monkeypatch)
-        released = asyncio.Event()
-        refresh_finished = False
+        writer_done = asyncio.Event()
 
         async def slow_writer():
             async with pool.acquire_write():
                 await asyncio.sleep(0.15)
-                assert not refresh_finished, "refresh ran while a write was in flight"
-            released.set()
+            writer_done.set()
 
         writer = asyncio.create_task(slow_writer())
         await asyncio.sleep(0.02)
-        await pool.refresh_connections()
-        refresh_finished = True
 
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        await pool.refresh_connections()
+        refresh_time = loop.time() - start
+
+        assert refresh_time < 0.10, (
+            f"refresh waited {refresh_time:.3f}s for an in-flight writer"
+        )
+        assert not writer_done.is_set(), "the writer should still be running"
         await writer
-        assert released.is_set()
 
 
 class TestConcurrentWritesUseMvcc:

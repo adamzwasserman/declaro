@@ -592,7 +592,9 @@ class TursoPool(BasePool):
         # is for. See acquire_write.
         self._write_holders: list[_TursoConnectionHolder] = []
         self._free_writers: asyncio.LifoQueue[_TursoConnectionHolder] | None = None
-        self._write_semaphore = asyncio.Semaphore(max_size)
+        # Connections marked stale by a migration. Disposed of on release
+        # rather than reused, so no caller waits for a refresh.
+        self._stale_holders: set[_TursoConnectionHolder] = set()
         # The push runs on its own sync connection, so a cloud round trip
         # never blocks a write. See _push_once.
         self._push_holder: _TursoConnectionHolder | None = None
@@ -602,8 +604,11 @@ class TursoPool(BasePool):
         self._initial_sync_event: asyncio.Event | None = None
         self._initial_sync_task: asyncio.Task[None] | None = None
         self._initial_sync_error: Exception | None = None
-        self._semaphore = asyncio.Semaphore(max_size)
-        self._conn_lock = asyncio.Lock()
+        # No semaphore and no lock. A consumer must never wait on this pool's
+        # bookkeeping: not on a lock, not behind a concurrency cap, and never
+        # refused because the pool is busy. Reads, writes and the push each
+        # have their own connections, so there is nothing shared to guard.
+        # max_size bounds retained idle connections only — see _release.
         self._closed = False
         self._active_connections = 0
         self._push_task: asyncio.Task[None] | None = None
@@ -743,14 +748,20 @@ class TursoPool(BasePool):
         Read connections are discarded rather than reopened. They are opened
         on demand, so the next reader gets a fresh one.
         """
-        # Quiesce writers. Every slot must be held before any connection is
-        # closed.
-        acquired = 0
-        try:
-            for _ in range(self._max_size):
-                await self._write_semaphore.acquire()
-                acquired += 1
+        # Nothing is quiesced and no caller waits. Connections currently held
+        # by a writer or reader are marked stale and disposed of when they
+        # are released; idle ones are closed here. The next caller opens a
+        # fresh connection against the migrated schema.
+        #
+        # Waiting for writers to drain would have been simpler, but a
+        # migration would then stall every write until it finished, which is
+        # the cost this pool exists to keep away from callers.
+        self._stale_holders.update(self._read_holders)
+        self._stale_holders.update(
+            w for w in self._write_holders if w is not self._write_holder
+        )
 
+        if True:
             if self._write_holder:
                 if self._write_holder.conn is not None:
                     await self._write_holder.conn.close()
@@ -766,40 +777,23 @@ class TursoPool(BasePool):
                         pass
                     await self._enable_replica_fk_enforcement()
 
-            # Every other write connection, so none is left on the old schema.
-            for writer in self._write_holders:
-                if writer is self._write_holder:
-                    continue
-                if writer.conn is not None:
-                    try:
-                        await writer.conn.close()
-                    except Exception:
-                        logger.debug("Write connection already closed")
-                    writer.conn = None
-                await writer.connect_async()
-                await self._configure_write_connection(writer)
-
-            # Read connections are discarded; the next reader opens a fresh
-            # one against the migrated schema.
-            for reader in self._read_holders:
-                if reader.conn is not None:
-                    try:
-                        await reader.conn.close()
-                    except Exception:
-                        logger.debug("Read connection already closed")
-                    reader.conn = None
-            self._read_holders.clear()
+            # Close every idle connection now. Any connection currently in
+            # use is in _stale_holders and is closed when its caller releases
+            # it, so no caller is interrupted mid-operation.
+            await self._close_idle(self._free_writers)
+            await self._close_idle(self._free_readers)
+            self._free_writers = None
             self._free_readers = None
+            self._read_holders.clear()
+            self._write_holders = [
+                w for w in self._write_holders if w is self._write_holder
+            ]
 
             logger.info(
-                "Refreshed %d write connection(s) and dropped %d read "
-                "connection(s) after migration",
-                len(self._write_holders) or 1,
-                len(self._read_holders),
+                "Refreshed the write connection and marked %d other "
+                "connection(s) stale after migration; none will be reused",
+                len(self._stale_holders),
             )
-        finally:
-            for _ in range(acquired):
-                self._write_semaphore.release()
 
     def pause_push(self) -> None:
         """Pause the background push loop (e.g. during migrations)."""
@@ -921,6 +915,75 @@ class TursoPool(BasePool):
         if self._initial_sync_error is not None:
             raise self._initial_sync_error
 
+    async def _release_reader(self, holder: "_TursoConnectionHolder") -> None:
+        """Return a read connection, or close it if the pool is already full.
+
+        max_size bounds how many idle connections are RETAINED, not how many
+        callers may proceed. Concurrency above max_size is allowed and costs
+        a connection that is opened, used, and closed again — never a wait.
+        """
+        await self._release(holder, self._free_readers, self._read_holders)
+
+    async def _release_writer(self, holder: "_TursoConnectionHolder") -> None:
+        """Return a write connection, or close it if the pool is already full."""
+        await self._release(holder, self._free_writers, self._write_holders)
+
+    async def _release(
+        self,
+        holder: "_TursoConnectionHolder",
+        free: "asyncio.LifoQueue[_TursoConnectionHolder] | None",
+        tracked: list["_TursoConnectionHolder"],
+    ) -> None:
+        if free is None:
+            return
+        if holder in self._stale_holders:
+            self._stale_holders.discard(holder)
+            if holder.conn is not None:
+                try:
+                    await holder.conn.close()
+                except Exception:
+                    logger.debug("Stale connection already closed")
+                holder.conn = None
+            if holder in tracked:
+                tracked.remove(holder)
+            return
+        if free.qsize() < self._max_size:
+            free.put_nowait(holder)
+            return
+
+        # Above the retention limit. Close it rather than growing the pool
+        # without bound, and never hand the cost of that back to a caller as
+        # a wait. The write holder is never disposed of: migration and
+        # shutdown hold a reference to it.
+        if holder is self._write_holder:
+            free.put_nowait(holder)
+            return
+        if holder.conn is not None:
+            try:
+                await holder.conn.close()
+            except Exception:
+                logger.debug("Connection already closed on release")
+            holder.conn = None
+        if holder in tracked:
+            tracked.remove(holder)
+
+    async def _close_idle(
+        self, free: "asyncio.LifoQueue[_TursoConnectionHolder] | None"
+    ) -> None:
+        """Close every connection sitting idle in a free list."""
+        if free is None:
+            return
+        while not free.empty():
+            holder = free.get_nowait()
+            if holder is self._write_holder:
+                continue
+            if holder.conn is not None:
+                try:
+                    await holder.conn.close()
+                except Exception:
+                    logger.debug("Idle connection already closed")
+                holder.conn = None
+
     async def _get_writer(self) -> "_TursoConnectionHolder":
         """Take a write connection from the free list, opening one if needed.
 
@@ -1038,18 +1101,22 @@ class TursoPool(BasePool):
         and the push-failure callback, which report what actually happened
         rather than inferring it.
         """
-        holder = self._push_holder or self._write_holder
-        if holder is None:
+        if not self._remote_url:
             return True
 
+        if self._push_holder is None:
+            # Retry opening the dedicated push connection rather than
+            # borrowing the write connection. Borrowing meant taking
+            # _conn_lock across a cloud round trip, which stalls every write
+            # for its duration — the exact cost this pool exists to keep away
+            # from callers. A push deferred to the next cycle costs latency
+            # to the cloud; a push on the write connection costs the caller.
+            await self._open_push_connection()
+            if self._push_holder is None:
+                return False
+
         try:
-            if holder is self._write_holder:
-                # Fallback path only: the write connection still needs the
-                # lock, because reads and writes share it.
-                async with self._conn_lock:
-                    await holder.push()
-            else:
-                await holder.push()
+            await self._push_holder.push()
         except Exception as e:
             self._record_push_failure(e)
             return False
@@ -1125,29 +1192,22 @@ class TursoPool(BasePool):
         if self._closed:
             raise PoolClosedError("Pool has been closed")
 
-        try:
-            async with asyncio.timeout(self._acquire_timeout):
-                await self._semaphore.acquire()
-        except TimeoutError as err:
-            raise PoolExhaustedError(
-                f"Timed out waiting for connection after {self._acquire_timeout}s"
-            ) from err
-
         if self._write_holder is None or self._write_holder.conn is None:
-            self._semaphore.release()
             raise PoolConnectionError("Write holder not initialized")
 
         if self._free_readers is None:
             self._free_readers = asyncio.LifoQueue()
 
+        # No semaphore. A reader never queues behind a cap and is never
+        # refused because the pool is busy: it takes an idle connection if
+        # there is one, and opens its own if there is not.
         holder = await self._get_reader()
         self._active_connections += 1
         try:
             yield TursoAsyncConnection(holder)
         finally:
             self._active_connections -= 1
-            self._free_readers.put_nowait(holder)
-            self._semaphore.release()
+            await self._release_reader(holder)
 
     @asynccontextmanager
     async def acquire_write(self, *, concurrent: bool = True) -> AsyncIterator[TursoAsyncConnection]:
@@ -1168,15 +1228,8 @@ class TursoPool(BasePool):
         if self._write_holder is None or self._write_holder.conn is None:
             raise PoolConnectionError("Write holder not initialized")
 
-        try:
-            async with asyncio.timeout(self._acquire_timeout):
-                await self._write_semaphore.acquire()
-        except TimeoutError as err:
-            raise PoolExhaustedError(
-                f"Timed out waiting for a write connection after "
-                f"{self._acquire_timeout}s"
-            ) from err
-
+        # No semaphore. A writer never queues behind a cap and is never
+        # refused because the pool is busy.
         holder = await self._get_writer()
         try:
             async_conn = TursoAsyncConnection(holder)
@@ -1189,9 +1242,7 @@ class TursoPool(BasePool):
                 await async_conn.rollback()
                 raise
         finally:
-            if self._free_writers is not None:
-                self._free_writers.put_nowait(holder)
-            self._write_semaphore.release()
+            await self._release_writer(holder)
         # No push here — the push loop handles cloud delivery.
         # Any push attempt (even fire-and-forget) acquires _conn_lock
         # and blocks reads during the cloud round-trip.

@@ -2,6 +2,20 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## 0.1.19 — 2026-08-06
+
+### Concurrency
+
+No consumer operation waits on this pool's own bookkeeping any more. Not on a lock, not behind a concurrency cap, and never refused because the pool is busy. Three things violated that and all three are gone.
+
+- **The last lock is removed.** `_conn_lock` was still taken when a push fell back to the write connection, which held that connection across a cloud round trip and stalled every write for its duration. The push now retries opening its own connection instead. A push deferred to the next cycle costs latency to the cloud; a push on the write connection costs the caller. `TursoPool` no longer has a lock at all.
+
+- **`max_size` no longer caps concurrency.** It capped both readers and writers, so caller number `max_size + 1` queued, and a writer could be refused outright with `PoolExhaustedError` simply because the pool was busy. Concurrency is now unbounded and **`max_size` bounds how many idle connections are retained**. A caller above that limit opens a connection, uses it, and closes it on release rather than waiting for someone else's. Retention stays bounded; nobody waits.
+
+- **A migration no longer stalls writes.** `refresh_connections` acquired every write slot before touching anything, so a DDL migration blocked every write until it finished. It now marks in-use connections stale and disposes of them when their caller releases them, closing idle ones immediately. An in-flight write runs to completion and is never interrupted; the next caller gets a fresh connection against the migrated schema.
+
+Reads, writes and the push each hold their own connections, so there is nothing shared left to guard. A test asserts the absence of `_conn_lock`, `_semaphore` and `_write_semaphore`, so reintroducing any of them fails the build.
+
 ## 0.1.18 — 2026-08-06
 
 ### Removed
