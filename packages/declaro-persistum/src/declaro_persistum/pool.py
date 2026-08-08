@@ -16,6 +16,7 @@ Example:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 from collections.abc import AsyncIterator
@@ -889,7 +890,7 @@ class TursoPool(BasePool):
 
         # Snapshot before the push so non-delivery is detectable afterwards.
         pending_before = self._writes_since_push
-        revision_before = self._sync_revision(holder)
+        revision_before = await self._sync_revision(holder)
 
         try:
             if holder is self._write_holder:
@@ -904,22 +905,35 @@ class TursoPool(BasePool):
             return False
 
         self._writes_since_push = max(0, self._writes_since_push - pending_before)
-        self._check_push_delivered(holder, pending_before, revision_before)
+        await self._check_push_delivered(holder, pending_before, revision_before)
         self._record_push_success()
         return True
 
-    def _sync_revision(self, holder: "_TursoConnectionHolder") -> Any:
-        """Read the replica's sync revision, or None if unavailable."""
+    async def _sync_revision(self, holder: "_TursoConnectionHolder") -> Any:
+        """Read the replica's sync revision, or None if unavailable.
+
+        stats() is a coroutine function on the async connection and a plain
+        method on the sync one, so the result is awaited only when it is
+        awaitable. Calling it without awaiting returns a coroutine, and
+        reading .revision off a coroutine yields None — which silently
+        disabled the tripwire below, because it treats None as "cannot
+        tell" and returns early. Python reported the un-awaited coroutine,
+        but only under sustained load, since nothing asserted the tripwire
+        could observe a moving revision.
+        """
         conn = getattr(holder, "conn", None)
         stats = getattr(conn, "stats", None)
         if stats is None:
             return None
         try:
-            return getattr(stats(), "revision", None)
+            result = stats()
+            if inspect.isawaitable(result):
+                result = await result
+            return getattr(result, "revision", None)
         except Exception:
             return None
 
-    def _check_push_delivered(
+    async def _check_push_delivered(
         self, holder: "_TursoConnectionHolder", pending_before: int, revision_before: Any
     ) -> None:
         """Warn if a push reported success but appears to have delivered nothing.
@@ -938,7 +952,7 @@ class TursoPool(BasePool):
         """
         if pending_before <= 0 or revision_before is None:
             return
-        revision_after = self._sync_revision(holder)
+        revision_after = await self._sync_revision(holder)
         if revision_after is None or revision_after != revision_before:
             return
         self._pushes_without_revision_change += 1

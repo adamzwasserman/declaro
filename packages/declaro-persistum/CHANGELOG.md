@@ -2,6 +2,20 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## 0.1.16 — 2026-08-06
+
+### Bugfixes
+
+- **The push delivery tripwire could never fire.** It exists to catch one failure: a push that reports success while delivering none of the write connection's frames. That is silent data loss, and it is the risk taken on in 0.1.14 by moving the push to its own connection.
+
+  On the async connection `stats()` is a coroutine function. The pool called it without awaiting, so reading `.revision` off the returned coroutine gave `None` every time. The tripwire treats `None` as "cannot tell" and returns early, so it returned early on every push and the alarm was decorative.
+
+  The cause was checking the wrong class: the signature was read from `turso.sync.ConnectionSync`, where `stats()` returns directly, while the pool uses `turso.aio.sync`, where it does not. The revision read is now awaited when awaitable, so it works on both.
+
+  This was never live data loss. It was a hole in the safety net, found by a downstream soak that noticed Python reporting `coroutine 'ConnectionSync.stats' was never awaited`. An independent delivery oracle confirmed all 7863 writes in that run reached the cloud.
+
+  Tests now assert the tripwire reads a **moving** revision, stays silent while it advances, warns when it is static with writes pending, and leaves no coroutine un-awaited. A tripwire that always reads `None` either never fires or fires always, and neither is an alarm — nothing had asserted which it was.
+
 ## 0.1.15 — 2026-08-06
 
 ### Bugfixes
