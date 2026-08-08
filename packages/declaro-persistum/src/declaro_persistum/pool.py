@@ -569,6 +569,7 @@ class TursoPool(BasePool):
         push_interval_s: float = 1.0,
         push_retry_base_s: float = 0.1,
         background_pull: bool = True,
+        mvcc: bool = True,
     ) -> None:
         self._database_path = database_path
         self._remote_url = remote_url
@@ -578,6 +579,14 @@ class TursoPool(BasePool):
         self._acquire_timeout = acquire_timeout
         self._push_interval_s = push_interval_s
         self._background_pull = background_pull
+        # Whether to ask the engine for MVCC. On by default: concurrent writes
+        # are a Turso feature and the pool should not decline them. Set False
+        # only to force WAL deliberately.
+        self._mvcc_requested = mvcc
+        # Read connections. Reads do not sync, so each gets its own plain
+        # local connection and they run in parallel. See acquire().
+        self._read_holders: list[_TursoConnectionHolder] = []
+        self._free_readers: asyncio.LifoQueue[_TursoConnectionHolder] | None = None
         # Initial-sync state. The event is created in _initialize, on the
         # running loop, rather than here — a pool may be constructed outside
         # the loop that later runs it.
@@ -631,10 +640,17 @@ class TursoPool(BasePool):
                 # wrong. Blocking is the only correct option in this case, and
                 # it is a once-per-replica cost, not a per-open one.
                 await self._initial_sync()
-        # MVCC and cache_size pragmas are only for local-only connections.
-        # Cloud sync (CDC replication) has its own journaling — MVCC is
-        # incompatible and the commit() triggers a CDC sync that fails.
-        if not self._remote_url:
+        # MVCC is requested on every pool, cloud-backed or not. Turso supports
+        # concurrent writes through BEGIN CONCURRENT over MVCC, and
+        # acquire_write only issues BEGIN CONCURRENT when self._mvcc is true.
+        # This block previously ran only when there was no remote_url, so
+        # every cloud pool serialized its writes while the engine below it
+        # supported concurrent ones — the configuration that needs the
+        # throughput least likely to get it.
+        #
+        # The engine has the last word. If it does not return 'mvcc' the pool
+        # records that and continues on WAL; nothing here fails the open.
+        if self._mvcc_requested:
             try:
                 cur = await self._write_holder.conn.execute("PRAGMA journal_mode = 'mvcc'")
                 rows = await cur.fetchall()
@@ -646,13 +662,16 @@ class TursoPool(BasePool):
                     logger.info("MVCC not available (got %s), using WAL — writes are still sub-ms", mode)
             except Exception:
                 self._mvcc = False
+        else:
+            self._mvcc = False
+
+        if not self._remote_url:
             try:
                 await self._write_holder.conn.execute("PRAGMA cache_size = -256")
             except Exception:
                 logger.debug("PRAGMA cache_size not supported — using default")
             await self._write_holder.conn.commit()
         else:
-            self._mvcc = False
             # Cloud-sync replicas must enforce the same FK constraints as the
             # primary. The FK *definition* bootstraps down with the schema, but
             # pyturso leaves enforcement OFF per connection by default — so a
@@ -860,14 +879,40 @@ class TursoPool(BasePool):
                 )
                 await asyncio.sleep(delay)
 
+    async def _get_reader(self) -> "_TursoConnectionHolder":
+        """Take a read connection from the free list, opening one if needed.
+
+        Read connections are plain local connections to the same replica
+        file. They never push and never pull, so they hold no sync state and
+        cannot diverge from the write connection's view of the cloud. That is
+        what lets them run outside _conn_lock.
+
+        At most max_size are ever opened, because the semaphore admits at
+        most max_size callers before any of them reach this point.
+        """
+        assert self._free_readers is not None
+        if not self._free_readers.empty():
+            return self._free_readers.get_nowait()
+
+        holder = _TursoConnectionHolder(self._database_path)
+        await holder.connect_async()
+        self._read_holders.append(holder)
+        return holder
+
     @asynccontextmanager
     async def acquire(self) -> AsyncIterator[TursoAsyncConnection]:
-        """Acquire a read connection backed by the write holder.
+        """Acquire a read connection.
 
-        Returns a wrapper around the _write_holder connection so reads
-        always see the same local state as writes — no driver mismatch,
-        no stale pulls from cloud.  The semaphore still limits concurrency.
-        The connection is NOT closed on release (it's shared).
+        Each caller gets its own connection, so reads run in parallel up to
+        max_size. Previously every read was served from the single write
+        connection under _conn_lock, and the lock was held for as long as the
+        caller held the connection — so max_size bounded how many callers
+        could queue, not how many could proceed. Five readers doing 100ms of
+        work each took 500ms rather than 100ms.
+
+        Reads see the write connection's committed data because both open the
+        same local replica file; a commit is visible to every connection on
+        that file. Reads never reach the network.
         """
         if self._closed:
             raise PoolClosedError("Pool has been closed")
@@ -884,13 +929,16 @@ class TursoPool(BasePool):
             self._semaphore.release()
             raise PoolConnectionError("Write holder not initialized")
 
+        if self._free_readers is None:
+            self._free_readers = asyncio.LifoQueue()
+
+        holder = await self._get_reader()
         self._active_connections += 1
         try:
-            async with self._conn_lock:
-                async_conn = TursoAsyncConnection(self._write_holder)
-                yield async_conn
+            yield TursoAsyncConnection(holder)
         finally:
             self._active_connections -= 1
+            self._free_readers.put_nowait(holder)
             self._semaphore.release()
 
     @asynccontextmanager
@@ -962,6 +1010,17 @@ class TursoPool(BasePool):
                 delay = min(self._push_retry_base_s * (2 ** attempt), 30.0)
                 logger.warning("Final push attempt %d failed, retrying in %.1fs", attempt, delay)
                 await asyncio.sleep(delay)
+        # Read connections hold no unpushed state, so they close after the
+        # final push rather than before it.
+        for reader in self._read_holders:
+            if reader.conn is not None:
+                try:
+                    await reader.conn.close()
+                except Exception:
+                    logger.debug("Read connection already closed")
+                reader.conn = None
+        self._read_holders.clear()
+
         if self._write_holder:
             if self._write_holder.conn is not None:
                 await self._write_holder.conn.close()
@@ -1129,6 +1188,7 @@ class ConnectionPool:
         acquire_timeout: float = 30.0,
         push_interval_s: float = 1.0,
         background_pull: bool = True,
+        mvcc: bool = True,
         instrumentation: bool = False,
         tier_label: str = "",
         latency_sink: str | None = None,
@@ -1151,6 +1211,15 @@ class ConnectionPool:
         a background task; opening does not wait on the cloud. When no local
         replica exists there is nothing to serve, so the sync is awaited
         inline — a once-per-replica cost, not a per-open one.
+
+        mvcc (default True) asks the engine for MVCC journal mode, which is
+        what lets acquire_write issue BEGIN CONCURRENT and run writes
+        concurrently. It is requested on cloud pools as well as local ones.
+        The engine decides: if it does not grant MVCC the pool falls back to
+        WAL and says so in the log. Pass mvcc=False to force WAL.
+
+        Reads take their own local connection, so up to max_size of them run
+        at once and none of them waits on a cloud push.
 
         Reads issued before the background sync finishes see the replica at
         its last-synced revision. Callers that must not observe a stale
@@ -1185,6 +1254,7 @@ class ConnectionPool:
             acquire_timeout=acquire_timeout,
             push_interval_s=push_interval_s,
             background_pull=background_pull,
+            mvcc=mvcc,
         )
         await pool._initialize()
         if instrumentation:

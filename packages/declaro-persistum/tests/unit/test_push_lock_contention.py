@@ -1,17 +1,19 @@
 """Measures whether a cloud push blocks consumer reads and writes.
 
-The pool serves reads, writes and the background push from one connection
-guarded by one lock (_conn_lock). _push_once holds that lock across
-`await push()` — the whole cloud round trip — so anything a consumer does
-while a push is in flight waits for the network.
+The pool used to serve reads, writes and the background push from one
+connection under one lock (_conn_lock), and _push_once holds that lock
+across `await push()` — the whole cloud round trip. Every consumer
+operation therefore waited on the network while a push was in flight.
 
-Reported downstream as write latency tracking the push duration instead of
-staying local sub-ms. Reads were assumed unaffected; acquire() takes the
-same lock, so they are not.
+Reads are now fixed: each read gets its own local connection and never
+takes _conn_lock, so a read runs during a push.
+
+Writes are not fixed. They still share the write connection with the push,
+so a write that arrives mid-push still waits for the round trip. That test
+is xfail(strict=True) below.
 
 These tests stub push() with a measurable delay rather than reaching the
-cloud, so they quantify the contention deterministically and act as a
-regression guard for any fix.
+cloud, so they quantify the contention deterministically.
 """
 
 import asyncio
@@ -48,10 +50,20 @@ class _SlowPushHolder:
         pass
 
 
-def _pool_with_slow_push(tmp_path):
+async def _seed_real_db(path: str) -> None:
+    """Create a genuine local database, so read connections can open it."""
+    import turso.aio
+
+    conn = await turso.aio.connect(path)
+    await conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)")
+    await conn.commit()
+    await conn.close()
+
+
+async def _pool_with_slow_push(tmp_path):
     """A cloud-configured pool whose push is slow and whose holder is stubbed."""
     db = tmp_path / "replica.db"
-    db.write_bytes(b"x" * 64)
+    await _seed_real_db(str(db))
 
     pool = TursoPool(
         str(db),
@@ -71,28 +83,17 @@ async def _time_it(coro_fn) -> float:
     return loop.time() - start
 
 
-_KNOWN_DEFECT = pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Reads, writes and the push share one connection guarded by one lock, "
-        "and _push_once holds it across the cloud round trip, so consumer "
-        "operations wait on the network. Measured here rather than argued. "
-        "The fix is structural — separate connections — and is gated on "
-        "whether concurrent sync connections to one replica are safe, which "
-        "is unproven. strict=True so that whoever fixes it is forced to "
-        "update this file instead of the tests quietly starting to pass."
-    ),
-)
+async def _noop() -> None:
+    return None
 
 
-@_KNOWN_DEFECT
-class TestPushBlocksConsumers:
-    """Each of these fails while the push holds _conn_lock across the network."""
+class TestReadsRunDuringAPush:
+    """Reads take their own connection, so a push cannot stall them."""
 
     @pytest.mark.asyncio
     async def test_read_does_not_wait_for_an_in_flight_push(self, tmp_path):
         """A read arriving mid-push must not wait for the cloud round trip."""
-        pool = _pool_with_slow_push(tmp_path)
+        pool = await _pool_with_slow_push(tmp_path)
 
         push = asyncio.create_task(pool._push_once())
         await asyncio.sleep(0.02)  # let the push take the lock
@@ -110,29 +111,9 @@ class TestPushBlocksConsumers:
         )
 
     @pytest.mark.asyncio
-    async def test_write_does_not_wait_for_an_in_flight_push(self, tmp_path):
-        """A write arriving mid-push must not wait for the cloud round trip."""
-        pool = _pool_with_slow_push(tmp_path)
-
-        push = asyncio.create_task(pool._push_once())
-        await asyncio.sleep(0.02)
-
-        async def _write():
-            async with pool.acquire_write(concurrent=False) as conn:
-                conn.commit = _noop  # type: ignore[method-assign]
-
-        elapsed = await _time_it(_write)
-        await push
-
-        assert elapsed < BLOCKED_THRESHOLD, (
-            f"write waited {elapsed:.3f}s on a {PUSH_SECONDS}s push — "
-            f"it is blocking on the cloud round trip"
-        )
-
-    @pytest.mark.asyncio
     async def test_many_reads_are_not_serialised_behind_one_push(self, tmp_path):
-        """Concurrent reads should not queue behind a single push."""
-        pool = _pool_with_slow_push(tmp_path)
+        """Concurrent reads must not queue behind a single push."""
+        pool = await _pool_with_slow_push(tmp_path)
 
         push = asyncio.create_task(pool._push_once())
         await asyncio.sleep(0.02)
@@ -149,5 +130,34 @@ class TestPushBlocksConsumers:
         )
 
 
-async def _noop() -> None:
-    return None
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Writes still share the single write connection with the background "
+        "push, and _push_once holds _conn_lock across the cloud round trip, so "
+        "a write arriving mid-push waits for the network. Measured here rather "
+        "than argued. Fixing it means giving the push its own connection, "
+        "which is gated on proving that a push on one sync connection is safe "
+        "concurrently with a write on another. strict=True so that whoever "
+        "fixes it must update this file rather than let it quietly pass."
+    ),
+)
+@pytest.mark.asyncio
+async def test_write_does_not_wait_for_an_in_flight_push(tmp_path):
+    """A write arriving mid-push must not wait for the cloud round trip."""
+    pool = await _pool_with_slow_push(tmp_path)
+
+    push = asyncio.create_task(pool._push_once())
+    await asyncio.sleep(0.02)
+
+    async def _write():
+        async with pool.acquire_write(concurrent=False) as conn:
+            conn.commit = _noop  # type: ignore[method-assign]
+
+    elapsed = await _time_it(_write)
+    await push
+
+    assert elapsed < BLOCKED_THRESHOLD, (
+        f"write waited {elapsed:.3f}s on a {PUSH_SECONDS}s push — "
+        f"it is blocking on the cloud round trip"
+    )

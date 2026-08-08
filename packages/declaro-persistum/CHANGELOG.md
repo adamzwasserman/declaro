@@ -2,7 +2,17 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
-## Unreleased
+## 0.1.13 — 2026-08-06
+
+### Concurrency
+
+- **MVCC is now requested on every Turso pool, not only local ones.** Turso supports concurrent writes through `BEGIN CONCURRENT` over MVCC, and `acquire_write` issues `BEGIN CONCURRENT` only when the pool holds MVCC. The pool previously asked for MVCC only when there was no `remote_url`, so every cloud-backed pool ran serialized writes while the engine below it supported concurrent ones — the configuration that needs the throughput was the one least likely to get it. The engine still has the last word: if it does not grant MVCC the pool falls back to WAL and logs that. Pass `mvcc=False` to force WAL deliberately.
+
+- **Reads no longer share the write connection.** Each read now takes its own plain local connection to the replica file, so reads run in parallel up to `max_size`. Previously every read was served from the single write connection under one lock, and the lock was held for as long as the caller held the connection — so `max_size` bounded how many callers could queue, not how many could proceed. Measured: five readers doing 100ms of work each took 0.505s, an effective concurrency of 1. They now overlap.
+
+  A read arriving while a cloud push is in flight also no longer waits for the round trip. Read connections never push and never pull, so they hold no sync state and cannot diverge from the write connection's view of the cloud.
+
+- **Still open:** a write arriving while a push is in flight waits for the round trip, because writes and the push still share the write connection. That test is `xfail(strict=True)` in `tests/unit/test_push_lock_contention.py`. Fixing it means giving the push its own connection, which is gated on proving that a push on one sync connection is safe concurrently with a write on another.
 
 ### Dependencies
 
@@ -10,13 +20,13 @@ All notable changes to `declaro-persistum` are recorded here.
 
   Verified in the published wheels rather than inferred: pyturso 0.5.1 writes the metadata file in place with `open(path, "wb")`; 0.7.2 writes a temporary file and `os.replace()`s it. The full test suite passes identically on 0.5.1, 0.7.0 and 0.7.2, so 0.7.0 is a tested floor and not merely the version where the fix landed.
 
-### Known defect (measured, not yet fixed)
+### How this defect was found
 
-- **A cloud push blocks consumer reads and writes.** `TursoPool` serves reads, writes and the background push from one connection guarded by one lock, and `_push_once` holds that lock across the entire cloud round trip. Measured in `tests/unit/test_push_lock_contention.py`: against a 0.30s push, a read arriving mid-push waits 0.280s, and five concurrent reads serialise completely behind it.
+The contention was measured rather than argued, in `tests/unit/test_push_lock_contention.py`. Against a 0.30s push, a read arriving mid-push waited 0.280s, and five concurrent reads serialised completely behind it. Separately, five concurrent readers each doing 100ms of work took 0.505s at `max_size=5`.
 
-  Related and larger: `acquire()` holds the lock across its whole `yield`, for as long as the caller holds the connection rather than just the query. Measured separately at `max_size=5` with five concurrent 100ms readers: 0.505s, an effective concurrency of 1. `max_size` currently bounds how many callers may queue, not how many may proceed.
+Those measurements were committed as `xfail(strict=True)` before the fix. When the read path was fixed they turned into XPASS and failed the suite, which forced this entry to be written rather than letting the tests quietly start passing. The remaining write-versus-push case is still `xfail(strict=True)` for the same reason.
 
-  The tests are marked `xfail(strict=True)` so the defect is recorded in code and cannot be silently fixed or silently regress. The fix is structural — separate connections — and is gated on establishing whether concurrent sync connections to one replica are safe, which is unproven. Reported downstream; documented here so no one plans capacity against a `max_size` that does not mean what it says.
+Reported downstream by a consumer running a live write workload.
 
 ## 0.1.12 — 2026-08-06
 
