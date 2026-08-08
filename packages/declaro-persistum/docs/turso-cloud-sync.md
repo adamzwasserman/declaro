@@ -120,15 +120,45 @@ The Turso inspector excludes these system tables from introspection (so the diff
 | `__turso_%` | Turso MVCC metadata (`__turso_internal_mvcc_meta`) |
 | `turso_%` | Turso CDC tables (`turso_cdc`, `turso_cdc_version`, `turso_sync_last_change_id`) |
 
+## Replica files on disk — never delete a subset
+
+A cloud replica named `<name>` is **four files**, and they are one atomic unit:
+
+| File | Contents |
+|------|----------|
+| `<name>` | The main database |
+| `<name>-changes` | Change tracking |
+| `<name>-info` | `DatabaseMetadata` — the sync configuration and the replica's position in the sync stream |
+| `<name>-wal` | The write-ahead log |
+
+Both a raw `turso.aio.sync` connection and `ConnectionPool.turso` produce the same four.
+
+**Never delete some of them and keep the rest.** `-info` is what lets the engine place the local database in the sync stream. Sweep it while keeping `<name>` and the next open fails with `sync engine operation failed: database error: Database schema changed` — the engine has a database it cannot relate to the remote.
+
+If you want a clean re-pull, delete **all four together**. That is a genuine cold start and the engine handles it correctly.
+
+This is not a cleanliness matter. It is what makes a warm re-open fast:
+
+| Re-open, all four files present | Time |
+|---|---|
+| Raw `turso.aio.sync` | ~1.5ms |
+| Through `ConnectionPool.turso` | ~5-7ms |
+
+Measured downstream against a real Turso Cloud remote. With `-info` removed, the open errors rather than being slow.
+
 ## Known pyturso Sync Engine Limitations
 
 These are limitations in pyturso's embedded replica sync engine, not declaro-persistum bugs. They may be resolved in future pyturso releases.
 
+**Several entries below were measured and found false in August 2026. They are struck rather than deleted, because declaro-persistum's current design depends on the corrected behaviour, and someone reading the old claims would conclude that design is impossible.**
+
 1. **DDL not replicable** -- CREATE TABLE, ALTER TABLE, DROP TABLE cannot be pushed via the sync engine
 2. **Push fails if cloud schema doesn't match** -- DML push requires cloud to already have the target tables
-3. **Pull may overwrite local on connect** -- `turso.aio.sync.connect()` may sync from cloud automatically, overwriting locally-committed changes that haven't been pushed
-4. **Connection cache not refreshed by pull** -- after `pull()`, existing connection objects may not see new tables without close/reopen
-5. **Sync and plain drivers don't share WAL** -- `turso.aio.sync.connect()` and `turso.aio.connect()` on the same file don't see each other's writes
-6. **Per-connection change tracking** -- each sync connection tracks its own changes; one connection can't push changes committed by another
-7. **CDC incompatible with MVCC** -- `PRAGMA journal_mode = 'mvcc'` crashes when cloud sync (CDC replication) is active
+3. **Pull may overwrite local on connect** -- `turso.aio.sync.connect()` may sync from cloud automatically, overwriting locally-committed changes that haven't been pushed. declaro-persistum guards this by pushing before every pull (W3).
+4. **Connection cache not refreshed by pull** -- after `pull()`, existing connection objects may not see new tables without close/reopen. This is why `refresh_connections()` exists.
+5. ~~**Sync and plain drivers don't share WAL**~~ -- **FALSE, measured 2026-08-06.** A plain `turso.aio.connect()` reader on the same local replica file *does* observe commits made by a `turso.aio.sync` writer. Verified under free-threaded CPython with the GIL confirmed off, with readers tracking a writer to the exact last id under concurrency. declaro-persistum's read path depends on this: reads take plain non-sync connections precisely so they hold no sync state.
+6. ~~**Per-connection change tracking**~~ -- **FALSE, measured 2026-08-06.** One sync connection *can* push frames committed by another on the same replica. Verified with 1353 rows written on connection A, 40 pushes issued on connection B, and a fresh third connection pulling all 1353 back from cloud. The dedicated push connection depends on this.
+7. ~~**CDC incompatible with MVCC**~~ -- **Not a crash, measured 2026-08-06.** `PRAGMA journal_mode = 'mvcc'` on a cloud replica does not crash. An A/B on a real remote measured MVCC on versus off at 1181ms versus 1030ms per commit, so MVCC is neither fatal nor free. MVCC is requested on every pool by default; pass `mvcc=False` to force WAL.
 8. **PRAGMA foreign_keys inside transaction** -- setting this inside a BEGIN may implicitly commit the transaction, breaking atomicity
+
+Entries 5, 6 and 7 were each written as engine facts and each turned out to be a snapshot of an older engine, or of an untested assumption. Verify against the current engine before relying on any entry here.
