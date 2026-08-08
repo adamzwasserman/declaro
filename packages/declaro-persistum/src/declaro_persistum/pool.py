@@ -16,6 +16,7 @@ Example:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 from collections.abc import AsyncIterator
@@ -588,6 +589,25 @@ class TursoPool(BasePool):
         # boundary before giving up and telling the caller. A busy database
         # means "not now", not "no".
         self._busy_retry_budget_s = busy_retry_budget_s
+        # Serializes writers against THIS replica, and nothing else.
+        #
+        # The sync engine takes one writer per replica at a time and rejects
+        # the second from inside the write statement — not at a transaction
+        # boundary, so the busy retry cannot help. Measured downstream on a
+        # real remote with distinct rows, so pure database contention: at
+        # K=2, one of two concurrent writers lost its write. Two people
+        # editing different cards on one board is ordinary collaboration.
+        #
+        # This is NOT the lock removed in 0.1.19. That one was shared by
+        # reads, writes and the push, so every reader waited on a cloud
+        # round trip. This covers writer-versus-writer on one replica, which
+        # is a constraint the engine actually has. Readers never touch it,
+        # the push never touches it, and writers to other replicas have
+        # their own pool and their own.
+        #
+        # The cost is one write of waiting — about 150ms — instead of a
+        # lost write.
+        self._replica_write_lock = asyncio.Lock()
         # Read connections. Reads do not sync, so each gets its own plain
         # local connection and they run in parallel. See acquire().
         self._read_holders: list[_TursoConnectionHolder] = []
@@ -996,6 +1016,17 @@ class TursoPool(BasePool):
                     logger.debug("Idle connection already closed")
                 holder.conn = None
 
+    def _write_serialisation(self) -> Any:
+        """One writer at a time on a cloud replica; unrestricted locally.
+
+        The sync tape takes a single writer per replica and rejects the
+        second from inside its write statement. A local-only database has
+        no tape and no such limit, so it is left alone.
+        """
+        if self._remote_url:
+            return self._replica_write_lock
+        return contextlib.nullcontext()
+
     @staticmethod
     def _is_busy(error: Exception) -> bool:
         """True when an error means 'not now' rather than 'no'.
@@ -1288,23 +1319,32 @@ class TursoPool(BasePool):
         # refused because the pool is busy.
         holder = await self._get_writer()
         try:
-            async_conn = TursoAsyncConnection(holder)
-            if concurrent and getattr(self, "_mvcc", False):
-                # Contention here means the transaction never started, so
-                # nothing was staged and retrying is safe.
-                await self._retry_while_busy(
-                    lambda: async_conn.execute("BEGIN CONCURRENT"),
-                    "BEGIN CONCURRENT",
-                )
-            try:
-                yield async_conn
-                # Contention here means the transaction did not land. The
-                # statements are still staged, so re-committing lands the
-                # same set.
-                await self._retry_while_busy(async_conn.commit, "commit")
-            except Exception:
-                await async_conn.rollback()
-                raise
+            # One writer per replica, held for the whole transaction. The
+            # engine rejects a second writer from inside the write
+            # statement, so the lock must cover the caller's statements as
+            # well as the boundaries. See _replica_write_lock.
+            #
+            # Cloud replicas only. The constraint belongs to the sync tape,
+            # and a local-only database has no tape — serializing there
+            # would cost concurrency for a constraint that does not exist.
+            async with self._write_serialisation():
+                async_conn = TursoAsyncConnection(holder)
+                if concurrent and getattr(self, "_mvcc", False):
+                    # Contention here means the transaction never started,
+                    # so nothing was staged and retrying is safe.
+                    await self._retry_while_busy(
+                        lambda: async_conn.execute("BEGIN CONCURRENT"),
+                        "BEGIN CONCURRENT",
+                    )
+                try:
+                    yield async_conn
+                    # Contention here means the transaction did not land.
+                    # The statements are still staged, so re-committing
+                    # lands the same set.
+                    await self._retry_while_busy(async_conn.commit, "commit")
+                except Exception:
+                    await async_conn.rollback()
+                    raise
         finally:
             await self._release_writer(holder)
         # No push here — the push loop handles cloud delivery.

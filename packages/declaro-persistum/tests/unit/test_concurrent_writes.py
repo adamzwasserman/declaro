@@ -78,7 +78,7 @@ class _Holder:
         pass
 
 
-async def _pool(tmp_path, monkeypatch, max_size=WRITERS):
+async def _pool(tmp_path, monkeypatch, max_size=WRITERS, remote=True):
     import declaro_persistum.pool as pool_mod
 
     _Holder.instances = []
@@ -88,8 +88,8 @@ async def _pool(tmp_path, monkeypatch, max_size=WRITERS):
     db.write_bytes(b"x" * 64)
     pool = TursoPool(
         str(db),
-        remote_url="https://example.turso.io",
-        auth_token="t",
+        remote_url="https://example.turso.io" if remote else None,
+        auth_token="t" if remote else None,
         max_size=max_size,
     )
     pool._push_loop = lambda: asyncio.sleep(0)  # type: ignore[assignment]
@@ -103,8 +103,14 @@ class TestWritersRunConcurrently:
 
     @pytest.mark.asyncio
     async def test_concurrent_writes_are_not_serialised(self, tmp_path, monkeypatch):
-        """Five writers each holding a connection for WRITE_WORK must overlap."""
-        pool = await _pool(tmp_path, monkeypatch)
+        """Five writers each holding a connection for WRITE_WORK must overlap.
+
+        Local pool. A cloud replica serializes its writers by necessity —
+        the sync tape takes one at a time — so this measures the pool's own
+        behaviour, not the engine's constraint. See
+        test_same_replica_write_serialization.py for the cloud case.
+        """
+        pool = await _pool(tmp_path, monkeypatch, remote=False)
 
         async def writer():
             async with pool.acquire_write():
@@ -126,8 +132,12 @@ class TestWritersRunConcurrently:
     async def test_each_concurrent_writer_gets_its_own_connection(
         self, tmp_path, monkeypatch
     ):
-        """Two writers held at once must not share a connection object."""
-        pool = await _pool(tmp_path, monkeypatch)
+        """Two writers held at once must not share a connection object.
+
+        Local pool, for the same reason as above: on a cloud replica only
+        one writer is inside at a time, so two could not be held at once.
+        """
+        pool = await _pool(tmp_path, monkeypatch, remote=False)
         seen: list[int] = []
         both_open = asyncio.Event()
 

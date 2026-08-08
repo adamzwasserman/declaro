@@ -123,8 +123,26 @@ class TestWritersNeverQueue:
     """More writers than max_size must still run at once, and never be refused."""
 
     @pytest.mark.asyncio
-    async def test_writers_above_max_size_do_not_wait(self, tmp_path, monkeypatch):
-        pool = await _pool(tmp_path, monkeypatch)
+    async def test_writers_above_max_size_do_not_queue_behind_a_cap(
+        self, tmp_path, monkeypatch
+    ):
+        """max_size must not bound how many writers proceed.
+
+        Measured on a LOCAL pool. A cloud replica serializes its writers
+        because the sync tape takes one at a time, and that wait is the
+        engine's constraint rather than this pool's bookkeeping — the
+        distinction the mandate turns on. What must never happen, on either,
+        is queueing behind a cap this pool invented.
+        """
+        import declaro_persistum.pool as pool_mod
+
+        _Holder.instances = []
+        monkeypatch.setattr(pool_mod, "_TursoConnectionHolder", _Holder)
+        db = tmp_path / "local.db"
+        db.write_bytes(b"x" * 64)
+        pool = TursoPool(str(db), max_size=MAX_SIZE)
+        pool._enable_replica_fk_enforcement = lambda: asyncio.sleep(0)
+        await pool._initialize()
 
         async def writer():
             async with pool.acquire_write():

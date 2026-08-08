@@ -2,6 +2,26 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## 0.1.22 — 2026-08-06
+
+### Bugfixes
+
+- **Two writers on one cloud replica no longer lose a write.** The sync engine takes a single writer per replica and rejects the second from *inside* its write statement — not at a transaction boundary — so 0.1.21's boundary-only busy retry correctly declined to engage and the error reached the caller as a failure.
+
+  Measured downstream on a real remote, writing distinct rows so there was no logical conflict, only database contention: at K=2, one of two concurrent writers lost its write. At K=10, four of ten. Two people editing different cards on one shared board at the same moment is ordinary collaboration, not a stress rate.
+
+  Writers against one cloud replica are now serialized. The cost is one write of waiting, about 150ms, instead of a lost write. Writers against *different* replicas still run fully in parallel.
+
+  **Cloud replicas only.** The constraint belongs to the sync tape; a local-only database has no tape, and serializing there would cost concurrency for a limit that does not exist.
+
+  This is not the lock removed in 0.1.19. That one was shared by reads, writes and the push, so every reader waited on a cloud round trip. This one covers writer-versus-writer on a single replica. Readers never touch it, the push never touches it, and no caller is ever refused.
+
+### Correction
+
+0.1.17 introduced per-writer connections so that `BEGIN CONCURRENT` over MVCC could give intra-pool write parallelism. Against a **cloud replica that capability was never real** — the sync tape rejects the second concurrent writer regardless. The tests asserting it passed only because their fakes permitted what the engine does not, and the real-engine test passed because it ran against a local database, which has no tape.
+
+Those tests now say what is true: writers to one cloud replica serialize because the engine requires it, writers to different replicas run in parallel, and writers on a local database run in parallel. The distinction that matters for the no-waiting mandate is between a wait this pool invented, which is a defect, and a wait the backend genuinely imposes, which must be absorbed rather than passed to the caller.
+
 ## 0.1.21 — 2026-08-06
 
 ### Bugfixes
