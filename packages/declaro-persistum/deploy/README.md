@@ -41,9 +41,34 @@ SHA-256: `80b9c3c187e738a54ce6597022e0e57a0ab66bc1c3309ad4880a3281b2b190ea`
 
     bc62e48718d5cfe8388deb57f9de5fa9d572c3ae   (2026-08-05)
 
-The patch applies cleanly to **this commit only**. `git apply --check` returns 0 against it. Its context lines are specific to this commit.
+The patch applies cleanly to **this commit only**. `git apply --check` returns 0 against it, for all four hunks. Its context lines are specific to this commit.
 
 It has **not** been tested against any released tag. Do not assume it applies to one. Pin the commit.
+
+## The version number does not identify this wheel
+
+The workspace version at `bc62e48` is `0.8.0-pre.2`. `maturin` normalises that to PEP 440, so the wheel this recipe produces reports:
+
+    pyturso 0.8.0rc2
+
+**Stock pyturso 0.8.0rc2 on PyPI reports exactly the same string**, because it is built from the same workspace version. The version number therefore tells you nothing about whether you have the patched wheel or the stock one.
+
+Identify this wheel by the recipe — the base commit, the patch, the `gil_used=false` flip, and the `cp314t` ABI — never by its version.
+
+This matters in practice. `declaro-persistum[turso]` requires `pyturso>=0.7.0`. That constraint is satisfied by stock `0.8.0rc2`, so a re-resolve can silently replace a patched wheel with a stock one of the identical version, and nothing in the version output will show it.
+
+### How to check which wheel is installed
+
+On free-threaded CPython, the two behave differently on import, and that is a reliable discriminator.
+
+Stock ships the module with `gil_used = true`, so importing it re-enables the GIL. The patched wheel has the flip, so the GIL stays off.
+
+```python
+import sys, turso
+assert sys._is_gil_enabled() is False, "stock pyturso — the GIL was re-enabled on import"
+```
+
+Run this after import, with `PYTHON_GIL=0` set. If it fails you have the stock wheel. Any concurrency measurement taken in that state is a GIL measurement, and the defect this patch fixes cannot occur, because the concurrency that triggers it cannot occur.
 
 ## Build recipe
 
