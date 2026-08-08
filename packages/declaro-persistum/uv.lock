@@ -213,7 +213,7 @@ wheels = [
 
 [[package]]
 name = "declaro-persistum"
-version = "0.1.17"
+version = "0.1.18"
 source = { editable = "." }
 dependencies = [
     { name = "tomli-w" },

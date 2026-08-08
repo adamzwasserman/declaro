@@ -16,7 +16,6 @@ Example:
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
 import os
 from collections.abc import AsyncIterator
@@ -597,8 +596,6 @@ class TursoPool(BasePool):
         # The push runs on its own sync connection, so a cloud round trip
         # never blocks a write. See _push_once.
         self._push_holder: _TursoConnectionHolder | None = None
-        self._writes_since_push = 0
-        self._pushes_without_revision_change = 0
         # Initial-sync state. The event is created in _initialize, on the
         # running loop, rather than here — a pool may be constructed outside
         # the loop that later runs it.
@@ -998,14 +995,34 @@ class TursoPool(BasePool):
 
         Does not hold _conn_lock. The push has its own connection, so writes
         and reads proceed while a round trip is in flight.
+
+        There is deliberately no per-push delivery check. One was written and
+        removed, and the reason is worth keeping so it is not rebuilt the
+        same way.
+
+        It compared the replica's sync revision either side of each push and
+        warned if the revision had not moved while writes were pending. The
+        revision is read from the push connection, and pushing another
+        connection's frames does not advance that connection's own revision,
+        so it fired on essentially every push that had pending writes. Two
+        downstream runs measured it: 1002 warnings in a capacity test, and 32
+        in a 66-second soak where an independent oracle confirmed all 2541
+        writes were delivered. It never once indicated real loss.
+
+        A warning that fires on nearly every operation is worse than no
+        warning, because it teaches everyone to ignore warnings. The signal
+        was chosen without verifying what it measures.
+
+        The only signal found so far that provably tracks delivery is
+        reading the rows back from the primary on a fresh connection, which
+        is far too expensive to run per push. Until such a signal exists,
+        push failures are surfaced by _record_push_failure, last_push_error
+        and the push-failure callback, which report what actually happened
+        rather than inferring it.
         """
         holder = self._push_holder or self._write_holder
         if holder is None:
             return True
-
-        # Snapshot before the push so non-delivery is detectable afterwards.
-        pending_before = self._writes_since_push
-        revision_before = await self._sync_revision(holder)
 
         try:
             if holder is self._write_holder:
@@ -1019,66 +1036,8 @@ class TursoPool(BasePool):
             self._record_push_failure(e)
             return False
 
-        self._writes_since_push = max(0, self._writes_since_push - pending_before)
-        await self._check_push_delivered(holder, pending_before, revision_before)
         self._record_push_success()
         return True
-
-    async def _sync_revision(self, holder: "_TursoConnectionHolder") -> Any:
-        """Read the replica's sync revision, or None if unavailable.
-
-        stats() is a coroutine function on the async connection and a plain
-        method on the sync one, so the result is awaited only when it is
-        awaitable. Calling it without awaiting returns a coroutine, and
-        reading .revision off a coroutine yields None — which silently
-        disabled the tripwire below, because it treats None as "cannot
-        tell" and returns early. Python reported the un-awaited coroutine,
-        but only under sustained load, since nothing asserted the tripwire
-        could observe a moving revision.
-        """
-        conn = getattr(holder, "conn", None)
-        stats = getattr(conn, "stats", None)
-        if stats is None:
-            return None
-        try:
-            result = stats()
-            if inspect.isawaitable(result):
-                result = await result
-            return getattr(result, "revision", None)
-        except Exception:
-            return None
-
-    async def _check_push_delivered(
-        self, holder: "_TursoConnectionHolder", pending_before: int, revision_before: Any
-    ) -> None:
-        """Warn if a push reported success but appears to have delivered nothing.
-
-        This is the tripwire for the failure mode that decoupling the push
-        could introduce: a push that succeeds on its own connection while
-        delivering none of the write connection's frames. That would be
-        silent data loss, which is worse than the write stall the decoupling
-        removes.
-
-        It logs rather than raises. The exact semantics of the engine's
-        revision counter are not pinned down here, so a mismatch is evidence
-        worth surfacing, not proof worth failing a healthy push over. If this
-        ever fires in the field it should be investigated before it is
-        silenced.
-        """
-        if pending_before <= 0 or revision_before is None:
-            return
-        revision_after = await self._sync_revision(holder)
-        if revision_after is None or revision_after != revision_before:
-            return
-        self._pushes_without_revision_change += 1
-        logger.warning(
-            "Push reported success with %d write(s) pending but the sync "
-            "revision did not change (%s); %d consecutive occurrence(s). "
-            "Verify writes are reaching the cloud primary.",
-            pending_before,
-            revision_before,
-            self._pushes_without_revision_change,
-        )
 
     async def _push_loop(self) -> None:
         """Guaranteed eventual consistency loop.
@@ -1208,9 +1167,6 @@ class TursoPool(BasePool):
             try:
                 yield async_conn
                 await async_conn.commit()
-                # Counted so the push can tell "nothing to deliver" from
-                # "delivered nothing" — see _check_push_delivered.
-                self._writes_since_push += 1
             except Exception:
                 await async_conn.rollback()
                 raise

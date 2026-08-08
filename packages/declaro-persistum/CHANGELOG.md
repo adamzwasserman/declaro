@@ -2,6 +2,20 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## 0.1.18 — 2026-08-06
+
+### Removed
+
+- **The push delivery tripwire is removed.** It was a false positive generator, not a safety net.
+
+  It compared the replica's sync revision either side of each push and warned if the revision had not moved while writes were pending. The revision is read from the push connection, and pushing another connection's frames does not advance that connection's own revision — so it fired on essentially every push that had pending writes.
+
+  Two downstream runs measured it: 1002 warnings during a capacity test, and 32 during a 66-second soak in which an independent oracle confirmed all 2541 writes were delivered. It never once indicated real loss. No data was ever lost; the alarm was wrong.
+
+  A warning that fires on nearly every operation is worse than no warning, because it teaches everyone to ignore warnings. The underlying error was mine and it is worth stating plainly: the signal was chosen without verifying what it measures, and shipped with a comment admitting its semantics were not pinned down.
+
+  The only signal found so far that provably tracks delivery is reading the rows back from the primary on a fresh connection, which is far too expensive to run per push. Until such a signal exists, push failures are surfaced by `last_push_error`, `push_healthy` and the push-failure callback, which report what actually happened rather than inferring it. The reasoning is recorded in `_push_once` so the same guard is not rebuilt the same way.
+
 ## 0.1.17 — 2026-08-06
 
 ### Concurrency
