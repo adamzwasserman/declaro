@@ -32,7 +32,7 @@ The base commit below already contains #7813, so a wheel built from this recipe 
 |------|--------|
 | `core/error.rs` | Adds the `WatermarkBelowBackfill { frame_watermark, nbackfills }` variant |
 | `core/storage/wal.rs` | Returns that error instead of panicking, plus the regression test |
-| `core/connection.rs` | Treats the error as "frame not found" rather than propagating it |
+| `core/connection.rs` | Returns `Ok(false)` on that error, so the page is skipped — the same path an absent page already takes — rather than propagating it |
 | `sync/engine/src/database_tape.rs` | Skips the page in the watermark-read wrapper |
 
 SHA-256: `80b9c3c187e738a54ce6597022e0e57a0ab66bc1c3309ad4880a3281b2b190ea`
