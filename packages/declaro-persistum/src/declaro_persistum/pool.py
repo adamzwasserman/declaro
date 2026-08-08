@@ -588,6 +588,12 @@ class TursoPool(BasePool):
         # local connection and they run in parallel. See acquire().
         self._read_holders: list[_TursoConnectionHolder] = []
         self._free_readers: asyncio.LifoQueue[_TursoConnectionHolder] | None = None
+        # Write connections. Each concurrent writer gets its own sync
+        # connection, so BEGIN CONCURRENT over MVCC can actually do what it
+        # is for. See acquire_write.
+        self._write_holders: list[_TursoConnectionHolder] = []
+        self._free_writers: asyncio.LifoQueue[_TursoConnectionHolder] | None = None
+        self._write_semaphore = asyncio.Semaphore(max_size)
         # The push runs on its own sync connection, so a cloud round trip
         # never blocks a write. See _push_once.
         self._push_holder: _TursoConnectionHolder | None = None
@@ -703,26 +709,82 @@ class TursoPool(BasePool):
             )
 
     async def refresh_connections(self) -> None:
-        """Close and reopen _write_holder to pick up schema changes.
+        """Reopen every connection so they see a migrated schema.
 
-        Call after DDL migrations — the write holder's cached connection
-        state doesn't see tables created via acquire_remote() or by
-        other connections, even after pull().
+        Call after DDL migrations. A connection's cached state does not see
+        tables created on another connection, even after pull().
+
+        Every connection is refreshed, not just the first write connection.
+        A pool now holds several write connections and several read
+        connections; refreshing one of them would leave the rest reading and
+        writing against a schema that no longer exists. That is the same
+        stale-input class as the defects this pool has already shipped.
+
+        Writers are quiesced first. Closing a connection while a writer holds
+        it is a use-after-close, so this takes every write slot before it
+        touches anything. That is a real pause on writes, and it is the one
+        place a pause is correct: a schema is changing underneath them.
+
+        Read connections are discarded rather than reopened. They are opened
+        on demand, so the next reader gets a fresh one.
         """
-        if self._write_holder:
-            if self._write_holder.conn is not None:
-                await self._write_holder.conn.close()
-                self._write_holder.conn = None
-            await self._write_holder.connect_async()
-            if self._remote_url:
-                # W3: push un-pushed local frames before pull() (see _initialize).
-                await self._push_once()
-                try:
-                    await self._write_holder.pull()
-                except Exception:
-                    pass
-                await self._enable_replica_fk_enforcement()
-            logger.info("Write holder connection refreshed after migration")
+        # Quiesce writers. Every slot must be held before any connection is
+        # closed.
+        acquired = 0
+        try:
+            for _ in range(self._max_size):
+                await self._write_semaphore.acquire()
+                acquired += 1
+
+            if self._write_holder:
+                if self._write_holder.conn is not None:
+                    await self._write_holder.conn.close()
+                    self._write_holder.conn = None
+                await self._write_holder.connect_async()
+                if self._remote_url:
+                    # W3: push un-pushed local frames before pull() (see
+                    # _initialize).
+                    await self._push_once()
+                    try:
+                        await self._write_holder.pull()
+                    except Exception:
+                        pass
+                    await self._enable_replica_fk_enforcement()
+
+            # Every other write connection, so none is left on the old schema.
+            for writer in self._write_holders:
+                if writer is self._write_holder:
+                    continue
+                if writer.conn is not None:
+                    try:
+                        await writer.conn.close()
+                    except Exception:
+                        logger.debug("Write connection already closed")
+                    writer.conn = None
+                await writer.connect_async()
+                await self._configure_write_connection(writer)
+
+            # Read connections are discarded; the next reader opens a fresh
+            # one against the migrated schema.
+            for reader in self._read_holders:
+                if reader.conn is not None:
+                    try:
+                        await reader.conn.close()
+                    except Exception:
+                        logger.debug("Read connection already closed")
+                    reader.conn = None
+            self._read_holders.clear()
+            self._free_readers = None
+
+            logger.info(
+                "Refreshed %d write connection(s) and dropped %d read "
+                "connection(s) after migration",
+                len(self._write_holders) or 1,
+                len(self._read_holders),
+            )
+        finally:
+            for _ in range(acquired):
+                self._write_semaphore.release()
 
     def pause_push(self) -> None:
         """Pause the background push loop (e.g. during migrations)."""
@@ -843,6 +905,59 @@ class TursoPool(BasePool):
             await self._initial_sync_event.wait()
         if self._initial_sync_error is not None:
             raise self._initial_sync_error
+
+    async def _get_writer(self) -> "_TursoConnectionHolder":
+        """Take a write connection from the free list, opening one if needed.
+
+        Every writer used to share one connection under one lock, so callers
+        were serialized before they reached it and BEGIN CONCURRENT was
+        issued into a queue of one. MVCC could not do the thing MVCC is for.
+
+        Each writer now gets its own sync connection. At most max_size are
+        opened, because the write semaphore admits at most max_size callers
+        before any of them reach this point.
+
+        The pool's original write holder is writer zero, so the migration and
+        shutdown paths that hold a reference to it keep working unchanged.
+        """
+        if self._free_writers is None:
+            self._free_writers = asyncio.LifoQueue()
+            if self._write_holder is not None:
+                self._write_holders.append(self._write_holder)
+                self._free_writers.put_nowait(self._write_holder)
+
+        if not self._free_writers.empty():
+            return self._free_writers.get_nowait()
+
+        holder = _TursoConnectionHolder(
+            self._database_path, self._remote_url, self._auth_token
+        )
+        await holder.connect_async()
+        await self._configure_write_connection(holder)
+        self._write_holders.append(holder)
+        return holder
+
+    async def _configure_write_connection(
+        self, holder: "_TursoConnectionHolder"
+    ) -> None:
+        """Give a new write connection the same settings as writer zero.
+
+        Journal mode and foreign-key enforcement are per connection, so a
+        writer opened later must be configured or it would silently behave
+        differently from the first one — no MVCC, and no FK enforcement,
+        which is the setting that stops a violating write committing locally
+        and being lost on the next re-sync.
+        """
+        if self._mvcc_requested:
+            try:
+                await holder.conn.execute("PRAGMA journal_mode = 'mvcc'")
+            except Exception:
+                logger.debug("MVCC not available on this write connection")
+        if self._remote_url:
+            try:
+                await holder.conn.execute("PRAGMA foreign_keys = ON")
+            except Exception:
+                logger.debug("Could not enable FK enforcement on write connection")
 
     async def _open_push_connection(self) -> None:
         """Open the dedicated push connection, once, during initialization.
@@ -1076,8 +1191,18 @@ class TursoPool(BasePool):
         if self._write_holder is None or self._write_holder.conn is None:
             raise PoolConnectionError("Write holder not initialized")
 
-        async with self._conn_lock:
-            async_conn = TursoAsyncConnection(self._write_holder)
+        try:
+            async with asyncio.timeout(self._acquire_timeout):
+                await self._write_semaphore.acquire()
+        except TimeoutError as err:
+            raise PoolExhaustedError(
+                f"Timed out waiting for a write connection after "
+                f"{self._acquire_timeout}s"
+            ) from err
+
+        holder = await self._get_writer()
+        try:
+            async_conn = TursoAsyncConnection(holder)
             if concurrent and getattr(self, "_mvcc", False):
                 await async_conn.execute("BEGIN CONCURRENT")
             try:
@@ -1089,6 +1214,10 @@ class TursoPool(BasePool):
             except Exception:
                 await async_conn.rollback()
                 raise
+        finally:
+            if self._free_writers is not None:
+                self._free_writers.put_nowait(holder)
+            self._write_semaphore.release()
         # No push here — the push loop handles cloud delivery.
         # Any push attempt (even fire-and-forget) acquires _conn_lock
         # and blocks reads during the cloud round-trip.
@@ -1148,6 +1277,18 @@ class TursoPool(BasePool):
                     logger.debug("Read connection already closed")
                 reader.conn = None
         self._read_holders.clear()
+
+        # Additional write connections. Writer zero is the write holder and
+        # is closed just below.
+        for writer in self._write_holders:
+            if writer is self._write_holder or writer.conn is None:
+                continue
+            try:
+                await writer.conn.close()
+            except Exception:
+                logger.debug("Write connection already closed")
+            writer.conn = None
+        self._write_holders.clear()
 
         if self._write_holder:
             if self._write_holder.conn is not None:

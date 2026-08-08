@@ -2,6 +2,18 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## 0.1.17 — 2026-08-06
+
+### Concurrency
+
+- **Concurrent writers now actually run concurrently.** Every writer shared one connection under one lock, so callers were serialized before they reached it. `BEGIN CONCURRENT` was issued into a queue of one, and MVCC — enabled by default in 0.1.13 — could not do the thing MVCC is for. Each writer now takes its own sync connection, so `max_size` bounds how many writers proceed rather than how many queue. Measured: five writers each holding a connection for 100ms went from 0.505s to parallel.
+
+  Write connections are opened on demand up to `max_size`, returned to a free list, and reused. Each new one is configured like the first — journal mode and foreign-key enforcement are per connection, so a writer opened later would otherwise silently run without MVCC and without the FK enforcement that stops a violating write committing locally and being lost on the next re-sync.
+
+- **`refresh_connections` now refreshes every connection, and quiesces writers first.** It reopened only the pool's original write connection. With several write connections and several read connections, that left the rest reading and writing against a schema that no longer existed after a migration — the same stale-input class as the defects fixed in 0.1.10 and 0.1.15. It also closed that connection while writers might hold it, which is a use-after-close.
+
+  It now takes every write slot before touching anything, reopens all write connections, and discards read connections so the next reader opens a fresh one. Writes do pause for the duration, and that is the one place a pause is correct: the schema is changing underneath them.
+
 ## 0.1.16 — 2026-08-06
 
 ### Bugfixes
