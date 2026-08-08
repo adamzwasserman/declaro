@@ -2,6 +2,22 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## Unreleased
+
+### Dependencies
+
+- **`pyturso` floor raised from `>=0.5.1` to `>=0.7.0`**, for a correctness fix rather than features. Turso 0.7.0 carries upstream PR #7813, "sync: fix race between concurrent opens of the same synced replica" (merged 2026-07-11). Opening several `turso.sync.connect()` handles to the same already-hydrated replica concurrently from threads failed intermittently — at K=8 nearly every run — with `meta must be initialized before open` or `deserialization error: trailing characters`. Two defects compounded: the metadata file was rewritten on *every* open (the configuration comparison reported a change whenever a `remote_url` was present rather than when it differed), and the Python binding's metadata write was not atomic despite its docstring, so a concurrent opener could read an empty or torn file.
+
+  Verified in the published wheels rather than inferred: pyturso 0.5.1 writes the metadata file in place with `open(path, "wb")`; 0.7.2 writes a temporary file and `os.replace()`s it. The full test suite passes identically on 0.5.1, 0.7.0 and 0.7.2, so 0.7.0 is a tested floor and not merely the version where the fix landed.
+
+### Known defect (measured, not yet fixed)
+
+- **A cloud push blocks consumer reads and writes.** `TursoPool` serves reads, writes and the background push from one connection guarded by one lock, and `_push_once` holds that lock across the entire cloud round trip. Measured in `tests/unit/test_push_lock_contention.py`: against a 0.30s push, a read arriving mid-push waits 0.280s, and five concurrent reads serialise completely behind it.
+
+  Related and larger: `acquire()` holds the lock across its whole `yield`, for as long as the caller holds the connection rather than just the query. Measured separately at `max_size=5` with five concurrent 100ms readers: 0.505s, an effective concurrency of 1. `max_size` currently bounds how many callers may queue, not how many may proceed.
+
+  The tests are marked `xfail(strict=True)` so the defect is recorded in code and cannot be silently fixed or silently regress. The fix is structural — separate connections — and is gated on establishing whether concurrent sync connections to one replica are safe, which is unproven. Reported downstream; documented here so no one plans capacity against a `max_size` that does not mean what it says.
+
 ## 0.1.12 — 2026-08-06
 
 ### Performance
