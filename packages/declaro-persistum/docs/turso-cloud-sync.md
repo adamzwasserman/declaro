@@ -146,6 +146,29 @@ This is not a cleanliness matter. It is what makes a warm re-open fast:
 
 Measured downstream against a real Turso Cloud remote. With `-info` removed, the open errors rather than being slow.
 
+## How many concurrent writers one replica sustains
+
+Measured against a real Turso Cloud replica, writing distinct rows so there is no logical conflict — pure database contention.
+
+| Concurrent writers on ONE replica | Result |
+|---|---|
+| 2–3 | 100% clean, ~4700 writes/second |
+| 10+ | 50–80% failures |
+
+Two to three concurrent writers is clean and fast. That covers ordinary collaboration: several people editing one board.
+
+Past that the sync tape degrades, and it degrades differently — the errors stop being `database is busy` and become `I/O error`, `database tape error` and `sync engine error`. That is a different failure from contention, and no retry or serialization in this package fixes it. It is the engine at its limit.
+
+**The number that matters is writes per replica, not requests per replica.** One user gesture is often several writes. A request that updates a row and then updates a derived index has issued two; add a fan-out and it is easily eight. Ten concurrent *requests* like that are eighty concurrent writes on one replica, which is far inside the breakdown zone even though the request count looks modest.
+
+If you are near the limit, the lever is writes per gesture, not concurrency:
+
+- Batch related writes into one transaction rather than issuing them separately
+- Defer derived or denormalised updates off the request path — an index rebuilt from canonical data does not need to block the write that changed it
+- Split hot data across replicas where the domain allows it
+
+Writers on *different* replicas do not contend at all, so scaling across replicas is unaffected by any of this.
+
 ## Known pyturso Sync Engine Limitations
 
 These are limitations in pyturso's embedded replica sync engine, not declaro-persistum bugs. They may be resolved in future pyturso releases.
