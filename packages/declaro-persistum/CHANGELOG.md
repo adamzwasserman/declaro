@@ -2,6 +2,22 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## 0.1.21 — 2026-08-06
+
+### Bugfixes
+
+- **A busy database no longer reaches the caller as an error.** Concurrent writes to one cloud replica could fail with `sync engine operation failed: database tape error: database is busy`. Measured downstream: 30 concurrent writes across 8 replicas produced 5 failures, surfaced to users as HTTP 500. A single writer never saw it; it appeared only when two writes landed on one replica at once.
+
+  That is I/O contention reaching the consumer, which is the one thing this pool exists to prevent. A busy database means "not now", not "no". The pool now absorbs it and retries.
+
+  **Retries happen at transaction boundaries only**, where the safety argument is clear. A failed `BEGIN` staged nothing, so retrying applies nothing twice. A failed commit did not land, so the statements are still staged and re-committing lands the same set. A statement failing *mid*-transaction is deliberately not retried: the pool cannot replay the caller's statements, and a half-applied transaction is not something to guess about.
+
+  Only contention is retried. A constraint violation is an answer, not a "not now", and propagates immediately rather than being retried into a stall.
+
+  The budget is wall-clock, not attempts — `busy_retry_budget_s`, default 5 seconds — so a database that stays busy still returns to the caller instead of retrying forever.
+
+  **This contention was introduced by 0.1.17.** Before it, every writer shared one connection under one lock, so two writes could never reach the replica at once. Removing the lock was right — it was costing every writer a cloud round trip — but it exposed a constraint in the sync engine that the lock had been hiding. Absorbing that constraint belongs here, not in the caller.
+
 ## 0.1.20 — 2026-08-06
 
 ### Performance

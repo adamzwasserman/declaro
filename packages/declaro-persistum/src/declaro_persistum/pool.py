@@ -570,6 +570,7 @@ class TursoPool(BasePool):
         push_retry_base_s: float = 0.1,
         background_pull: bool = True,
         mvcc: bool = True,
+        busy_retry_budget_s: float = 5.0,
     ) -> None:
         self._database_path = database_path
         self._remote_url = remote_url
@@ -583,6 +584,10 @@ class TursoPool(BasePool):
         # are a Turso feature and the pool should not decline them. Set False
         # only to force WAL deliberately.
         self._mvcc_requested = mvcc
+        # How long to keep absorbing "database is busy" at a transaction
+        # boundary before giving up and telling the caller. A busy database
+        # means "not now", not "no".
+        self._busy_retry_budget_s = busy_retry_budget_s
         # Read connections. Reads do not sync, so each gets its own plain
         # local connection and they run in parallel. See acquire().
         self._read_holders: list[_TursoConnectionHolder] = []
@@ -991,6 +996,50 @@ class TursoPool(BasePool):
                     logger.debug("Idle connection already closed")
                 holder.conn = None
 
+    @staticmethod
+    def _is_busy(error: Exception) -> bool:
+        """True when an error means 'not now' rather than 'no'.
+
+        Turso surfaces contention two ways: plain SQLITE_BUSY, and the sync
+        engine's own "database tape error: database is busy" when two
+        connections write to one replica at once. Both mean the write did
+        not happen and can be attempted again.
+        """
+        text = str(error).lower()
+        return "busy" in text or "sqlite_busy" in text
+
+    async def _retry_while_busy(self, operation: Any, what: str) -> Any:
+        """Run a transaction-boundary operation, absorbing contention.
+
+        Only used where the safety argument is clear: starting a
+        transaction, where nothing has been staged, and committing one,
+        where the statements are already staged and re-committing lands the
+        same set. A statement failing mid-transaction is not retried — the
+        pool cannot replay the caller's statements, and a half-applied
+        transaction is not something to guess about.
+
+        Bounded in wall-clock time rather than attempts, so a database that
+        is busy for a long time still returns to the caller rather than
+        retrying forever.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._busy_retry_budget_s
+        delay = 0.01
+        attempts = 0
+        while True:
+            try:
+                return await operation()
+            except Exception as e:
+                if not self._is_busy(e) or loop.time() >= deadline:
+                    if attempts:
+                        logger.warning(
+                            "Gave up after %d busy retries on %s: %s", attempts, what, e
+                        )
+                    raise
+                attempts += 1
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 0.25)
+
     async def _get_writer(self) -> "_TursoConnectionHolder":
         """Take a write connection from the free list, opening one if needed.
 
@@ -1241,10 +1290,18 @@ class TursoPool(BasePool):
         try:
             async_conn = TursoAsyncConnection(holder)
             if concurrent and getattr(self, "_mvcc", False):
-                await async_conn.execute("BEGIN CONCURRENT")
+                # Contention here means the transaction never started, so
+                # nothing was staged and retrying is safe.
+                await self._retry_while_busy(
+                    lambda: async_conn.execute("BEGIN CONCURRENT"),
+                    "BEGIN CONCURRENT",
+                )
             try:
                 yield async_conn
-                await async_conn.commit()
+                # Contention here means the transaction did not land. The
+                # statements are still staged, so re-committing lands the
+                # same set.
+                await self._retry_while_busy(async_conn.commit, "commit")
             except Exception:
                 await async_conn.rollback()
                 raise
@@ -1490,6 +1547,7 @@ class ConnectionPool:
         push_interval_s: float = 1.0,
         background_pull: bool = True,
         mvcc: bool = True,
+        busy_retry_budget_s: float = 5.0,
         instrumentation: bool = False,
         tier_label: str = "",
         latency_sink: str | None = None,
@@ -1556,6 +1614,7 @@ class ConnectionPool:
             push_interval_s=push_interval_s,
             background_pull=background_pull,
             mvcc=mvcc,
+            busy_retry_budget_s=busy_retry_budget_s,
         )
         await pool._initialize()
         if instrumentation:
