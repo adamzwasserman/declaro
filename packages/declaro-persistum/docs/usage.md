@@ -1,6 +1,14 @@
 # declaro_persistum Usage Guide
 
-A Functional Persistence Layer (FPL) for Python. Taking the O out of ORM. Pure functions. Declarative schema migrations. No migration files. No revision chains. Just declare what you want; the diff engine figures out the rest.
+A Functional Persistence Layer (FPL) for Python. Taking the O out of ORM.
+
+Three architectural priorities shape everything in this guide, in this order. They are stated in full in the [README](../README.md) and the [architecture document](architecture/declaro_persistum_architecture.md); in brief:
+
+1. **Declarative.** You declare the state you want and the library works out how to reach it. No migration files, no revision chains — you edit your models and the diff engine derives the operations.
+2. **One surface over every supported database.** The same API spans PostgreSQL, SQLite and Turso, so moving between them is a configuration change rather than a refactor. The connection pool and the compatibility layer exist to hold that promise; neither is a feature in its own right.
+3. **Migrations that survive a team.** No linear revision chain means no migration merge conflicts. Branches merge in the models file, and the difference is computed against the real database at apply time.
+
+Much of what follows reads as a list of features. Each one is in service of one of those three — it is worth knowing which, because that is what tells you how a given piece is meant to be used.
 
 ## Installation
 
@@ -11,7 +19,7 @@ pip install declaro_persistum
 pip install declaro_persistum asyncpg        # PostgreSQL
 pip install declaro_persistum aiosqlite      # SQLite
 pip install declaro_persistum pyturso        # Turso (embedded)
-pip install declaro_persistum libsql-experimental  # LibSQL (Turso cloud)
+# Turso Cloud needs no extra package — it is pyturso with a remote_url
 ```
 
 ## Core Concepts
@@ -413,9 +421,12 @@ pool = await ConnectionPool.turso(
     acquire_timeout=30.0,
 )
 
-# LibSQL - Turso cloud connections (libsql-experimental)
-pool = await ConnectionPool.libsql(
-    "libsql://your-db.turso.io",
+# Turso Cloud - a local replica kept in sync with a cloud primary.
+# Same factory as embedded Turso: adding remote_url is the only difference,
+# which is priority 2 in practice — the surface does not change with the backend.
+pool = await ConnectionPool.turso(
+    "./app.db",                          # local replica path
+    remote_url="libsql://your-db.turso.io",
     auth_token="your-token",
     max_size=10,
     acquire_timeout=30.0,
@@ -608,8 +619,9 @@ Record every query's duration, op type, and success/failure.
 
 ```python
 # At pool creation
-pool = await ConnectionPool.libsql(
-    "libsql://your-db.turso.io",
+pool = await ConnectionPool.turso(
+    "./app.db",                          # local replica path
+    remote_url="libsql://your-db.turso.io",
     auth_token="...",
     instrumentation=True,
     tier_label="project",
@@ -654,8 +666,9 @@ For high-latency backends (Turso Cloud writes can take 750–1100ms), the write 
 ### Enabling the Write Queue
 
 ```python
-pool = await ConnectionPool.libsql(
-    "libsql://your-db.turso.io",
+pool = await ConnectionPool.turso(
+    "./app.db",                          # local replica path
+    remote_url="libsql://your-db.turso.io",
     auth_token="...",
     instrumentation=True,
     tier_label="project",
@@ -1404,7 +1417,7 @@ declaro diff -c "sqlite:///./data/app.db" -d turso
 ### LibSQL (Turso Cloud)
 
 - SQLite-compatible with cloud sync
-- Requires `libsql-experimental` package
+- Uses `pyturso`; no separate cloud package
 - Same limitations as SQLite
 
 ```bash
@@ -1506,7 +1519,7 @@ Each backend requires different environment variables:
 | **PostgreSQL** | Connection URL | `DATABASE_URL=postgresql://user:pass@host:5432/dbname` |
 | **SQLite** | File path only | `DATABASE_PATH=./app.db` |
 | **Turso (embedded)** | File path only | `DATABASE_PATH=./app.db` |
-| **LibSQL (cloud)** | URL + Auth token | `TURSO_ORG`, `TURSO_API_TOKEN` (see multi-tenant pattern) |
+| **Turso Cloud** | Local path + URL + Auth token | `TURSO_ORG`, `TURSO_API_TOKEN` (see multi-tenant pattern) |
 
 ## Example Applications
 
@@ -2042,7 +2055,7 @@ Ensure you have the correct database driver installed:
 pip install asyncpg      # PostgreSQL
 pip install aiosqlite    # SQLite
 pip install pyturso      # Turso (embedded)
-pip install libsql-experimental  # LibSQL (Turso cloud)
+# Turso Cloud needs no extra package — it is pyturso with a remote_url
 ```
 
 ### "Cannot detect dialect"

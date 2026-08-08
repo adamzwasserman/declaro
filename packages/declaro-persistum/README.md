@@ -1,14 +1,44 @@
 # declaro_persistum
 
-Pure functional SQL library with declarative schema migrations.
+You declare the state you want; the library works out how to reach it — across PostgreSQL, SQLite and Turso, without rewriting your application to move between them.
 
-## Overview
+## Architectural priorities
 
-A replacement for SQLAlchemy ORM and Alembic that uses:
-- **Schema as Data**: Pydantic models with `@table` decorator
-- **State Diffing**: Migrations computed by diffing desired state vs actual database state
-- **Pure Functions**: No sessions, no identity maps, no hidden state
-- **Branch-Friendly**: No linear revision chain; each branch carries its own schema state
+These are in priority order. Everything in this package is either one of these three or exists to serve one of them, and when a design decision is contested the higher priority wins.
+
+### 1. Declarative
+
+You declare *what* you want and the library determines *how*. That is what the name means, and it is the first principle of the whole Declaro stack.
+
+In practice you never write a migration step. You edit your models to say what the schema should be; the library reads the live database, compares it against your declaration, and derives the operations itself. The same instinct governs queries: you describe the result you want rather than assembling SQL by hand.
+
+Anything that pushes you back into writing procedures instead of declaring outcomes is a defect here, however convenient it looks.
+
+### 2. One surface over every supported database
+
+A single API spans PostgreSQL, SQLite and Turso, so that changing database is a change of configuration rather than a refactor. An application written against this package should move from SQLite in development, to PostgreSQL in production, to Turso at the edge, without its code being touched.
+
+This is why two of the largest parts of the package exist. Neither is a feature in its own right:
+
+- The **connection pool** is not "a pool". It is the single entry point that makes several different drivers answer to one API.
+- The **compatibility layer** is not a bag of tricks. It supplies capabilities a given database lacks — arrays, maps, ranges, enums, hierarchies, materialized views, CHECK constraints — so that the difference between databases never reaches your application.
+
+Where a database genuinely cannot do something, the gap is closed here rather than handed to the caller.
+
+### 3. Migrations that survive a team
+
+Alembic becomes close to unusable once several people work at once, and the reason is structural: it records a linear chain of revisions. Two developers branch from main, each generates a migration, and now two revisions claim the same parent. Someone resolves that by hand, every time.
+
+There is no chain here to collide. Each branch carries its own declared schema, and the difference is computed against the real database at the moment migrations run. Two branches merge the way ordinary code merges — in the models file — and the resulting schema is simply whatever the merged declaration says.
+
+## What is subordinate
+
+Named explicitly, so that their size in the codebase is not mistaken for their importance:
+
+- **The query builder** is an expression of priority 1, not a goal of its own. It exists so that queries can be declared rather than concatenated. The several styles it offers (native, Django-like, Prisma-like, SQLAlchemy-like) are on-ramps for teams arriving from those tools — not four competing APIs to choose between.
+- **The connection pool** serves priority 2.
+- **The compatibility layer** serves priority 2.
+- **Pure functions, TypedDicts and the absence of hidden state** are how this code is written, not what it is for. They make the three priorities achievable and testable; they are not themselves the architecture.
 
 ## Installation
 
@@ -80,11 +110,13 @@ await pool.close()
 
 ## Philosophy & Getting Started
 
-Declaro is part of a larger functional‑Python stack that shuns hidden state and prefers pure functions.
-If you haven't read it yet, the [Declaro Manifesto](../../MANIFESTO.md) lays out the fundamental ideas (banana/monkey/jungle, caching policy, anti‑OOP, etc.).
+Declaro is part of a larger functional-Python stack that shuns hidden state and prefers pure functions. If you haven't read it yet, the [Declaro Manifesto](../../MANIFESTO.md) lays out the fundamental ideas (banana/monkey/jungle, caching policy, anti-OOP, etc.).
 
-This package is the persistence layer; it provides a **polymorphic facade** over SQLite, PostgreSQL, Turso, and LibSQL.
-Caching inside this package is intentionally narrow (pools, schemas, prepared statements) – any application‑specific result caching belongs in an adjacent package such as `tablix` or in your own code.
+This package is the persistence layer. Its three architectural priorities are stated at the top of this file, and they are the frame for everything below: what you read here as a list of features is, in every case, either a way of letting you declare an outcome instead of a procedure (priority 1), or a way of holding one API steady across three different databases (priority 2), or the team-safe migration engine (priority 3).
+
+The functional style — pure functions, TypedDicts, no hidden state — is the discipline that makes those three achievable, not a fourth goal competing with them.
+
+Caching inside this package is deliberately narrow (pools, schemas, prepared statements). Application-specific result caching belongs in an adjacent package such as `tablix`, or in your own code.
 
 ### Quick Start
 
@@ -140,9 +172,11 @@ pool = await ConnectionPool.sqlite("./app.db", max_size=5)
 # Provides async interface via dedicated thread pool
 pool = await ConnectionPool.turso("./app.db", max_size=5)
 
-# LibSQL (Turso cloud connections)
-pool = await ConnectionPool.libsql(
-    "libsql://your-db.turso.io",
+# Turso Cloud — a local replica kept in sync with a cloud primary.
+# Same factory as embedded Turso; adding remote_url is the only change.
+pool = await ConnectionPool.turso(
+    "./app.db",                          # local replica path
+    remote_url="libsql://your-db.turso.io",
     auth_token="...",
 )
 
@@ -273,7 +307,7 @@ Adding or removing enum values is handled automatically during migrations.
 
 ### Multiple Query Styles
 
-Choose the API that feels natural:
+These are on-ramps, not four APIs to choose between. All of them build the same declared query and run through the same executor; the alternative surfaces exist so a team arriving from Django, Prisma or SQLAlchemy can port code without rewriting every call site first. The native surface is the one to write new code against.
 
 ```python
 # All styles — pool bound at table creation, no conn on caller surface
@@ -293,8 +327,9 @@ results = await users.prisma.find_many(where={"status": "active"})
 Record every query's duration, op type, and success/failure:
 
 ```python
-pool = await ConnectionPool.libsql(
-    "libsql://your-db.turso.io",
+pool = await ConnectionPool.turso(
+    "./app.db",                          # local replica path
+    remote_url="libsql://your-db.turso.io",
     auth_token="...",
     instrumentation=True,
     tier_label="project",
@@ -321,8 +356,9 @@ Zero overhead when disabled — no timing, no allocations.
 For high-latency backends (Turso Cloud writes can take 750–1100ms), the write queue returns data to the caller immediately while persisting in the background:
 
 ```python
-pool = await ConnectionPool.libsql(
-    "libsql://your-db.turso.io",
+pool = await ConnectionPool.turso(
+    "./app.db",                          # local replica path
+    remote_url="libsql://your-db.turso.io",
     auth_token="...",
     instrumentation=True,
     tier_label="project",
@@ -349,8 +385,11 @@ The queue is:
 
 - PostgreSQL (via asyncpg)
 - SQLite (via aiosqlite)
-- Turso (via pyturso) - embedded SQLite-compatible with vector search & CDC
-- LibSQL (via libsql-experimental) - Turso cloud connections
+- Turso (via pyturso) — embedded SQLite-compatible engine, with optional cloud sync via `remote_url`
+
+All three answer to the same API (priority 2 above): moving between them is configuration, not a code change.
+
+libsql is no longer used. `ConnectionPool.libsql()` does not exist; Turso Cloud is reached with `ConnectionPool.turso(local_path, remote_url=...)`, which keeps a local replica in sync with the cloud primary. A `libsql://` URL is still a valid Turso Cloud address — that is Turso's own URL scheme, not the removed libsql package.
 
 ## Database Credentials
 
@@ -361,7 +400,7 @@ The queue is:
 | **PostgreSQL** | Connection URL | `DATABASE_URL=postgresql://user:pass@host:5432/dbname` |
 | **SQLite** | File path only | `DATABASE_PATH=./app.db` |
 | **Turso (embedded)** | File path only | `DATABASE_PATH=./app.db` |
-| **LibSQL (cloud)** | URL + Auth token | See multi-tenant pattern below |
+| **Turso Cloud** | Local path + URL + Auth token | See multi-tenant pattern below |
 
 ### Single-Tenant Configuration
 

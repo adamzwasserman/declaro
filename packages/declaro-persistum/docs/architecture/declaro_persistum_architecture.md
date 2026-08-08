@@ -8,6 +8,29 @@
 
 ## 1. Executive Summary
 
+### Architectural Priorities
+
+Three priorities govern this package, in this order. Everything in it is either one of these or exists to serve one of them, and where a design decision is contested the higher priority wins. Read the rest of this document against them — anything below that appears to be a goal in its own right is, on inspection, a mechanism for one of these three.
+
+**1. Declarative.** The user declares the state they want; the library determines how to reach it. This is what the project's name means and it is the first principle of the entire Declaro stack. No migration steps are written by hand: the models declare the intended schema, the library introspects the live database, and the operations are derived from the difference. The same instinct governs the query layer — the caller describes the result, not the SQL.
+
+Any interface that forces the user back into writing procedures rather than declaring outcomes is a defect, regardless of its convenience.
+
+**2. A single polymorphic surface over every supported database.** One API spans PostgreSQL, SQLite and Turso, such that changing database is a change of configuration and not a refactor. An application built on this package moves from SQLite in development to PostgreSQL in production to Turso at the edge without its code being touched.
+
+This priority is the reason the connection pool and the compatibility layer exist, and neither is a feature in its own right. The pool is the single entry point that makes several drivers answer to one API. The compatibility layer supplies capabilities a given engine lacks — arrays, maps, ranges, enums, hierarchies, materialized views, CHECK constraints — so that the difference between databases never surfaces in application code. Where an engine genuinely cannot do something, the gap is closed inside this package rather than handed to the caller.
+
+**3. Migrations that survive a multi-person team.** Alembic is close to unusable with several developers working concurrently, for a structural reason: it records a linear chain of revisions. Two developers branch from main, each generates a migration, and two revisions now claim the same parent — resolved by hand, every time. State diffing has no chain to collide. Each branch carries its own declared schema; the difference is computed against the real database at apply time; branches merge as ordinary code merges, in the models file.
+
+### What is subordinate
+
+Stated explicitly so that size in the codebase is not mistaken for architectural weight:
+
+- The **query builder** expresses priority 1. It exists so queries can be declared rather than concatenated. Its several styles (native, Django-like, Prisma-like, SQLAlchemy-like) are on-ramps for teams migrating from those tools, not competing APIs.
+- The **connection pool** serves priority 2.
+- The **compatibility layer** serves priority 2.
+- **Pure functions, TypedDicts and the absence of hidden state** are the implementation discipline that makes the three priorities achievable and testable. They are how the code is written, not what it is for.
+
 ### Problem Statement
 
 SQLAlchemy and Alembic represent the dominant Python database toolkit, but they embody architectural decisions that create systemic problems:
@@ -37,7 +60,7 @@ SQLAlchemy and Alembic represent the dominant Python database toolkit, but they 
 4. Drift detection comparing introspected DB against cached expected state
 5. Dependency-aware diff engine with topological sorting
 6. Interactive and unattended modes for ambiguity resolution
-7. Dialect-specific adapters for PostgreSQL, SQLite, Turso (embedded), and LibSQL (Turso cloud)
+7. Dialect-specific adapters for PostgreSQL, SQLite and Turso (embedded, with optional cloud sync). These adapters are the mechanism of priority 2 — they exist so one API holds steady across all three.
 8. Multi-tenant support via TursoCloudManager for Turso cloud deployments
 
 ### Expected Outcomes
@@ -135,7 +158,7 @@ graph TB
 | PostgreSQL | Bidirectional | asyncpg | Production database |
 | SQLite | Bidirectional | aiosqlite | Local development, testing |
 | Turso (embedded) | Bidirectional | pyturso | Embedded SQLite-compatible with vector search |
-| LibSQL (Turso cloud) | Bidirectional | libsql-experimental | Multi-tenant cloud database |
+| Turso Cloud | Bidirectional | pyturso (`remote_url=`) | Local replica kept in sync with a cloud primary |
 | Turso Platform API | Outbound | HTTPS REST | Database provisioning for multi-tenant |
 | Git Repository | Read/Write | Filesystem | Schema files, snapshots |
 | CI/CD Pipeline | Invoke | CLI | Unattended migration checks |
@@ -481,7 +504,7 @@ CREATE TABLE orders (
 - Renaming: Detected as drop+add; requires explicit decision
 
 **Benefits**:
-- Works across all backends (PostgreSQL, SQLite, Turso, LibSQL)
+- Works across all backends (PostgreSQL, SQLite, Turso) — uniformity here is priority 2, not a convenience
 - No CHECK constraint parsing required (enum values managed via FK lookup)
 - Values queryable at runtime via lookup table
 - Standard FK constraint enforcement
@@ -939,7 +962,7 @@ def introspect_postgresql(
 | PostgreSQL | Yes | all_or_nothing | Single transaction, full rollback on failure |
 | SQLite | Yes | all_or_nothing | Single transaction, full rollback on failure |
 | Turso (embedded) | Yes | all_or_nothing | Single transaction (inherits SQLite behavior) |
-| LibSQL (Turso cloud) | Yes | all_or_nothing | Single transaction (inherits SQLite behavior) |
+| Turso Cloud | Yes | all_or_nothing | Single transaction (inherits SQLite behavior) |
 
 ### 3.6 CLI Design
 
@@ -1448,7 +1471,7 @@ declaro_persistum/
 ├── types.py              # TypedDict definitions
 ├── loader.py             # Pydantic model loading
 ├── validator.py          # Schema validation
-├── pool.py               # Unified connection pool (PostgreSQL, SQLite, Turso, LibSQL)
+├── pool.py               # The single polymorphic surface (priority 2): PostgreSQL, SQLite, Turso
 ├── exceptions.py         # Exception hierarchy
 ├── inspector/
 │   ├── __init__.py
@@ -1456,7 +1479,7 @@ declaro_persistum/
 │   ├── shared.py         # Shared pure functions (type normalization, FK parsing, etc.)
 │   ├── postgresql.py     # PostgreSQL implementation
 │   ├── sqlite.py         # SQLite implementation
-│   └── turso.py          # Turso/LibSQL implementation
+│   └── turso.py          # Turso implementation (embedded, optional cloud sync)
 ├── differ/
 │   ├── __init__.py
 │   ├── core.py           # Main diff logic
@@ -1468,7 +1491,7 @@ declaro_persistum/
 │   ├── shared.py         # Shared pure SQL generation (sqlite + turso)
 │   ├── postgresql.py     # PostgreSQL implementation
 │   ├── sqlite.py         # SQLite implementation (thin I/O shell)
-│   └── turso.py          # Turso/LibSQL implementation (thin I/O shell)
+│   └── turso.py          # Turso implementation (thin I/O shell)
 ├── query/
 │   ├── __init__.py
 │   ├── builder.py        # Query building
@@ -1508,12 +1531,10 @@ dependencies = [
 postgresql = ["asyncpg>=0.28.0"]
 sqlite = ["aiosqlite>=0.19.0"]
 turso = ["pyturso>=0.5.0"]           # Embedded Turso (Rust-based SQLite-compatible)
-libsql = ["libsql-experimental>=0.0.55"]  # Turso cloud connections
 all = [
     "declaro_persistum[postgresql]",
     "declaro_persistum[sqlite]",
     "declaro_persistum[turso]",
-    "declaro_persistum[libsql]",
 ]
 dev = [
     "pytest>=7.0.0",
@@ -1695,12 +1716,12 @@ jobs:
 | Drift | Difference between actual and expected states |
 | Ambiguity | Change that requires human decision (rename vs drop+add) |
 | Operation | Single DDL statement to execute |
-| Dialect | Database-specific implementation (PostgreSQL, SQLite, Turso, LibSQL) |
+| Dialect | Database-specific implementation (PostgreSQL, SQLite, Turso) |
 | TursoCloudManager | Multi-tenant database provisioning for Turso cloud |
 
 ### B. SQL Type Mappings
 
-| Python Type | PostgreSQL | SQLite | Turso (embedded) | LibSQL (cloud) |
+| Python Type | PostgreSQL | SQLite | Turso (embedded) | Turso Cloud |
 |-----------|------------|--------|------------------|----------------|
 | `integer` | INTEGER | INTEGER | INTEGER | INTEGER |
 | `bigint` | BIGINT | INTEGER | INTEGER | INTEGER |
@@ -1718,7 +1739,7 @@ jobs:
 - [Turso documentation](https://docs.turso.tech/)
 - [Turso Platform API](https://docs.turso.tech/api-reference/introduction)
 - [pyturso (embedded Turso)](https://pypi.org/project/pyturso/)
-- [libsql-experimental](https://pypi.org/project/libsql-experimental/)
+- [pyturso](https://pypi.org/project/pyturso/) — the Turso engine; `import turso`
 - [Pydantic documentation](https://docs.pydantic.dev/)
 - [Topological sorting algorithm](https://en.wikipedia.org/wiki/Topological_sorting)
 
