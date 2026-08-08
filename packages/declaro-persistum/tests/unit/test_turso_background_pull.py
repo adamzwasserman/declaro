@@ -105,7 +105,22 @@ class TestLocalReplicaDetection:
 
 
 class TestOpenDoesNotBlock:
-    """The hot path — an existing replica — must not wait on the network."""
+    """THE INVARIANT.
+
+    A cloud sync on pool open MUST NOT block the caller unless there is no
+    local copy.
+
+    When the local replica file already exists — every re-open, and the
+    steady state on a persistent disk — the pool opens against the local
+    copy immediately and syncs with cloud in the background. Only a genuine
+    cold start with no local file may block to pull the initial copy,
+    because there is nothing local to serve.
+
+    A shared lock held across the initial sync broke this before 0.1.19: the
+    open returned, but the first write queued behind the background sync, so
+    the caller paid for it anyway. Downstream measured 474.9ms. These tests
+    exist so that regression cannot return unnoticed.
+    """
 
     @pytest.mark.asyncio
     async def test_existing_replica_does_not_await_pull(self, tmp_path):
@@ -308,3 +323,53 @@ class TestMigrationsAwaitTheBarrier:
             await apply_migrations_async(_PlainPool(), "postgresql", schema, force=True)
 
         assert touched == ["acquire"]
+
+
+class TestTheInvariantEndToEnd:
+    """One test per half of the invariant, named for what it protects."""
+
+    @pytest.mark.asyncio
+    async def test_warm_reopen_never_waits_on_the_network(self, tmp_path):
+        """A local copy exists, so nothing about open may touch the cloud.
+
+        Both the push and the pull are made slow. If open awaits either, the
+        elapsed time gives it away.
+        """
+        holder = _FakeHolder(pull_delay=1.0)
+
+        async def _slow_push():
+            await asyncio.sleep(1.0)
+            holder.calls.append("push")
+
+        holder.push = _slow_push  # type: ignore[method-assign]
+        pool, _ = _pool(tmp_path, holder=holder, populated=True)
+
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        await _initialize(pool, holder)
+        elapsed = loop.time() - start
+
+        assert elapsed < 0.1, (
+            f"a warm re-open blocked for {elapsed:.3f}s against a 1.0s sync. "
+            f"THE INVARIANT: with a local copy present, open must not wait on "
+            f"the cloud."
+        )
+        await pool.initial_pull_complete()
+
+    @pytest.mark.asyncio
+    async def test_cold_open_does_wait_because_nothing_is_local(self, tmp_path):
+        """No local copy, so blocking is correct — there is nothing to serve.
+
+        Returning early here would hand back a pool that reads an empty
+        database and reports success.
+        """
+        holder = _FakeHolder()
+        pool, _ = _pool(tmp_path, holder=holder, populated=False)
+
+        await _initialize(pool, holder)
+
+        assert "pull" in holder.calls, (
+            "a cold open returned without pulling; the pool would serve an "
+            "empty database and report success"
+        )
+        assert pool._initial_sync_task is None
