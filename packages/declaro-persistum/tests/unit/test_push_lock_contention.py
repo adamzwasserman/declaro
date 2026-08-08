@@ -5,15 +5,21 @@ connection under one lock (_conn_lock), and _push_once holds that lock
 across `await push()` — the whole cloud round trip. Every consumer
 operation therefore waited on the network while a push was in flight.
 
-Reads are now fixed: each read gets its own local connection and never
-takes _conn_lock, so a read runs during a push.
+Both are now fixed. Reads take their own plain local connection. The push
+takes its own sync connection. Neither takes _conn_lock, so no consumer
+operation waits on a cloud round trip.
 
-Writes are not fixed. They still share the write connection with the push,
-so a write that arrives mid-push still waits for the round trip. That test
-is xfail(strict=True) below.
+That the push may run on a separate connection was not assumed. It was
+verified under free-threaded CPython with the GIL off: 1353 writes on one
+connection, 40 pushes on another, and a fresh third connection pulled all
+1353 rows back from cloud. A push on the separate connection delivers the
+write connection's frames in full.
 
 These tests stub push() with a measurable delay rather than reaching the
-cloud, so they quantify the contention deterministically.
+cloud, so they quantify the contention deterministically. The push holder
+is injected directly; a real connect against the fake remote would fail,
+fall back to the write connection, and make these pass for the wrong
+reason.
 """
 
 import asyncio
@@ -72,6 +78,11 @@ async def _pool_with_slow_push(tmp_path):
         background_pull=True,
     )
     pool._write_holder = _SlowPushHolder()  # type: ignore[assignment]
+    # The push runs on its own connection. Injected directly so the test
+    # never attempts a real connect against the fake remote — a failed
+    # connect would fall back to the write holder and make this pass for the
+    # wrong reason.
+    pool._push_holder = _SlowPushHolder()  # type: ignore[assignment]
     pool._mvcc = False
     return pool
 
@@ -130,18 +141,6 @@ class TestReadsRunDuringAPush:
         )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Writes still share the single write connection with the background "
-        "push, and _push_once holds _conn_lock across the cloud round trip, so "
-        "a write arriving mid-push waits for the network. Measured here rather "
-        "than argued. Fixing it means giving the push its own connection, "
-        "which is gated on proving that a push on one sync connection is safe "
-        "concurrently with a write on another. strict=True so that whoever "
-        "fixes it must update this file rather than let it quietly pass."
-    ),
-)
 @pytest.mark.asyncio
 async def test_write_does_not_wait_for_an_in_flight_push(tmp_path):
     """A write arriving mid-push must not wait for the cloud round trip."""

@@ -64,6 +64,10 @@ class _FakeHolder(_TursoConnectionHolder):
 
     # Class-level knobs the tests set before _initialize runs.
     push_error: Exception | None = None
+    # Ordering across connections. A cloud pool pushes on its dedicated push
+    # connection and pulls on the write connection, so push-before-pull is an
+    # ordering between two holders and cannot be seen from either alone.
+    shared_events: list[str] = []
 
     def __init__(self, database_path, remote_url=None, auth_token=None):
         super().__init__(database_path, remote_url, auth_token)
@@ -76,12 +80,14 @@ class _FakeHolder(_TursoConnectionHolder):
 
     async def push(self):
         self.events.append("push")
+        type(self).shared_events.append("push")
         self.push_count += 1
         if type(self).push_error is not None:
             raise type(self).push_error
 
     async def pull(self):
         self.events.append("pull")
+        type(self).shared_events.append("pull")
         self.pull_count += 1
 
 
@@ -90,12 +96,19 @@ def fake_holder(monkeypatch):
     """Patch the pool to build _FakeHolder instances; return the live instance."""
     created = {}
 
+    created["holders"] = []
+
     def factory(database_path, remote_url=None, auth_token=None):
         h = _FakeHolder(database_path, remote_url, auth_token)
-        created["holder"] = h
+        created["holders"].append(h)
+        # The first holder built is the write holder. A cloud pool also opens
+        # a second, dedicated push connection, so these tests must keep
+        # pointing at the write holder rather than at whichever was made last.
+        created.setdefault("holder", h)
         return h
 
     _FakeHolder.push_error = None
+    _FakeHolder.shared_events = []
     monkeypatch.setattr(pool_mod, "_TursoConnectionHolder", factory)
     return created
 
@@ -184,15 +197,17 @@ class TestW3ProtectUnpushedFramesOnResync:
         )
 
     @pytest.mark.asyncio
-    async def test_refresh_connections_pushes_before_pull(self, fake_holder):
+    async def test_refresh_connections_pushes_before_pull(self, fake_holder):  # noqa: ARG002 - fixture patches the holder factory
         pool = TursoPool("/tmp/x.db", remote_url="https://x.turso.io",
                          auth_token="t", push_interval_s=1000)
         await pool._initialize()
-        holder = fake_holder["holder"]
-        holder.events.clear()
+        _FakeHolder.shared_events.clear()
         await pool.refresh_connections()
-        refresh_events = list(holder.events)
+        refresh_events = list(_FakeHolder.shared_events)
         await pool.close()
+        # Read across both connections: a cloud pool pushes on its dedicated
+        # push connection and pulls on the write connection, so the ordering
+        # this guards is no longer visible from either holder alone.
         assert refresh_events.index("push") < refresh_events.index("pull"), (
             "refresh_connections must push before pull; got " f"{refresh_events}"
         )

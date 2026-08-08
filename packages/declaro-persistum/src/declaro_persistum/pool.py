@@ -587,6 +587,11 @@ class TursoPool(BasePool):
         # local connection and they run in parallel. See acquire().
         self._read_holders: list[_TursoConnectionHolder] = []
         self._free_readers: asyncio.LifoQueue[_TursoConnectionHolder] | None = None
+        # The push runs on its own sync connection, so a cloud round trip
+        # never blocks a write. See _push_once.
+        self._push_holder: _TursoConnectionHolder | None = None
+        self._writes_since_push = 0
+        self._pushes_without_revision_change = 0
         # Initial-sync state. The event is created in _initialize, on the
         # running loop, rather than here — a pool may be constructed outside
         # the loop that later runs it.
@@ -681,6 +686,7 @@ class TursoPool(BasePool):
             # commit instead. Must run outside any transaction (fresh conn here).
             await self._enable_replica_fk_enforcement()
         if self._remote_url:
+            await self._open_push_connection()
             self._push_task = asyncio.create_task(self._push_loop())
 
     async def _enable_replica_fk_enforcement(self) -> None:
@@ -837,17 +843,113 @@ class TursoPool(BasePool):
         if self._initial_sync_error is not None:
             raise self._initial_sync_error
 
-    async def _push_once(self) -> bool:
-        """Attempt a single push under the connection lock, recording outcome."""
+    async def _open_push_connection(self) -> None:
+        """Open the dedicated push connection, once, during initialization.
+
+        The push runs on its own sync connection so it never takes
+        _conn_lock, and so a write never waits for a cloud round trip. A push
+        on a separate connection to the same local replica does deliver the
+        frames committed on the write connection: verified under free-threaded
+        CPython with the GIL off — 1353 writes on one connection, 40 pushes on
+        another, and a fresh third connection pulled all 1353 rows back from
+        cloud.
+
+        Opened here rather than lazily in _push_once, so that a remote which
+        cannot be reached costs one failed connect at startup instead of one
+        on every push cycle forever. On failure the pool keeps pushing on the
+        write connection: slower, because it blocks writes for each round
+        trip, but still delivering.
+        """
+        if not self._remote_url:
+            return
         try:
-            if self._write_holder:
+            holder = _TursoConnectionHolder(
+                self._database_path, self._remote_url, self._auth_token
+            )
+            await holder.connect_async()
+            self._push_holder = holder
+        except Exception as e:
+            self._push_holder = None
+            logger.warning(
+                "Could not open a dedicated push connection (%s); pushing on the "
+                "write connection instead, which blocks writes for the duration "
+                "of each round trip",
+                e,
+            )
+
+    async def _push_once(self) -> bool:
+        """Push pending frames to cloud, recording the outcome.
+
+        Does not hold _conn_lock. The push has its own connection, so writes
+        and reads proceed while a round trip is in flight.
+        """
+        holder = self._push_holder or self._write_holder
+        if holder is None:
+            return True
+
+        # Snapshot before the push so non-delivery is detectable afterwards.
+        pending_before = self._writes_since_push
+        revision_before = self._sync_revision(holder)
+
+        try:
+            if holder is self._write_holder:
+                # Fallback path only: the write connection still needs the
+                # lock, because reads and writes share it.
                 async with self._conn_lock:
-                    await self._write_holder.push()
+                    await holder.push()
+            else:
+                await holder.push()
         except Exception as e:
             self._record_push_failure(e)
             return False
+
+        self._writes_since_push = max(0, self._writes_since_push - pending_before)
+        self._check_push_delivered(holder, pending_before, revision_before)
         self._record_push_success()
         return True
+
+    def _sync_revision(self, holder: "_TursoConnectionHolder") -> Any:
+        """Read the replica's sync revision, or None if unavailable."""
+        conn = getattr(holder, "conn", None)
+        stats = getattr(conn, "stats", None)
+        if stats is None:
+            return None
+        try:
+            return getattr(stats(), "revision", None)
+        except Exception:
+            return None
+
+    def _check_push_delivered(
+        self, holder: "_TursoConnectionHolder", pending_before: int, revision_before: Any
+    ) -> None:
+        """Warn if a push reported success but appears to have delivered nothing.
+
+        This is the tripwire for the failure mode that decoupling the push
+        could introduce: a push that succeeds on its own connection while
+        delivering none of the write connection's frames. That would be
+        silent data loss, which is worse than the write stall the decoupling
+        removes.
+
+        It logs rather than raises. The exact semantics of the engine's
+        revision counter are not pinned down here, so a mismatch is evidence
+        worth surfacing, not proof worth failing a healthy push over. If this
+        ever fires in the field it should be investigated before it is
+        silenced.
+        """
+        if pending_before <= 0 or revision_before is None:
+            return
+        revision_after = self._sync_revision(holder)
+        if revision_after is None or revision_after != revision_before:
+            return
+        self._pushes_without_revision_change += 1
+        logger.warning(
+            "Push reported success with %d write(s) pending but the sync "
+            "revision did not change (%s); %d consecutive occurrence(s). "
+            "Verify writes are reaching the cloud primary.",
+            pending_before,
+            revision_before,
+            self._pushes_without_revision_change,
+        )
 
     async def _push_loop(self) -> None:
         """Guaranteed eventual consistency loop.
@@ -967,6 +1069,9 @@ class TursoPool(BasePool):
             try:
                 yield async_conn
                 await async_conn.commit()
+                # Counted so the push can tell "nothing to deliver" from
+                # "delivered nothing" — see _check_push_delivered.
+                self._writes_since_push += 1
             except Exception:
                 await async_conn.rollback()
                 raise
@@ -1010,6 +1115,15 @@ class TursoPool(BasePool):
                 delay = min(self._push_retry_base_s * (2 ** attempt), 30.0)
                 logger.warning("Final push attempt %d failed, retrying in %.1fs", attempt, delay)
                 await asyncio.sleep(delay)
+        # The push connection closes after the final push above has used it.
+        if self._push_holder is not None and self._push_holder.conn is not None:
+            try:
+                await self._push_holder.conn.close()
+            except Exception:
+                logger.debug("Push connection already closed")
+            self._push_holder.conn = None
+        self._push_holder = None
+
         # Read connections hold no unpushed state, so they close after the
         # final push rather than before it.
         for reader in self._read_holders:

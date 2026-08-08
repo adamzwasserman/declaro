@@ -2,6 +2,20 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## 0.1.14 — 2026-08-06
+
+### Concurrency
+
+- **The cloud push now runs on its own connection, so a write never waits for a round trip.** The push previously shared the write connection and held `_conn_lock` across the whole cloud round trip, so a write arriving mid-push waited for the network — measured at 0.280s against a 0.300s push. The push now has a dedicated sync connection and takes no lock.
+
+  That a push on a separate connection still delivers the write connection's frames was verified, not assumed. Under free-threaded CPython with the GIL confirmed off: 1353 rows written on one connection, 40 pushes issued on another, and a fresh third connection pulled all 1353 rows back from cloud. Full delivery, no crash. The concern this test existed to rule out was a push that reports success and silently delivers nothing, which would be worse than the stall it removes.
+
+- **A delivery tripwire guards against that failure returning.** The pool counts committed writes and reads the replica's sync revision either side of each push. If a push reports success while writes were pending and the revision does not move, it logs a warning naming the count and the revision. It logs rather than raises, because the engine's revision semantics are not pinned down here and a healthy push should not be failed on a guess. If it ever fires in the field, investigate before silencing it.
+
+- If the dedicated push connection cannot be opened, the pool falls back to pushing on the write connection and says so once. Delivery continues at the old cost rather than stopping. The connection is opened once during initialization, so an unreachable remote costs one failed connect at startup rather than one per push cycle.
+
+With this, no consumer operation on a Turso pool waits on the network: reads take their own connections, writes take the write connection, and the push takes its own. `tests/unit/test_push_lock_contention.py` has no `xfail` left in it.
+
 ## 0.1.13 — 2026-08-06
 
 ### Concurrency
@@ -12,7 +26,7 @@ All notable changes to `declaro-persistum` are recorded here.
 
   A read arriving while a cloud push is in flight also no longer waits for the round trip. Read connections never push and never pull, so they hold no sync state and cannot diverge from the write connection's view of the cloud.
 
-- **Still open:** a write arriving while a push is in flight waits for the round trip, because writes and the push still share the write connection. That test is `xfail(strict=True)` in `tests/unit/test_push_lock_contention.py`. Fixing it means giving the push its own connection, which is gated on proving that a push on one sync connection is safe concurrently with a write on another.
+- **Still open at this release, fixed in 0.1.14:** a write arriving while a push is in flight waits for the round trip, because writes and the push still share the write connection. That test was `xfail(strict=True)` in `tests/unit/test_push_lock_contention.py`. Fixing it meant giving the push its own connection, which was gated on proving that a push on one sync connection is safe concurrently with a write on another.
 
 ### Dependencies
 
@@ -24,7 +38,7 @@ All notable changes to `declaro-persistum` are recorded here.
 
 The contention was measured rather than argued, in `tests/unit/test_push_lock_contention.py`. Against a 0.30s push, a read arriving mid-push waited 0.280s, and five concurrent reads serialised completely behind it. Separately, five concurrent readers each doing 100ms of work took 0.505s at `max_size=5`.
 
-Those measurements were committed as `xfail(strict=True)` before the fix. When the read path was fixed they turned into XPASS and failed the suite, which forced this entry to be written rather than letting the tests quietly start passing. The remaining write-versus-push case is still `xfail(strict=True)` for the same reason.
+Those measurements were committed as `xfail(strict=True)` before the fix. When the read path was fixed they turned into XPASS and failed the suite, which forced this entry to be written rather than letting the tests quietly start passing. The write-versus-push case stayed `xfail(strict=True)` at this release and was fixed the same way in 0.1.14.
 
 Reported downstream by a consumer running a live write workload.
 
