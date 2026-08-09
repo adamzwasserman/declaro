@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import logging
 import os
 from collections.abc import AsyncIterator
@@ -26,6 +27,15 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
+
+# The write connection belonging to the transaction the current task is
+# inside, if any. A ContextVar rather than pool state because a transaction
+# belongs to one task: two requests running concurrently against one pool
+# must not join each other's transaction, and asyncio gives each task its
+# own copy of this automatically.
+_active_transaction: contextvars.ContextVar[Any | None] = contextvars.ContextVar(
+    "declaro_active_transaction", default=None
+)
 
 from declaro_persistum.exceptions import (
     PoolClosedError,
@@ -1071,6 +1081,55 @@ class TursoPool(BasePool):
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 0.25)
 
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator["TursoAsyncConnection"]:
+        """Run several writes as one transaction.
+
+        Every ORM write inside the block shares one connection and one
+        commit, so they land together or not at all. Without this, each ORM
+        write took its own acquire_write and its own commit, and batching
+        was only possible by dropping to raw SQL — which defeats the point
+        of having an ORM.
+
+        The cost of not having it is not tidiness. A caller updating a row
+        and a derived index had to do them separately, so a failure between
+        the two left the index disagreeing with the row it describes.
+
+            async with pool.transaction():
+                await cards.update_one(where=..., data=...)
+                await index.update_one(where=..., data=...)
+
+        The transaction belongs to the calling TASK, not to the pool. Two
+        requests running concurrently against one pool each get their own;
+        neither joins the other's. Writes outside a transaction are
+        unaffected and still commit individually.
+
+        The replica write lock is held for the whole block, which is what
+        makes the writes atomic against other writers. Keep transactions
+        short for the same reason you would anywhere else.
+        """
+        holder = await self._get_writer()
+        token = None
+        try:
+            async with self._write_serialisation():
+                conn = TursoAsyncConnection(holder)
+                if getattr(self, "_mvcc", False):
+                    await self._retry_while_busy(
+                        lambda: conn.execute("BEGIN CONCURRENT"), "BEGIN CONCURRENT"
+                    )
+                token = _active_transaction.set({"pool": self, "conn": conn})
+                try:
+                    yield conn
+                    await self._retry_while_busy(conn.commit, "commit")
+                except Exception:
+                    await conn.rollback()
+                    raise
+                finally:
+                    if token is not None:
+                        _active_transaction.reset(token)
+        finally:
+            await self._release_writer(holder)
+
     async def _get_writer(self) -> "_TursoConnectionHolder":
         """Take a write connection from the free list, opening one if needed.
 
@@ -1317,6 +1376,15 @@ class TursoPool(BasePool):
 
         # No semaphore. A writer never queues behind a cap and is never
         # refused because the pool is busy.
+        # Already inside a transaction on this task: reuse its connection so
+        # every ORM write in the block lands in one commit. The transaction
+        # owns the connection, the replica lock and the commit; this just
+        # hands the connection over.
+        active = _active_transaction.get()
+        if active is not None and active["pool"] is self:
+            yield active["conn"]
+            return
+
         holder = await self._get_writer()
         try:
             # One writer per replica, held for the whole transaction. The

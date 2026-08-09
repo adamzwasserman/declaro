@@ -2,6 +2,28 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## 0.1.23 — 2026-08-06
+
+### Features
+
+- **`pool.transaction()` now groups several ORM writes into one transaction.** It was a no-op passthrough that yielded the pool itself. Every ORM write took its own `acquire_write` and its own commit, so two `update_one` calls were two transactions however they were nested. Batching was possible only by dropping to `acquire_write` and raw SQL, which defeats the point of having an ORM.
+
+  ```python
+  async with pool.transaction():
+      await cards.update_one(where=..., data=...)
+      await index.update_one(where=..., data=...)
+  ```
+
+  Every write inside the block shares one connection and one commit. They land together or not at all.
+
+  The cost of not having this was not tidiness. A caller updating a row and a derived index had to do them separately, so a failure between the two left the index disagreeing with the row it describes. That is the case this exists for.
+
+  **A transaction belongs to the calling task, not to the pool.** Two requests running concurrently against one pool each get their own; neither joins the other's. Writes outside a transaction are unaffected and still commit individually.
+
+  The replica write lock is held for the whole block, which is what makes the writes atomic against other writers — so keep transactions short, for the same reason as anywhere else.
+
+  Reported by a consumer who had to choose between raw SQL and leaving a derived index able to drift from its source.
+
 ## 0.1.22 — 2026-08-06
 
 ### Bugfixes

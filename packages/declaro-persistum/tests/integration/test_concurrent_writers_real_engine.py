@@ -123,3 +123,52 @@ class TestConcurrentWritersDeliverEveryRow:
 
         assert total == distinct == WRITERS * ROWS_PER_WRITER
         await pool.close()
+
+
+class TestTransactionsOnARealEngine:
+    """Multi-statement transactions, against a real database not a fake."""
+
+    @pytest.mark.asyncio
+    async def test_two_writes_commit_together(self, tmp_path):
+        pool = await ConnectionPool.turso(str(tmp_path / "tx.db"))
+        async with pool.acquire_write(concurrent=False) as conn:
+            await conn.execute("CREATE TABLE card (id INTEGER PRIMARY KEY, tag TEXT)")
+            await conn.execute("CREATE TABLE idx (id INTEGER PRIMARY KEY, n INTEGER)")
+
+        async with pool.transaction():
+            async with pool.acquire_write() as c:
+                await c.execute("INSERT INTO card (id, tag) VALUES (1, 'a')")
+            async with pool.acquire_write() as c:
+                await c.execute("INSERT INTO idx (id, n) VALUES (1, 1)")
+
+        async with pool.acquire() as conn:
+            cur = await conn.execute("SELECT COUNT(*) FROM card")
+            cards = (await cur.fetchall())[0][0]
+            cur = await conn.execute("SELECT COUNT(*) FROM idx")
+            idx = (await cur.fetchall())[0][0]
+
+        assert (cards, idx) == (1, 1)
+        await pool.close()
+
+    @pytest.mark.asyncio
+    async def test_a_failure_leaves_neither_write(self, tmp_path):
+        """The derived-index case: the row and its index move together."""
+        pool = await ConnectionPool.turso(str(tmp_path / "rb.db"))
+        async with pool.acquire_write(concurrent=False) as conn:
+            await conn.execute("CREATE TABLE card (id INTEGER PRIMARY KEY, tag TEXT)")
+
+        with pytest.raises(RuntimeError, match="derived-index write failed"):
+            async with pool.transaction():
+                async with pool.acquire_write() as c:
+                    await c.execute("INSERT INTO card (id, tag) VALUES (1, 'a')")
+                raise RuntimeError("the derived-index write failed")
+
+        async with pool.acquire() as conn:
+            cur = await conn.execute("SELECT COUNT(*) FROM card")
+            remaining = (await cur.fetchall())[0][0]
+
+        assert remaining == 0, (
+            f"{remaining} row(s) survived a rolled-back transaction; the row "
+            f"and its index can now disagree"
+        )
+        await pool.close()
