@@ -16,7 +16,6 @@ import pytest
 
 import declaro_persistum.pool as pool_mod
 from declaro_persistum.pool import TursoPool, _TursoConnectionHolder
-from declaro_persistum.write_queue import WriteQueue
 
 
 class _FakeCursor:
@@ -218,53 +217,6 @@ class TestW3ProtectUnpushedFramesOnResync:
         assert refresh_events.index("push") < refresh_events.index("pull"), (
             "refresh_connections must push before pull; got " f"{refresh_events}"
         )
-
-
-class _RaisingCM:
-    async def __aenter__(self):
-        raise RuntimeError("UNIQUE constraint failed")  # a permanent poison
-
-    async def __aexit__(self, *a):
-        return False
-
-
-class _FailingPool:
-    """Pool whose every write attempt fails permanently."""
-
-    def acquire_write(self):
-        return _RaisingCM()
-
-
-class TestW4QuarantinePoisonWrite:
-    """W4: a write that can never succeed on the primary must be quarantined
-    after a bounded number of attempts, not retried forever, and be observable —
-    so it neither wastes resources nor hides behind an endless retry."""
-
-    @pytest.mark.asyncio
-    async def test_poison_entry_quarantined_after_max_attempts(self):
-        q = WriteQueue(_FailingPool(), max_drain_attempts=3)
-        q.enqueue("child", "id", "c1", "insert", {"id": "c1"},
-                  "INSERT INTO child (id) VALUES (?)", ("c1",), "turso")
-        key = "child:c1"
-
-        await q._write_retry(key, q._queue[key])
-
-        assert key not in q._queue, "poison must be removed from the active queue"
-        dead = q.dead_letters()
-        assert any(e["pk_value"] == "c1" for e in dead), (
-            "poison must be quarantined into the dead-letter set, not lost or retried forever"
-        )
-        assert q._queue == {}, "no active entries should remain"
-
-    @pytest.mark.asyncio
-    async def test_unlimited_default_does_not_quarantine_immediately(self):
-        # Default (no max) keeps retrying — quarantine is strictly opt-in.
-        q = WriteQueue(_FailingPool())
-        q.enqueue("child", "id", "c2", "insert", {"id": "c2"},
-                  "INSERT INTO child (id) VALUES (?)", ("c2",), "turso")
-        # One bounded number of attempts via a tiny helper: the entry stays active.
-        assert q.dead_letters() == []
-        assert "child:c2" in q._queue
 
 
 class TestW5HonestMigrationSkips:

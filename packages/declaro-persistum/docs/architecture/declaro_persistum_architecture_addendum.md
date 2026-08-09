@@ -1,7 +1,7 @@
 # declaro_persistum Architecture Addendum
 
 ---
-**STATUS**: PARTIALLY IMPLEMENTED — A9 (Instrumentation + Write Queue) complete; A1-A8 still design
+**STATUS**: PARTIALLY IMPLEMENTED — A9 (Instrumentation) complete; A1-A8 still design
 **VERSION**: 0.2.0
 **DATE**: 2026-03-11
 **PARENT**: declaro_persistum_architecture.md
@@ -17,7 +17,7 @@ This addendum extends the core architecture with:
 4. **Observability**: Performance monitoring and automatic index optimization
 5. **Pool Binding**: Connection removed from caller surface — pool bound at `table()` creation ✅ IMPLEMENTED
 6. **Instrumentation**: Per-query latency recording with pluggable sinks ✅ IMPLEMENTED
-7. **Write Queue**: Optimistic writes for high-latency backends with transparent read merging ✅ IMPLEMENTED
+7. ~~**Write Queue**: Optimistic writes for high-latency backends with transparent read merging~~ — REMOVED in 0.1.25, never wired up and measurement showed it was not needed
 
 The guiding principle: honest abstraction. No performance lies. Portable patterns that work everywhere without hidden degradation.
 
@@ -1379,9 +1379,11 @@ Recommended order for Claude Code implementation:
 
 ---
 
-## A9. Instrumentation + Write Queue ✅ IMPLEMENTED
+## A9. Instrumentation ✅ IMPLEMENTED
 
-> **Status**: Fully implemented as of 2026-03-11. See `src/declaro_persistum/instrumentation.py` and `src/declaro_persistum/write_queue.py`.
+> **Status**: Fully implemented as of 2026-03-11. See `src/declaro_persistum/instrumentation.py`.
+>
+> **A9.2 "Optimistic Write Queue" was removed in 0.1.25.** It was never wired to any write path, and measurement showed the condition it existed for does not occur: 2 of 2397 writes exceeded its 50ms trigger on a real Turso Cloud replica, and 0 of 1200 on PostgreSQL. See the 0.1.25 changelog.
 
 ### A9.1 Connection-Level Latency Instrumentation
 
@@ -1403,7 +1405,7 @@ class LatencyRecord(TypedDict):
 #### API
 
 ```python
-# At pool creation (enables instrumentation + optional write queue)
+# At pool creation
 pool = await ConnectionPool.libsql(
     url, auth_token=token,
     instrumentation=True,
@@ -1424,76 +1426,3 @@ pool.configure_instrumentation(
 - `instrumentation.py`: `classify_sql`, `is_write_op`, `build_record`, `format_jsonl`, `get_latency_logger`, `setup_jsonl_sink`, `setup_callable_sink`, `record_execution`
 - `pool.py`: `BasePool._latency_logger`, `BasePool._tier`, `BasePool.configure_instrumentation()`
 - `query/executor.py`: `execute_with_pool` calls `record_execution(pool, sql, duration_ms, success)`
-- `write_queue.py`: `_drain_one` also calls `record_execution` for background retry attempts
-
-### A9.2 Optimistic Write Queue
-
-For high-latency backends, writes that exceed a threshold (default 50ms) are queued and the caller receives the data immediately. The write continues in the background.
-
-#### Design Decisions
-
-1. One queue per pool — keyed by `"{table}:{pk_value}"`
-2. 50ms race: `asyncio.wait_for(asyncio.shield(task), timeout=0.05)` — fast writes skip the queue entirely
-3. Background write continues after timeout — on success, removes itself from queue
-4. Supervisor coroutine drains queue with semaphore(3) concurrency and exponential backoff
-5. CRITICAL log after 6 hours continuous failure (prefix `WRITE_QUEUE_EXHAUSTED`)
-6. Transparent read merging — SELECT results include pending entries merged by PK
-7. JOIN-aware merge — uses FK schema knowledge to match pending entries to joined rows
-8. Re-sort after merge — preserves ORDER BY from original query
-
-#### Types
-
-```python
-class PendingEntry(TypedDict):
-    entry_id: str       # UUID
-    table: str
-    pk_column: str
-    pk_value: Any
-    op: str             # "insert" | "update" | "delete"
-    data: dict[str, Any]   # Row data returned to caller
-    sql: str
-    params: Any
-    dialect: str
-    queued_at: str      # ISO 8601
-    attempt_count: int
-    last_error: str
-```
-
-#### API
-
-```python
-# At pool creation
-pool = await ConnectionPool.libsql(
-    url, auth_token=token,
-    write_queue_path="./data/pending_writes.jsonl",
-    write_queue_threshold_ms=50.0,
-    write_queue_concurrency=3,
-)
-
-# Or post-creation
-pool.configure_write_queue(
-    persistence_path="./data/pending_writes.jsonl",
-    threshold_ms=50.0,
-    max_concurrent_drains=3,
-)
-
-# All writes go through the queue transparently
-users = table("users", schema, pool)
-await users.insert(id=new_id, name="alice").execute()  # returns immediately if >50ms
-
-# Reads merge pending queue entries automatically
-rows = await users.select().execute()  # includes pending inserts
-```
-
-#### Implementation
-
-- `write_queue.py`: `PendingEntry` TypedDict, `WriteQueue` class with supervisor, `merge_pending_into_results`, `merge_pending_into_join_results`, `_find_fk_relationship`, `_extract_order_by`, `_resort`
-- `query/executor.py`: `_race_write` function, `execute_with_pool` wires queue for write and read merge
-- `pool.py`: `BasePool._write_queue`, `BasePool.configure_write_queue()`, all `close()` methods call `queue.stop_supervisor()`
-- `__init__.py`: exports `WriteQueue`, `PendingEntry`, `LatencyRecord`, `WriteQueueError`
-- `exceptions.py`: `WriteQueueError(PoolError)`
-
-#### Disk Persistence
-
-Queue is persisted atomically (tmp + rename) to a JSONL file on every change. On startup, `load_from_disk()` restores pending entries and the supervisor resumes retrying them.
-- [ ] TursoCloudManager tested against real Turso Platform API

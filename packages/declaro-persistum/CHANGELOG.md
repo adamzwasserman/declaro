@@ -2,6 +2,44 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## 0.1.25 — 2026-08-09
+
+### Removed — the write queue
+
+**`WriteQueue` and everything attached to it is gone.** It was never wired to any write path, and measurement shows the condition it was built for does not happen.
+
+Removed from the public surface: `WriteQueue`, `PendingEntry`, `WriteQueueError`, `pool.configure_write_queue()`, and the `write_queue_path` / `write_queue_threshold_ms` / `write_queue_concurrency` / `write_queue_max_attempts` parameters on `ConnectionPool.sqlite()`, `.postgresql()` and `.turso()`.
+
+**This is a breaking change only if you called one of those.** If you passed `write_queue_path=` to a factory or called `configure_write_queue()`, you now get a `TypeError` or `AttributeError`. Delete the call: it never did anything. Nothing in the package ever enqueued a write, so no behaviour is lost and no data path changes.
+
+#### Why
+
+The queue's premise was that some writes are slow: a write over 50ms would be queued, and the caller would return immediately with its data. Nobody had ever measured how often a write crosses 50ms, so the premise was never tested. It is now.
+
+Measured with a throwaway harness against real databases, at concurrency 1, 2, 3, 5 and 10, on both the raw `acquire_write` path and the ORM `insert().execute()` path:
+
+| Backend | Writes over 50ms |
+|---|---|
+| Turso Cloud replica (aws-us-west-2), two runs | 2 of 2397 (0.08%) |
+| PostgreSQL 17.10 (loopback) | 0 of 1200 (0.0%) |
+| Turso local, no remote | 0 of 1200 (0.0%) |
+
+Typical latency on the cloud replica was p50 0.3–4.3ms with p99 mostly under 15ms. The two outliers landed at different concurrency levels in each run, so they are a tail event of roughly 1 in 1200 rather than an effect of load.
+
+**On Turso the queue is redundant by architecture.** A write commits to the local replica and the push loop delivers it to the cloud in the background, so the remote is never on the write path. Concurrency 10 measured *faster* than concurrency 1 in one run, which is only possible because the network is not in the measured path. persistum already solves the problem the queue was designed for, by a different route.
+
+**On PostgreSQL the network genuinely is on the write path**, which makes it the backend most likely to cross the threshold — and it still did not. One round trip measured 0.107ms on loopback; a write costs roughly two to three of them. Substituting a LAN round trip of 0.2–1ms puts a write at a few milliseconds. Reaching 50ms would need a round trip near 20ms, which is not a local network.
+
+PostgreSQL *can* exceed 50ms under a lock wait, a slow fsync, a vacuum storm or a failover. That argues against the queue rather than for it: in those conditions the queue would report success to the caller for a write that has not happened, converting backpressure into silent optimism. A lock wait is precisely when the caller should be told.
+
+#### What this means for the 0.1.24 write-queue fixes
+
+0.1.24 fixed a `_first_failure_time` leak and a silent `_flush` swallow in this module, and its release note said both were latent rather than live. They are now moot: the code they were in no longer exists. The seven silent-swallow fixes in 0.1.24 were in other modules and are unaffected.
+
+### Notes
+
+1187 tests pass, down from 1220 — the 33 removed tests covered only the deleted module.
+
 ## 0.1.24 — 2026-08-08
 
 ### Read this before assessing the write-queue fixes
