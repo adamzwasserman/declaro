@@ -321,8 +321,17 @@ async def _recover_orphaned_tmp_tables(pool: Any) -> int:
                 logger.info(
                     f"Cleared schema hash after recovering {recovered} orphaned table(s)"
                 )
-            except Exception:
-                pass  # Meta table might not exist yet
+            except Exception as exc:
+                # The meta table legitimately does not exist on a fresh
+                # database. Anything else here means the stale schema hash
+                # survived, so the next start will believe the schema is
+                # current when it is not -- worth seeing rather than hiding.
+                logger.warning(
+                    "Could not clear the schema hash after recovering %d "
+                    "orphaned table(s): %s. If the meta table exists, the next "
+                    "start may skip a migration it should have run.",
+                    recovered, exc,
+                )
 
     return recovered
 

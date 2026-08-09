@@ -815,8 +815,18 @@ class TursoPool(BasePool):
                     await self._push_once()
                     try:
                         await self._write_holder.pull()
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        # Not fatal: the local replica keeps the state it has
+                        # and the next pull retries. But a refresh that never
+                        # pulled has connections that cannot see remote DDL,
+                        # which is the exact confusion this refresh exists to
+                        # resolve, so it must not be invisible.
+                        logger.warning(
+                            "Pull from remote failed during connection refresh: "
+                            "%s. The local replica keeps its current state and "
+                            "may not yet see remote schema changes.",
+                            exc,
+                        )
                     await self._enable_replica_fk_enforcement()
 
             # Close every idle connection now. Any connection currently in

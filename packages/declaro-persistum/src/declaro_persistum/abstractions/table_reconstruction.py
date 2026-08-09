@@ -138,8 +138,17 @@ async def reconstruct_table(
             try:
                 if fk_enabled:
                     await connection.execute("PRAGMA foreign_keys = ON")
-            except Exception:
-                pass
+            except Exception as fk_exc:
+                # The original failure is about to be re-raised, but this one
+                # leaves the connection enforcing nothing. A caller that
+                # catches the reconstruction error and carries on would write
+                # against unchecked constraints and never know.
+                logger.error(
+                    "Could not re-enable foreign keys after the failed "
+                    "reconstruction of '%s': %s. THIS CONNECTION NOW HAS "
+                    "FOREIGN KEY ENFORCEMENT OFF.",
+                    table_name, fk_exc,
+                )
         raise
 
 

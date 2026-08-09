@@ -265,7 +265,14 @@ class WriteQueue:
                         ):
                             self._quarantine(key, self._queue[key])
                             return False
-                    self._check_critical_threshold(key, entry, exc)
+                        # Only track a key that is still queued. This call
+                        # inserts into _first_failure_time, and the only two
+                        # places that pop it (remove_entry, _quarantine) have
+                        # already run if the entry left the queue during the
+                        # awaits above -- a concurrent _flush success is the
+                        # live path. Tracking it here would strand the key
+                        # permanently, since the loop below then exits.
+                        self._check_critical_threshold(key, entry, exc)
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2.0, 60.0)
         return True
@@ -320,8 +327,30 @@ class WriteQueue:
                 duration_ms = (time.monotonic() - t0) * 1000
                 record_execution(self._pool, entry["sql"], duration_ms, success=True)
                 self.remove_entry(entry["table"], entry["pk_value"])
-            except Exception:
-                pass
+            except Exception as exc:
+                duration_ms = (time.monotonic() - t0) * 1000
+                record_execution(
+                    self._pool, entry["sql"], duration_ms, success=False, error=str(exc)
+                )
+                # This is the last drain before shutdown. Swallowing it silently
+                # is how a write disappears with nothing in the log to say so.
+                # With no persistence path the entry does not survive this
+                # process, so the two cases get different severities.
+                if self._persistence_path is None:
+                    logger.critical(
+                        "WRITE_QUEUE_LOST: entry %s for %s:%s failed the shutdown "
+                        "flush and no persistence path is configured, so this "
+                        "write is gone. Error: %s",
+                        entry["entry_id"], entry["table"], entry["pk_value"], exc,
+                    )
+                else:
+                    logger.error(
+                        "WRITE_QUEUE_FLUSH_FAILED: entry %s for %s:%s failed the "
+                        "shutdown flush; it stays queued in %s and will be retried "
+                        "on next start. Error: %s",
+                        entry["entry_id"], entry["table"], entry["pk_value"],
+                        self._persistence_path, exc,
+                    )
         self._persist_to_disk()
 
 
