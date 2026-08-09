@@ -91,13 +91,21 @@ def format_row(label: str, s: dict) -> str:
 # --- measurement ------------------------------------------------------------
 
 
-async def time_raw_write(pool, n: int) -> float:
-    """Consumer-visible cost of one raw write, in milliseconds."""
+async def time_raw_write(pool, n: int, sql: str, splat: bool) -> float:
+    """Consumer-visible cost of one raw write, in milliseconds.
+
+    Two dialect differences, both of which produce a 100% failure rate if
+    you get them wrong: asyncpg takes $1/$2 where SQLite and Turso take ?,
+    and asyncpg takes its arguments splatted where the others take a tuple.
+    """
+    acquire = getattr(pool, "acquire_write", pool.acquire)
+    params = (str(uuid.uuid4()), n)
     t0 = time.perf_counter()
-    async with pool.acquire_write() as conn:
-        await conn.execute(
-            "INSERT INTO spike (id, n) VALUES (?, ?)", (str(uuid.uuid4()), n)
-        )
+    async with acquire() as conn:
+        if splat:
+            await conn.execute(sql, *params)
+        else:
+            await conn.execute(sql, params)
     return (time.perf_counter() - t0) * 1000.0
 
 
@@ -108,32 +116,64 @@ async def time_orm_write(rows, n: int) -> float:
     return (time.perf_counter() - t0) * 1000.0
 
 
-async def run_level(writer, workers: int, total: int) -> tuple[list[float], int]:
-    """Drive `total` writes across `workers` concurrent tasks."""
+async def run_level(writer, workers: int, total: int) -> tuple[list[float], int, str]:
+    """Drive `total` writes across `workers` concurrent tasks.
+
+    Returns the first failure's text as well as the count. A harness that
+    counts failures without ever showing one reports a wall of zeroes and
+    calls it a measurement -- which is the same silent-failure fault this
+    package spent a release removing.
+    """
     samples: list[float] = []
     failures = 0
+    first_error = ""
     per_worker = max(1, total // workers)
 
     async def worker(index: int) -> None:
-        nonlocal failures
+        nonlocal failures, first_error
         for i in range(per_worker):
             try:
                 samples.append(await writer(index * 10_000 + i))
-            except Exception:
+            except Exception as exc:
                 failures += 1
+                if not first_error:
+                    first_error = f"{type(exc).__name__}: {exc}"
 
     await asyncio.gather(*(worker(w) for w in range(workers)))
-    return samples, failures
+    return samples, failures, first_error
+
+
+async def measure_round_trip(pool, samples: int = 200) -> float:
+    """Median cost of one trivial round trip, in ms.
+
+    For PostgreSQL this is the network+protocol floor: a write cannot cost
+    less than this, and on a LAN it grows by the extra RTT. It is what lets
+    a loopback measurement be extrapolated to a real network.
+    """
+    times = []
+    async with pool.acquire() as conn:
+        for _ in range(samples):
+            t0 = time.perf_counter()
+            await conn.execute("SELECT 1")
+            times.append((time.perf_counter() - t0) * 1000.0)
+    return statistics.median(times)
 
 
 async def main() -> int:
     remote = os.environ.get("TURSO_DATABASE_URL") or os.environ.get("TURSO_URL")
     token = os.environ.get("TURSO_AUTH_TOKEN")
+    pg = os.environ.get("SPIKE_POSTGRES_URL")
 
     tmp = tempfile.mkdtemp(prefix="spike-")
     db = str(Path(tmp) / "spike.db")
 
-    if remote:
+    if pg:
+        print(f"target: PostgreSQL ({pg.split('@')[-1][:50]})")
+        print("NOTE: every write here is a synchronous round trip to the server.")
+        print("      There is no local replica and no background push, so unlike")
+        print("      Turso the network IS on the write path.")
+        pool = await ConnectionPool.postgresql(pg, max_size=max(CONCURRENCY) + 2)
+    elif remote:
         print(f"target: Turso Cloud replica ({remote.split('//')[-1][:40]})")
         pool = await ConnectionPool.turso(db, remote_url=remote, auth_token=token,
                                           max_size=max(CONCURRENCY))
@@ -144,10 +184,20 @@ async def main() -> int:
         print("         and TURSO_AUTH_TOKEN to get the deciding number.")
         pool = await ConnectionPool.turso(db, max_size=max(CONCURRENCY))
 
-    async with pool.acquire_write(concurrent=False) as conn:
-        await conn.execute(
-            "CREATE TABLE IF NOT EXISTS spike (id TEXT PRIMARY KEY, n INTEGER)"
-        )
+    if pg:
+        async with pool.acquire() as conn:
+            await conn.execute("DROP TABLE IF EXISTS spike")
+            await conn.execute(
+                "CREATE TABLE spike (id TEXT PRIMARY KEY, n INTEGER)"
+            )
+        rtt = await measure_round_trip(pool)
+        print(f"\none round trip (SELECT 1), median: {rtt:.3f}ms")
+        print(f"add (LAN_RTT - {rtt:.3f}ms) per round trip to extrapolate off-box.")
+    else:
+        async with pool.acquire_write(concurrent=False) as conn:
+            await conn.execute(
+                "CREATE TABLE IF NOT EXISTS spike (id TEXT PRIMARY KEY, n INTEGER)"
+            )
 
     rows = table("spike", SCHEMA, pool)
 
@@ -156,34 +206,54 @@ async def main() -> int:
 
     verdict_rows: list[tuple[int, str, dict]] = []
 
+    raw_sql = (
+        "INSERT INTO spike (id, n) VALUES ($1, $2)"
+        if pg
+        else "INSERT INTO spike (id, n) VALUES (?, ?)"
+    )
+
     for workers in CONCURRENCY:
         print(f"concurrency {workers}:")
-        raw_s, raw_f = await run_level(
-            lambda n: time_raw_write(pool, n), workers, WRITES_PER_LEVEL
+        raw_s, raw_f, raw_err = await run_level(
+            lambda n: time_raw_write(pool, n, raw_sql, bool(pg)), workers, WRITES_PER_LEVEL
         )
         raw = summarize(raw_s, raw_f)
         print(format_row("raw", raw))
+        if raw_err:
+            print(f"                 first failure: {raw_err[:110]}")
         verdict_rows.append((workers, "raw", raw))
 
-        orm_s, orm_f = await run_level(
+        orm_s, orm_f, orm_err = await run_level(
             lambda n: time_orm_write(rows, n), workers, WRITES_PER_LEVEL
         )
         orm = summarize(orm_s, orm_f)
         print(format_row("orm", orm))
+        if orm_err:
+            print(f"                 first failure: {orm_err[:110]}")
         verdict_rows.append((workers, "orm", orm))
+
+    if pg:
+        async with pool.acquire() as conn:
+            await conn.execute("DROP TABLE IF EXISTS spike")
 
     await pool.close()
 
     print("\n--- what this says about the write queue ---")
-    worst = max(verdict_rows, key=lambda r: r[2]["pct_over"])
-    total_over = sum(r[2]["over_threshold"] for r in verdict_rows)
-    total_n = sum(r[2]["n"] for r in verdict_rows)
+    usable = [r for r in verdict_rows if r[2]["n"]]
+    if not usable:
+        print("every write failed; there is no latency to report")
+        return 1
+    worst = max(usable, key=lambda r: r[2]["pct_over"])
+    total_over = sum(r[2]["over_threshold"] for r in usable)
+    total_n = sum(r[2]["n"] for r in usable)
     print(f"writes over {THRESHOLD_MS:.0f}ms overall: {total_over}/{total_n} "
           f"({100.0 * total_over / total_n:.1f}%)")
     print(f"worst case: concurrency {worst[0]} {worst[1]} path, "
           f"{worst[2]['pct_over']:.1f}% over threshold, p99 {worst[2]['p99']:.1f}ms")
-    if not remote:
+    if not remote and not pg:
         print("\nLOCAL RUN — not the deciding number. Re-run against a real remote.")
+    if pg:
+        print("\nLOOPBACK PostgreSQL. A LAN adds its RTT per round trip on top.")
     return 0
 
 
