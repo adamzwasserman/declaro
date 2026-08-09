@@ -12,7 +12,7 @@ All notable changes to `declaro-persistum` are recorded here.
 
 The two write-queue defects below are real, and the regression tests prove them. **They are latent, not live.** They cannot occur in a consumer today, because both require a queued write to exist. Setting `persistence_path` changes nothing at present, and `WRITE_QUEUE_LOST` / `WRITE_QUEUE_FLUSH_FAILED` cannot fire. This note exists because the first version of these release notes described the leak as an operational concern without establishing that any consumer could reach it.
 
-The six silent-swallow fixes further down are **not** affected by this. Those sit on live paths.
+The seven silent-swallow fixes further down are **not** affected by this. Those sit on live paths.
 
 ### Bug fixes
 
@@ -26,9 +26,9 @@ The six silent-swallow fixes further down are **not** affected by this. Those si
 
   Failures now log per row, and the two cases are distinguished: `CRITICAL` (`WRITE_QUEUE_LOST`) when no persistence path is set and the write is unrecoverable, `ERROR` (`WRITE_QUEUE_FLUSH_FAILED`) when the entry stays queued on disk and the next start will retry it. Both name the entry, the table and the primary key.
 
-- **Six further silent exception swallows across the package now report.** None of them change control flow; each one previously discarded a failure with no record. The two that matter most re-enable foreign keys after a failed table reconstruction (`abstractions/reconstruction.py`, `abstractions/table_reconstruction.py`, `applier/turso.py`): if that `PRAGMA` itself failed, the connection was left with **foreign key enforcement off** and the original error was re-raised over the top of it. A caller that caught the reconstruction error and continued would write against constraints nobody was checking, and had no way to find out. That case now logs at `ERROR`.
+- **Seven further silent exception swallows across the package now report.** None of them change control flow; each one previously discarded a failure with no record. The three that matter most re-enable foreign keys after a failed table reconstruction (`abstractions/reconstruction.py`, `abstractions/table_reconstruction.py`, `applier/turso.py`): if that `PRAGMA` itself failed, the connection was left with **foreign key enforcement off** and the original error was re-raised over the top of it. A caller that caught the reconstruction error and continued would write against constraints nobody was checking, and had no way to find out. That case now logs at `ERROR`.
 
-  The others: a pull failure during `refresh_connections` (the connections then cannot see remote DDL, which is exactly what the refresh exists to fix), a failure to clear the schema hash after orphaned-table recovery (a stale hash makes the next start skip a migration it should run), and a user instrumentation callback raising inside the log handler.
+  The other four: a failed `rollback` after a failed DDL operation (`applier/turso.py`, which can leave a transaction open), a pull failure during `refresh_connections` (the connections then cannot see remote DDL, which is exactly what the refresh exists to fix), a failure to clear the schema hash after orphaned-table recovery (a stale hash makes the next start skip a migration it should run), and a user instrumentation callback raising inside the log handler.
 
 ### Notes
 
