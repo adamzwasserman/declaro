@@ -235,7 +235,12 @@ class TursoAsyncCursor:
     """
 
     def __init__(self, rows: list[Any], description: Any, rowcount: int) -> None:
-        self._rows = rows
+        # Stored immutably. The rows are read after construction and never
+        # changed, so a tuple states that in the type rather than leaving a
+        # mutable list that any holder of this cursor could rewrite under a
+        # reader mid-iteration. Bounded state is what makes this class
+        # exhaustively testable.
+        self._rows: tuple[Any, ...] = tuple(rows)
         self._description = description
         self._rowcount = rowcount
         self._position = 0
@@ -250,13 +255,13 @@ class TursoAsyncCursor:
 
     async def fetchall(self) -> list[Any]:
         """Fetch all remaining rows."""
-        rows = self._rows[self._position :]
+        rows = list(self._rows[self._position :])
         self._position = len(self._rows)
         return rows
 
     async def fetchmany(self, size: int = 1) -> list[Any]:
         """Fetch many rows."""
-        rows = self._rows[self._position : self._position + size]
+        rows = list(self._rows[self._position : self._position + size])
         self._position += len(rows)
         return rows
 
@@ -2186,7 +2191,9 @@ class MirrorCursor:
 
     def __init__(self, cursor: Any | None, prefetched_rows: list | None) -> None:
         self._cursor = cursor
-        self._rows = prefetched_rows or []
+        # Immutable for the same reason as TursoAsyncCursor above: assigned
+        # once, read thereafter, never rewritten.
+        self._rows: tuple[Any, ...] = tuple(prefetched_rows or ())
         self._position = 0
 
     async def fetchone(self) -> Any:
@@ -2209,7 +2216,7 @@ class MirrorCursor:
             if asyncio.iscoroutine(result):
                 return await result
             return result
-        rows = self._rows[self._position :]
+        rows = list(self._rows[self._position :])
         self._position = len(self._rows)
         return rows
 
@@ -2220,7 +2227,7 @@ class MirrorCursor:
             if asyncio.iscoroutine(result):
                 return await result
             return result
-        rows = self._rows[self._position : self._position + size]
+        rows = list(self._rows[self._position : self._position + size])
         self._position += len(rows)
         return rows
 
