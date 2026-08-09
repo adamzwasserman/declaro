@@ -4,13 +4,23 @@ All notable changes to `declaro-persistum` are recorded here.
 
 ## 0.1.24 — 2026-08-08
 
+### Read this before assessing the write-queue fixes
+
+**The write queue currently has no producer.** Nothing in this package calls `WriteQueue.enqueue` — the only callers anywhere are its own tests. `threshold_ms`, and the "writes slower than the threshold are queued and the caller returns immediately" behaviour its module docstring describes, is stored at `write_queue.py:72` and never read. `pool._write_queue` is only assigned and then checked so `stop_supervisor()` can run at close; no read path and no write path consults it. `merge_pending_into_results` has no callers.
+
+`configure_write_queue()` therefore starts a supervisor that drains a queue nothing fills. It is Phase 3 infrastructure that was never connected (see the comment at `pool.py:286`).
+
+The two write-queue defects below are real, and the regression tests prove them. **They are latent, not live.** They cannot occur in a consumer today, because both require a queued write to exist. Setting `persistence_path` changes nothing at present, and `WRITE_QUEUE_LOST` / `WRITE_QUEUE_FLUSH_FAILED` cannot fire. This note exists because the first version of these release notes described the leak as an operational concern without establishing that any consumer could reach it.
+
+The six silent-swallow fixes further down are **not** affected by this. Those sit on live paths.
+
 ### Bug fixes
 
 - **The write queue leaked one entry per raced row, for the lifetime of the process.** `_check_critical_threshold` ran in the retry loop's exception handler *outside* the `if key in self._queue` guard. If the entry left the queue while the write was awaiting, both places that remove the key — `remove_entry` and `_quarantine` — had already run, and the threshold check then re-inserted it. The retry loop exited immediately afterwards on `while key in self._queue`, so nothing removed that key ever again.
 
   The race is reachable in normal operation: `_flush` and the supervisor's retry tasks drain the same queue, and a write attempt awaits three times between the queue check and the exception handler. A regression test drives 25 raced rows and leaked 25 of 25 before the fix.
 
-  This is bookkeeping only. No write was lost and no row was written twice. The cost was memory that grew with the number of raced writes and never came back.
+  This is bookkeeping only. No write was lost and no row was written twice. The cost was memory that grew with the number of raced writes and never came back — and see the note at the top of this release: with no producer for the queue, no consumer reaches this path today.
 
 - **A failed shutdown flush is no longer silent.** `_flush` is the last drain before the process ends, and it caught every exception with a bare `except: pass`. When it failed and no `persistence_path` was configured, the pending write did not survive the process and nothing appeared in the log to say so.
 
