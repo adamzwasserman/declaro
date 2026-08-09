@@ -1,48 +1,49 @@
 # Declaro
 
-[![PyPI version](https://img.shields.io/pypi/v/declaro.svg)](https://pypi.org/project/declaro/) [![Python versions](https://img.shields.io/pypi/pyversions/declaro.svg)](https://pypi.org/project/declaro/)
+[![PyPI version](https://img.shields.io/pypi/v/declaro-persistum.svg)](https://pypi.org/project/declaro-persistum/) [![Python versions](https://img.shields.io/pypi/pyversions/declaro-persistum.svg)](https://pypi.org/project/declaro-persistum/)
 
 > **Note:** Declaro is available on PyPI as early-access software. The APIs are still unstable and under active development, so pin your version and expect breaking changes before 1.0. Not yet recommended for production.
 
-**The Functional Python Stack**
+**You declare what you want. The library works out how.**
 
-## Install
-
-```bash
-pip install declaro
-```
-
-> Pure functions. Typed data. No class magic.
+That is what the name means, and it is the first principle of everything here. You describe the state you want — a schema, a query, a type — and the tools derive the steps. You do not write the steps.
 
 ## Vision
 
-Declaro is a collection of tools for developers who believe:
+Declaro is built on three commitments, in this order.
 
-- **Data is just data** - Dicts and TypedDicts, not objects with hidden state
-- **Functions transform data** - Pure functions with no side effects
-- **Types should be explicit** - Declared upfront, enforced everywhere
-- **Testing should be trivial** - Same input, same output, always
+**1. Declarative.** You declare outcomes, not procedures. You never hand-write a migration: you edit your models to say what the schema should be, and the library reads the live database and derives the operations. You describe the rows you want rather than assembling SQL. Anything that pushes you back into writing procedures is a defect, however convenient it looks.
+
+**2. One surface over many backends.** A single API spans PostgreSQL, SQLite and Turso, so changing database is a change of configuration rather than a refactor — SQLite in development, PostgreSQL in production, Turso at the edge, without touching your code. Where a database lacks a capability, the difference is absorbed by the library rather than reaching your application.
+
+**3. Tools that survive a team.** Migrations that do not collide when two people branch. Errors that say what is wrong rather than where it threw. Behaviour that a second developer can predict from the code in front of them.
+
+The functional style — data as dicts and TypedDicts, pure functions, explicit types, no hidden state — is how these are achieved and how they stay testable. It is the discipline, not the goal.
 
 ## Packages
 
 | Package | Description | Status |
 | ------- | ----------- | ------ |
-| `declaro-persistum` | Schema-first database toolkit | In development |
-| `declaro-ximinez` | Type enforcement with memorable errors | In development |
-| `declaro-observe` | Event sourcing observability | Pre-alpha |
+| `declaro-persistum` | Declarative database toolkit — schema, migrations, queries, pooling | Published, in active use |
+| `declaro-ximinez` | Type enforcement with memorable errors | In development, not yet released |
+| `declaro-observe` | Event sourcing observability | Pre-alpha, not yet released |
 | `declaro-api` | FastAPI integration | Planned |
 
-## Installation
+Only `declaro-persistum` is on PyPI today. The others are in this repository but not yet published.
+
+## Install
 
 ```bash
-# Install everything
-pip install declaro[all]
-
-# Or pick what you need
 pip install declaro-persistum
-pip install declaro-ximinez
-pip install declaro-api
+
+# with a database driver
+pip install "declaro-persistum[postgresql]"
+pip install "declaro-persistum[sqlite]"
+pip install "declaro-persistum[turso]"
+pip install "declaro-persistum[all]"
 ```
+
+The `declaro` meta-package exists on PyPI as a placeholder and does not yet install the stack. Install the package you want directly.
 
 ## Philosophy
 
@@ -65,40 +66,46 @@ def validate_user(user: dict) -> list[Error]:
 Declaro takes its cues from the “banana, monkey, jungle” problem: libraries should not plant bananas in the environment and then ask you to babysit them. State is owned by the caller; caches in the core are limited to pools and prepared statements, not query results. If you require application‑specific caching strategies, put them in a sibling package such as tablix or handle them yourself. This keeps the persistence façade lean and predictable.
 ### Getting started
 
-Use `declaro-persistum` below as an example; the other packages follow the same pattern.
-
 ```bash
-# install the core persistence toolkit
-pip install declaro-persistum[all]
+pip install "declaro-persistum[sqlite]"
 ```
-
-A longer quick‑start walkthrough lives in [docs/quickstart.md](docs/quickstart.md).
 
 ```python
 from uuid import uuid4
 from declaro_persistum import ConnectionPool
 from declaro_persistum.query import table
 
-# create an SQLite pool (later you can switch to Postgres/Turso without changing this code)
+# The schema is data — a dict describing your tables. In a real project you
+# declare it as Pydantic models and load it with load_schema().
+schema = {
+    "users": {
+        "columns": {
+            "id": {"type": "text", "primary_key": True},
+            "name": {"type": "text", "nullable": True},
+        },
+        "primary_key": ["id"],
+        "indexes": {},
+    }
+}
+
+# Switching to PostgreSQL or Turso later changes this line and nothing else.
 pool = await ConnectionPool.sqlite("./data.db")
 
-users = table("users")
-
 async with pool.acquire() as conn:
-    # make sure your schema exists
     await conn.execute("CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT)")
     await conn.commit()
 
-    # simple insert
-    await users.insert(id=str(uuid4()), name="alice").execute(conn)
-    # select rows
-    rows = await users.select().execute(conn)
-    print(rows)
+# The pool is bound at table creation, so queries take no connection.
+users = table("users", schema, pool)
+
+await users.insert(id=str(uuid4()), name="alice").execute()
+rows = await users.select().execute()
+print(rows)   # [{'id': '...', 'name': 'alice'}]
 
 await pool.close()
 ```
 
-you can find a more complete quick start in `packages/declaro-persistum/README.md`.
+A fuller quick start lives in [`packages/declaro-persistum/README.md`](packages/declaro-persistum/README.md), including declaring your schema as models and letting the diff engine derive migrations from it.
 
 ## Manifesto & Additional Reading
 
