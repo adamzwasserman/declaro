@@ -165,7 +165,11 @@ def setup_callable_sink(logger: logging.Logger, fn: Any) -> None:
                 data = json.loads(record.getMessage())
                 fn(data)
             except Exception:
-                pass
+                # A handler must not raise into the logging call that reached
+                # it, but a caller whose callback is failing must not be left
+                # with no signal at all. handleError is the route that does
+                # not recurse back through logging.
+                self.handleError(record)
 
     handler = _CallableHandler()
     logger.addHandler(handler)

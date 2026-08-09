@@ -140,13 +140,25 @@ class TursoApplier:
             except Exception as e:
                 try:
                     await connection.rollback()
-                except Exception:
-                    pass
+                except Exception as rollback_exc:
+                    logger.warning(
+                        "Rollback failed after '%s' failed: %s. The connection "
+                        "may still hold an open transaction.",
+                        op_desc, rollback_exc,
+                    )
                 if is_reconstruction:
                     try:
                         await connection.execute("PRAGMA foreign_keys = ON")
-                    except Exception:
-                        pass
+                    except Exception as fk_exc:
+                        # Leaving FK enforcement off silently is worse than the
+                        # original failure: later writes would be accepted
+                        # against constraints nobody is checking.
+                        logger.error(
+                            "Could not re-enable foreign keys after '%s' "
+                            "failed: %s. THIS CONNECTION NOW HAS FOREIGN KEY "
+                            "ENFORCEMENT OFF.",
+                            op_desc, fk_exc,
+                        )
                 # Reconstruction failures are catastrophic (orphaned tables) —
                 # never skip them. Only skip non-reconstruction ops.
                 if is_reconstruction:
