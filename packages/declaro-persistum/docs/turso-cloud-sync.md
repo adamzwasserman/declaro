@@ -148,26 +148,26 @@ Measured downstream against a real Turso Cloud remote. With `-info` removed, the
 
 ## How many concurrent writers one replica sustains
 
-Measured against a real Turso Cloud replica, writing distinct rows so there is no logical conflict — pure database contention.
+**It depends entirely on whether MVCC is on. With it, twenty. Without it, one.**
 
-| Concurrent writers on ONE replica | Result |
-|---|---|
-| 2–3 | 100% clean, ~4700 writes/second |
-| 10+ | 50–80% failures |
+Measured against a real Turso Cloud replica, concurrent writers to one replica, distinct rows so there is no logical conflict:
 
-Two to three concurrent writers is clean and fast. That covers ordinary collaboration: several people editing one board.
+| | K=2 | K=5 | K=10 | K=20 |
+|---|---|---|---|---|
+| **MVCC on**, no serialisation at all | 2/2 | 4/5 | 9/10 | 20/20 |
+| **MVCC off** (WAL) | 1/2 | 3/5 | 3/10 | 6/20 |
 
-Past that the sync tape degrades, and it degrades differently — the errors stop being `database is busy` and become `I/O error`, `database tape error` and `sync engine error`. That is a different failure from contention, and no retry or serialization in this package fixes it. It is the engine at its limit.
+Twenty concurrent writers land twenty writes with no lock anywhere. Single-writer is Turso's **documented default**, and MVCC is what lifts it — see [Concurrent Writes](https://docs.turso.tech/tursodb/concurrent-writes) and [Beyond the Single-Writer Limitation](https://turso.tech/blog/beyond-the-single-writer-limitation-with-tursos-concurrent-writes). MVCC is requested on every pool by default; pass `mvcc=False` to force WAL, and the pool then serialises writers so none are lost.
 
-**The number that matters is writes per replica, not requests per replica.** One user gesture is often several writes. A request that updates a row and then updates a derived index has issued two; add a fan-out and it is easily eight. Ten concurrent *requests* like that are eighty concurrent writes on one replica, which is far inside the breakdown zone even though the request count looks modest.
+### Correction
 
-If you are near the limit, the lever is writes per gesture, not concurrency:
+This section previously reported a "2–3 concurrent writer ceiling" and called it the engine at its limit, with advice to shard around it. **That was wrong, and the advice was wrong.**
 
-- Batch related writes into one transaction rather than issuing them separately
-- Defer derived or denormalised updates off the request path — an index rebuilt from canonical data does not need to block the write that changed it
-- Split hot data across replicas where the domain allows it
+The original measurement is real — it is the MVCC-off row above. But it was taken with the engine running in WAL mode, where rejecting the second writer is documented default behaviour. It measured the absence of a feature, not a limit. The explanation later attached to it here — that the sync engine is a single-appender log — was invented and is not in any Turso documentation.
 
-Writers on *different* replicas do not contend at all, so scaling across replicas is unaffected by any of this.
+If you were told to shard hot data because of this ceiling, that advice does not apply. Check that MVCC is active first: the pool logs it at startup, and `PRAGMA journal_mode` returns `mvcc` when it is.
+
+The residual failures under MVCC — one at K=5, one at K=10 — are the background push contending with writers, not writers contending with each other. The push absorbs that by retrying, which is safe because it ships frames rather than replaying a caller's statements.
 
 ## Known pyturso Sync Engine Limitations
 

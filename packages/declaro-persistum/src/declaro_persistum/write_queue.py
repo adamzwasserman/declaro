@@ -4,14 +4,19 @@ The WAL is already the queue. A write is durable once it is in the log, and
 the engine applies it to the main file later. That is what a write-ahead log
 is for, and it is why a local commit takes under a millisecond.
 
-A log has one appender. That is what makes it a log. So the only job left is
-to absorb callers who arrive at the same instant and hand them to the log one
-at a time. That is all this module does.
+So the only job left is to buffer callers who arrive at the same instant and
+hand their writes to the log in order. That is all this module does.
+
+It is NOT a claim that the engine takes one writer. Turso supports concurrent
+writers through MVCC and BEGIN CONCURRENT, and the pool still opens a write
+connection per concurrent caller. This buffers callers; it does not serialise
+the database.
 
 Nothing is stored here. The room is empty except during the microseconds when
 callers overlap. There is no persistence, because nothing sits in it; no
-retry, because one appender has nothing to contend with; and no pending list
-surviving a failure, because every write has a caller holding its ticket.
+retry, because a real error -- a constraint violation -- fails again and
+belongs to its caller; and no pending list surviving a failure, because every
+write has a caller holding its ticket.
 
     ticket = deposit(room, write)      # returns at once
     ...                                # the caller is free
@@ -21,6 +26,15 @@ surviving a failure, because every write has a caller holding its ticket.
 so a caller can deposit several writes, keep working, and collect when it
 actually needs the answer. That is the difference between this and a lock: a
 lock makes you wait at the moment of writing.
+
+The ticket is also how a caller designs its own atomicity. A transaction is
+a boundary the library imposes -- everything inside it, all or nothing.
+Tickets put that choice with the caller, who draws the boundary by choosing
+when to collect: deposit three and collect all three, or collect the first
+before depositing the one that depends on it, or deposit three and collect
+only the one it actually needs. Failure is per ticket too, so a caller can
+retry one write and carry on with the rest instead of losing work that was
+independently fine.
 
 The appender is `drain`, and the caller runs it. This module never starts a
 task of its own::
@@ -95,8 +109,8 @@ async def drain(
     """Append every waiting write to the log, in arrival order.
 
     One at a time: the next write starts only after the previous one
-    returns, because the log has one appender. Returns how many were
-    appended.
+    returns, so the order the caller deposited in is the order the log
+    receives. Returns how many were appended.
 
     A failure is not retried and does not stop the queue. It belongs to the
     caller that deposited it, and it goes back down that caller's ticket.

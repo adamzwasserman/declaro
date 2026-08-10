@@ -591,8 +591,9 @@ class TursoPool(BasePool):
         # Connections marked stale by a migration. Disposed of on release
         # rather than reused, so no caller waits for a refresh.
         self._stale_holders: set[_TursoConnectionHolder] = set()
-        # The push runs on its own sync connection, so a cloud round trip
-        # never blocks a write. See _push_once.
+        # Kept only so an older caller reading it does not crash. The push
+        # has no connection of its own; it uses the write connection and
+        # takes its turn. See _push_once.
         self._push_holder: _TursoConnectionHolder | None = None
         # Initial-sync state. The event is created in _initialize, on the
         # running loop, rather than here — a pool may be constructed outside
@@ -998,27 +999,43 @@ class TursoPool(BasePool):
                 holder.conn = None
 
     def _write_serialisation(self) -> Any:
-        """One writer at a time on a cloud replica; unrestricted locally.
+        """Serialise writers only when MVCC is not active.
 
-        The sync tape takes a single writer per replica and rejects the
-        second from inside its write statement. A local-only database has
-        no tape and no such limit, so it is left alone.
+        Measured against a real Turso Cloud replica, concurrent writers to
+        one replica, distinct rows so there is no logical conflict:
+
+                        K=2    K=5    K=10   K=20
+            MVCC on     2/2    4/5    9/10   20/20    (with this lock removed)
+            MVCC off    1/2    3/5    3/10   6/20
+
+        With MVCC the lock changes nothing: twenty concurrent writers land
+        twenty writes without it. Without MVCC, single-writer is Turso's
+        documented default and the second writer is rejected — so the lock
+        is what keeps those writes from being lost.
+
+        0.1.22 added this lock unconditionally, on a measurement taken in
+        WAL mode. That measurement is the MVCC-off row above: real, but a
+        measurement of the engine running without the feature rather than a
+        limit of the engine. `mvcc=True` is the default and the engine has
+        the last word; this covers the case where it says no.
+
+        See https://docs.turso.tech/tursodb/concurrent-writes
         """
-        if self._remote_url:
+        if self._remote_url and not getattr(self, "_mvcc", False):
             return self._replica_write_lock
         return contextlib.nullcontext()
 
     @staticmethod
     def _is_busy(error: Exception) -> bool:
-        """True when an error means 'not now' rather than 'no'.
+        """True when an error means "not now" rather than "no".
 
-        Turso surfaces contention two ways: plain SQLITE_BUSY, and the sync
-        engine's own "database tape error: database is busy" when two
-        connections write to one replica at once. Both mean the write did
-        not happen and can be attempted again.
+        The documented retryable set is Error::Busy, Error::BusySnapshot and
+        anything reporting a conflict — a commit-time row conflict under
+        BEGIN CONCURRENT. The sync engine also wraps contention as
+        "database tape error: database is busy".
         """
         text = str(error).lower()
-        return "busy" in text or "sqlite_busy" in text
+        return "busy" in text or "sqlite_busy" in text or "conflict" in text
 
     async def _retry_while_busy(self, operation: Any, what: str) -> Any:
         """Run a transaction-boundary operation, absorbing contention.
@@ -1154,86 +1171,42 @@ class TursoPool(BasePool):
             except Exception:
                 logger.debug("Could not enable FK enforcement on write connection")
 
-    async def _open_push_connection(self) -> None:
-        """Open the dedicated push connection, once, during initialization.
-
-        The push runs on its own sync connection so it never takes
-        _conn_lock, and so a write never waits for a cloud round trip. A push
-        on a separate connection to the same local replica does deliver the
-        frames committed on the write connection: verified under free-threaded
-        CPython with the GIL off — 1353 writes on one connection, 40 pushes on
-        another, and a fresh third connection pulled all 1353 rows back from
-        cloud.
-
-        Opened here rather than lazily in _push_once, so that a remote which
-        cannot be reached costs one failed connect at startup instead of one
-        on every push cycle forever. On failure the pool keeps pushing on the
-        write connection: slower, because it blocks writes for each round
-        trip, but still delivering.
-        """
-        if not self._remote_url:
-            return
-        try:
-            holder = _TursoConnectionHolder(
-                self._database_path, self._remote_url, self._auth_token
-            )
-            await holder.connect_async()
-            self._push_holder = holder
-        except Exception as e:
-            self._push_holder = None
-            logger.warning(
-                "Could not open a dedicated push connection (%s); pushing on the "
-                "write connection instead, which blocks writes for the duration "
-                "of each round trip",
-                e,
-            )
-
     async def _push_once(self) -> bool:
-        """Push pending frames to cloud, recording the outcome.
+        """Ship pending frames to cloud on the write connection, in turn.
 
-        Does not hold _conn_lock. The push has its own connection, so writes
-        and reads proceed while a round trip is in flight.
+        The push used to hold a sync connection of its own so a write never
+        waited for a cloud round trip. It no longer does: nothing is waiting
+        on the push, so it can queue behind writes like anything else, and
+        one fewer connection is one fewer thing writing to the replica.
+
+        This does NOT rest on any claim that the sync engine takes a single
+        writer. Turso supports concurrent writers through MVCC and
+        BEGIN CONCURRENT, and `Error::Busy` at commit is a documented,
+        retryable conflict signal rather than evidence of a broken shape.
+        See docs/turso-cloud-sync.md.
 
         There is deliberately no per-push delivery check. One was written and
-        removed, and the reason is worth keeping so it is not rebuilt the
-        same way.
-
-        It compared the replica's sync revision either side of each push and
-        warned if the revision had not moved while writes were pending. The
-        revision is read from the push connection, and pushing another
-        connection's frames does not advance that connection's own revision,
-        so it fired on essentially every push that had pending writes. Two
-        downstream runs measured it: 1002 warnings in a capacity test, and 32
-        in a 66-second soak where an independent oracle confirmed all 2541
-        writes were delivered. It never once indicated real loss.
-
-        A warning that fires on nearly every operation is worse than no
-        warning, because it teaches everyone to ignore warnings. The signal
-        was chosen without verifying what it measures.
-
-        The only signal found so far that provably tracks delivery is
-        reading the rows back from the primary on a fresh connection, which
-        is far too expensive to run per push. Until such a signal exists,
-        push failures are surfaced by _record_push_failure, last_push_error
-        and the push-failure callback, which report what actually happened
-        rather than inferring it.
+        removed: it compared the replica's sync revision either side of each
+        push, and fired on essentially every push that had pending writes.
+        Two downstream runs measured it -- 1002 warnings in a capacity test,
+        and 32 in a 66-second soak where an independent oracle confirmed all
+        2541 writes were delivered. It never once indicated real loss. Push
+        failures are surfaced by _record_push_failure, last_push_error and
+        the push-failure callback, which report what happened rather than
+        inferring it.
         """
         if not self._remote_url:
             return True
 
-        if self._push_holder is None:
-            # Retry opening the dedicated push connection rather than
-            # borrowing the write connection. Borrowing meant taking
-            # _conn_lock across a cloud round trip, which stalls every write
-            # for its duration — the exact cost this pool exists to keep away
-            # from callers. A push deferred to the next cycle costs latency
-            # to the cloud; a push on the write connection costs the caller.
-            await self._open_push_connection()
-            if self._push_holder is None:
-                return False
+        if self._write_holder is None or self._write_holder.conn is None:
+            return False
 
+        # The push contends with writers on the replica, and it is the one
+        # operation this pool can safely retry: it ships frames, so there
+        # are no caller statements to replay. Contention is absorbed here
+        # rather than serialised away, so no writer waits on a round trip.
         try:
-            await self._push_holder.push()
+            await self._retry_while_busy(self._write_holder.push, "push")
         except Exception as e:
             self._record_push_failure(e)
             return False
@@ -1424,15 +1397,6 @@ class TursoPool(BasePool):
                 delay = min(self._push_retry_base_s * (2 ** attempt), 30.0)
                 logger.warning("Final push attempt %d failed, retrying in %.1fs", attempt, delay)
                 await asyncio.sleep(delay)
-        # The push connection closes after the final push above has used it.
-        if self._push_holder is not None and self._push_holder.conn is not None:
-            try:
-                await self._push_holder.conn.close()
-            except Exception:
-                logger.debug("Push connection already closed")
-            self._push_holder.conn = None
-        self._push_holder = None
-
         # Read connections hold no unpushed state, so they close after the
         # final push rather than before it.
         for reader in self._read_holders:

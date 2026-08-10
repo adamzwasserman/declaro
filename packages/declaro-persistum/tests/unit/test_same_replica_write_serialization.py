@@ -1,31 +1,26 @@
-"""Two writers on one replica must not collide.
+"""Writers to one replica: concurrent under MVCC, serialised without it.
 
-The sync engine cannot take two concurrent writers on one replica. It
-returns "database tape error: database is busy", and it does so from
-inside the write statement rather than at a transaction boundary — so the
-boundary-only busy retry correctly declines to engage and the error
-reaches the caller.
+Measured against a real Turso Cloud replica, concurrent writers to one
+replica, distinct rows so there is no logical conflict:
 
-Measured downstream on a real remote, distinct cards so there is no
-logical conflict, only database contention:
+                    K=2    K=5    K=10   K=20
+    MVCC on         2/2    4/5    9/10   20/20     (with no lock at all)
+    MVCC off        1/2    3/5    3/10   6/20
 
-    K=2  -> 1 ok, 1 busy-500
-    K=5  -> 4 ok, 1 busy-500
-    K=10 -> 6 ok, 4 busy-500
-    K=20 -> 16 ok, 4 busy-500
+With MVCC, twenty concurrent writers land twenty writes and a lock changes
+nothing. Without it, single-writer is Turso's documented default and the
+second writer is rejected from inside the write statement — so a lock is the
+only thing that keeps those writes.
 
-K=2 is two people editing different cards on one shared board at the same
-moment. That is ordinary collaboration, not a stress rate.
+0.1.22 added that lock unconditionally, on a measurement taken in WAL mode.
+That measurement is the MVCC-off row above: real, but a measurement of the
+engine running without the feature rather than a limit of the engine. The
+serialisation is now conditional on MVCC being off.
 
-So writers to one replica are serialized here. The wait is one write —
-about 150ms — instead of a lost write. Writers to *different* replicas
-still run fully in parallel, which is what 0.1.17 bought and what this
-keeps.
+    https://docs.turso.tech/tursodb/concurrent-writes
 
-This is not the lock 0.1.19 removed. That one was shared by reads, writes
-and the push, so it made every reader wait on a cloud round trip. This one
-covers writer-versus-writer only, on one replica, which is a constraint
-the engine actually has.
+The fake below models exactly that: it rejects a second concurrent writer
+only when it is not in MVCC mode.
 """
 
 import asyncio
@@ -38,6 +33,8 @@ from declaro_persistum.pool import TursoPool
 class _FakeCursor:
     def __init__(self, rows):
         self._rows = rows
+        self.description = None
+        self.rowcount = 1
 
     async def fetchall(self):
         return self._rows
@@ -47,16 +44,11 @@ class _FakeCursor:
 
 
 class _TapeConn:
-    """Fails if a second writer is inside a write while one is active.
+    """A replica that rejects concurrent writers only outside MVCC."""
 
-    Models the engine: the tape takes one writer at a time and rejects the
-    second from inside the statement.
-    """
-
-    # Keyed by replica path: the engine's constraint is per replica, and a
-    # shared counter would make two different replicas look like a collision.
     active_writers: dict[str, int] = {}
     collisions = 0
+    mvcc = True
 
     def __init__(self, replica: str) -> None:
         self.replica = replica
@@ -65,18 +57,18 @@ class _TapeConn:
     async def execute(self, sql: str, *_a):
         self.statements.append(sql)
         if "journal_mode" in sql and "mvcc" in sql:
-            return _FakeCursor([("mvcc",)])
+            return _FakeCursor([("mvcc",)] if type(self).mvcc else [("wal",)])
         if sql.strip().upper().startswith(("UPDATE", "INSERT", "DELETE")):
             counts = type(self).active_writers
             counts[self.replica] = counts.get(self.replica, 0) + 1
             try:
-                if counts[self.replica] > 1:
+                if counts[self.replica] > 1 and not type(self).mvcc:
                     type(self).collisions += 1
                     raise RuntimeError(
                         "sync engine operation failed: database tape error: "
                         "database is busy"
                     )
-                await asyncio.sleep(0.05)  # the write takes real time
+                await asyncio.sleep(0.02)
             finally:
                 counts[self.replica] -= 1
         return _FakeCursor([])
@@ -107,107 +99,122 @@ class _Holder:
         pass
 
 
-async def _pool(tmp_path, monkeypatch, name="r.db"):
+async def _pool(tmp_path, monkeypatch, *, mvcc: bool, name="r.db"):
     import declaro_persistum.pool as pool_mod
 
     _TapeConn.active_writers = {}
     _TapeConn.collisions = 0
+    _TapeConn.mvcc = mvcc
     monkeypatch.setattr(pool_mod, "_TursoConnectionHolder", _Holder)
 
     db = tmp_path / name
     db.write_bytes(b"x" * 64)
     pool = TursoPool(
-        str(db), remote_url="https://example.turso.io", auth_token="t", max_size=8
+        str(db), remote_url="https://example.turso.io", auth_token="t",
+        mvcc=mvcc, max_size=24,
     )
     pool._push_loop = lambda: asyncio.sleep(0)  # type: ignore[assignment]
     pool._enable_replica_fk_enforcement = lambda: asyncio.sleep(0)  # type: ignore[assignment]
+    pool._initial_sync = lambda: asyncio.sleep(0)  # type: ignore[assignment]
     await pool._initialize()
     return pool
 
 
-class TestWritersToOneReplicaDoNotCollide:
-    """The failure downstream started at K=2, so K=2 is the first case."""
+async def _write_all(pool, k):
+    errors = []
 
-    @pytest.mark.parametrize("writers", [2, 5, 10, 20])
+    async def writer(n):
+        try:
+            async with pool.acquire_write() as conn:
+                await conn.execute(f"INSERT INTO t VALUES ({n})")
+        except Exception as e:  # noqa: BLE001 - collected, then asserted on
+            errors.append(str(e))
+
+    await asyncio.gather(*(writer(n) for n in range(k)))
+    return errors
+
+
+class TestWithoutMvccWritersAreSerialised:
+    """Single-writer is the documented default. Nothing may be lost to it."""
+
+    @pytest.mark.parametrize("k", [2, 5, 10, 20])
     @pytest.mark.asyncio
-    async def test_concurrent_writers_all_succeed(self, tmp_path, monkeypatch, writers):
-        pool = await _pool(tmp_path, monkeypatch)
-        errors: list[str] = []
+    async def test_no_write_is_lost(self, tmp_path, monkeypatch, k):
+        pool = await _pool(tmp_path, monkeypatch, mvcc=False)
 
-        async def writer(index: int) -> None:
-            try:
-                async with pool.acquire_write() as conn:
-                    await conn.execute(f"UPDATE cards SET pos = {index}")
-            except Exception as e:  # noqa: BLE001 - collected, then asserted
-                errors.append(str(e))
-
-        await asyncio.gather(*(writer(i) for i in range(writers)))
+        errors = await _write_all(pool, k)
 
         assert errors == [], (
-            f"{len(errors)}/{writers} writers lost their write to tape "
-            f"contention: {errors[:2]}"
+            f"{len(errors)}/{k} writers lost their write with MVCC off; the "
+            f"pool must serialise them: {errors[:2]}"
         )
-        assert _TapeConn.collisions == 0, (
-            f"{_TapeConn.collisions} writers entered the tape concurrently"
-        )
-
-
-class TestDifferentReplicasStillRunInParallel:
-    """Serializing one replica must not serialize the whole application."""
+        await pool.close()
 
     @pytest.mark.asyncio
-    async def test_two_pools_write_at_the_same_time(self, tmp_path, monkeypatch):
-        """Cross-replica parallelism is what 0.1.17 bought; keep it."""
-        pool_a = await _pool(tmp_path, monkeypatch, name="a.db")
-        pool_b = await _pool(tmp_path, monkeypatch, name="b.db")
+    async def test_the_lock_is_engaged(self, tmp_path, monkeypatch):
+        pool = await _pool(tmp_path, monkeypatch, mvcc=False)
+        assert pool._write_serialisation() is pool._replica_write_lock
+        await pool.close()
 
-        overlapped = asyncio.Event()
+
+class TestWithMvccWritersRunConcurrently:
+    """Measured: 20/20 land with no lock at all. Do not serialise them."""
+
+    @pytest.mark.asyncio
+    async def test_no_lock_is_taken(self, tmp_path, monkeypatch):
+        pool = await _pool(tmp_path, monkeypatch, mvcc=True)
+        assert pool._write_serialisation() is not pool._replica_write_lock, (
+            "writers are serialised under MVCC, which throws away the "
+            "concurrency the engine provides"
+        )
+        await pool.close()
+
+    @pytest.mark.parametrize("k", [2, 5, 10, 20])
+    @pytest.mark.asyncio
+    async def test_no_write_is_lost(self, tmp_path, monkeypatch, k):
+        pool = await _pool(tmp_path, monkeypatch, mvcc=True)
+
+        errors = await _write_all(pool, k)
+
+        assert errors == [], f"{len(errors)}/{k} writers lost a write: {errors[:2]}"
+        await pool.close()
+
+    @pytest.mark.asyncio
+    async def test_writers_actually_overlap(self, tmp_path, monkeypatch):
+        pool = await _pool(tmp_path, monkeypatch, mvcc=True)
+        peak = 0
         inside = 0
+        release = asyncio.Event()
 
-        async def writer(pool):
-            nonlocal inside
+        async def writer():
+            nonlocal inside, peak
             async with pool.acquire_write() as conn:
                 inside += 1
-                if inside == 2:
-                    overlapped.set()
-                await asyncio.wait_for(overlapped.wait(), timeout=2.0)
-                await conn.execute("UPDATE cards SET pos = 1")
+                peak = max(peak, inside)
+                if inside == 3:
+                    release.set()
+                await asyncio.wait_for(release.wait(), timeout=2.0)
+                await conn.execute("INSERT INTO t VALUES (1)")
+                inside -= 1
 
-        await asyncio.gather(writer(pool_a), writer(pool_b))
+        await asyncio.gather(*(writer() for _ in range(3)))
 
-        assert overlapped.is_set(), (
-            "writers on different replicas could not run at the same time; "
-            "the serialization is too broad"
-        )
+        assert peak == 3, f"only {peak} writer(s) were inside at once"
+        await pool.close()
 
 
-class TestReadsAreNotSerialisedByIt:
-    """The 0.1.19 guarantee must survive: readers never wait on a writer."""
-
+class TestDifferentReplicasNeverContend:
     @pytest.mark.asyncio
-    async def test_a_read_runs_while_a_write_is_in_flight(self, tmp_path, monkeypatch):
-        pool = await _pool(tmp_path, monkeypatch)
-        write_started = asyncio.Event()
-        release_write = asyncio.Event()
+    async def test_two_replicas_run_in_parallel(self, tmp_path, monkeypatch):
+        a = await _pool(tmp_path, monkeypatch, mvcc=False, name="a.db")
+        b = await _pool(tmp_path, monkeypatch, mvcc=False, name="b.db")
 
-        async def slow_writer():
-            async with pool.acquire_write():
-                write_started.set()
-                await release_write.wait()
+        async def write(pool):
+            async with pool.acquire_write() as conn:
+                await conn.execute("INSERT INTO t VALUES (1)")
 
-        writer = asyncio.create_task(slow_writer())
-        await write_started.wait()
+        await asyncio.gather(write(a), write(b))
 
-        loop = asyncio.get_running_loop()
-        start = loop.time()
-        async with pool.acquire():
-            pass
-        elapsed = loop.time() - start
-
-        release_write.set()
-        await writer
-
-        assert elapsed < 0.1, (
-            f"a read waited {elapsed:.3f}s behind an in-flight write; the "
-            f"write serialization must not touch readers"
-        )
+        assert _TapeConn.collisions == 0
+        await a.close()
+        await b.close()

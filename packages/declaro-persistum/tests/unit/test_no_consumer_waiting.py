@@ -249,9 +249,12 @@ class TestNoLockAndNoCapExist:
 
         await pool._push_once()
 
-        assert pool._push_holder is not None, "push did not open its own connection"
-        assert pool._push_holder.conn is not write_conn, (
-            "the push borrowed the write connection"
+        assert pool._push_holder is None, (
+            "the push opened a connection of its own; it uses the write "
+            "connection and absorbs contention by retrying"
+        )
+        assert write_conn is not None, (
+            "the push should have gone out on the write connection"
         )
 
 
@@ -307,5 +310,6 @@ class TestPoolOpenPaysOneHandshake:
 
         await pool._push_once()
 
-        assert pool._push_holder is not None
-        assert pool._push_holder is not pool._write_holder
+        assert pool._push_holder is None, (
+            "the push no longer keeps a connection of its own"
+        )

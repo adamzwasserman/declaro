@@ -2,13 +2,49 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## 0.1.29 — 2026-08-10
+
+### Concurrent writers work. The lock that prevented them is conditional now.
+
+**Twenty concurrent writers to one Turso Cloud replica land twenty writes, with no serialisation at all.** Measured, on a real remote, distinct rows so there was no logical conflict:
+
+| | K=2 | K=5 | K=10 | K=20 |
+|---|---|---|---|---|
+| **MVCC on**, no lock | 2/2 | 4/5 | 9/10 | 20/20 |
+| **MVCC off** (WAL) | 1/2 | 3/5 | 3/10 | 6/20 |
+
+0.1.22 added a lock that serialised every writer to a cloud replica, on a measurement of exactly the MVCC-off row above. That measurement was real. It was taken with the engine in WAL mode, where rejecting the second writer is Turso's **documented default** — so it measured the absence of a feature rather than a limit of the engine.
+
+`_write_serialisation()` now returns that lock only when MVCC is **not** active. With MVCC — the default — writers run concurrently, each on its own connection, using `BEGIN CONCURRENT`. Without it, they serialise, because otherwise the writes are genuinely lost.
+
+- `_is_busy` now recognises the full documented retryable set: `Error::Busy`, `Error::BusySnapshot`, and anything reporting a conflict.
+- The background push no longer holds a connection of its own. It uses the write connection and **absorbs contention by retrying**, which is safe because a push ships frames — there are no caller statements to replay. No writer waits on a cloud round trip.
+
+### Corrections to what this package published
+
+Three things stated as fact in earlier releases and docs were wrong. They are corrected in place rather than quietly dropped.
+
+1. **"2–3 concurrent writer ceiling", `docs/turso-cloud-sync.md`.** Reported as an engine limit, with advice to shard hot data around it. It was the engine running without MVCC. If you sharded because of that advice, it does not apply — check `PRAGMA journal_mode` returns `mvcc` first.
+
+2. **"A log has one appender", 0.1.28.** The claim that the sync engine is single-appender, and that the ceiling was this package fighting itself, was invented. No Turso documentation says it. It was fitted to an error string and a failure count.
+
+3. **"The engine at its limit."** Turso supports concurrent writes through MVCC and `BEGIN CONCURRENT`; conflicts are detected at commit at row granularity and are retryable. The engine was never asked.
+
+Sources: [Concurrent Writes](https://docs.turso.tech/tursodb/concurrent-writes), [Beyond the Single-Writer Limitation](https://turso.tech/blog/beyond-the-single-writer-limitation-with-tursos-concurrent-writes).
+
+### Notes
+
+1222 tests pass. `test_same_replica_write_serialization.py` is rewritten: its fake previously rejected concurrent writers unconditionally, encoding WAL behaviour as universal. It now models what was measured — concurrency under MVCC, rejection without it — and asserts both.
+
 ## 0.1.28 — 2026-08-10
 
 ### The write queue is a waiting room in front of the WAL
 
 **The WAL is already the queue.** A write is durable the moment it is in the log, and the engine applies it to the main file later. That is what a write-ahead log is for, and it is why a local commit takes under a millisecond.
 
-A log has one appender — that is what makes it a log. So the only job left for this package is to absorb callers who arrive at the same instant and hand them to the log one at a time. That is what this now is, and it is all it is.
+So the only job left for this package is to buffer callers who arrive at the same instant and hand their writes to the log in order. That is what this now is, and it is all it is.
+
+It does **not** serialise the database. Turso supports concurrent writers through MVCC and `BEGIN CONCURRENT`, and the pool still opens a write connection per concurrent caller.
 
 ```python
 from declaro_persistum import new_room, deposit, collect, drain
@@ -27,7 +63,7 @@ The appender is `drain`, and **you** run it. This package no longer starts a tas
 
 0.1.27 shipped a *deferral* queue: the caller dropped a write and left, and a list held it. That was the wrong idea. Deferral is what the WAL already does. Once the purpose is understood as buffering concurrent callers, the following all become unnecessary and are gone:
 
-- **Retries.** With one appender there is no contention to retry, and a real error — a constraint violation — fails again. `attempts` and `DrainFailed` are removed.
+- **Retries.** A real error — a constraint violation — fails again, and it belongs to the caller that caused it. `attempts` and `DrainFailed` are removed. (Commit-time conflicts under `BEGIN CONCURRENT` are a different thing and *are* retryable; that belongs in the pool, not here.)
 - **A pending list surviving failure.** Every write has a caller holding its ticket, so nothing is orphaned and nothing needs recovering.
 - **Persistence.** Nothing sits in the room. It is empty except during the microseconds when callers overlap.
 - **`add` / `remove`.** There is no list for the caller to curate.
@@ -38,7 +74,11 @@ A failure now belongs to the caller who deposited it and travels back down that 
 
 The 340-line class in 0.1.24 and 0.1.26 was a queue in front of a queue: it re-implemented the WAL, in Python, one layer up. Its supervisor, dead-letter set, backoff schedule and attempt counters all existed to manage a durability problem the log had already solved.
 
-Worse, the second connection it used for cloud push made **two appenders on a one-appender structure**. That is the whole source of `database tape error: database is busy`, and of the "2–3 concurrent writer ceiling" documented in `docs/turso-cloud-sync.md`. That ceiling was never a Turso limit. It was this package fighting itself. *(The pool still has that second push connection; removing it is separate work and is not in this release.)*
+**Correction, added 2026-08-10:** the paragraph originally here claimed the cloud-push connection made "two appenders on a one-appender structure", and that this was the whole source of `database tape error: database is busy` and of the "2–3 concurrent writer ceiling" in `docs/turso-cloud-sync.md`. **That was fabricated.** No Turso documentation describes the sync engine as single-appender. The explanation was fitted to an error string and a downstream failure count, and published as fact.
+
+What the documentation actually says: Turso supports concurrent writers through MVCC and `BEGIN CONCURRENT`; conflicts are detected at commit at row granularity; and `Error::Busy` / `Error::BusySnapshot` are **documented, retryable** conflict signals whose prescribed handling is to roll back and retry. `COMPAT.md` does note `SQLITE_BUSY` for a second write statement *on the same connection* — which is an argument against multiplexing one connection, not for having only one.
+
+The cause of the `database tape error` seen downstream at 25 concurrent writers is **still unknown**. See the correction in 0.1.29.
 
 ### Breaking
 

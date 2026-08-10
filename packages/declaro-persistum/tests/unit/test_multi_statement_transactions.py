@@ -229,7 +229,11 @@ class TestOutsideATransactionNothingChanges:
             await asyncio.sleep(0.01)
             async with pool.acquire_write() as c:
                 await c.execute("UPDATE b SET x = 2")
-            inside_saw.append(pool._write_holder.conn.commits)
+            # With MVCC the outside write gets its own connection, so count
+            # commits across every write connection rather than writer zero.
+            inside_saw.append(
+                sum(c.commits for c in _Holder.conns if c is not None)
+            )
 
         await asyncio.gather(in_transaction(), outside())
 

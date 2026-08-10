@@ -1,9 +1,12 @@
 """The queue is a waiting room in front of the WAL.
 
 A WAL is already the queue: a write is durable once it is in the log, and
-the engine applies it later. A log has one appender — that is what makes it
-a log. So the only job left is to absorb callers who arrive at the same
-instant, and hand them to the log one at a time.
+the engine applies it later. So the only job left is to buffer callers who
+arrive at the same instant and hand them to the log in order.
+
+This does not serialise the database. Turso supports concurrent writers
+through MVCC and BEGIN CONCURRENT, and the pool still opens a write
+connection per concurrent caller.
 
 Nothing is stored here. The room is empty except during the microseconds
 when callers overlap.
@@ -54,7 +57,7 @@ class TestDepositReturnsATicketAtOnce:
         assert len(executed) == 1
 
 
-class TestOneAppender:
+class TestArrivalOrderIsKept:
     @pytest.mark.asyncio
     async def test_writes_reach_the_log_in_deposit_order(self):
         room = new_room()
@@ -71,7 +74,7 @@ class TestOneAppender:
 
     @pytest.mark.asyncio
     async def test_writes_never_overlap(self):
-        """A log has one appender. Two must never be inside execute at once."""
+        """The room hands writes over one at a time, in arrival order."""
         room = new_room()
         events = []
 

@@ -663,7 +663,9 @@ When `configure_instrumentation()` has not been called, `pool._latency_logger` i
 
 The WAL is already the queue. A write is durable once it is in the log, and the engine applies it to the main file later — which is why a local commit takes under a millisecond.
 
-A log has one appender. That is what makes it a log. So the only job left is to absorb callers who arrive at the same instant and hand them to the log one at a time. That is all this is: a waiting room.
+So the only job left is to buffer callers who arrive at the same instant and hand their writes to the log in order. That is all this is: a waiting room.
+
+It does **not** serialise the database. Turso supports concurrent writers through MVCC and `BEGIN CONCURRENT`, and the pool still opens a write connection per concurrent caller. The room buffers callers; the engine still writes them concurrently.
 
 Nothing is stored in it. It is empty except during the microseconds when callers overlap. There is no persistence, no retry, and no pending list that survives a failure.
 
@@ -712,7 +714,7 @@ if not receipt["ok"]:
     logger.error("write %s failed: %s", receipt["id"], receipt["error"])
 ```
 
-It is not retried, because with one appender there is no contention to retry, and a real error — a constraint violation — will fail again. One caller's failure does not affect any other caller's write.
+It is not retried, because a real error — a constraint violation — will fail again, and it belongs to the caller that caused it. One caller's failure does not affect any other caller's write.
 
 ## Programmatic Usage
 
