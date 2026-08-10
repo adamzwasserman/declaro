@@ -41,7 +41,15 @@ from declaro_persistum.exceptions import (  # noqa: I001 - must follow __version
     TransferError,
 )
 from declaro_persistum.instrumentation import LatencyRecord
-from declaro_persistum.write_queue import DrainFailed, PendingWrite, add, drain, remove
+from declaro_persistum.write_queue import (
+    PendingWrite,
+    Receipt,
+    Room,
+    collect,
+    deposit,
+    drain,
+    new_room,
+)
 from declaro_persistum.pool import ConnectionPool, MirrorPool, SyncConnectionPool, TursoCloudManager
 from declaro_persistum.types import (
     Ambiguity,
@@ -119,12 +127,14 @@ __all__ = [
     "TransferError",
     # Instrumentation
     "LatencyRecord",
-    # Write queue — a list of writes that have not happened yet
+    # Write queue — a waiting room in front of the WAL
     "PendingWrite",
-    "DrainFailed",
-    "add",
+    "Receipt",
+    "Room",
+    "new_room",
+    "deposit",
+    "collect",
     "drain",
-    "remove",
     # Query hooks
     "PreHook",
     "PostHook",

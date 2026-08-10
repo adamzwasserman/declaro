@@ -1,106 +1,116 @@
-"""A queue is a list of writes that have not happened yet.
+"""A waiting room in front of the WAL.
 
-That is the whole idea, and everything here follows from it.
+The WAL is already the queue. A write is durable once it is in the log, and
+the engine applies it to the main file later. That is what a write-ahead log
+is for, and it is why a local commit takes under a millisecond.
 
-The queue is a tuple of ``PendingWrite`` dicts. ``add`` and ``remove`` are
-pure functions over that tuple. ``drain`` walks it, calls the write function
-you give it, and hands back what is still outstanding. There is no class, no
-hidden state, no background task, and no clock.
+A log has one appender. That is what makes it a log. So the only job left is
+to absorb callers who arrive at the same instant and hand them to the log one
+at a time. That is all this module does.
 
-The caller holds the list::
+Nothing is stored here. The room is empty except during the microseconds when
+callers overlap. There is no persistence, because nothing sits in it; no
+retry, because one appender has nothing to contend with; and no pending list
+surviving a failure, because every write has a caller holding its ticket.
 
-    pending = add(pending, {"key": "users:1", "sql": ..., "params": ...})
-    ...
-    pending = await drain(pending, execute, attempts=3)
+    ticket = deposit(room, write)      # returns at once
+    ...                                # the caller is free
+    receipt = await collect(room, ticket)
 
-The write function is an argument, so this module never touches a pool, a
-connection or a database. That also means it is tested with plain functions
-rather than mocks.
+`deposit` hands back a ticket immediately and `collect` awaits that ticket,
+so a caller can deposit several writes, keep working, and collect when it
+actually needs the answer. That is the difference between this and a lock: a
+lock makes you wait at the moment of writing.
 
-Two consequences worth stating, because the previous implementation of this
-idea got both wrong:
+The appender is `drain`, and the caller runs it. This module never starts a
+task of its own::
 
-* A queue nobody drains is visible in the caller's own code, because the
-  caller runs the loop. It cannot sit empty and unnoticed inside an object.
-* A ``PendingWrite`` is a dict of JSON-native values, so persisting the queue
-  is ``json.dumps(list(pending))``. No function here is needed for it, and
-  none is provided.
+    async def appender():
+        while True:
+            await drain(room, execute)
+            await asyncio.sleep(0)
 """
 
+import asyncio
+import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any, TypedDict
 
 
 class PendingWrite(TypedDict):
-    """One write that has not happened yet."""
+    """One write on its way to the log."""
 
-    key: str        # the caller's name for this write; used to remove it
     sql: str
     params: Any
 
 
-class DrainFailed(Exception):
-    """A write did not land after every attempt.
+class Receipt(TypedDict):
+    """The answer to one deposited write."""
 
-    Carries the writes that are still outstanding. A bare raise would lose
-    the queue, and the caller needs it back to try again later. Writes that
-    already landed are not in ``pending``, so retrying cannot re-apply them.
+    id: str      # the ticket returned by deposit
+    ok: bool
+    error: str   # empty when ok
+
+
+class Room(TypedDict):
+    """Callers waiting for their turn at the log.
+
+    `writes` is the arrival order. `waiting` maps a ticket to the caller
+    awaiting it. Both are empty whenever no caller is mid-flight.
     """
 
-    def __init__(
-        self,
-        pending: tuple[PendingWrite, ...],
-        write: PendingWrite,
-        attempts: int,
-    ) -> None:
-        self.pending = pending
-        self.write = write
-        self.attempts = attempts
-        super().__init__(
-            f"write {write['key']!r} did not land after {attempts} attempt(s); "
-            f"{len(pending)} write(s) still pending"
-        )
+    writes: list[tuple[str, PendingWrite]]
+    waiting: dict[str, asyncio.Future]
 
 
-def add(
-    pending: tuple[PendingWrite, ...], write: PendingWrite
-) -> tuple[PendingWrite, ...]:
-    """Return the list with one more write on the end.
+def new_room() -> Room:
+    """An empty waiting room."""
+    return {"writes": [], "waiting": {}}
 
-    Two writes to the same row both stay. They both happened, and applying
-    only the last would lose one.
+
+def deposit(room: Room, write: PendingWrite) -> str:
+    """Put a write in the room and return its ticket at once.
+
+    Nothing is executed here. Call from inside the event loop.
     """
-    return (*pending, write)
+    ticket = str(uuid.uuid4())
+    room["writes"].append((ticket, write))
+    room["waiting"][ticket] = asyncio.get_running_loop().create_future()
+    return ticket
 
 
-def remove(pending: tuple[PendingWrite, ...], key: str) -> tuple[PendingWrite, ...]:
-    """Return the list without the writes under this key."""
-    return tuple(w for w in pending if w["key"] != key)
+async def collect(room: Room, ticket: str) -> Receipt:
+    """Wait for one deposited write and return its receipt.
+
+    The ticket is dropped once collected, so the room does not grow.
+    """
+    receipt = await room["waiting"][ticket]
+    room["waiting"].pop(ticket, None)
+    return receipt
 
 
 async def drain(
-    pending: tuple[PendingWrite, ...],
-    execute: Callable[[PendingWrite], Awaitable[Any]],
-    *,
-    attempts: int,
-) -> tuple[PendingWrite, ...]:
-    """Execute each write in turn and return what is still outstanding.
+    room: Room, execute: Callable[[PendingWrite], Awaitable[Any]]
+) -> int:
+    """Append every waiting write to the log, in arrival order.
 
-    ``execute`` returning is the signal that the write landed and the next
-    one can go. Nothing overlaps and nothing polls.
+    One at a time: the next write starts only after the previous one
+    returns, because the log has one appender. Returns how many were
+    appended.
 
-    A write that fails is tried ``attempts`` times, then ``DrainFailed`` is
-    raised with the outstanding writes attached. It is not removed, because
-    only success removes.
+    A failure is not retried and does not stop the queue. It belongs to the
+    caller that deposited it, and it goes back down that caller's ticket.
     """
-    for write in pending:
-        for attempt in range(attempts):
-            try:
-                await execute(write)
-            except Exception as exc:
-                if attempt == attempts - 1:
-                    raise DrainFailed(pending, write, attempts) from exc
-            else:
-                pending = remove(pending, write["key"])
-                break
-    return pending
+    appended = 0
+    while room["writes"]:
+        ticket, write = room["writes"].pop(0)
+        try:
+            await execute(write)
+            receipt: Receipt = {"id": ticket, "ok": True, "error": ""}
+        except Exception as exc:
+            receipt = {"id": ticket, "ok": False, "error": str(exc)}
+        waiter = room["waiting"].get(ticket)
+        if waiter is not None and not waiter.done():
+            waiter.set_result(receipt)
+        appended += 1
+    return appended

@@ -661,64 +661,58 @@ When `configure_instrumentation()` has not been called, `pool._latency_logger` i
 
 ## Write Queue
 
-A queue is a list of writes that have not happened yet. That is all it is, and everything below follows from it.
+The WAL is already the queue. A write is durable once it is in the log, and the engine applies it to the main file later — which is why a local commit takes under a millisecond.
 
-`add` and `remove` are pure functions over a tuple of `PendingWrite` dicts. `drain` walks the list, calls the write function you give it, and returns what is still outstanding. There is no class, no hidden state, no background task and no clock.
+A log has one appender. That is what makes it a log. So the only job left is to absorb callers who arrive at the same instant and hand them to the log one at a time. That is all this is: a waiting room.
+
+Nothing is stored in it. It is empty except during the microseconds when callers overlap. There is no persistence, no retry, and no pending list that survives a failure.
 
 ```python
-from declaro_persistum import add, remove, drain, DrainFailed
+from declaro_persistum import new_room, deposit, collect, drain
 
-pending = ()
-pending = add(pending, {
-    "key": "users:1",
-    "sql": "INSERT INTO users (id, name) VALUES (?, ?)",
-    "params": (1, "ada"),
-})
+room = new_room()
+
+ticket = deposit(room, {"sql": "INSERT INTO users (id, name) VALUES (?, ?)",
+                        "params": (1, "ada")})
+# ... the caller is free here ...
+receipt = await collect(room, ticket)      # {"id": ticket, "ok": True, "error": ""}
 ```
 
-You hold the list, and you supply the function that does the writing. The queue never touches a pool or a connection:
+`deposit` returns a ticket immediately. `collect` awaits that ticket and gives back the same ticket with a success or failure code. That is what makes it asynchronous rather than a lock: a lock makes you wait at the moment of writing, whereas here you can deposit several writes, keep working, and collect when you actually need the answer.
+
+Deposit order is preserved, so a write that depends on an earlier one — a foreign key, say — is safe to deposit straight after it.
+
+### You run the appender
+
+The library never starts a task. `drain` appends everything waiting, one at a time, and you decide when it runs:
+
+```python
+async def appender():
+    while True:
+        await drain(room, execute)
+        await asyncio.sleep(0)
+```
+
+`execute` is your own write function, so the room never touches a pool or a connection:
 
 ```python
 async def execute(w):
     async with pool.acquire() as conn:
         await conn.execute(w["sql"], w["params"])
         await conn.commit()
-
-pending = await drain(pending, execute, attempts=3)
 ```
 
-`execute` returning is what releases the next write. Nothing overlaps and nothing polls.
+### Failure
 
-### When a write fails
-
-Each write is attempted `attempts` times. After the last one, `drain` raises `DrainFailed` — and the exception carries the writes that are still outstanding, so a raise never loses your queue:
+A failure belongs to the caller that deposited it and goes back down that caller's ticket:
 
 ```python
-try:
-    pending = await drain(pending, execute, attempts=3)
-except DrainFailed as failed:
-    pending = failed.pending      # retry these later
-    logger.error("write %s did not land", failed.write["key"])
+receipt = await collect(room, ticket)
+if not receipt["ok"]:
+    logger.error("write %s failed: %s", receipt["id"], receipt["error"])
 ```
 
-Writes that already landed are **not** in `failed.pending`, so draining again cannot apply them twice.
-
-Only success removes a write from the list. That single rule replaces attempt counters, dead-letter sets, backoff schedules and stuck-entry alarms: the list *is* the record of what is outstanding.
-
-### Persistence
-
-A `PendingWrite` is a dict of JSON-native values, so the queue is already data:
-
-```python
-Path("pending.json").write_text(json.dumps(list(pending)))
-pending = tuple(json.loads(Path("pending.json").read_text()))
-```
-
-No function is provided for this because none is needed.
-
-### Latency
-
-The queue costs essentially nothing — `add` and `remove` are tuple operations, against writes measured at 0.2–4ms. It does not change what a write costs, only *when* you drain. Drain before you respond and the caller waits for the write; drain afterwards and it does not.
+It is not retried, because with one appender there is no contention to retry, and a real error — a constraint violation — will fail again. One caller's failure does not affect any other caller's write.
 
 ## Programmatic Usage
 

@@ -1,200 +1,237 @@
-"""A queue is a list of writes that have not happened yet.
+"""The queue is a waiting room in front of the WAL.
 
-Everything here is a plain function over that list. There is no class, no
-hidden state, no background supervisor, and no clock. The caller holds the
-list and runs the loop, so a queue that is never drained is visible in the
-caller's own code rather than sitting empty inside an object nobody can see.
+A WAL is already the queue: a write is durable once it is in the log, and
+the engine applies it later. A log has one appender — that is what makes it
+a log. So the only job left is to absorb callers who arrive at the same
+instant, and hand them to the log one at a time.
 
-`drain` takes the write function as an argument, so these tests use plain
-recording functions. No mocks, no database, no pool.
+Nothing is stored here. The room is empty except during the microseconds
+when callers overlap.
+
+Deposit returns a ticket immediately. The caller awaits that ticket and gets
+back the same ticket with a success or failure code. That is what makes it
+asynchronous rather than a lock: a caller can deposit several writes, keep
+working, and collect when it actually needs the answer.
 """
+
+import asyncio
 
 import pytest
 
-from declaro_persistum.write_queue import DrainFailed, add, drain, remove
+from declaro_persistum.write_queue import collect, deposit, drain, new_room
 
 
-def _write(key: str, n: int = 0):
-    return {"key": key, "sql": f"INSERT INTO t VALUES ({n})", "params": (n,)}
+def _write(n: int):
+    return {"sql": f"INSERT INTO t VALUES ({n})", "params": (n,)}
 
 
-class TestAdd:
-    """add puts a write on the list and returns a new list."""
-
-    def test_add_returns_a_list_containing_the_write(self):
-        assert add((), _write("a")) == (_write("a"),)
-
-    def test_add_appends_in_order(self):
-        pending = add(add((), _write("a", 1)), _write("b", 2))
-        assert [w["key"] for w in pending] == ["a", "b"]
-
-    def test_add_does_not_mutate_the_original(self):
-        original = ()
-        add(original, _write("a"))
-        assert original == ()
-
-    def test_two_writes_to_the_same_row_both_stay(self):
-        """Both writes happened; applying only the last would lose one."""
-        pending = add(add((), _write("a", 1)), _write("a", 2))
-        assert len(pending) == 2
-
-
-class TestRemove:
-    """remove takes a write off the list and returns a new list."""
-
-    def test_remove_drops_the_matching_key(self):
-        pending = add(add((), _write("a")), _write("b"))
-        assert [w["key"] for w in remove(pending, "a")] == ["b"]
-
-    def test_remove_does_not_mutate_the_original(self):
-        pending = add((), _write("a"))
-        remove(pending, "a")
-        assert len(pending) == 1
-
-    def test_removing_an_absent_key_changes_nothing(self):
-        pending = add((), _write("a"))
-        assert remove(pending, "zzz") == pending
-
-    def test_remove_drops_every_entry_with_that_key(self):
-        pending = add(add((), _write("a", 1)), _write("a", 2))
-        assert remove(pending, "a") == ()
-
-
-class TestDrain:
-    """drain executes each write and removes the ones that land."""
+class TestDepositReturnsATicketAtOnce:
+    @pytest.mark.asyncio
+    async def test_deposit_returns_a_ticket(self):
+        room = new_room()
+        ticket = deposit(room, _write(1))
+        assert isinstance(ticket, str) and ticket
 
     @pytest.mark.asyncio
-    async def test_every_write_is_executed_in_order(self):
-        seen = []
+    async def test_every_ticket_is_different(self):
+        room = new_room()
+        tickets = {deposit(room, _write(n)) for n in range(5)}
+        assert len(tickets) == 5
+
+    @pytest.mark.asyncio
+    async def test_deposit_does_not_wait_for_the_write(self):
+        """Nothing has been executed yet -- the appender has not run."""
+        room = new_room()
+        executed = []
 
         async def execute(w):
-            seen.append(w["key"])
+            executed.append(w)
 
-        await drain(add(add((), _write("a")), _write("b")), execute, attempts=3)
-        assert seen == ["a", "b"]
+        deposit(room, _write(1))
+        assert executed == []
+
+        await drain(room, execute)
+        assert len(executed) == 1
+
+
+class TestOneAppender:
+    @pytest.mark.asyncio
+    async def test_writes_reach_the_log_in_deposit_order(self):
+        room = new_room()
+        order = []
+
+        async def execute(w):
+            order.append(w["params"][0])
+
+        for n in (1, 2, 3):
+            deposit(room, _write(n))
+        await drain(room, execute)
+
+        assert order == [1, 2, 3]
 
     @pytest.mark.asyncio
-    async def test_an_emptied_queue_comes_back_empty(self):
-        async def execute(_w):
-            return None
-
-        remaining = await drain(add((), _write("a")), execute, attempts=3)
-        assert remaining == ()
-
-    @pytest.mark.asyncio
-    async def test_the_next_write_waits_for_the_previous_return(self):
-        """The return value releases the next one. Nothing overlaps."""
+    async def test_writes_never_overlap(self):
+        """A log has one appender. Two must never be inside execute at once."""
+        room = new_room()
         events = []
 
         async def execute(w):
-            events.append(f"start {w['key']}")
-            events.append(f"end {w['key']}")
+            n = w["params"][0]
+            events.append(f"start {n}")
+            await asyncio.sleep(0)          # give the loop a chance to interleave
+            events.append(f"end {n}")
 
-        await drain(add(add((), _write("a")), _write("b")), execute, attempts=3)
-        assert events == ["start a", "end a", "start b", "end b"]
+        for n in (1, 2):
+            deposit(room, _write(n))
+        await drain(room, execute)
+
+        assert events == ["start 1", "end 1", "start 2", "end 2"]
 
     @pytest.mark.asyncio
-    async def test_draining_an_empty_queue_does_nothing(self):
+    async def test_draining_an_empty_room_does_nothing(self):
         async def execute(_w):
-            raise AssertionError("nothing to execute")
+            raise AssertionError("nothing to append")
 
-        assert await drain((), execute, attempts=3) == ()
+        assert await drain(new_room(), execute) == 0
 
 
-class TestRetry:
-    """Three attempts, then raise. The write stays on the list."""
+class TestCollect:
+    @pytest.mark.asyncio
+    async def test_collect_returns_the_same_ticket(self):
+        room = new_room()
+
+        async def execute(_w):
+            return None
+
+        ticket = deposit(room, _write(1))
+        await drain(room, execute)
+        receipt = await collect(room, ticket)
+
+        assert receipt["id"] == ticket
 
     @pytest.mark.asyncio
-    async def test_a_failing_write_is_attempted_three_times(self):
-        tries = []
+    async def test_a_write_that_landed_reports_success(self):
+        room = new_room()
+
+        async def execute(_w):
+            return None
+
+        ticket = deposit(room, _write(1))
+        await drain(room, execute)
+        receipt = await collect(room, ticket)
+
+        assert receipt["ok"] is True
+        assert receipt["error"] == ""
+
+    @pytest.mark.asyncio
+    async def test_the_caller_can_deposit_then_work_then_collect(self):
+        """Deposit, do something else, collect. The point of the ticket."""
+        room = new_room()
+
+        async def execute(_w):
+            return None
+
+        tickets = [deposit(room, _write(n)) for n in range(3)]
+        appended = asyncio.create_task(drain(room, execute))
+        await asyncio.sleep(0)              # the caller is free in the meantime
+        await appended
+
+        receipts = [await collect(room, t) for t in tickets]
+        assert [r["id"] for r in receipts] == tickets
+        assert all(r["ok"] for r in receipts)
+
+    @pytest.mark.asyncio
+    async def test_collect_waits_until_the_write_is_appended(self):
+        room = new_room()
+        ticket = deposit(room, _write(1))
+
+        async def execute(_w):
+            return None
+
+        collected = asyncio.create_task(collect(room, ticket))
+        await asyncio.sleep(0)
+        assert not collected.done(), "collect returned before the write was appended"
+
+        await drain(room, execute)
+        assert (await collected)["ok"] is True
+
+
+class TestFailureGoesBackToItsOwnCaller:
+    @pytest.mark.asyncio
+    async def test_a_failed_write_reports_failure(self):
+        room = new_room()
+
+        async def execute(_w):
+            raise RuntimeError("UNIQUE constraint failed")
+
+        ticket = deposit(room, _write(1))
+        await drain(room, execute)
+        receipt = await collect(room, ticket)
+
+        assert receipt["ok"] is False
+        assert "UNIQUE constraint failed" in receipt["error"]
+        assert receipt["id"] == ticket
+
+    @pytest.mark.asyncio
+    async def test_one_failure_does_not_affect_another_caller(self):
+        room = new_room()
 
         async def execute(w):
-            tries.append(w["key"])
-            raise RuntimeError("nope")
-
-        with pytest.raises(DrainFailed):
-            await drain(add((), _write("a")), execute, attempts=3)
-        assert tries == ["a", "a", "a"]
-
-    @pytest.mark.asyncio
-    async def test_a_write_that_succeeds_on_the_third_try_is_removed(self):
-        calls = {"n": 0}
-
-        async def execute(_w):
-            calls["n"] += 1
-            if calls["n"] < 3:
-                raise RuntimeError("not yet")
-
-        remaining = await drain(add((), _write("a")), execute, attempts=3)
-        assert calls["n"] == 3
-        assert remaining == ()
-
-    @pytest.mark.asyncio
-    async def test_the_failed_write_is_still_on_the_returned_list(self):
-        """A raise must not lose the queue -- the caller needs it back."""
-
-        async def execute(_w):
-            raise RuntimeError("nope")
-
-        with pytest.raises(DrainFailed) as caught:
-            await drain(add((), _write("a")), execute, attempts=3)
-        assert [w["key"] for w in caught.value.pending] == ["a"]
-
-    @pytest.mark.asyncio
-    async def test_writes_that_already_landed_are_not_on_the_returned_list(self):
-        """Only the unfinished work comes back, so a retry cannot double-apply."""
-
-        async def execute(w):
-            if w["key"] == "b":
+            if w["params"][0] == 2:
                 raise RuntimeError("nope")
 
-        with pytest.raises(DrainFailed) as caught:
-            await drain(add(add((), _write("a")), _write("b")), execute, attempts=3)
-        assert [w["key"] for w in caught.value.pending] == ["b"]
+        first = deposit(room, _write(1))
+        bad = deposit(room, _write(2))
+        third = deposit(room, _write(3))
+        await drain(room, execute)
+
+        assert (await collect(room, first))["ok"] is True
+        assert (await collect(room, bad))["ok"] is False
+        assert (await collect(room, third))["ok"] is True
 
     @pytest.mark.asyncio
-    async def test_the_original_error_is_the_cause(self):
-        original = RuntimeError("connection refused")
+    async def test_a_failed_write_is_not_retried(self):
+        """There is no contention to retry. A real error belongs to its caller."""
+        room = new_room()
+        attempts = []
 
         async def execute(_w):
-            raise original
-
-        with pytest.raises(DrainFailed) as caught:
-            await drain(add((), _write("a")), execute, attempts=3)
-        assert caught.value.__cause__ is original
-
-    @pytest.mark.asyncio
-    async def test_the_failed_write_is_named(self):
-        async def execute(_w):
+            attempts.append(1)
             raise RuntimeError("nope")
 
-        with pytest.raises(DrainFailed) as caught:
-            await drain(add((), _write("a")), execute, attempts=3)
-        assert caught.value.write["key"] == "a"
+        deposit(room, _write(1))
+        await drain(room, execute)
 
+        assert len(attempts) == 1
+
+
+class TestTheRoomStaysEmpty:
     @pytest.mark.asyncio
-    async def test_one_attempt_means_no_retry(self):
-        tries = []
+    async def test_nothing_is_left_after_a_drain_and_collect(self):
+        room = new_room()
 
         async def execute(_w):
-            tries.append(1)
-            raise RuntimeError("nope")
+            return None
 
-        with pytest.raises(DrainFailed):
-            await drain(add((), _write("a")), execute, attempts=1)
-        assert len(tries) == 1
+        ticket = deposit(room, _write(1))
+        await drain(room, execute)
+        await collect(room, ticket)
 
-
-class TestTheQueueIsJustData:
-    """No state, no clock, no I/O of its own."""
-
-    def test_a_pending_list_survives_json(self):
-        """Persistence needs no library function: the list is already data."""
-        import json
-
-        pending = add(add((), _write("a", 1)), _write("b", 2))
-        restored = tuple(
-            {**w, "params": tuple(w["params"])}
-            for w in json.loads(json.dumps(list(pending)))
+        assert room["writes"] == []
+        assert room["waiting"] == {}, (
+            f"the room kept something after the caller collected: {room['waiting']}"
         )
-        assert restored == pending
+
+    @pytest.mark.asyncio
+    async def test_a_failed_write_leaves_nothing_behind_either(self):
+        room = new_room()
+
+        async def execute(_w):
+            raise RuntimeError("nope")
+
+        ticket = deposit(room, _write(1))
+        await drain(room, execute)
+        await collect(room, ticket)
+
+        assert room["writes"] == []
+        assert room["waiting"] == {}

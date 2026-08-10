@@ -1,19 +1,19 @@
-"""A caller must be able to actually use the queue against a real database.
+"""A caller must be able to use the waiting room against a real database.
 
-This is the acceptance test, and it exists because of how the previous
-write queue failed. That one had 25 passing unit tests and was unreachable
-through the public API for five months, because every test called the
-internals directly with arguments no real caller supplied. Green tests
-reported a working feature that no consumer could invoke.
+This is the acceptance test, and it exists because of how the previous write
+queue failed: 25 passing tests, all calling internals with arguments no real
+caller supplied, and unreachable through the public API for five months.
 
-So this test uses only what a consumer uses: the exported functions, a real
-pool, and a real table. If the queue ever becomes unusable from outside,
-this fails.
+So this uses only exported names, a real pool and a real table — and it
+exercises the thing the room exists for, which is callers arriving at the
+same instant.
 """
+
+import asyncio
 
 import pytest
 
-from declaro_persistum import ConnectionPool, DrainFailed, add, drain, remove
+from declaro_persistum import ConnectionPool, collect, deposit, drain, new_room
 
 
 async def _pool(tmp_path, name="q.db"):
@@ -24,8 +24,8 @@ async def _pool(tmp_path, name="q.db"):
     return pool
 
 
-def _writer(pool):
-    """The caller's own write function. The queue never sees the pool."""
+def _appender(pool):
+    """The caller's own write function. The room never sees the pool."""
 
     async def execute(w):
         async with pool.acquire() as conn:
@@ -35,105 +35,107 @@ def _writer(pool):
     return execute
 
 
-async def _names(pool):
+async def _rows(pool):
     async with pool.acquire() as conn:
-        cursor = await conn.execute("SELECT name FROM users ORDER BY id")
-        return [row[0] for row in await cursor.fetchall()]
+        cursor = await conn.execute("SELECT id, name FROM users ORDER BY id")
+        return await cursor.fetchall()
 
 
-class TestAConsumerCanQueueAndDrain:
+INSERT = "INSERT INTO users (id, name) VALUES (?, ?)"
+
+
+class TestDepositCollect:
     @pytest.mark.asyncio
-    async def test_queued_writes_reach_the_database(self, tmp_path):
+    async def test_a_deposited_write_reaches_the_database(self, tmp_path):
         pool = await _pool(tmp_path)
+        room = new_room()
 
-        pending = ()
-        pending = add(pending, {
-            "key": "users:1",
-            "sql": "INSERT INTO users (id, name) VALUES (?, ?)",
-            "params": (1, "ada"),
-        })
-        pending = add(pending, {
-            "key": "users:2",
-            "sql": "INSERT INTO users (id, name) VALUES (?, ?)",
-            "params": (2, "grace"),
-        })
+        ticket = deposit(room, {"sql": INSERT, "params": (1, "ada")})
+        assert await _rows(pool) == [], "nothing should be written before the drain"
 
-        assert await _names(pool) == [], "nothing should be written before the drain"
+        await drain(room, _appender(pool))
+        receipt = await collect(room, ticket)
 
-        pending = await drain(pending, _writer(pool), attempts=3)
-
-        assert await _names(pool) == ["ada", "grace"]
-        assert pending == (), "everything landed, so nothing should be outstanding"
+        assert receipt == {"id": ticket, "ok": True, "error": ""}
+        assert await _rows(pool) == [(1, "ada")]
         await pool.close()
 
     @pytest.mark.asyncio
-    async def test_a_caller_can_drop_a_write_before_it_happens(self, tmp_path):
-        pool = await _pool(tmp_path)
-
-        pending = add((), {
-            "key": "users:1",
-            "sql": "INSERT INTO users (id, name) VALUES (?, ?)",
-            "params": (1, "ada"),
-        })
-        pending = remove(pending, "users:1")
-        pending = await drain(pending, _writer(pool), attempts=3)
-
-        assert await _names(pool) == []
-        await pool.close()
-
-
-class TestFailureLeavesTheWorkWithTheCaller:
-    @pytest.mark.asyncio
-    async def test_an_unwritable_row_comes_back_pending(self, tmp_path):
-        """A real constraint violation, not a simulated one."""
+    async def test_ordered_dependent_writes_land_in_order(self, tmp_path):
+        """multicardz's signup shape: a later write depends on an earlier one."""
         pool = await _pool(tmp_path)
         async with pool.acquire() as conn:
-            await conn.execute("INSERT INTO users (id, name) VALUES (1, 'taken')")
+            await conn.execute(
+                "CREATE TABLE routes (id INTEGER PRIMARY KEY, user_id INTEGER "
+                "REFERENCES users(id))"
+            )
+            await conn.execute("PRAGMA foreign_keys = ON")
             await conn.commit()
+        room = new_room()
 
-        pending = add((), {
-            "key": "users:1",
-            "sql": "INSERT INTO users (id, name) VALUES (?, ?)",
-            "params": (1, "ada"),          # duplicate primary key
+        user = deposit(room, {"sql": INSERT, "params": (1, "ada")})
+        route = deposit(room, {
+            "sql": "INSERT INTO routes (id, user_id) VALUES (?, ?)",
+            "params": (10, 1),
         })
 
-        with pytest.raises(DrainFailed) as caught:
-            await drain(pending, _writer(pool), attempts=3)
+        await drain(room, _appender(pool))
 
-        assert [w["key"] for w in caught.value.pending] == ["users:1"], (
-            "the caller must get the outstanding write back to retry later"
+        assert (await collect(room, user))["ok"] is True
+        assert (await collect(room, route))["ok"] is True, (
+            "the dependent write ran before the row it references"
         )
-        assert await _names(pool) == ["taken"]
+        await pool.close()
+
+
+class TestConcurrentCallers:
+    """The reason the room exists."""
+
+    @pytest.mark.asyncio
+    async def test_twenty_five_callers_all_land(self, tmp_path):
+        pool = await _pool(tmp_path)
+        room = new_room()
+        appending = asyncio.create_task(_forever(room, _appender(pool)))
+
+        async def caller(n: int):
+            ticket = deposit(room, {"sql": INSERT, "params": (n, f"user{n}")})
+            return await collect(room, ticket)
+
+        receipts = await asyncio.gather(*(caller(n) for n in range(25)))
+
+        appending.cancel()
+        assert all(r["ok"] for r in receipts), (
+            [r for r in receipts if not r["ok"]]
+        )
+        assert len(await _rows(pool)) == 25
+        assert room["waiting"] == {}, "tickets were left behind"
         await pool.close()
 
     @pytest.mark.asyncio
-    async def test_the_caller_can_drain_again_without_double_applying(self, tmp_path):
-        """The good write landed once; retrying must not write it twice."""
+    async def test_one_callers_failure_does_not_touch_the_others(self, tmp_path):
         pool = await _pool(tmp_path)
+        async with pool.acquire() as conn:
+            await conn.execute("INSERT INTO users (id, name) VALUES (7, 'taken')")
+            await conn.commit()
+        room = new_room()
+        appending = asyncio.create_task(_forever(room, _appender(pool)))
 
-        pending = ()
-        pending = add(pending, {
-            "key": "users:1",
-            "sql": "INSERT INTO users (id, name) VALUES (?, ?)",
-            "params": (1, "ada"),
-        })
-        pending = add(pending, {
-            "key": "users:2",
-            "sql": "INSERT INTO nonexistent (id) VALUES (?)",   # will always fail
-            "params": (2,),
-        })
+        async def caller(n: int):
+            ticket = deposit(room, {"sql": INSERT, "params": (n, f"user{n}")})
+            return await collect(room, ticket)
 
-        with pytest.raises(DrainFailed) as caught:
-            await drain(pending, _writer(pool), attempts=2)
+        receipts = await asyncio.gather(*(caller(n) for n in range(5, 10)))
+        appending.cancel()
 
-        outstanding = caught.value.pending
-        assert [w["key"] for w in outstanding] == ["users:2"]
-
-        # Retry what is left. The row that landed is not in it.
-        with pytest.raises(DrainFailed):
-            await drain(outstanding, _writer(pool), attempts=2)
-
-        assert await _names(pool) == ["ada"], (
-            "the successful write was applied more than once"
-        )
+        failed = [r for r in receipts if not r["ok"]]
+        assert len(failed) == 1, f"expected only id=7 to fail, got {failed}"
+        assert "UNIQUE" in failed[0]["error"].upper()
+        assert len(await _rows(pool)) == 5      # 4 new + the pre-existing row
         await pool.close()
+
+
+async def _forever(room, execute):
+    """The appender the caller owns. The library never starts one."""
+    while True:
+        await drain(room, execute)
+        await asyncio.sleep(0)

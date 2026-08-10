@@ -2,6 +2,52 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## 0.1.28 — 2026-08-10
+
+### The write queue is a waiting room in front of the WAL
+
+**The WAL is already the queue.** A write is durable the moment it is in the log, and the engine applies it to the main file later. That is what a write-ahead log is for, and it is why a local commit takes under a millisecond.
+
+A log has one appender — that is what makes it a log. So the only job left for this package is to absorb callers who arrive at the same instant and hand them to the log one at a time. That is what this now is, and it is all it is.
+
+```python
+from declaro_persistum import new_room, deposit, collect, drain
+
+room = new_room()
+ticket = deposit(room, {"sql": ..., "params": ...})   # returns at once
+# ... the caller is free ...
+receipt = await collect(room, ticket)                 # {"id": ..., "ok": True, "error": ""}
+```
+
+`deposit` hands back a ticket immediately; `collect` awaits it and returns the same ticket with a success or failure code. **That is what makes it asynchronous rather than a lock.** A lock makes you wait at the moment of writing. Here you can deposit several writes, keep working, and collect when you actually need the answer. Deposit order is preserved, so a write with a foreign key onto an earlier one is safe to deposit straight after it.
+
+The appender is `drain`, and **you** run it. This package no longer starts a task of its own.
+
+### What this deletes, and why it was wrong
+
+0.1.27 shipped a *deferral* queue: the caller dropped a write and left, and a list held it. That was the wrong idea. Deferral is what the WAL already does. Once the purpose is understood as buffering concurrent callers, the following all become unnecessary and are gone:
+
+- **Retries.** With one appender there is no contention to retry, and a real error — a constraint violation — fails again. `attempts` and `DrainFailed` are removed.
+- **A pending list surviving failure.** Every write has a caller holding its ticket, so nothing is orphaned and nothing needs recovering.
+- **Persistence.** Nothing sits in the room. It is empty except during the microseconds when callers overlap.
+- **`add` / `remove`.** There is no list for the caller to curate.
+
+A failure now belongs to the caller who deposited it and travels back down that caller's ticket. One caller's failure does not touch another's write.
+
+### Why the earlier shapes were wrong
+
+The 340-line class in 0.1.24 and 0.1.26 was a queue in front of a queue: it re-implemented the WAL, in Python, one layer up. Its supervisor, dead-letter set, backoff schedule and attempt counters all existed to manage a durability problem the log had already solved.
+
+Worse, the second connection it used for cloud push made **two appenders on a one-appender structure**. That is the whole source of `database tape error: database is busy`, and of the "2–3 concurrent writer ceiling" documented in `docs/turso-cloud-sync.md`. That ceiling was never a Turso limit. It was this package fighting itself. *(The pool still has that second push connection; removing it is separate work and is not in this release.)*
+
+### Breaking
+
+`add`, `remove` and `DrainFailed` from 0.1.27 are gone, replaced by `new_room`, `deposit`, `collect`, `drain`, `Receipt` and `Room`. 0.1.27 was published for roughly an hour; if you took it, the migration is to deposit and collect rather than to hold a list.
+
+### Notes
+
+1206 tests pass. Fifteen cover the room with plain functions and no mocks; four exercise it end to end through the public API against a real database, including twenty-five concurrent callers and ordered dependent writes.
+
 ## 0.1.27 — 2026-08-09
 
 ### The write queue, rebuilt as data
