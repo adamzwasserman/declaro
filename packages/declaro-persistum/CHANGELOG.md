@@ -2,58 +2,100 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
-## 0.1.26 — 2026-08-09
+## 0.1.27 — 2026-08-09
 
-### Restored — the write queue is wired to the write and read paths again
+### The write queue, rebuilt as data
 
-**The queue is connected. It was designed to be, it was, and it stopped being on 2026-03-11.**
+**A queue is a list of writes that have not happened yet.** The previous implementation was a 340-line class with a background supervisor, disk persistence, dead-letter quarantine, exponential backoff, attempt counters and a stuck-entry alarm. All of it is gone. What replaces it:
 
-Commit `15f72b6` — "migrate TursoPool to pyturso 0.6.0rc1 with cloud sync" — detached it as a side effect of a driver migration. Its own message records the change: *"Simplify execute_with_pool: remove write queue race (`_race_write`, `_rescue`) and read merge logic — writes are local and fast."* The module was left in place, so the design looked intact while nothing called it. It stayed that way for five months.
+```python
+from declaro_persistum import add, remove, drain, DrainFailed
 
-What is restored, in `query/executor.py`:
+pending = add(pending, {"key": "users:1", "sql": ..., "params": ...})
+pending = await drain(pending, execute, attempts=3)
+```
 
-- **`_race_write`** — a write gets `threshold_ms` to finish. Under it the caller gets the real result and the queue is never touched. Over it the caller gets its row back at once, and the write continues in the background on its own connection, removing itself from the queue when it lands. The timeout releases the *caller*; it never cancels the write.
-- **The read merge** — `merge_pending_into_results` / `merge_pending_into_join_results`, with `ORDER BY` re-sorting, so a caller always sees a write it just made. This half is a **correctness** property, not a latency optimisation: without it an optimistically-returned write is invisible to the very next read.
+`add` and `remove` are pure functions over a tuple of `PendingWrite` dicts. `drain` walks the list, calls the write function **you** supply, and returns what is still outstanding. No class, no hidden state, no background task, no clock, and no reference to a pool or connection anywhere in the module.
 
-The queue engages only for a single identified row — a write with no primary key has nothing to key an entry on, nothing to merge into a later read, and no row to hand back, so bulk writes always wait for the real result. That gate is unchanged from the original design.
+`execute` returning is what releases the next write. That single fact replaces the supervisor that polled every 100ms.
 
-#### Two defects found while restoring it
+**Only success removes a write from the list.** That one rule replaced `attempt_count`, `last_error`, `_first_failure_time`, `_quarantine`, the dead-letter dict, the exponential backoff and the CRITICAL-after-an-hour log — every one of which existed to answer a question that "leave it on the list" already answers.
 
-- **All three backends are now covered.** The first restoration attempt wired the queue only into the `acquire_write` branch. Only `TursoPool` has `acquire_write`; `SQLitePool` and `PostgreSQLPool` do not, so both would have silently skipped the queue. Both execution paths now funnel through one `_write_maybe_queued` helper, and a test asserts the gate is gone.
+`DrainFailed` carries the outstanding writes, so a raise never loses the queue, and writes that already landed are not in it — draining again cannot double-apply them.
 
-- **The supervisor no longer re-applies a write that is still running.** It scans the queue every 100ms, and a raced write sits in the queue while its original attempt is still in flight — so the supervisor would apply it a second time. Measured: with an entry queued and its write in flight, the supervisor wrote the row anyway. For an `INSERT` that means a duplicate row, or a primary-key failure on the second attempt that leaves the entry retrying forever.
+Persisting the queue is `json.dumps(list(pending))`. A `PendingWrite` is JSON-native, so no function is provided for it.
 
-  `mark_in_flight()` / `clear_in_flight()` claim the entry for the duration of the original write. The supervisor skips a claimed entry; a failed write releases the claim so the supervisor takes over; a successful one drops it with the entry. **This race existed in the original design too** — it is not introduced by the restoration.
+### Why the shape changed
 
-### Correction to 0.1.24 and 0.1.25
+Every defect fixed in 0.1.24 and 0.1.26 was an artifact of the old shape, not of the idea:
 
-**0.1.24 and 0.1.25 both stated that nothing had ever called `WriteQueue.enqueue`. That was false**, and it is why 0.1.25 removed the module. `execute_with_pool` called it through `_race_write` until 2026-03-11. The claim came from checking the current tree and inferring that no caller had ever existed, without running `git log -S` — the one command that answers the question being asserted.
+- the `_first_failure_time` leak needed a dict of failure timestamps to leak from
+- the supervisor re-applying in-flight writes needed a supervisor polling state it did not own
+- the five months of unreachability needed a class that hid its list where nobody could see it was empty
 
-0.1.25's other reasoning stands on its own terms and is still worth recording: on a Turso cloud replica, writes commit locally and the push loop delivers in the background, so the remote is not on the write path, and measured over 2397 writes only 0.08% exceeded 50ms. But a threshold designed for the tail is *supposed* to fire rarely, and that measurement was used to argue the mechanism away. Whether the tail is worth protecting is a design decision, and it was not one to make on a false premise about the code's history.
+None of those have anywhere to live in a list and a loop.
 
-**Upgrade note:** 0.1.25 removed `WriteQueue`, `PendingEntry`, `WriteQueueError`, `configure_write_queue()` and the `write_queue_*` factory parameters. **0.1.26 restores all of them**, so code written against 0.1.24 works again unchanged. If you deleted a `configure_write_queue()` call because of 0.1.25, you may put it back — and now it does something.
+The old queue was also unreachable through the public API for its entire life. It had 25 passing tests, all of which called the internals directly with arguments no real caller supplied. `tests/integration/test_write_queue_end_to_end.py` now uses only exported functions against a real pool and a real table, so the same failure cannot repeat silently.
+
+### Breaking
+
+`WriteQueue`, `PendingEntry`, `WriteQueueError`, `pool.configure_write_queue()` and the `write_queue_*` parameters on `sqlite()`, `postgresql()` and `turso()` are removed. The queue is no longer attached to a pool and is not invoked by the query builders — you call it.
+
+Six parameters on `execute_with_pool` that existed only for the old queue and were documented as "unused, kept for compat" are also gone: `table_name`, `pk_column`, `pk_value`, `data`, `join_tables`, `schema`. No caller passed them.
 
 ### Notes
 
-1232 tests pass. Twelve are new and assert the wiring itself, so a future refactor cannot quietly detach the queue again while leaving the module in place.
+1211 tests pass. Twenty cover the queue with plain functions and no mocks; four exercise it end to end through the public API.
 
 ## 0.1.25 — 2026-08-09
 
-**Superseded by 0.1.26, which restores what this release removed.** It removed the write queue on the stated grounds that it had never been wired to any write path. That was wrong: it was wired until 2026-03-11. See the correction in 0.1.26.
-
 ### Removed — the write queue
 
-`WriteQueue`, `PendingEntry`, `WriteQueueError`, `pool.configure_write_queue()` and the `write_queue_path` / `write_queue_threshold_ms` / `write_queue_concurrency` / `write_queue_max_attempts` parameters were removed. All are restored in 0.1.26.
+**`WriteQueue` and everything attached to it is gone.** It was never wired to any write path, and measurement shows the condition it was built for does not happen.
+
+Removed from the public surface: `WriteQueue`, `PendingEntry`, `WriteQueueError`, `pool.configure_write_queue()`, and the `write_queue_path` / `write_queue_threshold_ms` / `write_queue_concurrency` / `write_queue_max_attempts` parameters on `ConnectionPool.sqlite()`, `.postgresql()` and `.turso()`.
+
+**This is a breaking change only if you called one of those.** If you passed `write_queue_path=` to a factory or called `configure_write_queue()`, you now get a `TypeError` or `AttributeError`. Delete the call: it never did anything. Nothing in the package ever enqueued a write, so no behaviour is lost and no data path changes.
+
+#### Why
+
+The queue's premise was that some writes are slow: a write over 50ms would be queued, and the caller would return immediately with its data. Nobody had ever measured how often a write crosses 50ms, so the premise was never tested. It is now.
+
+Measured with a throwaway harness against real databases, at concurrency 1, 2, 3, 5 and 10, on both the raw `acquire_write` path and the ORM `insert().execute()` path:
+
+| Backend | Writes over 50ms |
+|---|---|
+| Turso Cloud replica (aws-us-west-2), two runs | 2 of 2397 (0.08%) |
+| PostgreSQL 17.10 (loopback) | 0 of 1200 (0.0%) |
+| Turso local, no remote | 0 of 1200 (0.0%) |
+
+Typical latency on the cloud replica was p50 0.3–4.3ms with p99 mostly under 15ms. The two outliers landed at different concurrency levels in each run, so they are a tail event of roughly 1 in 1200 rather than an effect of load.
+
+**On Turso the queue is redundant by architecture.** A write commits to the local replica and the push loop delivers it to the cloud in the background, so the remote is never on the write path. Concurrency 10 measured *faster* than concurrency 1 in one run, which is only possible because the network is not in the measured path. persistum already solves the problem the queue was designed for, by a different route.
+
+**On PostgreSQL the network genuinely is on the write path**, which makes it the backend most likely to cross the threshold — and it still did not. One round trip measured 0.107ms on loopback; a write costs roughly two to three of them. Substituting a LAN round trip of 0.2–1ms puts a write at a few milliseconds. Reaching 50ms would need a round trip near 20ms, which is not a local network.
+
+PostgreSQL *can* exceed 50ms under a lock wait, a slow fsync, a vacuum storm or a failover. That argues against the queue rather than for it: in those conditions the queue would report success to the caller for a write that has not happened, converting backpressure into silent optimism. A lock wait is precisely when the caller should be told.
+
+#### What this means for the 0.1.24 write-queue fixes
+
+0.1.24 fixed a `_first_failure_time` leak and a silent `_flush` swallow in this module, and its release note said both were latent rather than live. They are now moot: the code they were in no longer exists. The seven silent-swallow fixes in 0.1.24 were in other modules and are unaffected.
+
+### Notes
+
+1187 tests pass, down from 1220 — the 33 removed tests covered only the deleted module.
 
 ## 0.1.24 — 2026-08-08
 
-### Correction to the note that was here
+### Read this before assessing the write-queue fixes
 
-This entry originally opened with a claim that the write queue "has no producer" and that nothing in the package had ever called `WriteQueue.enqueue`. **That was false.** `execute_with_pool` enqueued through `_race_write` until commit `15f72b6` on 2026-03-11 detached it. The wiring was restored in 0.1.26.
+**The write queue currently has no producer.** Nothing in this package calls `WriteQueue.enqueue` — the only callers anywhere are its own tests. `threshold_ms`, and the "writes slower than the threshold are queued and the caller returns immediately" behaviour its module docstring describes, is stored at `write_queue.py:72` and never read. `pool._write_queue` is only assigned and then checked so `stop_supervisor()` can run at close; no read path and no write path consults it. `merge_pending_into_results` has no callers.
 
-The two write-queue defects below are real and their regression tests prove them. They were described here as "latent, not live" on the strength of that false claim. With the wiring restored in 0.1.26 they are live, and both fixes matter.
+`configure_write_queue()` therefore starts a supervisor that drains a queue nothing fills. It is Phase 3 infrastructure that was never connected (see the comment at `pool.py:286`).
 
-The seven silent-swallow fixes further down were never affected by any of this. Those sit on other modules' live paths.
+The two write-queue defects below are real, and the regression tests prove them. **They are latent, not live.** They cannot occur in a consumer today, because both require a queued write to exist. Setting `persistence_path` changes nothing at present, and `WRITE_QUEUE_LOST` / `WRITE_QUEUE_FLUSH_FAILED` cannot fire. This note exists because the first version of these release notes described the leak as an operational concern without establishing that any consumer could reach it.
+
+The seven silent-swallow fixes further down are **not** affected by this. Those sit on live paths.
 
 ### Bug fixes
 
@@ -61,7 +103,7 @@ The seven silent-swallow fixes further down were never affected by any of this. 
 
   The race is reachable in normal operation: `_flush` and the supervisor's retry tasks drain the same queue, and a write attempt awaits three times between the queue check and the exception handler. A regression test drives 25 raced rows and leaked 25 of 25 before the fix.
 
-  This is bookkeeping only. No write was lost and no row was written twice. The cost was memory that grew with the number of raced writes and never came back.
+  This is bookkeeping only. No write was lost and no row was written twice. The cost was memory that grew with the number of raced writes and never came back — and see the note at the top of this release: with no producer for the queue, no consumer reaches this path today.
 
 - **A failed shutdown flush is no longer silent.** `_flush` is the last drain before the process ends, and it caught every exception with a bare `except: pass`. When it failed and no `persistence_path` was configured, the pending write did not survive the process and nothing appeared in the log to say so.
 

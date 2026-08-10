@@ -283,12 +283,10 @@ class BasePool:
     Instrumentation fields (set by configure_instrumentation()):
         _tier: str — label for every latency record from this pool
         _latency_logger: logging.Logger | None — None means disabled (zero overhead)
-        _write_queue: Any | None — reserved for Phase 3 write queue
     """
 
     _tier: str = ""
     _latency_logger: Any = None  # logging.Logger when instrumentation enabled
-    _write_queue: Any = None     # WriteQueue instance when enabled (Phase 3)
 
     def acquire(self) -> AbstractAsyncContextManager[Any]:
         """Acquire a connection from the pool."""
@@ -335,37 +333,6 @@ class BasePool:
             setup_callable_sink(logger, callable_sink)
 
         self._latency_logger = logger
-
-    def configure_write_queue(
-        self,
-        *,
-        persistence_path: str | None = None,
-        threshold_ms: float = 50.0,
-        max_concurrent_drains: int = 3,
-        max_drain_attempts: int | None = None,
-    ) -> None:
-        """
-        Attach a write queue to this pool and start the supervisor.
-
-        Args:
-            persistence_path: JSONL file to persist queue across restarts
-            threshold_ms: Write latency threshold before queuing (default: 50ms)
-            max_concurrent_drains: Max concurrent drain tasks (default: 3)
-            max_drain_attempts: Quarantine an entry to the dead-letter set after
-                this many failed drain attempts. None = retry forever (default).
-        """
-        from declaro_persistum.write_queue import WriteQueue
-
-        queue = WriteQueue(
-            self,
-            persistence_path=persistence_path,
-            threshold_ms=threshold_ms,
-            max_concurrent_drains=max_concurrent_drains,
-            max_drain_attempts=max_drain_attempts,
-        )
-        queue.load_from_disk()
-        queue.start_supervisor()
-        self._write_queue = queue
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[Any]:
@@ -442,8 +409,6 @@ class PostgreSQLPool(BasePool):
 
     async def close(self) -> None:
         """Close the pool and all connections."""
-        if self._write_queue is not None:
-            await self._write_queue.stop_supervisor()
         if self._pool is not None:
             await self._pool.close()
             self._pool = None
@@ -477,8 +442,6 @@ class SQLitePool(BasePool):
     to limit concurrent connections (important for WAL mode which
     supports up to ~5 concurrent writers).
     """
-
-    _write_queue: Any = None
 
     @property
     def dialect(self) -> str:
@@ -533,8 +496,6 @@ class SQLitePool(BasePool):
 
     async def close(self) -> None:
         """Mark the pool as closed."""
-        if self._write_queue is not None:
-            await self._write_queue.stop_supervisor()
         self._closed = True
 
     @property
@@ -1453,8 +1414,6 @@ class TursoPool(BasePool):
 
         Call this on SIGTERM / application shutdown before exiting.
         """
-        if self._write_queue is not None:
-            await self._write_queue.stop_supervisor()
         self._closed = True
         # Final push — retry indefinitely.  No persistent disk means
         # data not pushed is lost permanently.
@@ -1563,9 +1522,6 @@ class ConnectionPool:
         tier_label: str = "",
         latency_sink: str | None = None,
         latency_path: str | None = None,
-        write_queue_path: str | None = None,
-        write_queue_threshold_ms: float = 50.0,
-        write_queue_concurrency: int = 3,
     ) -> "PostgreSQLPool":
         """
         Create a PostgreSQL connection pool.
@@ -1579,9 +1535,6 @@ class ConnectionPool:
             tier_label: Label for every latency record from this pool
             latency_sink: "jsonl" to write to latency_path, or None
             latency_path: File path for JSONL sink
-            write_queue_path: JSONL path to persist write queue across restarts
-            write_queue_threshold_ms: Latency threshold before queuing (default: 50ms)
-            write_queue_concurrency: Max concurrent drain tasks (default: 3)
 
         Returns:
             PostgreSQLPool instance
@@ -1597,12 +1550,6 @@ class ConnectionPool:
             pool.configure_instrumentation(
                 tier_label=tier_label, sink=latency_sink, path=latency_path
             )
-        if write_queue_path is not None:
-            pool.configure_write_queue(
-                persistence_path=write_queue_path,
-                threshold_ms=write_queue_threshold_ms,
-                max_concurrent_drains=write_queue_concurrency,
-            )
         return pool
 
     @staticmethod
@@ -1615,9 +1562,6 @@ class ConnectionPool:
         tier_label: str = "",
         latency_sink: str | None = None,
         latency_path: str | None = None,
-        write_queue_path: str | None = None,
-        write_queue_threshold_ms: float = 50.0,
-        write_queue_concurrency: int = 3,
     ) -> "SQLitePool":
         """
         Create a SQLite connection pool.
@@ -1630,9 +1574,6 @@ class ConnectionPool:
             tier_label: Label for every latency record from this pool
             latency_sink: "jsonl" to write to latency_path, or None
             latency_path: File path for JSONL sink
-            write_queue_path: JSONL path to persist write queue across restarts
-            write_queue_threshold_ms: Latency threshold before queuing (default: 50ms)
-            write_queue_concurrency: Max concurrent drain tasks (default: 3)
 
         Returns:
             SQLitePool instance
@@ -1645,12 +1586,6 @@ class ConnectionPool:
         if instrumentation:
             pool.configure_instrumentation(
                 tier_label=tier_label, sink=latency_sink, path=latency_path
-            )
-        if write_queue_path is not None:
-            pool.configure_write_queue(
-                persistence_path=write_queue_path,
-                threshold_ms=write_queue_threshold_ms,
-                max_concurrent_drains=write_queue_concurrency,
             )
         return pool
 
@@ -1670,10 +1605,6 @@ class ConnectionPool:
         tier_label: str = "",
         latency_sink: str | None = None,
         latency_path: str | None = None,
-        write_queue_path: str | None = None,
-        write_queue_threshold_ms: float = 50.0,
-        write_queue_concurrency: int = 3,
-        write_queue_max_attempts: int | None = None,
     ) -> "TursoPool":
         """
         Create a Turso connection pool using pyturso.
@@ -1716,9 +1647,6 @@ class ConnectionPool:
             tier_label: Label for every latency record from this pool
             latency_sink: "jsonl" to write to latency_path, or None
             latency_path: File path for JSONL sink
-            write_queue_path: JSONL path to persist write queue across restarts
-            write_queue_threshold_ms: Latency threshold before queuing (default: 50ms)
-            write_queue_concurrency: Max concurrent drain tasks (default: 3)
 
         Returns:
             TursoPool instance, initialised and ready (pulled from cloud if remote_url)
@@ -1738,13 +1666,6 @@ class ConnectionPool:
         if instrumentation:
             pool.configure_instrumentation(
                 tier_label=tier_label, sink=latency_sink, path=latency_path
-            )
-        if write_queue_path is not None:
-            pool.configure_write_queue(
-                persistence_path=write_queue_path,
-                threshold_ms=write_queue_threshold_ms,
-                max_concurrent_drains=write_queue_concurrency,
-                max_drain_attempts=write_queue_max_attempts,
             )
         return pool
 

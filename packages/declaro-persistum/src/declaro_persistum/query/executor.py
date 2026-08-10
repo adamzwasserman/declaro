@@ -5,10 +5,9 @@ Executes Query objects against database connections.
 Handles parameter binding for different dialects.
 """
 
-import asyncio
 import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from typing import Any, TypeVar
 
 from declaro_persistum.query.builder import Query
@@ -366,163 +365,10 @@ def _dict_factory(cursor: Any, row: tuple[Any, ...]) -> dict[str, Any]:
     return dict(zip(columns, row, strict=True))
 
 
-async def _race_write(
-    queue: Any,
-    do_write: Callable[[], Awaitable[Any]],
-    query: Query,
-    *,
-    table_name: str,
-    pk_column: str,
-    pk_value: Any,
-    op: str,
-    data: dict[str, Any],
-) -> Any:
-    """Give the write `threshold_ms` to finish; past that, queue it and return.
-
-    The caller never waits longer than the threshold for a write. Under it,
-    the real result comes back and the queue is never touched. Over it, the
-    row the caller supplied is returned immediately, the write carries on in
-    the background, and it removes itself from the queue when it lands.
-
-    `do_write` is the same write the non-queued path would have performed,
-    so the queue changes when the caller is released, not how the write is
-    made: it still goes through acquire_write and its replica serialisation.
-    """
-    write_task = asyncio.create_task(do_write())
-    try:
-        # shield: the timeout releases the CALLER, it must not cancel the write.
-        return await asyncio.wait_for(
-            asyncio.shield(write_task), timeout=queue.threshold_seconds
-        )
-    except TimeoutError:
-        queue.enqueue(
-            table_name, pk_column, pk_value, op, data,
-            query["sql"], query["params"], query["dialect"],
-        )
-        # Claim it before yielding control. The supervisor scans the queue on
-        # its own schedule and would otherwise re-apply a write that is still
-        # running -- inserting the row twice, or failing the second attempt on
-        # the primary key and leaving the entry retrying forever.
-        queue.mark_in_flight(table_name, pk_value)
-
-        async def _on_complete() -> None:
-            try:
-                await write_task
-                queue.remove_entry(table_name, pk_value)
-            except Exception as exc:
-                queue.note_failed_attempt(table_name, pk_value, exc)
-                # Hand it to the supervisor: this attempt is over, and the
-                # row still needs to land.
-                queue.clear_in_flight(table_name, pk_value)
-
-        asyncio.create_task(_on_complete())
-        return data
-
-
-def _merge_pending_reads(
-    queue: Any,
-    result: Any,
-    sql: str,
-    *,
-    table_name: str,
-    pk_column: str,
-    join_tables: list[str] | None,
-    schema: dict[str, Any] | None,
-) -> Any:
-    """Fold queued writes into a SELECT so a caller sees its own write.
-
-    Without this the queue would be a correctness hazard rather than a
-    latency win: a write that returned optimistically would be invisible to
-    the very next read.
-    """
-    from declaro_persistum.write_queue import (
-        _extract_order_by,
-        _resort,
-        merge_pending_into_join_results,
-        merge_pending_into_results,
-    )
-
-    pending = queue.get_pending_for_table(table_name)
-    if pending:
-        result = merge_pending_into_results(result, pending, pk_column)
-    if join_tables and schema:
-        pending_by_table = {t: queue.get_pending_for_table(t) for t in join_tables}
-        if any(pending_by_table.values()):
-            result = merge_pending_into_join_results(
-                result, pending_by_table, schema, join_tables, table_name
-            )
-    order_by = _extract_order_by(sql)
-    if order_by:
-        result = _resort(result, order_by)
-    return result
-
-
-async def _write_maybe_queued(
-    pool: Any,
-    query: Query,
-    executor_fn: Callable[..., Any],
-    sql: str,
-    op: str,
-    *,
-    table_name: str,
-    pk_column: str,
-    pk_value: Any,
-    data: dict[str, Any] | None,
-) -> Any:
-    """Perform one write, through the queue when the pool has one.
-
-    Both execution paths funnel through here so a backend cannot be left
-    out by accident. The first restoration of this wiring gated it behind
-    ``hasattr(pool, "acquire_write")``, which silently excluded SQLitePool
-    and PostgreSQLPool — neither has that method.
-    """
-    from declaro_persistum.instrumentation import has_returning_clause
-
-    # The write takes its OWN connection, never the caller's. A queued write
-    # outlives the call that started it, so borrowing the caller's connection
-    # would hand it back to the pool mid-write.
-    async def _do_write() -> Any:
-        if hasattr(pool, "acquire_write"):
-            async with pool.acquire_write() as wconn:
-                if has_returning_clause(sql):
-                    return await executor_fn(query, wconn)
-                prepared_sql, prepared_params = _prepare_query(query, wconn)
-                return await _execute_update(wconn, prepared_sql, prepared_params)
-        async with pool.acquire() as wconn:
-            if has_returning_clause(sql):
-                result = await executor_fn(query, wconn)
-            else:
-                prepared_sql, prepared_params = _prepare_query(query, wconn)
-                result = await _execute_update(wconn, prepared_sql, prepared_params)
-            # aiosqlite and turso require an explicit commit after DML.
-            if any(m in _conn_module(wconn) for m in ("aiosqlite", "turso")):
-                await wconn.commit()
-            return result
-
-    # The queue engages only for a single identified row. Without a primary
-    # key there is nothing to key the entry on, nothing to merge into a later
-    # read, and no row to hand back, so a bulk write waits for the real result.
-    queue = getattr(pool, "_write_queue", None)
-    if queue is not None and table_name and pk_column and pk_value is not None:
-        return await _race_write(
-            queue, _do_write, query,
-            table_name=table_name, pk_column=pk_column,
-            pk_value=pk_value, op=op, data=data or {},
-        )
-    return await _do_write()
-
-
 async def execute_with_pool(
     pool: Any,
     to_query: Callable[..., Query],
     mode: str = "all",
-    *,
-    table_name: str = "",
-    pk_column: str = "",
-    pk_value: Any = None,
-    data: dict[str, Any] | None = None,
-    join_tables: list[str] | None = None,
-    schema: dict[str, Any] | None = None,
 ) -> Any:
     """
     Acquire a connection from pool, detect dialect, build query, execute.
@@ -539,15 +385,10 @@ async def execute_with_pool(
         pool: Connection pool with acquire() context manager
         to_query: Callable that takes (dialect: str) and returns a Query dict
         mode: "all" | "one" | "scalar"
-        table_name: Table being queried/written (unused, kept for compat)
-        pk_column: Primary key column name (unused, kept for compat)
-        pk_value: Primary key value (unused, kept for compat)
-        data: Row data (unused, kept for compat)
-        join_tables: Additional tables (unused, kept for compat)
-        schema: Full schema dict (unused, kept for compat)
     """
     from declaro_persistum.instrumentation import (
         classify_sql,
+        has_returning_clause,
         is_write_op,
         record_execution,
     )
@@ -576,14 +417,17 @@ async def execute_with_pool(
         # through the count path and silently returned int instead of rows,
         # crashing prisma update_many's len() and breaking the documented
         # dict return type of update_one / create / delete.
-        if is_write_op(op):
+        if is_write_op(op) and hasattr(pool, "acquire_write"):
             t0 = time.monotonic()
             try:
-                result = await _write_maybe_queued(
-                    pool, query, executor_fn, sql, op,
-                    table_name=table_name, pk_column=pk_column,
-                    pk_value=pk_value, data=data,
-                )
+                async with pool.acquire_write() as wconn:
+                    if has_returning_clause(sql):
+                        result = await executor_fn(query, wconn)
+                    else:
+                        prepared_sql, prepared_params = _prepare_query(query, wconn)
+                        result = await _execute_update(
+                            wconn, prepared_sql, prepared_params
+                        )
                 duration_ms = (time.monotonic() - t0) * 1000
                 record_execution(pool, sql, duration_ms, success=True)
                 return result
@@ -602,33 +446,24 @@ async def execute_with_pool(
 
         t0 = time.monotonic()
         try:
-            if is_write_op(op):
-                result = await _write_maybe_queued(
-                    pool, query, executor_fn, sql, op,
-                    table_name=table_name, pk_column=pk_column,
-                    pk_value=pk_value, data=data,
-                )
+            if is_write_op(op) and hasattr(pool, "acquire_write"):
+                # Same split as the fast path above: RETURNING -> fetch, else -> count.
+                async with pool.acquire_write() as wconn:
+                    if has_returning_clause(sql):
+                        result = await executor_fn(query, wconn)
+                    else:
+                        prepared_sql, prepared_params = _prepare_query(query, wconn)
+                        result = await _execute_update(
+                            wconn, prepared_sql, prepared_params
+                        )
             else:
                 result = await executor_fn(query, conn)
+                # aiosqlite and turso require explicit commit after DML.
+                _cm = _conn_module(conn)
+                if is_write_op(op) and ("aiosqlite" in _cm or "turso" in _cm):
+                    await conn.commit()
             duration_ms = (time.monotonic() - t0) * 1000
             record_execution(pool, sql, duration_ms, success=True)
-
-            # A queued write has already been returned to its caller, so it
-            # is not in the database yet. Fold it into the read or the caller
-            # cannot see what it just wrote.
-            queue = getattr(pool, "_write_queue", None)
-            if (
-                queue is not None
-                and not is_write_op(op)
-                and table_name
-                and pk_column
-                and isinstance(result, list)
-            ):
-                result = _merge_pending_reads(
-                    queue, result, sql,
-                    table_name=table_name, pk_column=pk_column,
-                    join_tables=join_tables, schema=schema,
-                )
             return result
         except Exception as exc:
             duration_ms = (time.monotonic() - t0) * 1000

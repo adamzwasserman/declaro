@@ -661,63 +661,64 @@ When `configure_instrumentation()` has not been called, `pool._latency_logger` i
 
 ## Write Queue
 
-For high-latency backends (Turso Cloud writes can take 750–1100ms), the write queue returns data to the caller immediately and persists in the background.
+A queue is a list of writes that have not happened yet. That is all it is, and everything below follows from it.
 
-### Enabling the Write Queue
-
-```python
-pool = await ConnectionPool.turso(
-    "./app.db",                          # local replica path
-    remote_url="libsql://your-db.turso.io",
-    auth_token="...",
-    instrumentation=True,
-    tier_label="project",
-    write_queue_path="./data/pending_writes.jsonl",
-    write_queue_threshold_ms=50.0,    # Queue writes that take >50ms
-    write_queue_concurrency=3,        # Max concurrent drain tasks
-)
-```
-
-Or post-creation:
+`add` and `remove` are pure functions over a tuple of `PendingWrite` dicts. `drain` walks the list, calls the write function you give it, and returns what is still outstanding. There is no class, no hidden state, no background task and no clock.
 
 ```python
-pool.configure_write_queue(
-    persistence_path="./data/pending_writes.jsonl",
-    threshold_ms=50.0,
-    max_concurrent_drains=3,
-)
+from declaro_persistum import add, remove, drain, DrainFailed
+
+pending = ()
+pending = add(pending, {
+    "key": "users:1",
+    "sql": "INSERT INTO users (id, name) VALUES (?, ?)",
+    "params": (1, "ada"),
+})
 ```
 
-### Usage
-
-The queue is completely transparent. No API changes on the caller:
+You hold the list, and you supply the function that does the writing. The queue never touches a pool or a connection:
 
 ```python
-users = table("users", schema, pool)
+async def execute(w):
+    async with pool.acquire() as conn:
+        await conn.execute(w["sql"], w["params"])
+        await conn.commit()
 
-# Returns immediately if write takes >50ms — data returned before DB confirms
-await users.insert(id=new_id, name="alice").execute()
-
-# Reads merge pending queue entries — insert appears in results immediately
-rows = await users.select().execute()
+pending = await drain(pending, execute, attempts=3)
 ```
 
-### How It Works
+`execute` returning is what releases the next write. Nothing overlaps and nothing polls.
 
-1. `execute_with_pool` races the write against the threshold: `asyncio.wait_for(asyncio.shield(task), timeout=0.05)`
-2. Fast writes (under threshold): queue never touched
-3. Slow writes: `enqueue()` called immediately, data returned to caller; write continues in background
-4. On background write success: entry removed from queue
-5. On background write failure: supervisor retries with exponential backoff (cap 60s)
-6. CRITICAL log after 6 hours of continuous failure (prefix: `WRITE_QUEUE_EXHAUSTED`)
-7. SELECT results merge pending entries by primary key and re-sort using original ORDER BY
-8. JOIN results: pending entries matched via FK schema knowledge
+### When a write fails
 
-### Disk Persistence
+Each write is attempted `attempts` times. After the last one, `drain` raises `DrainFailed` — and the exception carries the writes that are still outstanding, so a raise never loses your queue:
 
-Queue is atomically persisted (tmp + rename) to a JSONL file on every change. Pending writes survive `kill -9`. On `pool.close()`, the supervisor is stopped and a final flush is attempted.
+```python
+try:
+    pending = await drain(pending, execute, attempts=3)
+except DrainFailed as failed:
+    pending = failed.pending      # retry these later
+    logger.error("write %s did not land", failed.write["key"])
+```
 
----
+Writes that already landed are **not** in `failed.pending`, so draining again cannot apply them twice.
+
+Only success removes a write from the list. That single rule replaces attempt counters, dead-letter sets, backoff schedules and stuck-entry alarms: the list *is* the record of what is outstanding.
+
+### Persistence
+
+A `PendingWrite` is a dict of JSON-native values, so the queue is already data:
+
+```python
+Path("pending.json").write_text(json.dumps(list(pending)))
+pending = tuple(json.loads(Path("pending.json").read_text()))
+```
+
+No function is provided for this because none is needed.
+
+### Latency
+
+The queue costs essentially nothing — `add` and `remove` are tuple operations, against writes measured at 0.2–4ms. It does not change what a write costs, only *when* you drain. Drain before you respond and the caller waits for the write; drain afterwards and it does not.
 
 ## Programmatic Usage
 
