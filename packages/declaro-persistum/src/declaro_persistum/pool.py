@@ -1205,6 +1205,12 @@ class TursoPool(BasePool):
         # operation this pool can safely retry: it ships frames, so there
         # are no caller statements to replay. Contention is absorbed here
         # rather than serialised away, so no writer waits on a round trip.
+        # Pushes writer zero only. Frames committed on the other write
+        # connections are stranded: measured against a real replica, 17
+        # writes reported ok, 4 reached the primary, and it never converged
+        # in 348s. Making the push cover every holder in _write_holders did
+        # NOT fix it -- the frames were still stranded -- so the cause is
+        # not simply which connection is pushed. Open, cause unknown.
         try:
             await self._retry_while_busy(self._write_holder.push, "push")
         except Exception as e:
