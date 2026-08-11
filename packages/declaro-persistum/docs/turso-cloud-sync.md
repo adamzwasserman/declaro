@@ -171,17 +171,14 @@ The residual failures under MVCC — one at K=5, one at K=10 — are the backgro
 
 ## Known pyturso Sync Engine Limitations
 
-These are limitations in pyturso's embedded replica sync engine, not declaro-persistum bugs. They may be resolved in future pyturso releases.
+**This list has been emptied. Every entry that was here was written as an engine fact and stated without a measurement; three were later disproved outright, and the rest were never checked.**
 
-**Several entries below were measured and found false in August 2026. They are struck rather than deleted, because declaro-persistum's current design depends on the corrected behaviour, and someone reading the old claims would conclude that design is impossible.**
+Nothing is recorded here unless it carries a date and the measurement that produced it. If you need to know whether the engine does something, measure it against a throwaway database and write the number down. Do not restore a claim from memory or from an older revision of this file.
 
-1. **DDL not replicable** -- CREATE TABLE, ALTER TABLE, DROP TABLE cannot be pushed via the sync engine
-2. **Push fails if cloud schema doesn't match** -- DML push requires cloud to already have the target tables
-3. **Pull may overwrite local on connect** -- `turso.aio.sync.connect()` may sync from cloud automatically, overwriting locally-committed changes that haven't been pushed. declaro-persistum guards this by pushing before every pull (W3).
-4. **Connection cache not refreshed by pull** -- after `pull()`, existing connection objects may not see new tables without close/reopen. This is why `refresh_connections()` exists.
-5. ~~**Sync and plain drivers don't share WAL**~~ -- **FALSE, measured 2026-08-06.** A plain `turso.aio.connect()` reader on the same local replica file *does* observe commits made by a `turso.aio.sync` writer. Verified under free-threaded CPython with the GIL confirmed off, with readers tracking a writer to the exact last id under concurrency. declaro-persistum's read path depends on this: reads take plain non-sync connections precisely so they hold no sync state.
-6. ~~**Per-connection change tracking**~~ -- **FALSE, measured 2026-08-06.** One sync connection *can* push frames committed by another on the same replica. Verified with 1353 rows written on connection A, 40 pushes issued on connection B, and a fresh third connection pulling all 1353 back from cloud. The dedicated push connection depends on this.
-7. ~~**CDC incompatible with MVCC**~~ -- **Not a crash, measured 2026-08-06.** `PRAGMA journal_mode = 'mvcc'` on a cloud replica does not crash. An A/B on a real remote measured MVCC on versus off at 1181ms versus 1030ms per commit, so MVCC is neither fatal nor free. MVCC is requested on every pool by default; pass `mvcc=False` to force WAL.
-8. **PRAGMA foreign_keys inside transaction** -- setting this inside a BEGIN may implicitly commit the transaction, breaking atomicity
+Measured facts currently held about this engine live in the sections above, each with its date and its numbers.
 
-Entries 5, 6 and 7 were each written as engine facts and each turned out to be a snapshot of an older engine, or of an untested assumption. Verify against the current engine before relying on any entry here.
+### Open, cause unknown
+
+**Writes are stranded under MVCC with concurrent write connections.** Measured 2026-08-10 against a real cloud replica: 17 writes reported ok, 15 locally durable, 4 reached the primary, and it did not converge in 348 seconds — plateauing at 4 after the first minute. Making the push cover every write connection did not change it.
+
+Separately measured the same day: concurrent writers to one table under MVCC raise `turso.Error: Write-write conflict` even for distinct rows. That error is documented as retryable, and `acquire_write` does not retry it — it cannot replay a caller's statements. Whether the conflicts and the stranding are the same failure is **not established**.

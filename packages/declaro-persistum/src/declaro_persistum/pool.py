@@ -1337,19 +1337,12 @@ class TursoPool(BasePool):
 
         holder = await self._get_writer()
         try:
-            # One writer per replica, held for the whole transaction. The
-            # engine rejects a second writer from inside the write
-            # statement, so the lock must cover the caller's statements as
-            # well as the boundaries. See _replica_write_lock.
-            #
-            # Cloud replicas only. The constraint belongs to the sync tape,
-            # and a local-only database has no tape — serializing there
-            # would cost concurrency for a constraint that does not exist.
+            # Serialised only when MVCC is off. See _write_serialisation
+            # for the measurement.
             async with self._write_serialisation():
                 async_conn = TursoAsyncConnection(holder)
                 if concurrent and getattr(self, "_mvcc", False):
-                    # Contention here means the transaction never started,
-                    # so nothing was staged and retrying is safe.
+                    # Retried because nothing has been staged yet.
                     await self._retry_while_busy(
                         lambda: async_conn.execute("BEGIN CONCURRENT"),
                         "BEGIN CONCURRENT",
