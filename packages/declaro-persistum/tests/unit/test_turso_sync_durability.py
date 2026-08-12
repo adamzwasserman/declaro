@@ -14,7 +14,7 @@ contract that drives it.
 
 import pytest
 
-import declaro_persistum.pool as pool_mod
+import declaro_persistum.turso_pool as pool_mod  # TursoPool's own module since declaro-tvx split pool.py
 from declaro_persistum.pool import TursoPool, _TursoConnectionHolder
 
 

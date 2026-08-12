@@ -100,7 +100,7 @@ class _Holder:
 
 
 async def _pool(tmp_path, monkeypatch, *, mvcc: bool, name="r.db"):
-    import declaro_persistum.pool as pool_mod
+    import declaro_persistum.turso_pool as pool_mod  # TursoPool's own module since declaro-tvx split pool.py
 
     _TapeConn.active_writers = {}
     _TapeConn.collisions = 0

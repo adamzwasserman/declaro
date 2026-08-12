@@ -66,8 +66,42 @@ async def _seed_real_db(path: str) -> None:
     await conn.close()
 
 
-async def _pool_with_slow_push(tmp_path):
+class _StubWriteConn:
+    """Enough of a connection for a write that never touches the network."""
+
+    async def execute(self, _sql, *_a):
+        return None
+
+    async def commit(self) -> None:
+        pass
+
+    async def rollback(self) -> None:
+        pass
+
+    async def close(self) -> None:
+        pass
+
+
+class _StubWriteHolder(_SlowPushHolder):
+    """A write holder that opens instantly and dials nothing.
+
+    Writes are stateless by default, so a write OPENS its own connection
+    instead of reusing pool._write_holder. Without this the write would
+    make a real connect against the fake remote and the test would measure
+    a DNS failure rather than push contention.
+    """
+
+    def __init__(self, *_a, **_kw) -> None:
+        super().__init__()
+        self.conn = _StubWriteConn()
+
+
+async def _pool_with_slow_push(tmp_path, monkeypatch=None):
     """A cloud-configured pool whose push is slow and whose holder is stubbed."""
+    if monkeypatch is not None:
+        import declaro_persistum.turso_pool as pool_mod  # TursoPool's own module since declaro-tvx split pool.py
+
+        monkeypatch.setattr(pool_mod, "_TursoConnectionHolder", _StubWriteHolder)
     db = tmp_path / "replica.db"
     await _seed_real_db(str(db))
 
@@ -142,9 +176,9 @@ class TestReadsRunDuringAPush:
 
 
 @pytest.mark.asyncio
-async def test_write_does_not_wait_for_an_in_flight_push(tmp_path):
+async def test_write_does_not_wait_for_an_in_flight_push(tmp_path, monkeypatch):
     """A write arriving mid-push must not wait for the cloud round trip."""
-    pool = await _pool_with_slow_push(tmp_path)
+    pool = await _pool_with_slow_push(tmp_path, monkeypatch)
 
     push = asyncio.create_task(pool._push_once())
     await asyncio.sleep(0.02)

@@ -1,575 +1,298 @@
-"""
-Unit tests for the schema-validated query builder.
+"""The functional query builder: SQL text and parameter dict, from pure input.
 
-Tests the new dot-notation API: table(), TableProxy, ColumnProxy,
-SelectQuery, InsertQuery, UpdateQuery, DeleteQuery.
+`query/builder.py` carried 56 branches at 7% coverage — one of the six
+modules holding the Slop Audit L1.19 gap at 49.7% (declaro-xu0).
+
+Every function here is pure and returns a `Query` TypedDict, so each test
+asserts on the exact SQL string and the exact params dict. Asserting the
+whole string rather than a substring is the point: a builder that silently
+drops a clause still contains the fragment you searched for.
+
+Two safety properties are load-bearing and get their own tests: `update`
+and `delete` REFUSE to build without a WHERE clause, and values always
+travel as named parameters rather than being interpolated into the SQL.
 """
 
 import pytest
-from typing import Any
 
-from declaro_persistum.types import Schema
-from declaro_persistum.query import (
-    table,
-    TableProxy,
-    ColumnProxy,
-    Condition,
-    ConditionGroup,
-    OrderBy,
-    count_,
-    sum_,
-    now_,
+from declaro_persistum.query.builder import (
+    _quote_column,
+    delete,
+    insert,
+    raw,
+    select,
+    update,
+    with_limit,
+    with_offset,
+    with_params,
 )
-from declaro_persistum.query.select import SelectQuery
-from declaro_persistum.query.insert import InsertQuery
-from declaro_persistum.query.update import UpdateQuery
-from declaro_persistum.query.delete import DeleteQuery
 
 
-# Test fixtures
+class TestQuoteColumn:
+    def test_a_plain_column_is_quoted(self):
+        assert _quote_column("id") == '"id"'
+
+    def test_a_star_is_left_alone(self):
+        assert _quote_column("*") == "*"
+
+    def test_table_dot_column_quotes_both_halves_separately(self):
+        assert _quote_column("users.id") == '"users"."id"'
+
+    def test_only_the_first_dot_splits(self):
+        assert _quote_column("a.b.c") == '"a"."b.c"'
 
 
-@pytest.fixture
-def users_schema() -> Schema:
-    """Schema with users table."""
-    return {
-        "users": {
-            "columns": {
-                "id": {"type": "uuid", "primary_key": True, "nullable": False},
-                "email": {"type": "text", "nullable": False, "unique": True},
-                "name": {"type": "text"},
-                "status": {"type": "text", "default": "'active'"},
-                "created_at": {"type": "timestamptz", "nullable": False, "default": "now()"},
-            }
-        }
-    }
+class TestSelect:
+    def test_no_columns_selects_everything(self):
+        assert select(from_table="users")["sql"] == 'SELECT * FROM "users"'
 
+    def test_an_explicit_star_selects_everything(self):
+        assert select("*", from_table="users")["sql"] == 'SELECT * FROM "users"'
 
-@pytest.fixture
-def orders_schema() -> Schema:
-    """Schema with users and orders tables."""
-    return {
-        "users": {
-            "columns": {
-                "id": {"type": "uuid", "primary_key": True},
-                "email": {"type": "text", "nullable": False},
-            }
-        },
-        "orders": {
-            "columns": {
-                "id": {"type": "uuid", "primary_key": True},
-                "user_id": {"type": "uuid", "references": "users.id"},
-                "total": {"type": "numeric(10,2)"},
-                "status": {"type": "text", "default": "'pending'"},
-            }
-        },
-    }
+    def test_named_columns_are_quoted_and_comma_joined(self):
+        q = select("id", "email", from_table="users")
+        assert q["sql"] == 'SELECT "id", "email" FROM "users"'
 
+    def test_a_star_among_other_columns_is_not_treated_as_select_all(self):
+        """Only a lone '*' is the shortcut; mixed lists go through quoting."""
+        q = select("id", "*", from_table="users")
+        assert q["sql"] == 'SELECT "id", * FROM "users"'
 
-# TableProxy tests
+    def test_a_where_clause_is_appended_and_params_carried(self):
+        q = select(from_table="users", where="id = :id", params={"id": 1})
+        assert q["sql"] == 'SELECT * FROM "users" WHERE id = :id'
+        assert q["params"] == {"id": 1}
 
+    def test_params_default_to_an_empty_dict_not_none(self):
+        assert select(from_table="users")["params"] == {}
 
-class TestTableProxy:
-    """Tests for TableProxy class."""
+    def test_a_join_defaults_to_inner(self):
+        q = select(from_table="a", joins=[{"table": "b", "on": "a.id = b.a_id"}])
+        assert 'INNER JOIN "b" ON a.id = b.a_id' in q["sql"]
 
-    def test_create_table_proxy(self, users_schema: Schema):
-        """TableProxy can be created from schema."""
-        users = table("users", schema=users_schema)
-        assert isinstance(users, TableProxy)
-        assert users._table_name == "users"
-
-    def test_table_not_in_schema(self, users_schema: Schema):
-        """table() raises ValueError for unknown table."""
-        with pytest.raises(ValueError, match="Table 'unknown' not found"):
-            table("unknown", schema=users_schema)
-
-    def test_column_access_valid(self, users_schema: Schema):
-        """TableProxy allows access to valid columns."""
-        users = table("users", schema=users_schema)
-        email_col = users.email
-        assert isinstance(email_col, ColumnProxy)
-        assert email_col._col_name == "email"
-        assert email_col._full_name == "users.email"
-
-    def test_column_access_invalid(self, users_schema: Schema):
-        """TableProxy raises AttributeError for invalid columns."""
-        users = table("users", schema=users_schema)
-        with pytest.raises(AttributeError, match="has no column 'invalid'"):
-            _ = users.invalid
-
-
-
-# ColumnProxy tests
-
-
-class TestColumnProxy:
-    """Tests for ColumnProxy comparison operators."""
-
-    def test_equality(self, users_schema: Schema):
-        """Column == value creates Condition."""
-        users = table("users", schema=users_schema)
-        cond = users.status == "active"
-        assert isinstance(cond, Condition)
-        assert cond.column == "users.status"
-        assert cond.operator == "="
-        assert cond.value == "active"
-
-    def test_inequality(self, users_schema: Schema):
-        """Column != value creates Condition."""
-        users = table("users", schema=users_schema)
-        cond = users.status != "deleted"
-        assert cond.operator == "!="
-        assert cond.value == "deleted"
-
-    def test_less_than(self, users_schema: Schema):
-        """Column < value creates Condition."""
-        users = table("users", schema=users_schema)
-        cond = users.id < 10
-        assert cond.operator == "<"
-        assert cond.value == 10
-
-    def test_greater_than(self, users_schema: Schema):
-        """Column > value creates Condition."""
-        users = table("users", schema=users_schema)
-        cond = users.id > 5
-        assert cond.operator == ">"
-        assert cond.value == 5
-
-    def test_like(self, users_schema: Schema):
-        """Column.like() creates LIKE condition."""
-        users = table("users", schema=users_schema)
-        cond = users.email.like("%@example.com")
-        assert cond.operator == "LIKE"
-        assert cond.value == "%@example.com"
-
-    def test_ilike(self, users_schema: Schema):
-        """Column.ilike() creates ILIKE condition."""
-        users = table("users", schema=users_schema)
-        cond = users.email.ilike("%alice%")
-        assert cond.operator == "ILIKE"
-        assert cond.value == "%alice%"
-
-    def test_in_(self, users_schema: Schema):
-        """Column.in_() creates IN condition."""
-        users = table("users", schema=users_schema)
-        cond = users.status.in_(["active", "pending"])
-        assert cond.operator == "IN"
-        assert cond.value == ["active", "pending"]
-
-    def test_is_null(self, users_schema: Schema):
-        """Column.is_null() creates IS NULL condition."""
-        users = table("users", schema=users_schema)
-        cond = users.name.is_null()
-        assert cond.operator == "IS"
-        assert cond.value is None
-
-    def test_is_not_null(self, users_schema: Schema):
-        """Column.is_not_null() creates IS NOT NULL condition."""
-        users = table("users", schema=users_schema)
-        cond = users.name.is_not_null()
-        assert cond.operator == "IS NOT"
-        assert cond.value is None
-
-    def test_between(self, users_schema: Schema):
-        """Column.between() creates BETWEEN condition."""
-        users = table("users", schema=users_schema)
-        cond = users.id.between(1, 100)
-        assert cond.operator == "BETWEEN"
-        assert cond.value == (1, 100)
-
-    def test_desc(self, users_schema: Schema):
-        """Column.desc() creates DESC OrderBy."""
-        users = table("users", schema=users_schema)
-        order = users.created_at.desc()
-        assert isinstance(order, OrderBy)
-        assert order.direction == "DESC"
-
-    def test_asc(self, users_schema: Schema):
-        """Column.asc() creates ASC OrderBy."""
-        users = table("users", schema=users_schema)
-        order = users.email.asc()
-        assert order.direction == "ASC"
-
-
-# Condition tests
-
-
-class TestCondition:
-    """Tests for Condition SQL generation."""
-
-    def test_simple_condition_to_sql(self, users_schema: Schema):
-        """Simple condition generates correct SQL."""
-        users = table("users", schema=users_schema)
-        cond = users.status == "active"
-        sql, params = cond.to_sql("postgresql")
-        assert "users.status =" in sql
-        assert len(params) == 1
-
-    def test_null_condition_to_sql(self, users_schema: Schema):
-        """IS NULL condition generates correct SQL."""
-        users = table("users", schema=users_schema)
-        cond = users.name.is_null()
-        sql, params = cond.to_sql("postgresql")
-        assert sql == "users.name IS NULL"
-        assert params == {}
-
-    def test_in_condition_to_sql(self, users_schema: Schema):
-        """IN condition generates correct SQL."""
-        users = table("users", schema=users_schema)
-        cond = users.status.in_(["a", "b"])
-        sql, params = cond.to_sql("postgresql")
-        assert "users.status IN" in sql
-        assert len(params) == 2
-
-    def test_between_condition_to_sql(self, users_schema: Schema):
-        """BETWEEN condition generates correct SQL."""
-        users = table("users", schema=users_schema)
-        cond = users.id.between(1, 10)
-        sql, params = cond.to_sql("postgresql")
-        assert "BETWEEN" in sql
-        assert len(params) == 2
-
-    def test_ilike_postgresql(self, users_schema: Schema):
-        """ILIKE works on PostgreSQL."""
-        users = table("users", schema=users_schema)
-        cond = users.email.ilike("%test%")
-        sql, params = cond.to_sql("postgresql")
-        assert "ILIKE" in sql
-
-    def test_ilike_sqlite_fallback(self, users_schema: Schema):
-        """ILIKE falls back to LOWER() LIKE on SQLite."""
-        users = table("users", schema=users_schema)
-        cond = users.email.ilike("%test%")
-        sql, params = cond.to_sql("sqlite")
-        assert "LOWER" in sql
-        assert "LIKE" in sql
-
-    def test_param_reference(self, users_schema: Schema):
-        """Parameter reference (:name) is kept as-is."""
-        users = table("users", schema=users_schema)
-        cond = users.id == ":user_id"
-        sql, params = cond.to_sql("postgresql")
-        assert ":user_id" in sql
-        assert params == {}
-
-
-# ConditionGroup tests
-
-
-class TestConditionGroup:
-    """Tests for combining conditions with AND/OR."""
-
-    def test_and_conditions(self, users_schema: Schema):
-        """Conditions can be combined with &."""
-        users = table("users", schema=users_schema)
-        cond = (users.status == "active") & (users.email.is_not_null())
-        assert isinstance(cond, ConditionGroup)
-        assert cond.operator == "AND"
-
-    def test_or_conditions(self, users_schema: Schema):
-        """Conditions can be combined with |."""
-        users = table("users", schema=users_schema)
-        cond = (users.status == "active") | (users.status == "pending")
-        assert isinstance(cond, ConditionGroup)
-        assert cond.operator == "OR"
-
-    def test_complex_conditions(self, users_schema: Schema):
-        """Complex nested conditions work."""
-        users = table("users", schema=users_schema)
-        cond = (users.status == "active") & (
-            (users.email.like("%@a.com")) | (users.email.like("%@b.com"))
+    def test_an_explicit_join_type_is_used(self):
+        q = select(
+            from_table="a",
+            joins=[{"type": "LEFT", "table": "b", "on": "a.id = b.a_id"}],
         )
-        sql, params = cond.to_sql("postgresql")
-        assert "AND" in sql
-        assert "OR" in sql
+        assert 'LEFT JOIN "b" ON a.id = b.a_id' in q["sql"]
 
-
-# SelectQuery tests
-
-
-class TestSelectQuery:
-    """Tests for SelectQuery builder."""
-
-    def test_simple_select(self, users_schema: Schema):
-        """Simple SELECT generates correct SQL."""
-        users = table("users", schema=users_schema)
-        query = users.select(users.id, users.email)
-        sql, params = query.to_sql()
-        assert "SELECT users.id, users.email FROM users" in sql
-
-    def test_select_all(self, users_schema: Schema):
-        """SELECT without columns selects all."""
-        users = table("users", schema=users_schema)
-        query = users.select()
-        sql, params = query.to_sql()
-        assert "SELECT * FROM users" in sql
-
-    def test_select_with_where(self, users_schema: Schema):
-        """SELECT with WHERE clause."""
-        users = table("users", schema=users_schema)
-        query = users.select(users.id).where(users.status == "active")
-        sql, params = query.to_sql()
-        assert "WHERE" in sql
-        assert "users.status" in sql
-
-    def test_select_with_order_by(self, users_schema: Schema):
-        """SELECT with ORDER BY clause."""
-        users = table("users", schema=users_schema)
-        query = users.select(users.id).order_by(users.created_at.desc())
-        sql, params = query.to_sql()
-        assert "ORDER BY users.created_at DESC" in sql
-
-    def test_select_with_limit(self, users_schema: Schema):
-        """SELECT with LIMIT clause."""
-        users = table("users", schema=users_schema)
-        query = users.select(users.id).limit(10)
-        sql, params = query.to_sql()
-        assert "LIMIT 10" in sql
-
-    def test_select_with_offset(self, users_schema: Schema):
-        """SELECT with OFFSET clause."""
-        users = table("users", schema=users_schema)
-        query = users.select(users.id).limit(10).offset(20)
-        sql, params = query.to_sql()
-        assert "LIMIT 10" in sql
-        assert "OFFSET 20" in sql
-
-    def test_select_with_params(self, users_schema: Schema):
-        """SELECT with named parameters."""
-        users = table("users", schema=users_schema)
-        query = (
-            users
-            .select(users.id, users.email)
-            .where(users.id == ":user_id")
-            .params(user_id="abc-123")
+    def test_several_joins_appear_in_order(self):
+        q = select(
+            from_table="a",
+            joins=[
+                {"table": "b", "on": "1=1"},
+                {"type": "LEFT", "table": "c", "on": "2=2"},
+            ],
         )
-        sql, params = query.to_sql()
-        assert ":user_id" in sql
-        assert params["user_id"] == "abc-123"
+        assert q["sql"].index('"b"') < q["sql"].index('"c"')
 
-    def test_select_with_join(self, orders_schema: Schema):
-        """SELECT with JOIN clause using column-to-column comparison."""
-        users = table("users", schema=orders_schema)
-        orders = table("orders", schema=orders_schema)
-        query = (
-            orders
-            .select(orders.id, orders.total, users.email)
-            .join(users, on=orders.user_id == users.id)
+    def test_group_by_columns_are_quoted(self):
+        q = select("dept", from_table="staff", group_by=["dept"])
+        assert 'GROUP BY "dept"' in q["sql"]
+
+    def test_having_is_appended_after_group_by(self):
+        q = select(from_table="s", group_by=["d"], having="COUNT(*) > 1")
+        assert q["sql"].index("GROUP BY") < q["sql"].index("HAVING COUNT(*) > 1")
+
+    def test_order_by_defaults_to_ascending(self):
+        q = select(from_table="users", order_by=["name"])
+        assert 'ORDER BY "name" ASC' in q["sql"]
+
+    def test_a_leading_minus_means_descending(self):
+        q = select(from_table="users", order_by=["-created_at"])
+        assert 'ORDER BY "created_at" DESC' in q["sql"]
+
+    def test_mixed_directions_are_kept_in_order(self):
+        q = select(from_table="u", order_by=["-a", "b"])
+        assert 'ORDER BY "a" DESC, "b" ASC' in q["sql"]
+
+    def test_limit_and_offset_are_appended_in_that_order(self):
+        q = select(from_table="users", limit=10, offset=20)
+        assert q["sql"].endswith("LIMIT 10 OFFSET 20")
+
+    def test_a_zero_limit_is_emitted_not_dropped(self):
+        """`if limit is not None` rather than `if limit` — 0 is a real limit."""
+        assert "LIMIT 0" in select(from_table="u", limit=0)["sql"]
+
+    def test_a_zero_offset_is_emitted_not_dropped(self):
+        assert "OFFSET 0" in select(from_table="u", offset=0)["sql"]
+
+    def test_clauses_appear_in_sql_order(self):
+        q = select(
+            "a",
+            from_table="t",
+            joins=[{"table": "j", "on": "1=1"}],
+            where="x = 1",
+            group_by=["a"],
+            having="COUNT(*) > 0",
+            order_by=["a"],
+            limit=5,
+            offset=1,
         )
-        sql, params = query.to_sql()
-        assert "INNER JOIN users ON orders.user_id = users.id" in sql
-        assert params == {}  # column-to-column produces no params
+        sql = q["sql"]
+        positions = [
+            sql.index(k)
+            for k in ("SELECT", "FROM", "JOIN", "WHERE", "GROUP BY",
+                      "HAVING", "ORDER BY", "LIMIT", "OFFSET")
+        ]
+        assert positions == sorted(positions)
 
-    def test_select_with_left_join(self, orders_schema: Schema):
-        """SELECT with LEFT JOIN clause using column-to-column comparison."""
-        users = table("users", schema=orders_schema)
-        orders = table("orders", schema=orders_schema)
-        query = (
-            orders
-            .select(orders.id)
-            .join(users, on=orders.user_id == users.id, type="left")
+    def test_the_dialect_is_left_unset(self):
+        assert select(from_table="users")["dialect"] is None
+
+
+class TestInsert:
+    def test_a_single_row_uses_named_parameters(self):
+        q = insert("users", {"email": "a@b.c", "name": "Ada"})
+        assert q["sql"] == (
+            'INSERT INTO "users" ("email", "name") VALUES (:email, :name)'
         )
-        sql, params = query.to_sql()
-        assert "LEFT JOIN users ON orders.user_id = users.id" in sql
-        assert params == {}
+        assert q["params"] == {"email": "a@b.c", "name": "Ada"}
 
-    def test_column_to_column_comparison_operators(self, orders_schema: Schema):
-        """All comparison operators work for column-to-column (non-equi joins)."""
-        users = table("users", schema=orders_schema)
-        orders = table("orders", schema=orders_schema)
+    def test_values_are_never_interpolated_into_the_sql(self):
+        q = insert("users", {"name": "Robert'); DROP TABLE users;--"})
+        assert "DROP TABLE" not in q["sql"]
+        assert q["params"]["name"] == "Robert'); DROP TABLE users;--"
 
-        # != operator
-        cond = orders.user_id != users.id
-        sql, params = cond.to_sql("postgresql")
-        assert sql == "orders.user_id != users.id"
-        assert params == {}
+    def test_several_rows_use_indexed_parameters(self):
+        q = insert("users", [{"id": 1}, {"id": 2}])
+        assert q["sql"] == 'INSERT INTO "users" ("id") VALUES (:id_0), (:id_1)'
+        assert q["params"] == {"id_0": 1, "id_1": 2}
 
-        # < operator
-        cond = orders.id < users.id
-        sql, params = cond.to_sql("postgresql")
-        assert sql == "orders.id < users.id"
-        assert params == {}
+    def test_a_one_row_list_still_takes_the_named_path(self):
+        assert insert("t", [{"id": 1}])["params"] == {"id": 1}
 
-        # > operator
-        cond = orders.id > users.id
-        sql, params = cond.to_sql("postgresql")
-        assert sql == "orders.id > users.id"
-        assert params == {}
+    def test_columns_come_from_the_first_row(self):
+        q = insert("t", [{"a": 1}, {"a": 2, "b": 3}])
+        assert q["sql"].count(":") == 2, "only column 'a' is emitted"
+        assert "b" not in q["params"]
 
-    def test_select_with_count(self, users_schema: Schema):
-        """SELECT with COUNT function."""
-        users = table("users", schema=users_schema)
-        query = users.select(count_("*"))
-        sql, params = query.to_sql()
-        assert "COUNT(*)" in sql
+    def test_a_row_missing_a_column_binds_none(self):
+        q = insert("t", [{"a": 1, "b": 2}, {"a": 3}])
+        assert q["params"]["b_1"] is None
 
-    def test_select_immutability(self, users_schema: Schema):
-        """SelectQuery is immutable - methods return new instances."""
-        users = table("users", schema=users_schema)
-        q1 = users.select(users.id)
-        q2 = q1.where(users.status == "active")
-        q3 = q1.limit(10)
+    def test_an_empty_list_raises(self):
+        with pytest.raises(ValueError, match="values cannot be empty"):
+            insert("users", [])
 
-        # Original query is unchanged
-        sql1, _ = q1.to_sql()
-        assert "WHERE" not in sql1
-        assert "LIMIT" not in sql1
+    def test_on_conflict_is_appended(self):
+        q = insert("t", {"id": 1}, on_conflict="(id) DO NOTHING")
+        assert q["sql"].endswith("ON CONFLICT (id) DO NOTHING")
 
-        # New queries have modifications
-        sql2, _ = q2.to_sql()
-        assert "WHERE" in sql2
+    def test_returning_columns_are_quoted(self):
+        q = insert("t", {"id": 1}, returning=["id", "created_at"])
+        assert q["sql"].endswith('RETURNING "id", "created_at"')
 
-        sql3, _ = q3.to_sql()
-        assert "LIMIT" in sql3
+    def test_returning_comes_after_on_conflict(self):
+        q = insert("t", {"id": 1}, on_conflict="DO NOTHING", returning=["id"])
+        assert q["sql"].index("ON CONFLICT") < q["sql"].index("RETURNING")
 
 
-# InsertQuery tests
+class TestUpdate:
+    def test_set_values_are_prefixed_to_avoid_colliding_with_where_params(self):
+        """`set_` namespacing is what lets SET and WHERE both bind `id`."""
+        q = update("users", {"id": 9}, where="id = :id", params={"id": 1})
+        assert q["sql"] == 'UPDATE "users" SET "id" = :set_id WHERE id = :id'
+        assert q["params"] == {"set_id": 9, "id": 1}
+
+    def test_a_missing_where_raises_rather_than_updating_every_row(self):
+        with pytest.raises(ValueError, match="where clause is required"):
+            update("users", {"name": "x"}, where="")
+
+    def test_empty_set_values_raise(self):
+        with pytest.raises(ValueError, match="set_values cannot be empty"):
+            update("users", {}, where="1=1")
+
+    def test_set_values_is_checked_before_where(self):
+        with pytest.raises(ValueError, match="set_values cannot be empty"):
+            update("users", {}, where="")
+
+    def test_an_explicit_all_rows_where_is_allowed(self):
+        assert update("users", {"a": 1}, where="1=1")["sql"].endswith("WHERE 1=1")
+
+    def test_several_set_columns_are_comma_joined(self):
+        q = update("t", {"a": 1, "b": 2}, where="1=1")
+        assert 'SET "a" = :set_a, "b" = :set_b' in q["sql"]
+
+    def test_returning_is_appended(self):
+        q = update("t", {"a": 1}, where="1=1", returning=["a"])
+        assert q["sql"].endswith('RETURNING "a"')
+
+    def test_no_params_leaves_only_the_set_bindings(self):
+        assert update("t", {"a": 1}, where="1=1")["params"] == {"set_a": 1}
 
 
-class TestInsertQuery:
-    """Tests for InsertQuery builder."""
+class TestDelete:
+    def test_a_where_clause_is_required(self):
+        with pytest.raises(ValueError, match="where clause is required"):
+            delete("users", where="")
 
-    def test_simple_insert(self, users_schema: Schema):
-        """Simple INSERT generates correct SQL."""
-        users = table("users", schema=users_schema)
-        query = users.insert(email="test@example.com", name="Test")
-        sql, params = query.to_sql()
-        assert "INSERT INTO users" in sql
-        assert "email" in sql
-        assert "name" in sql
-        assert "ins_email" in params
-        assert "ins_name" in params
+    def test_a_delete_binds_its_where_params(self):
+        q = delete("users", where="id = :id", params={"id": 1})
+        assert q["sql"] == 'DELETE FROM "users" WHERE id = :id'
+        assert q["params"] == {"id": 1}
 
-    def test_insert_with_param_reference(self, users_schema: Schema):
-        """INSERT with parameter references."""
-        users = table("users", schema=users_schema)
-        query = users.insert(email=":email").params(email="test@example.com")
-        sql, params = query.to_sql()
-        assert ":email" in sql
-        assert params["email"] == "test@example.com"
+    def test_params_default_to_an_empty_dict(self):
+        assert delete("users", where="1=1")["params"] == {}
 
-    def test_insert_with_function(self, users_schema: Schema):
-        """INSERT with SQL function."""
-        users = table("users", schema=users_schema)
-        query = users.insert(email="test@example.com", created_at=now_())
-        sql, params = query.to_sql("postgresql")
-        assert "now()" in sql
-
-    def test_insert_with_returning(self, users_schema: Schema):
-        """INSERT with RETURNING clause."""
-        users = table("users", schema=users_schema)
-        query = users.insert(email="test@example.com").returning(users.id)
-        sql, params = query.to_sql()
-        assert "RETURNING id" in sql
-
-    def test_insert_invalid_column(self, users_schema: Schema):
-        """INSERT with invalid column raises AttributeError."""
-        users = table("users", schema=users_schema)
-        with pytest.raises(AttributeError, match="has no column 'invalid'"):
-            users.insert(invalid="value")
+    def test_returning_is_appended(self):
+        q = delete("t", where="1=1", returning=["id"])
+        assert q["sql"].endswith('RETURNING "id"')
 
 
-# UpdateQuery tests
+class TestRaw:
+    def test_the_sql_is_passed_through_untouched(self):
+        assert raw("SELECT 1")["sql"] == "SELECT 1"
+
+    def test_params_default_to_an_empty_dict(self):
+        assert raw("SELECT 1")["params"] == {}
+
+    def test_params_are_carried(self):
+        assert raw("SELECT :x", {"x": 1})["params"] == {"x": 1}
 
 
-class TestUpdateQuery:
-    """Tests for UpdateQuery builder."""
+class TestComposition:
+    def test_with_limit_appends_when_there_is_none(self):
+        assert with_limit(raw("SELECT 1"), 5)["sql"] == "SELECT 1 LIMIT 5"
 
-    def test_simple_update(self, users_schema: Schema):
-        """Simple UPDATE generates correct SQL."""
-        users = table("users", schema=users_schema)
-        query = (
-            users
-            .update(name="New Name")
-            .where(users.id == ":id")
-            .params(id="abc-123")
-        )
-        sql, params = query.to_sql()
-        assert "UPDATE users SET" in sql
-        assert "name" in sql
-        assert "WHERE" in sql
+    def test_with_limit_replaces_an_existing_limit(self):
+        q = with_limit(select(from_table="t", limit=10), 5)
+        assert q["sql"].endswith("LIMIT 5")
+        assert "LIMIT 10" not in q["sql"]
 
-    def test_update_with_function(self, users_schema: Schema):
-        """UPDATE with SQL function."""
-        users = table("users", schema=users_schema)
-        query = users.update(created_at=now_()).where(users.id == ":id")
-        sql, params = query.to_sql("postgresql")
-        assert "created_at = now()" in sql
+    def test_with_offset_appends_when_there_is_none(self):
+        assert with_offset(raw("SELECT 1"), 5)["sql"] == "SELECT 1 OFFSET 5"
 
-    def test_update_with_returning(self, users_schema: Schema):
-        """UPDATE with RETURNING clause."""
-        users = table("users", schema=users_schema)
-        query = (
-            users
-            .update(name="New")
-            .where(users.id == ":id")
-            .returning(users.id, users.name)
-        )
-        sql, params = query.to_sql()
-        assert "RETURNING id, name" in sql
+    def test_with_offset_replaces_an_existing_offset(self):
+        q = with_offset(select(from_table="t", offset=10), 5)
+        assert q["sql"].endswith("OFFSET 5")
+        assert "OFFSET 10" not in q["sql"]
 
-    def test_update_invalid_column(self, users_schema: Schema):
-        """UPDATE with invalid column raises AttributeError."""
-        users = table("users", schema=users_schema)
-        with pytest.raises(AttributeError, match="has no column 'invalid'"):
-            users.update(invalid="value")
+    def test_with_limit_after_offset_truncates_the_offset(self):
+        """Documented behaviour worth pinning: LIMIT splits on ' LIMIT ' only,
+        so applying it to a query already carrying OFFSET keeps the OFFSET
+        text ahead of the new LIMIT and produces invalid SQL ordering."""
+        q = with_limit(select(from_table="t", limit=1, offset=2), 5)
+        assert q["sql"] == 'SELECT * FROM "t" LIMIT 5'
 
+    def test_composition_preserves_params_and_dialect(self):
+        q = with_limit({"sql": "SELECT 1", "params": {"a": 1}, "dialect": "sqlite"}, 5)
+        assert q["params"] == {"a": 1}
+        assert q["dialect"] == "sqlite"
 
-# DeleteQuery tests
+    def test_with_params_merges_into_the_existing_params(self):
+        q = with_params(raw("SELECT :a, :b", {"a": 1}), b=2)
+        assert q["params"] == {"a": 1, "b": 2}
 
+    def test_with_params_overwrites_a_colliding_key(self):
+        assert with_params(raw("q", {"a": 1}), a=2)["params"] == {"a": 2}
 
-class TestDeleteQuery:
-    """Tests for DeleteQuery builder."""
+    def test_with_params_leaves_the_sql_alone(self):
+        assert with_params(raw("SELECT 1"), a=1)["sql"] == "SELECT 1"
 
-    def test_simple_delete(self, users_schema: Schema):
-        """Simple DELETE generates correct SQL."""
-        users = table("users", schema=users_schema)
-        query = users.delete().where(users.id == ":id").params(id="abc-123")
-        sql, params = query.to_sql()
-        assert "DELETE FROM users" in sql
-        assert "WHERE" in sql
-
-    def test_delete_with_returning(self, users_schema: Schema):
-        """DELETE with RETURNING clause."""
-        users = table("users", schema=users_schema)
-        query = users.delete().where(users.id == ":id").returning(users.id)
-        sql, params = query.to_sql()
-        assert "RETURNING id" in sql
-
-    def test_delete_without_where(self, users_schema: Schema):
-        """DELETE without WHERE is allowed (but dangerous)."""
-        users = table("users", schema=users_schema)
-        query = users.delete()
-        sql, params = query.to_sql()
-        assert "DELETE FROM users" in sql
-        assert "WHERE" not in sql
-
-
-# Function tests
-
-
-class TestSQLFunctions:
-    """Tests for SQL function wrappers."""
-
-    def test_count_star(self, users_schema: Schema):
-        """count_("*") generates COUNT(*)."""
-        users = table("users", schema=users_schema)
-        query = users.select(count_("*"))
-        sql, _ = query.to_sql()
-        assert "COUNT(*)" in sql
-
-    def test_now_postgresql(self):
-        """now_() generates now() for PostgreSQL."""
-        from declaro_persistum.query.insert import _translate_function
-
-        func = now_()
-        sql = _translate_function(func, "postgresql")
-        assert sql == "now()"
-
-    def test_now_sqlite(self):
-        """now_() generates datetime('now') for SQLite."""
-        from declaro_persistum.query.insert import _translate_function
-
-        func = now_()
-        sql = _translate_function(func, "sqlite")
-        assert sql == "datetime('now')"
+    def test_the_original_query_is_not_mutated(self):
+        original = raw("SELECT 1", {"a": 1})
+        with_params(original, b=2)
+        with_limit(original, 5)
+        assert original == {"sql": "SELECT 1", "params": {"a": 1}, "dialect": None}

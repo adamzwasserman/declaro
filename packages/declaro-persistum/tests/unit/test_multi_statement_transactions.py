@@ -63,6 +63,7 @@ class _RecordingConn:
 
 class _Holder:
     conns: list[_RecordingConn] = []
+    conn_factory = _RecordingConn
 
     def __init__(self, database_path, remote_url=None, _auth_token=None) -> None:
         self.database_path = database_path
@@ -70,7 +71,7 @@ class _Holder:
         self.conn = None
 
     async def connect_async(self) -> None:
-        self.conn = _RecordingConn()
+        self.conn = type(self).conn_factory()
         type(self).conns.append(self.conn)
 
     async def push(self) -> None:
@@ -80,10 +81,30 @@ class _Holder:
         pass
 
 
-async def _pool(tmp_path, monkeypatch, remote=True):
-    import declaro_persistum.pool as pool_mod
+# Writes are stateless by default: each one opens its own connection and
+# closes it, so there is no single connection left to inspect afterwards.
+# These read the whole population instead, which is what the assertions
+# always meant — "one commit happened", not "one commit happened on the
+# connection the pool happens to keep".
+
+
+def _commits() -> int:
+    return sum(c.commits for c in _Holder.conns)
+
+
+def _rollbacks() -> int:
+    return sum(c.rollbacks for c in _Holder.conns)
+
+
+def _statements() -> list[str]:
+    return [s for c in _Holder.conns for s in c.statements]
+
+
+async def _pool(tmp_path, monkeypatch, remote=True, mvcc=True):
+    import declaro_persistum.turso_pool as pool_mod  # TursoPool's own module since declaro-tvx split pool.py
 
     _Holder.conns = []
+    _Holder.conn_factory = _RecordingConn
     monkeypatch.setattr(pool_mod, "_TursoConnectionHolder", _Holder)
 
     db = tmp_path / "r.db"
@@ -92,6 +113,7 @@ async def _pool(tmp_path, monkeypatch, remote=True):
         str(db),
         remote_url="https://example.turso.io" if remote else None,
         auth_token="t" if remote else None,
+        mvcc=mvcc,
     )
     pool._push_loop = lambda: asyncio.sleep(0)  # type: ignore[assignment]
     pool._enable_replica_fk_enforcement = lambda: asyncio.sleep(0)  # type: ignore[assignment]
@@ -113,9 +135,8 @@ class TestWritesShareOneTransaction:
             async with pool.acquire_write() as c2:
                 await c2.execute("UPDATE tag_cooccurrence SET n = 1")
 
-        conn = pool._write_holder.conn
-        assert conn.commits == 1, (
-            f"{conn.commits} commits for two writes inside one transaction; "
+        assert _commits() == 1, (
+            f"{_commits()} commits for two writes inside one transaction; "
             f"they did not share it"
         )
 
@@ -144,7 +165,7 @@ class TestWritesShareOneTransaction:
             async with pool.acquire_write() as c:
                 await c.execute("UPDATE b SET x = 2")
 
-        begins = [s for s in pool._write_holder.conn.statements if s.startswith("BEGIN")]
+        begins = [s for s in _statements() if s.startswith("BEGIN")]
         assert len(begins) == 1, f"expected one BEGIN, saw {len(begins)}"
 
 
@@ -163,9 +184,8 @@ class TestFailureRollsBackEverything:
                     await c.execute("UPDATE cards SET tags = 'a'")
                 raise ValueError("boom")
 
-        conn = pool._write_holder.conn
-        assert conn.rollbacks == 1, "the transaction was not rolled back"
-        assert conn.commits == 0, "a failed transaction still committed"
+        assert _rollbacks() == 1, "the transaction was not rolled back"
+        assert _commits() == 0, "a failed transaction still committed"
 
     @pytest.mark.asyncio
     async def test_a_failing_write_rolls_back_the_earlier_one(
@@ -180,7 +200,7 @@ class TestFailureRollsBackEverything:
                     raise RuntimeError("index write failed")
                 return await super().execute(sql, *_a)
 
-        pool._write_holder.conn = _FailsSecond()
+        _Holder.conn_factory = _FailsSecond
 
         with pytest.raises(RuntimeError, match="index write failed"):
             async with pool.transaction():
@@ -189,7 +209,7 @@ class TestFailureRollsBackEverything:
                 async with pool.acquire_write() as c:
                     await c.execute("UPDATE tag_cooccurrence SET n = 1")
 
-        assert pool._write_holder.conn.commits == 0
+        assert _commits() == 0
 
 
 class TestOutsideATransactionNothingChanges:
@@ -206,7 +226,7 @@ class TestOutsideATransactionNothingChanges:
         async with pool.acquire_write() as c:
             await c.execute("UPDATE b SET x = 2")
 
-        assert pool._write_holder.conn.commits == 2
+        assert _commits() == 2
 
     @pytest.mark.asyncio
     async def test_concurrent_tasks_do_not_share_a_transaction(

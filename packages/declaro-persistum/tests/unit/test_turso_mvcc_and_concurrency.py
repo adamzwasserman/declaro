@@ -68,7 +68,7 @@ class _Holder:
 
 async def _init(pool, conn):
     """Run _initialize with the holder and background work stubbed out."""
-    import declaro_persistum.pool as pool_mod
+    import declaro_persistum.turso_pool as pool_mod  # TursoPool's own module since declaro-tvx split pool.py
 
     orig = pool_mod._TursoConnectionHolder
     pool_mod._TursoConnectionHolder = lambda *_a, **_kw: _Holder(conn)  # type: ignore[assignment]

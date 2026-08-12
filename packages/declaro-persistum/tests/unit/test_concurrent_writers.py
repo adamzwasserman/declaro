@@ -75,7 +75,7 @@ class _Holder:
 
 
 async def _pool(tmp_path, monkeypatch, mvcc=True):
-    import declaro_persistum.pool as pool_mod
+    import declaro_persistum.turso_pool as pool_mod  # TursoPool's own module since declaro-tvx split pool.py
 
     monkeypatch.setattr(pool_mod, "_TursoConnectionHolder", _Holder)
     db = tmp_path / "r.db"
@@ -146,10 +146,13 @@ class TestWritersOverlap:
 
         async with pool.acquire_write() as conn:
             await conn.execute("INSERT INTO t VALUES (1)")
+            # Read inside the block. A stateless write closes its own
+            # connection on the way out, so writer zero never sees this
+            # statement stream — it is not the connection that wrote.
+            statements = list(conn._holder.conn.statements)
 
         assert any(
-            s.startswith("BEGIN CONCURRENT")
-            for s in pool._write_holder.conn.statements
+            s.startswith("BEGIN CONCURRENT") for s in statements
         ), "MVCC is on but BEGIN CONCURRENT was not issued"
         await pool.close()
 

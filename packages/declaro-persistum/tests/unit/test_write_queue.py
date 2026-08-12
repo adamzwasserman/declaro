@@ -21,6 +21,7 @@ import asyncio
 
 import pytest
 
+from declaro_persistum.retry import NO_RETRY
 from declaro_persistum.write_queue import collect, deposit, drain, new_room
 
 
@@ -53,7 +54,7 @@ class TestDepositReturnsATicketAtOnce:
         deposit(room, _write(1))
         assert executed == []
 
-        await drain(room, execute)
+        await drain(room, execute, NO_RETRY)
         assert len(executed) == 1
 
 
@@ -68,7 +69,7 @@ class TestArrivalOrderIsKept:
 
         for n in (1, 2, 3):
             deposit(room, _write(n))
-        await drain(room, execute)
+        await drain(room, execute, NO_RETRY)
 
         assert order == [1, 2, 3]
 
@@ -86,7 +87,7 @@ class TestArrivalOrderIsKept:
 
         for n in (1, 2):
             deposit(room, _write(n))
-        await drain(room, execute)
+        await drain(room, execute, NO_RETRY)
 
         assert events == ["start 1", "end 1", "start 2", "end 2"]
 
@@ -95,7 +96,7 @@ class TestArrivalOrderIsKept:
         async def execute(_w):
             raise AssertionError("nothing to append")
 
-        assert await drain(new_room(), execute) == 0
+        assert await drain(new_room(), execute, NO_RETRY) == 0
 
 
 class TestCollect:
@@ -107,7 +108,7 @@ class TestCollect:
             return None
 
         ticket = deposit(room, _write(1))
-        await drain(room, execute)
+        await drain(room, execute, NO_RETRY)
         receipt = await collect(room, ticket)
 
         assert receipt["id"] == ticket
@@ -120,7 +121,7 @@ class TestCollect:
             return None
 
         ticket = deposit(room, _write(1))
-        await drain(room, execute)
+        await drain(room, execute, NO_RETRY)
         receipt = await collect(room, ticket)
 
         assert receipt["ok"] is True
@@ -135,7 +136,7 @@ class TestCollect:
             return None
 
         tickets = [deposit(room, _write(n)) for n in range(3)]
-        appended = asyncio.create_task(drain(room, execute))
+        appended = asyncio.create_task(drain(room, execute, NO_RETRY))
         await asyncio.sleep(0)              # the caller is free in the meantime
         await appended
 
@@ -155,7 +156,7 @@ class TestCollect:
         await asyncio.sleep(0)
         assert not collected.done(), "collect returned before the write was appended"
 
-        await drain(room, execute)
+        await drain(room, execute, NO_RETRY)
         assert (await collected)["ok"] is True
 
 
@@ -168,7 +169,7 @@ class TestFailureGoesBackToItsOwnCaller:
             raise RuntimeError("UNIQUE constraint failed")
 
         ticket = deposit(room, _write(1))
-        await drain(room, execute)
+        await drain(room, execute, NO_RETRY)
         receipt = await collect(room, ticket)
 
         assert receipt["ok"] is False
@@ -186,7 +187,7 @@ class TestFailureGoesBackToItsOwnCaller:
         first = deposit(room, _write(1))
         bad = deposit(room, _write(2))
         third = deposit(room, _write(3))
-        await drain(room, execute)
+        await drain(room, execute, NO_RETRY)
 
         assert (await collect(room, first))["ok"] is True
         assert (await collect(room, bad))["ok"] is False
@@ -203,7 +204,7 @@ class TestFailureGoesBackToItsOwnCaller:
             raise RuntimeError("nope")
 
         deposit(room, _write(1))
-        await drain(room, execute)
+        await drain(room, execute, NO_RETRY)
 
         assert len(attempts) == 1
 
@@ -217,7 +218,7 @@ class TestTheRoomStaysEmpty:
             return None
 
         ticket = deposit(room, _write(1))
-        await drain(room, execute)
+        await drain(room, execute, NO_RETRY)
         await collect(room, ticket)
 
         assert room["writes"] == []
@@ -233,7 +234,7 @@ class TestTheRoomStaysEmpty:
             raise RuntimeError("nope")
 
         ticket = deposit(room, _write(1))
-        await drain(room, execute)
+        await drain(room, execute, NO_RETRY)
         await collect(room, ticket)
 
         assert room["writes"] == []

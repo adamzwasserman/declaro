@@ -78,8 +78,11 @@ class _Holder:
         pass
 
 
-async def _pool(tmp_path, monkeypatch, max_size=WRITERS, remote=True):
-    import declaro_persistum.pool as pool_mod
+async def _pool(
+    tmp_path, monkeypatch, max_size=WRITERS, remote=True, mvcc=False,
+    pooled_writes=False,
+):
+    import declaro_persistum.turso_pool as pool_mod  # TursoPool's own module since declaro-tvx split pool.py
 
     _Holder.instances = []
     monkeypatch.setattr(pool_mod, "_TursoConnectionHolder", _Holder)
@@ -90,7 +93,9 @@ async def _pool(tmp_path, monkeypatch, max_size=WRITERS, remote=True):
         str(db),
         remote_url="https://example.turso.io" if remote else None,
         auth_token="t" if remote else None,
+        mvcc=mvcc,
         max_size=max_size,
+        pooled_writes=pooled_writes,
     )
     pool._push_loop = lambda: asyncio.sleep(0)  # type: ignore[assignment]
     pool._enable_replica_fk_enforcement = lambda: asyncio.sleep(0)  # type: ignore[assignment]
@@ -153,9 +158,9 @@ class TestWritersRunConcurrently:
         assert len(set(seen)) == 2, "both writers used the same connection"
 
     @pytest.mark.asyncio
-    async def test_write_connections_are_reused_not_leaked(self, tmp_path, monkeypatch):
-        """Sequential writes must not open a new connection every time."""
-        pool = await _pool(tmp_path, monkeypatch)
+    async def test_pooled_writes_reuse_connections(self, tmp_path, monkeypatch):
+        """Under the pooled OPT-IN, sequential writes reuse connections."""
+        pool = await _pool(tmp_path, monkeypatch, pooled_writes=True)
 
         for _ in range(20):
             async with pool.acquire_write():
@@ -164,6 +169,32 @@ class TestWritersRunConcurrently:
         assert len(_Holder.instances) <= WRITERS + 2, (
             f"opened {len(_Holder.instances)} connections for 20 sequential "
             f"writes — they are not being returned to the pool"
+        )
+
+    @pytest.mark.asyncio
+    async def test_stateless_writes_close_every_connection(
+        self, tmp_path, monkeypatch
+    ):
+        """The default opens one connection per write, and closes each one.
+
+        Twenty connections for twenty writes is the DESIGN, not a leak. The
+        leak this guards against is a connection left open: `holder.conn`
+        must be None once the write is done. Cost of the open is measured
+        in pool.py's module docstring — 1.16ms on a live cloud replica.
+        """
+        pool = await _pool(tmp_path, monkeypatch)
+        before = len(_Holder.instances)
+
+        for _ in range(20):
+            async with pool.acquire_write():
+                pass
+
+        opened = _Holder.instances[before:]
+        assert len(opened) == 20, (
+            f"expected one connection per write, saw {len(opened)}"
+        )
+        assert all(h.conn is None for h in opened), (
+            "a stateless write left its connection open"
         )
 
     @pytest.mark.asyncio
@@ -204,7 +235,10 @@ class TestRefreshCoversEveryConnection:
 
     @pytest.mark.asyncio
     async def test_all_write_connections_are_reopened(self, tmp_path, monkeypatch):
-        pool = await _pool(tmp_path, monkeypatch)
+        # Held write connections only exist on the pooled opt-in. A stateless
+        # write has nothing to reopen: it opens after the migration or it
+        # does not exist.
+        pool = await _pool(tmp_path, monkeypatch, pooled_writes=True)
 
         # Force three write connections into existence.
         async def hold(barrier):
@@ -285,13 +319,21 @@ class TestConcurrentWritesUseMvcc:
     async def test_begin_concurrent_issued_when_mvcc_granted(
         self, tmp_path, monkeypatch
     ):
-        pool = await _pool(tmp_path, monkeypatch)
+        # This runs local-only, but NOT because MVCC is unavailable with a
+        # remote. The comment here used to say that, citing declaro-9si. It
+        # is wrong: MVCC is requested by default and DOES activate on a
+        # cloud replica (journal_mode='mvcc', measured 2026-08-10, survives
+        # CDC and a replica reopen). It is refused only on an EXISTING
+        # wal+CDC replica.
+        pool = await _pool(tmp_path, monkeypatch, remote=False, mvcc=True)
         assert pool._mvcc is True
 
         async with pool.acquire_write(concurrent=True) as conn:
-            pass
+            # Read inside the block: a stateless write closes its connection
+            # on the way out and clears holder.conn.
+            statements = list(conn._holder.conn.statements)
 
-        assert any("BEGIN CONCURRENT" in s for s in conn._holder.conn.statements)
+        assert any("BEGIN CONCURRENT" in s for s in statements)
 
     @pytest.mark.asyncio
     async def test_ddl_path_does_not_use_begin_concurrent(self, tmp_path, monkeypatch):
@@ -299,6 +341,6 @@ class TestConcurrentWritesUseMvcc:
         pool = await _pool(tmp_path, monkeypatch)
 
         async with pool.acquire_write(concurrent=False) as conn:
-            pass
+            statements = list(conn._holder.conn.statements)
 
-        assert not any("BEGIN CONCURRENT" in s for s in conn._holder.conn.statements)
+        assert not any("BEGIN CONCURRENT" in s for s in statements)

@@ -71,7 +71,7 @@ class _Holder:
 
 
 async def _pool(tmp_path, monkeypatch):
-    import declaro_persistum.pool as pool_mod
+    import declaro_persistum.turso_pool as pool_mod  # TursoPool's own module since declaro-tvx split pool.py
 
     _Holder.opened = []
     _Holder.pushes = []

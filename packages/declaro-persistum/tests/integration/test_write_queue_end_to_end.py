@@ -14,6 +14,7 @@ import asyncio
 import pytest
 
 from declaro_persistum import ConnectionPool, collect, deposit, drain, new_room
+from declaro_persistum.retry import NO_RETRY
 
 
 async def _pool(tmp_path, name="q.db"):
@@ -53,7 +54,7 @@ class TestDepositCollect:
         ticket = deposit(room, {"sql": INSERT, "params": (1, "ada")})
         assert await _rows(pool) == [], "nothing should be written before the drain"
 
-        await drain(room, _appender(pool))
+        await drain(room, _appender(pool), NO_RETRY)
         receipt = await collect(room, ticket)
 
         assert receipt == {"id": ticket, "ok": True, "error": ""}
@@ -79,7 +80,7 @@ class TestDepositCollect:
             "params": (10, 1),
         })
 
-        await drain(room, _appender(pool))
+        await drain(room, _appender(pool), NO_RETRY)
 
         assert (await collect(room, user))["ok"] is True
         assert (await collect(room, route))["ok"] is True, (
@@ -137,5 +138,5 @@ class TestConcurrentCallers:
 async def _forever(room, execute):
     """The appender the caller owns. The library never starts one."""
     while True:
-        await drain(room, execute)
+        await drain(room, execute, NO_RETRY)
         await asyncio.sleep(0)

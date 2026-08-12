@@ -41,7 +41,7 @@ class TestConcurrentWritersDeliverEveryRow:
     @pytest.mark.asyncio
     async def test_disjoint_ranges_all_land(self, tmp_path):
         """N writers, disjoint id ranges, every row present and attributable."""
-        pool = await ConnectionPool.turso(str(tmp_path / "w.db"), max_size=WRITERS)
+        pool = await ConnectionPool.turso(str(tmp_path / "w.db"), max_size=WRITERS, mvcc=True)
         async with pool.acquire_write(concurrent=False) as conn:
             await conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, writer INTEGER)")
 
@@ -103,7 +103,7 @@ class TestConcurrentWritersDeliverEveryRow:
     @pytest.mark.asyncio
     async def test_no_row_is_written_twice(self, tmp_path):
         """Concurrency must not duplicate rows or corrupt the primary key."""
-        pool = await ConnectionPool.turso(str(tmp_path / "d.db"), max_size=WRITERS)
+        pool = await ConnectionPool.turso(str(tmp_path / "d.db"), max_size=WRITERS, mvcc=True)
         async with pool.acquire_write(concurrent=False) as conn:
             await conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, writer INTEGER)")
 

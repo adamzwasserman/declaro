@@ -78,7 +78,7 @@ class _Holder:
 
 
 async def _pool(tmp_path, monkeypatch, max_size=MAX_SIZE):
-    import declaro_persistum.pool as pool_mod
+    import declaro_persistum.turso_pool as pool_mod  # TursoPool's own module since declaro-tvx split pool.py
 
     _Holder.instances = []
     monkeypatch.setattr(pool_mod, "_TursoConnectionHolder", _Holder)
@@ -134,7 +134,7 @@ class TestWritersNeverQueue:
         distinction the mandate turns on. What must never happen, on either,
         is queueing behind a cap this pool invented.
         """
-        import declaro_persistum.pool as pool_mod
+        import declaro_persistum.turso_pool as pool_mod  # TursoPool's own module since declaro-tvx split pool.py
 
         _Holder.instances = []
         monkeypatch.setattr(pool_mod, "_TursoConnectionHolder", _Holder)
@@ -269,7 +269,7 @@ class TestPoolOpenPaysOneHandshake:
         after open, which is fine — it runs in a task, not on the path a
         caller awaits. Stubbing it isolates _initialize's own work.
         """
-        import declaro_persistum.pool as pool_mod
+        import declaro_persistum.turso_pool as pool_mod  # TursoPool's own module since declaro-tvx split pool.py
 
         _Holder.instances = []
         monkeypatch.setattr(pool_mod, "_TursoConnectionHolder", _Holder)

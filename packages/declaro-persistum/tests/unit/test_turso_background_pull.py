@@ -62,7 +62,7 @@ def _pool(tmp_path, *, background_pull=True, holder=None, populated=True):
 
 async def _initialize(pool, holder):
     """Run _initialize with the holder and side effects stubbed out."""
-    import declaro_persistum.pool as pool_mod
+    import declaro_persistum.turso_pool as pool_mod  # TursoPool's own module since declaro-tvx split pool.py
 
     orig_holder_cls = pool_mod._TursoConnectionHolder
     pool_mod._TursoConnectionHolder = lambda *_a, **_kw: holder  # type: ignore[assignment]
