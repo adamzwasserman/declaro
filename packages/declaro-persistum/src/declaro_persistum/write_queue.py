@@ -13,10 +13,17 @@ connection per concurrent caller. This buffers callers; it does not serialise
 the database.
 
 Nothing is stored here. The room is empty except during the microseconds when
-callers overlap. There is no persistence, because nothing sits in it; no
-retry, because a real error -- a constraint violation -- fails again and
-belongs to its caller; and no pending list surviving a failure, because every
-write has a caller holding its ticket.
+callers overlap. There is no persistence, because nothing sits in it; and no
+pending list surviving a failure, because every write has a caller holding
+its ticket.
+
+Contention IS retried, and only contention. This paragraph used to say there
+was no retry at all, "because a real error -- a constraint violation -- fails
+again and belongs to its caller". That reasoning still holds for constraint
+violations and they are still not retried. It does not hold for a write-write
+conflict, which is the documented price of MVCC concurrency and means "not
+now" rather than "no". `drain` takes a required `Retry` policy; see retry.py
+for why it is required rather than defaulted.
 
     ticket = deposit(room, write)      # returns at once
     ...                                # the caller is free
@@ -41,14 +48,18 @@ task of its own::
 
     async def appender():
         while True:
-            await drain(room, execute)
+            await drain(room, execute, NO_RETRY)
             await asyncio.sleep(0)
 """
+
+from __future__ import annotations
 
 import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any, TypedDict
+
+from declaro_persistum.retry import Retry, delay_before, is_contention
 
 
 class PendingWrite(TypedDict):
@@ -104,7 +115,9 @@ async def collect(room: Room, ticket: str) -> Receipt:
 
 
 async def drain(
-    room: Room, execute: Callable[[PendingWrite], Awaitable[Any]]
+    room: Room,
+    execute: Callable[[PendingWrite], Awaitable[Any]],
+    retry: Retry,
 ) -> int:
     """Append every waiting write to the log, in arrival order.
 
@@ -112,19 +125,44 @@ async def drain(
     returns, so the order the caller deposited in is the order the log
     receives. Returns how many were appended.
 
-    A failure is not retried and does not stop the queue. It belongs to the
-    caller that deposited it, and it goes back down that caller's ticket.
+    `retry` is required, not defaulted. Pass `NO_RETRY` to run each write
+    once; retry.py says why the choice is forced on the caller.
+
+    Contention is retried, up to `retry["attempts"]` in total. Anything else
+    fails on the first attempt. Either way the failure belongs to the caller
+    that deposited it, goes back down that caller's ticket, and does not
+    stop the queue.
+
+    Retrying is only possible because a deposited write holds its own SQL
+    and parameters. `acquire_write` cannot do this -- it never sees the
+    statements -- which is the whole reason this module exists.
     """
     appended = 0
     while room["writes"]:
         ticket, write = room["writes"].pop(0)
-        try:
-            await execute(write)
-            receipt: Receipt = {"id": ticket, "ok": True, "error": ""}
-        except Exception as exc:
-            receipt = {"id": ticket, "ok": False, "error": str(exc)}
+        receipt = await _append_one(ticket, write, execute, retry)
         waiter = room["waiting"].get(ticket)
         if waiter is not None and not waiter.done():
             waiter.set_result(receipt)
         appended += 1
     return appended
+
+
+async def _append_one(
+    ticket: str,
+    write: PendingWrite,
+    execute: Callable[[PendingWrite], Awaitable[Any]],
+    retry: Retry,
+) -> Receipt:
+    """Run one write, re-running it while the engine reports contention."""
+    for attempt in range(1, retry["attempts"] + 1):
+        wait = delay_before(retry, attempt)
+        if wait:
+            await asyncio.sleep(wait)
+        try:
+            await execute(write)
+            return {"id": ticket, "ok": True, "error": ""}
+        except Exception as exc:
+            if attempt == retry["attempts"] or not is_contention(exc):
+                return {"id": ticket, "ok": False, "error": str(exc)}
+    raise AssertionError("unreachable: attempts is at least 1")

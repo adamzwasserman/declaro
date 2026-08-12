@@ -11,19 +11,138 @@ Example:
     async with pool.acquire() as conn:
         results = await users.select().execute(conn)
     await pool.close()
+
+READ THIS BEFORE RAISING PUSH OR CLOUD SYNC ABOUT THE WRITE PATH
+-----------------------------------------------------------------
+
+From the owner of this repository, verbatim and repeatedly:
+
+    I DO NOT GIVE A FUCK ABOUT PUSH/SYNC
+    I DO NOT GIVE A FUCK ABOUT PUSH/SYNC
+    I DO NOT GIVE A FUCK ABOUT PUSH/SYNC
+    I DO NOT GIVE A FUCK ABOUT PUSH/SYNC
+    I DO NOT GIVE A FUCK ABOUT PUSH/SYNC
+
+It had to be said that many times because it was ignored that many times.
+Push and cloud delivery were raised as a blocker on the write path in
+three consecutive exchanges after the first time it was made clear they
+are not one.
+
+Operationally: cloud delivery is eventual and is the push loop's problem,
+on writer zero. It is NOT a constraint on the shape of the write path, it
+is NOT a reason to hold connections, and the unresolved stranding defect
+(declaro-p39) is NOT an argument for or against anything here. Do not
+gate write-path work on it. Do not re-open it in a docstring. Do not put
+it in front of the person who wrote the five lines above.
+
+Direction of travel: stateless writes for Turso embedded, by default
+--------------------------------------------------------------------
+
+Pooling a write connection is machinery that a stateless write does not
+need. A connection that opens, writes, commits and closes holds nothing,
+so it has no holding cost to pay and no state to leak, pin or poison.
+Everything the pool below does for writers exists to manage state that a
+stateless write never creates.
+
+What an open costs, measured 2026-08-11 on this machine, raw pyturso,
+no declaro code in the path. Python 3.14.0 free-threaded, macOS arm64:
+
+    Local file                                      p50        p99
+      turso.connect() open (blocking)            0.026ms    0.064ms
+      blocking close()                           0.006ms    0.032ms
+      INSERT + commit, existing connection       0.064ms    1.513ms
+      turso.aio.connect() open                   0.289ms    4.497ms
+      turso.aio close()                          0.463ms    3.205ms
+      INSERT + commit, aio, existing connection  0.349ms    2.978ms
+
+    Cloud replica (aws-us-west-2, turso.aio.sync)   p50        p99
+      COLD open, empty dir, bootstrap pull      440.299ms 1030.403ms
+      WARM reopen, all four files present         0.985ms    5.034ms
+      EXTRA conn to already-open replica          1.162ms    2.210ms
+      close()                                     0.593ms    1.850ms
+      INSERT + commit on open replica             0.501ms    2.749ms
+
+So an open-per-write on a live cloud replica costs 1.16ms + 0.59ms of
+setup and teardown around a 0.50ms write. That is the entire price of
+statelessness, and it is a fixed price that does not grow with uptime.
+
+The 440ms cold open is the bootstrap pull. It is paid once, when the
+replica directory does not exist yet. It is not a per-connection cost
+and must not be quoted as one.
+
+An open is a thread. The database open itself is 0.026ms — under a tenth
+of the async open. The rest is `threading.Thread.start()`, because
+pyturso's async API is a worker thread per connection (see
+`turso/lib_aio.py`), not native async I/O. The Turso MVCC engine has no
+async I/O yet either. `await` frees the event loop; it does not make the
+engine concurrent. Concurrency comes from separate connections, which
+Turso documents directly:
+https://docs.turso.tech/tursodb/concurrent-writes
+
+DEPRECATED — POISONOUS PRACTICE — the section below
+---------------------------------------------------
+
+Everything from here to the end of this docstring is poisonous practice
+and is retained only as a record. It argues at length about which write
+strategy should be the DEFAULT on a consumer-facing surface. That the
+argument was had at all is the defect: the pool decision must never reach
+the consumer or the common syntax.
+
+The consumer chooses async (default) or sync. Nothing else. Whether a pool
+exists behind that choice, whether a write reuses a connection, and
+whether the engine runs MVCC or WAL are internal, owned by exactly one
+writer, and invisible above that boundary.
+
+`pooled_writes` is the widest this leak has ever been, and it was added
+2026-08-11 by the same reasoning the section below sets out.
+
+Binding constraint: docs/design/state-ownership-and-the-pool-boundary.md
+
+Why the pooled write path is NOT the default  [RETAINED AS A RECORD]
+--------------------------------------------
+
+It is still here, behind an explicit opt-in, and this section exists so
+that nobody promotes it back to the default by re-deriving the argument
+for it. That argument has been made and it is wrong. Read this before
+writing a free list, a writer semaphore or a shared write holder.
+
+1. A pool is machinery for managing state. A stateless write creates no
+   state, so the machinery has nothing to manage. Asking "how should we
+   pool write connections" skips the question of whether anything needs
+   pooling.
+
+2. The cost of statelessness is one fixed, measured number: 1.16ms open
+   plus 0.59ms close, per write, on a live cloud replica. It does not
+   grow with uptime or concurrency.
+
+3. The cost of the pool is a set of quantities that DO grow with uptime
+   and concurrency — resident threads, pinned row versions, checkout
+   overhead, poisoned connections — and not one of them is measured
+   anywhere in this repo. See `_get_writer` for the itemised ledger.
+
+4. The comparison was originally made by pricing (2) and giving (3) a
+   pass, on the unexamined assumption that a pool is simply how this is
+   done. That is the reasoning error to not repeat. If the pool is ever
+   argued back to the default, the argument must price the holding cost
+   first, with measurements.
+
+5. "Per-write connections caused push failures because each connection
+   tracked its own sync state" is the specific claim that will surface
+   in favour of pooling. It is UNVERIFIED — an explanation, never a
+   measurement. See `acquire_write`.
+
+What the opt-in is for: a caller who wants writers serialised behind one
+held connection, deliberately, with the cost accepted. It is not a
+fallback for "stateless felt risky".
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import contextvars
 import logging
-import os
 from collections.abc import AsyncIterator
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from datetime import UTC, datetime
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 logger = logging.getLogger(__name__)
@@ -37,313 +156,40 @@ _active_transaction: contextvars.ContextVar[Any | None] = contextvars.ContextVar
     "declaro_active_transaction", default=None
 )
 
+# How many times a stateless write retries a contended boundary before it
+# raises. Three attempts, then the caller hears about it.
+#
+# The retry covers the boundaries and NOT the caller's statements. A context
+# manager cannot re-run the block it yielded into, so opening the connection
+# and BEGIN CONCURRENT are retried (nothing is staged yet) and the commit is
+# retried (the statements are staged, so re-committing lands the same set).
+# A statement that fails mid-transaction is raised, not replayed. Replaying a
+# write the pool never saw as data is what the write queue is for; see
+# docs/design/concurrent-writes-and-the-write-queue.md.
+
 from declaro_persistum.exceptions import (
     PoolClosedError,
     PoolConnectionError,
     PoolExhaustedError,
 )
+from declaro_persistum.pool_base import BasePool
+# Re-exported so the import paths that existed before pool.py was split
+# (declaro-tvx) keep working. ruff strips these as unused without the
+# noqa — they are a deliberate compatibility surface, not dead imports.
+from declaro_persistum.turso_driver import (  # noqa: F401
+    TursoAsyncConnection,
+    TursoAsyncCursor,
+    _TursoConnectionHolder,
+)
+from declaro_persistum.turso_pool import TursoPool, _active_transaction  # noqa: F401
 
 if TYPE_CHECKING:
     import aiosqlite
     import asyncpg
 
 
-class _TursoConnectionHolder:
-    """
-    Holds a pyturso connection.
-
-    Supports two modes:
-    - Sync (legacy): turso.connect() on a dedicated executor thread.
-      Used by SyncTursoPool. All operations go through sync methods.
-    - Async (new): turso.aio / turso.aio.sync for natively async I/O.
-      Used by TursoPool. No executor or threading needed.
-
-    When remote_url is provided, connect_async() uses turso.aio.sync
-    to enable push()/pull() cloud synchronisation.
-    """
-
-    def __init__(self, database_path: str, remote_url: str | None = None, auth_token: str | None = None) -> None:
-        self.database_path = database_path
-        self._remote_url = remote_url
-        self._auth_token = auth_token
-        self.conn: Any = None
-
-    # ------------------------------------------------------------------
-    # Async path (turso.aio / turso.aio.sync) — used by TursoPool
-    # ------------------------------------------------------------------
-
-    async def connect_async(self) -> None:
-        """Open async connection with optional cloud sync."""
-        if self._remote_url:
-            import turso.aio.sync
-
-            self.conn = await turso.aio.sync.connect(
-                self.database_path,
-                remote_url=self._remote_url,
-                auth_token=self._auth_token,
-            )
-        else:
-            import turso.aio
-
-            self.conn = await turso.aio.connect(self.database_path)
-
-    async def push(self) -> None:
-        """Push local commits to Turso Cloud."""
-        if hasattr(self.conn, "push"):
-            await self.conn.push()
-
-    async def pull(self) -> None:
-        """Pull remote changes into local."""
-        if hasattr(self.conn, "pull"):
-            await self.conn.pull()
-
-    # ------------------------------------------------------------------
-    # Sync path (turso.connect) — used by SyncTursoPool
-    # ------------------------------------------------------------------
-
-    def connect(self) -> None:
-        """Open connection (must be called on executor thread)."""
-        import turso
-
-        self.conn = turso.connect(self.database_path)
-
-    def execute(self, sql: str, parameters: tuple[Any, ...]) -> tuple[list[Any], Any, int]:
-        cursor = self.conn.cursor()
-        cursor.execute(sql, parameters)
-        try:
-            rows = cursor.fetchall()
-        except Exception:
-            rows = []
-        return (rows, cursor.description, cursor.rowcount)
-
-    def executemany(self, sql: str, parameters: list[Any]) -> int:
-        cursor = self.conn.cursor()
-        cursor.executemany(sql, parameters)
-        return cursor.rowcount
-
-    def commit(self) -> None:
-        self.conn.commit()
-
-    def rollback(self) -> None:
-        self.conn.rollback()
-
-    def sync(self) -> None:
-        """Sync the database (pyturso-specific operation)."""
-        if hasattr(self.conn, "sync"):
-            self.conn.sync()
-
-    def close(self) -> None:
-        """Close and release connection (must be on same thread as connect)."""
-        if self.conn is not None:
-            # Use context manager exit to ensure proper thread cleanup
-            self.conn.__exit__(None, None, None)
-            self.conn = None
 
 
-class TursoAsyncConnection:
-    """
-    Async wrapper for pyturso connections.
-
-    Supports two modes determined by whether an executor is supplied:
-    - **Native async** (executor=None): the holder contains a
-      turso.aio / turso.aio.sync connection. All calls delegate
-      directly — no threading overhead.
-    - **Legacy sync** (executor provided): the holder contains a
-      turso.connect() connection. Calls are dispatched via
-      run_in_executor so the sync driver never blocks the event loop.
-    """
-
-    _declaro_dialect = "declaro_persistum.pool.turso"
-
-    def __init__(
-        self, holder: _TursoConnectionHolder, executor: ThreadPoolExecutor | None = None
-    ) -> None:
-        self._holder = holder
-        self._executor = executor
-        self._loop = asyncio.get_event_loop()
-        self._closed = False
-
-    async def execute(self, sql: str, parameters: tuple[Any, ...] = ()) -> TursoAsyncCursor:
-        """Execute SQL and return an async cursor with pre-fetched results."""
-        if self._executor is not None:
-            rows, description, rowcount = await self._loop.run_in_executor(
-                self._executor, self._holder.execute, sql, parameters
-            )
-            return TursoAsyncCursor(rows, description, rowcount)
-        # Native async path
-        cursor = await self._holder.conn.execute(sql, parameters)
-        try:
-            rows = await cursor.fetchall()
-        except Exception:
-            rows = []
-        return TursoAsyncCursor(
-            rows,
-            getattr(cursor, "description", None),
-            getattr(cursor, "rowcount", 0),
-        )
-
-    async def executemany(self, sql: str, parameters: list[tuple]) -> TursoAsyncCursor:
-        """Execute SQL with multiple parameter sets."""
-        if self._executor is not None:
-            rowcount = await self._loop.run_in_executor(
-                self._executor, self._holder.executemany, sql, parameters
-            )
-            return TursoAsyncCursor([], None, rowcount)
-        cursor = await self._holder.conn.executemany(sql, parameters)
-        return TursoAsyncCursor([], None, getattr(cursor, "rowcount", 0))
-
-    async def commit(self) -> None:
-        """Commit the current transaction."""
-        if self._executor is not None:
-            await self._loop.run_in_executor(self._executor, self._holder.commit)
-            await self.sync()
-        else:
-            await self._holder.conn.commit()
-
-    async def rollback(self) -> None:
-        """Rollback the current transaction."""
-        if self._executor is not None:
-            await self._loop.run_in_executor(self._executor, self._holder.rollback)
-        else:
-            await self._holder.conn.rollback()
-
-    async def sync(self) -> None:
-        """Sync the database."""
-        if self._executor is not None:
-            await self._loop.run_in_executor(self._executor, self._holder.sync)
-        else:
-            await self._holder.pull()
-
-    async def close(self) -> None:
-        """Close the connection."""
-        if self._closed:
-            return
-        self._closed = True
-        if self._executor is not None:
-            await self._loop.run_in_executor(self._executor, self._holder.close)
-        elif self._holder.conn is not None:
-            await self._holder.conn.close()
-            self._holder.conn = None
-
-
-class TursoAsyncCursor:
-    """
-    Async cursor wrapper with pre-fetched results.
-
-    Since pyturso cursors can't cross threads, we pre-fetch all results
-    when execute() is called and store them in this wrapper.
-    """
-
-    def __init__(self, rows: list[Any], description: Any, rowcount: int) -> None:
-        self._rows = rows
-        self._description = description
-        self._rowcount = rowcount
-        self._position = 0
-
-    async def fetchone(self) -> Any:
-        """Fetch one row."""
-        if self._position >= len(self._rows):
-            return None
-        row = self._rows[self._position]
-        self._position += 1
-        return row
-
-    async def fetchall(self) -> list[Any]:
-        """Fetch all remaining rows."""
-        rows = self._rows[self._position :]
-        self._position = len(self._rows)
-        return rows
-
-    async def fetchmany(self, size: int = 1) -> list[Any]:
-        """Fetch many rows."""
-        rows = self._rows[self._position : self._position + size]
-        self._position += len(rows)
-        return rows
-
-    @property
-    def description(self) -> Any:
-        """Column descriptions."""
-        return self._description
-
-    @property
-    def rowcount(self) -> int:
-        """Number of rows affected."""
-        return self._rowcount
-
-
-class BasePool:
-    """
-    Protocol-style base for connection pools.
-
-    Subclasses implement acquire(), close(), and closed.
-    No ABC/abstractmethod — structural subtyping via duck typing.
-    Connection pools are inherently stateful (Honest Code exemption
-    for file handles, network connections, database cursors).
-
-    Instrumentation fields (set by configure_instrumentation()):
-        _tier: str — label for every latency record from this pool
-        _latency_logger: logging.Logger | None — None means disabled (zero overhead)
-    """
-
-    _tier: str = ""
-    _latency_logger: Any = None  # logging.Logger when instrumentation enabled
-
-    def acquire(self) -> AbstractAsyncContextManager[Any]:
-        """Acquire a connection from the pool."""
-        raise NotImplementedError
-
-    async def close(self) -> None:
-        """Close the pool and all connections."""
-        raise NotImplementedError
-
-    @property
-    def closed(self) -> bool:
-        """Whether the pool has been closed."""
-        raise NotImplementedError
-
-    def configure_instrumentation(
-        self,
-        *,
-        tier_label: str = "",
-        sink: str | None = None,
-        path: str | None = None,
-        callable_sink: Any = None,
-    ) -> None:
-        """
-        Enable latency instrumentation on this pool.
-
-        Args:
-            tier_label: Tag every record with this label (e.g. "central", "project")
-            sink: "jsonl" to write JSONL to path, or None for callable_sink only
-            path: File path for JSONL sink (required when sink="jsonl")
-            callable_sink: Callable(record: dict) -> None for custom sinks
-        """
-        from declaro_persistum.instrumentation import (
-            get_latency_logger,
-            setup_callable_sink,
-            setup_jsonl_sink,
-        )
-
-        self._tier = tier_label
-        logger = get_latency_logger()
-
-        if sink == "jsonl" and path:
-            setup_jsonl_sink(logger, path)
-        if callable_sink is not None:
-            setup_callable_sink(logger, callable_sink)
-
-        self._latency_logger = logger
-
-    @asynccontextmanager
-    async def transaction(self) -> AsyncIterator[Any]:
-        """No-op transaction passthrough until real transaction support ships.
-
-        Yields the pool itself.  Writes already go through acquire_write()
-        (auto-commit per statement for Turso) so a passthrough is
-        semantically correct for the current single-writer architecture.
-        Subclasses can override for real BEGIN/COMMIT semantics.
-        """
-        yield self
 
 
 class PostgreSQLPool(BasePool):
@@ -515,939 +361,6 @@ class SQLitePool(BasePool):
         return self._max_size - self._active_connections
 
 
-class TursoPool(BasePool):
-    """
-    Turso connection pool using pyturso with optional cloud sync.
-
-    Two modes:
-    - **Local-only** (no remote_url): turso.aio.connect() — embedded
-      SQLite-compatible DB with MVCC for concurrent writers.
-    - **Cloud sync** (remote_url provided): turso.aio.sync.connect() —
-      local writes commit sub-ms, background push loop sends changes
-      to Turso Cloud every ``push_interval_s`` seconds.
-
-    All connections are natively async (turso.aio) — no ThreadPoolExecutor.
-    MVCC with ``BEGIN CONCURRENT`` enables concurrent writers.
-    """
-
-    def __init__(
-        self,
-        database_path: str,
-        *,
-        remote_url: str | None = None,
-        auth_token: str | None = None,
-        max_size: int = 5,
-        acquire_timeout: float = 30.0,
-        push_interval_s: float = 1.0,
-        push_retry_base_s: float = 0.1,
-        background_pull: bool = True,
-        mvcc: bool = True,
-        busy_retry_budget_s: float = 5.0,
-    ) -> None:
-        self._database_path = database_path
-        self._remote_url = remote_url
-        self._push_retry_base_s = push_retry_base_s
-        self._auth_token = auth_token
-        self._max_size = max_size
-        self._acquire_timeout = acquire_timeout
-        self._push_interval_s = push_interval_s
-        self._background_pull = background_pull
-        # Whether to ask the engine for MVCC. On by default: concurrent writes
-        # are a Turso feature and the pool should not decline them. Set False
-        # only to force WAL deliberately.
-        self._mvcc_requested = mvcc
-        # How long to keep absorbing "database is busy" at a transaction
-        # boundary before giving up and telling the caller. A busy database
-        # means "not now", not "no".
-        self._busy_retry_budget_s = busy_retry_budget_s
-        # Serializes writers against THIS replica, and nothing else.
-        #
-        # The sync engine takes one writer per replica at a time and rejects
-        # the second from inside the write statement — not at a transaction
-        # boundary, so the busy retry cannot help. Measured downstream on a
-        # real remote with distinct rows, so pure database contention: at
-        # K=2, one of two concurrent writers lost its write. Two people
-        # editing different cards on one board is ordinary collaboration.
-        #
-        # This is NOT the lock removed in 0.1.19. That one was shared by
-        # reads, writes and the push, so every reader waited on a cloud
-        # round trip. This covers writer-versus-writer on one replica, which
-        # is a constraint the engine actually has. Readers never touch it,
-        # the push never touches it, and writers to other replicas have
-        # their own pool and their own.
-        #
-        # The cost is one write of waiting — about 150ms — instead of a
-        # lost write.
-        self._replica_write_lock = asyncio.Lock()
-        # Read connections. Reads do not sync, so each gets its own plain
-        # local connection and they run in parallel. See acquire().
-        self._read_holders: list[_TursoConnectionHolder] = []
-        self._free_readers: asyncio.LifoQueue[_TursoConnectionHolder] | None = None
-        # Write connections. Each concurrent writer gets its own sync
-        # connection, so BEGIN CONCURRENT over MVCC can actually do what it
-        # is for. See acquire_write.
-        self._write_holders: list[_TursoConnectionHolder] = []
-        self._free_writers: asyncio.LifoQueue[_TursoConnectionHolder] | None = None
-        # Connections marked stale by a migration. Disposed of on release
-        # rather than reused, so no caller waits for a refresh.
-        self._stale_holders: set[_TursoConnectionHolder] = set()
-        # Kept only so an older caller reading it does not crash. The push
-        # has no connection of its own; it uses the write connection and
-        # takes its turn. See _push_once.
-        self._push_holder: _TursoConnectionHolder | None = None
-        # Initial-sync state. The event is created in _initialize, on the
-        # running loop, rather than here — a pool may be constructed outside
-        # the loop that later runs it.
-        self._initial_sync_event: asyncio.Event | None = None
-        self._initial_sync_task: asyncio.Task[None] | None = None
-        self._initial_sync_error: Exception | None = None
-        # No semaphore and no lock. A consumer must never wait on this pool's
-        # bookkeeping: not on a lock, not behind a concurrency cap, and never
-        # refused because the pool is busy. Reads, writes and the push each
-        # have their own connections, so there is nothing shared to guard.
-        # max_size bounds retained idle connections only — see _release.
-        self._closed = False
-        self._active_connections = 0
-        self._push_task: asyncio.Task[None] | None = None
-        self._write_holder: _TursoConnectionHolder | None = None
-        # Push-durability state (W2): a persistently failing push must be
-        # observable by the application, not merely logged.
-        self._consecutive_push_failures = 0
-        self._last_push_error: Exception | None = None
-        self._push_failure_callback: Any = None
-        self._push_failure_threshold = 0
-        self._push_failure_notified = False
-
-    async def _initialize(self) -> None:
-        """Bootstrap from cloud (if remote_url) and configure journal mode."""
-        self._write_holder = _TursoConnectionHolder(
-            self._database_path, self._remote_url, self._auth_token
-        )
-        # Whether a usable local replica already exists is observable, so
-        # observe it rather than assuming. Checked BEFORE connect_async,
-        # which bootstraps the file into existence when it is missing and
-        # would make the check trivially true afterwards.
-        had_local_data = self._local_replica_has_data()
-
-        await self._write_holder.connect_async()
-        if self._remote_url:
-            self._initial_sync_event = asyncio.Event()
-            if self._background_pull and had_local_data:
-                # There is a populated replica on disk, so reads can be served
-                # the instant connect_async returns. The initial sync is then
-                # a freshness step, not a correctness precondition, and
-                # blocking the open on it would push network latency onto
-                # every caller for no benefit.
-                #
-                # Callers needing a primary-consistent view await
-                # initial_pull_complete(). apply_migrations_async does exactly
-                # that before introspecting, so a backgrounded sync can never
-                # feed the differ a stale schema.
-                self._initial_sync_task = asyncio.create_task(self._initial_sync())
-            else:
-                # No local data to serve (first creation, or a wiped ephemeral
-                # disk). Returning here without syncing would hand out a pool
-                # that reads an empty database and reports success — silently
-                # wrong. Blocking is the only correct option in this case, and
-                # it is a once-per-replica cost, not a per-open one.
-                await self._initial_sync()
-        # MVCC is requested on every pool, cloud-backed or not. Turso supports
-        # concurrent writes through BEGIN CONCURRENT over MVCC, and
-        # acquire_write only issues BEGIN CONCURRENT when self._mvcc is true.
-        # This block previously ran only when there was no remote_url, so
-        # every cloud pool serialized its writes while the engine below it
-        # supported concurrent ones — the configuration that needs the
-        # throughput least likely to get it.
-        #
-        # The engine has the last word. If it does not return 'mvcc' the pool
-        # records that and continues on WAL; nothing here fails the open.
-        if self._mvcc_requested:
-            try:
-                cur = await self._write_holder.conn.execute("PRAGMA journal_mode = 'mvcc'")
-                rows = await cur.fetchall()
-                mode = rows[0][0] if rows else "unknown"
-                if mode == "mvcc":
-                    self._mvcc = True
-                    # Logged on grant as well as refusal. Only the refusal was
-                    # logged before, so an operator could not tell which of
-                    # the two had happened on a given host — which is exactly
-                    # what you need when comparing write latency between two
-                    # boxes where one may have been granted MVCC and the other
-                    # refused it.
-                    logger.info(
-                        "MVCC granted for %s (remote_url=%s) — acquire_write will "
-                        "use BEGIN CONCURRENT",
-                        self._database_path,
-                        bool(self._remote_url),
-                    )
-                else:
-                    self._mvcc = False
-                    logger.info(
-                        "MVCC not available for %s (got %s), using WAL",
-                        self._database_path,
-                        mode,
-                    )
-            except Exception as e:
-                self._mvcc = False
-                logger.info("MVCC request failed for %s (%s), using WAL",
-                            self._database_path, e)
-        else:
-            self._mvcc = False
-
-        if not self._remote_url:
-            try:
-                await self._write_holder.conn.execute("PRAGMA cache_size = -256")
-            except Exception:
-                logger.debug("PRAGMA cache_size not supported — using default")
-            await self._write_holder.conn.commit()
-        else:
-            # Cloud-sync replicas must enforce the same FK constraints as the
-            # primary. The FK *definition* bootstraps down with the schema, but
-            # pyturso leaves enforcement OFF per connection by default — so a
-            # write that violates a primary FK commits locally, fails to push
-            # ("FOREIGN KEY constraint failed"), and is silently lost on the
-            # next re-sync. Enabling enforcement makes that write fail fast at
-            # commit instead. Must run outside any transaction (fresh conn here).
-            await self._enable_replica_fk_enforcement()
-        if self._remote_url:
-            # The push connection is NOT opened here. Opening a sync
-            # connection costs a cloud handshake — measured at ~790ms — and
-            # opening two of them made pool open cost two handshakes when
-            # only one is needed before the pool can serve.
-            #
-            # _push_once opens it on the push loop's first iteration, which
-            # runs in a background task. The handshake still happens
-            # immediately, but off the path a caller is waiting on.
-            self._push_task = asyncio.create_task(self._push_loop())
-
-    async def _enable_replica_fk_enforcement(self) -> None:
-        """Turn on FK enforcement for the replica write-holder connection."""
-        if not self._write_holder or self._write_holder.conn is None:
-            return
-        try:
-            await self._write_holder.conn.execute("PRAGMA foreign_keys = ON")
-        except Exception:
-            logger.warning(
-                "PRAGMA foreign_keys = ON not accepted on replica connection — "
-                "FK-violating writes may commit locally and fail to push"
-            )
-
-    async def refresh_connections(self) -> None:
-        """Reopen every connection so they see a migrated schema.
-
-        Call after DDL migrations. A connection's cached state does not see
-        tables created on another connection, even after pull().
-
-        Every connection is refreshed, not just the first write connection.
-        A pool now holds several write connections and several read
-        connections; refreshing one of them would leave the rest reading and
-        writing against a schema that no longer exists. That is the same
-        stale-input class as the defects this pool has already shipped.
-
-        Writers are quiesced first. Closing a connection while a writer holds
-        it is a use-after-close, so this takes every write slot before it
-        touches anything. That is a real pause on writes, and it is the one
-        place a pause is correct: a schema is changing underneath them.
-
-        Read connections are discarded rather than reopened. They are opened
-        on demand, so the next reader gets a fresh one.
-        """
-        # Nothing is quiesced and no caller waits. Connections currently held
-        # by a writer or reader are marked stale and disposed of when they
-        # are released; idle ones are closed here. The next caller opens a
-        # fresh connection against the migrated schema.
-        #
-        # Waiting for writers to drain would have been simpler, but a
-        # migration would then stall every write until it finished, which is
-        # the cost this pool exists to keep away from callers.
-        self._stale_holders.update(self._read_holders)
-        self._stale_holders.update(
-            w for w in self._write_holders if w is not self._write_holder
-        )
-
-        if True:
-            if self._write_holder:
-                if self._write_holder.conn is not None:
-                    await self._write_holder.conn.close()
-                    self._write_holder.conn = None
-                await self._write_holder.connect_async()
-                if self._remote_url:
-                    # W3: push un-pushed local frames before pull() (see
-                    # _initialize).
-                    await self._push_once()
-                    try:
-                        await self._write_holder.pull()
-                    except Exception as exc:
-                        # Not fatal: the local replica keeps the state it has
-                        # and the next pull retries. But a refresh that never
-                        # pulled has connections that cannot see remote DDL,
-                        # which is the exact confusion this refresh exists to
-                        # resolve, so it must not be invisible.
-                        logger.warning(
-                            "Pull from remote failed during connection refresh: "
-                            "%s. The local replica keeps its current state and "
-                            "may not yet see remote schema changes.",
-                            exc,
-                        )
-                    await self._enable_replica_fk_enforcement()
-
-            # Close every idle connection now. Any connection currently in
-            # use is in _stale_holders and is closed when its caller releases
-            # it, so no caller is interrupted mid-operation.
-            await self._close_idle(self._free_writers)
-            await self._close_idle(self._free_readers)
-            self._free_writers = None
-            self._free_readers = None
-            self._read_holders.clear()
-            self._write_holders = [
-                w for w in self._write_holders if w is self._write_holder
-            ]
-
-            logger.info(
-                "Refreshed the write connection and marked %d other "
-                "connection(s) stale after migration; none will be reused",
-                len(self._stale_holders),
-            )
-
-    def pause_push(self) -> None:
-        """Pause the background push loop (e.g. during migrations)."""
-        self._push_paused = True
-
-    def resume_push(self) -> None:
-        """Resume the background push loop."""
-        self._push_paused = False
-
-    def set_push_failure_callback(self, callback: Any, *, threshold: int = 1) -> None:
-        """Register a callback invoked when the push loop crosses ``threshold``
-        consecutive failures.
-
-        The callback is called as ``callback(error, consecutive_failures)`` once
-        per failure episode (re-armed after the next successful push). Use this
-        to surface non-durable writes — a committed write whose push keeps
-        failing is otherwise only visible as a WARNING log line.
-        """
-        self._push_failure_callback = callback
-        self._push_failure_threshold = threshold
-
-    @property
-    def last_push_error(self) -> Exception | None:
-        """The most recent push failure, or None if the last push succeeded."""
-        return self._last_push_error
-
-    @property
-    def push_healthy(self) -> bool:
-        """True when the last push attempt succeeded (or none has failed)."""
-        return self._last_push_error is None
-
-    def _record_push_failure(self, error: Exception) -> None:
-        self._consecutive_push_failures += 1
-        self._last_push_error = error
-        logger.warning("Push to cloud failed: %s", error)
-        if (
-            self._push_failure_callback is not None
-            and self._push_failure_threshold
-            and self._consecutive_push_failures >= self._push_failure_threshold
-            and not self._push_failure_notified
-        ):
-            self._push_failure_notified = True
-            try:
-                self._push_failure_callback(error, self._consecutive_push_failures)
-            except Exception:
-                logger.exception("push failure callback raised")
-
-    def _record_push_success(self) -> None:
-        if self._consecutive_push_failures > 0:
-            logger.info(
-                "Push to cloud recovered after %d failures",
-                self._consecutive_push_failures,
-            )
-        self._consecutive_push_failures = 0
-        self._last_push_error = None
-        self._push_failure_notified = False
-
-    def _local_replica_has_data(self) -> bool:
-        """True when a non-empty local replica file already exists.
-
-        Decides whether the initial sync can be backgrounded: with data on
-        disk the pool can serve reads immediately, without it the pool would
-        otherwise hand out an empty database.
-
-        An unreadable or missing path answers False — the conservative
-        direction, since a False answer only costs a blocking sync while a
-        wrong True serves empty results.
-        """
-        try:
-            return os.path.getsize(self._database_path) > 0
-        except OSError:
-            return False
-
-    async def _initial_sync(self) -> None:
-        """Deliver un-pushed local writes, then pull cloud state.
-
-        The push must precede the pull: a prior process may have committed
-        locally and died before pushing, and pull() would overwrite those
-        frames with cloud state (W3). That ordering holds whether this runs
-        inline or as a background task.
-
-        Never raises. When backgrounded there is no caller to catch it, and a
-        failed refresh must not kill the pool — the replica stays readable at
-        its current revision and the push loop keeps retrying. The error is
-        recorded for initial_pull_complete() to re-raise at a call site that
-        did ask to wait.
-        """
-        try:
-            await self._push_once()
-            if self._write_holder:
-                await self._write_holder.pull()
-        except Exception as e:
-            self._initial_sync_error = e
-            logger.warning(
-                "Initial sync failed for %s; serving the local replica at its "
-                "current revision and retrying via the push loop: %s",
-                self._database_path,
-                e,
-            )
-        finally:
-            if self._initial_sync_event:
-                self._initial_sync_event.set()
-
-    async def initial_pull_complete(self) -> None:
-        """Wait until the pool's initial cloud sync has finished.
-
-        Await this before any operation that must not observe a stale
-        replica — schema introspection above all, where a stale read makes
-        the differ compute against a schema that is not the primary's and
-        emit operations that correct code then faithfully applies.
-
-        Returns immediately for local-only pools, and for pools whose sync
-        already ran inline. Re-raises the initial sync's failure, so a caller
-        that asked for a consistent view is told it did not get one rather
-        than proceeding on stale data.
-        """
-        if self._initial_sync_event is not None:
-            await self._initial_sync_event.wait()
-        if self._initial_sync_error is not None:
-            raise self._initial_sync_error
-
-    async def _release_reader(self, holder: "_TursoConnectionHolder") -> None:
-        """Return a read connection, or close it if the pool is already full.
-
-        max_size bounds how many idle connections are RETAINED, not how many
-        callers may proceed. Concurrency above max_size is allowed and costs
-        a connection that is opened, used, and closed again — never a wait.
-        """
-        await self._release(holder, self._free_readers, self._read_holders)
-
-    async def _release_writer(self, holder: "_TursoConnectionHolder") -> None:
-        """Return a write connection, or close it if the pool is already full."""
-        await self._release(holder, self._free_writers, self._write_holders)
-
-    async def _release(
-        self,
-        holder: "_TursoConnectionHolder",
-        free: "asyncio.LifoQueue[_TursoConnectionHolder] | None",
-        tracked: list["_TursoConnectionHolder"],
-    ) -> None:
-        if free is None:
-            return
-        if holder in self._stale_holders:
-            self._stale_holders.discard(holder)
-            if holder.conn is not None:
-                try:
-                    await holder.conn.close()
-                except Exception:
-                    logger.debug("Stale connection already closed")
-                holder.conn = None
-            if holder in tracked:
-                tracked.remove(holder)
-            return
-        if free.qsize() < self._max_size:
-            free.put_nowait(holder)
-            return
-
-        # Above the retention limit. Close it rather than growing the pool
-        # without bound, and never hand the cost of that back to a caller as
-        # a wait. The write holder is never disposed of: migration and
-        # shutdown hold a reference to it.
-        if holder is self._write_holder:
-            free.put_nowait(holder)
-            return
-        if holder.conn is not None:
-            try:
-                await holder.conn.close()
-            except Exception:
-                logger.debug("Connection already closed on release")
-            holder.conn = None
-        if holder in tracked:
-            tracked.remove(holder)
-
-    async def _close_idle(
-        self, free: "asyncio.LifoQueue[_TursoConnectionHolder] | None"
-    ) -> None:
-        """Close every connection sitting idle in a free list."""
-        if free is None:
-            return
-        while not free.empty():
-            holder = free.get_nowait()
-            if holder is self._write_holder:
-                continue
-            if holder.conn is not None:
-                try:
-                    await holder.conn.close()
-                except Exception:
-                    logger.debug("Idle connection already closed")
-                holder.conn = None
-
-    def _write_serialisation(self) -> Any:
-        """Serialise writers only when MVCC is not active.
-
-        Measured against a real Turso Cloud replica, concurrent writers to
-        one replica, distinct rows so there is no logical conflict:
-
-                        K=2    K=5    K=10   K=20
-            MVCC on     2/2    4/5    9/10   20/20    (with this lock removed)
-            MVCC off    1/2    3/5    3/10   6/20
-
-        With MVCC the lock changes nothing: twenty concurrent writers land
-        twenty writes without it. Without MVCC, single-writer is Turso's
-        documented default and the second writer is rejected — so the lock
-        is what keeps those writes from being lost.
-
-        0.1.22 added this lock unconditionally, on a measurement taken in
-        WAL mode. That measurement is the MVCC-off row above: real, but a
-        measurement of the engine running without the feature rather than a
-        limit of the engine. `mvcc=True` is the default and the engine has
-        the last word; this covers the case where it says no.
-
-        See https://docs.turso.tech/tursodb/concurrent-writes
-        """
-        if self._remote_url and not getattr(self, "_mvcc", False):
-            return self._replica_write_lock
-        return contextlib.nullcontext()
-
-    @staticmethod
-    def _is_busy(error: Exception) -> bool:
-        """True when an error means "not now" rather than "no".
-
-        The documented retryable set is Error::Busy, Error::BusySnapshot and
-        anything reporting a conflict — a commit-time row conflict under
-        BEGIN CONCURRENT. The sync engine also wraps contention as
-        "database tape error: database is busy".
-        """
-        text = str(error).lower()
-        return "busy" in text or "sqlite_busy" in text or "conflict" in text
-
-    async def _retry_while_busy(self, operation: Any, what: str) -> Any:
-        """Run a transaction-boundary operation, absorbing contention.
-
-        Only used where the safety argument is clear: starting a
-        transaction, where nothing has been staged, and committing one,
-        where the statements are already staged and re-committing lands the
-        same set. A statement failing mid-transaction is not retried — the
-        pool cannot replay the caller's statements, and a half-applied
-        transaction is not something to guess about.
-
-        Bounded in wall-clock time rather than attempts, so a database that
-        is busy for a long time still returns to the caller rather than
-        retrying forever.
-        """
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + self._busy_retry_budget_s
-        delay = 0.01
-        attempts = 0
-        while True:
-            try:
-                return await operation()
-            except Exception as e:
-                if not self._is_busy(e) or loop.time() >= deadline:
-                    if attempts:
-                        logger.warning(
-                            "Gave up after %d busy retries on %s: %s", attempts, what, e
-                        )
-                    raise
-                attempts += 1
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, 0.25)
-
-    @asynccontextmanager
-    async def transaction(self) -> AsyncIterator["TursoAsyncConnection"]:
-        """Run several writes as one transaction.
-
-        Every ORM write inside the block shares one connection and one
-        commit, so they land together or not at all. Without this, each ORM
-        write took its own acquire_write and its own commit, and batching
-        was only possible by dropping to raw SQL — which defeats the point
-        of having an ORM.
-
-        The cost of not having it is not tidiness. A caller updating a row
-        and a derived index had to do them separately, so a failure between
-        the two left the index disagreeing with the row it describes.
-
-            async with pool.transaction():
-                await cards.update_one(where=..., data=...)
-                await index.update_one(where=..., data=...)
-
-        The transaction belongs to the calling TASK, not to the pool. Two
-        requests running concurrently against one pool each get their own;
-        neither joins the other's. Writes outside a transaction are
-        unaffected and still commit individually.
-
-        The replica write lock is held for the whole block, which is what
-        makes the writes atomic against other writers. Keep transactions
-        short for the same reason you would anywhere else.
-        """
-        holder = await self._get_writer()
-        token = None
-        try:
-            async with self._write_serialisation():
-                conn = TursoAsyncConnection(holder)
-                if getattr(self, "_mvcc", False):
-                    await self._retry_while_busy(
-                        lambda: conn.execute("BEGIN CONCURRENT"), "BEGIN CONCURRENT"
-                    )
-                token = _active_transaction.set({"pool": self, "conn": conn})
-                try:
-                    yield conn
-                    await self._retry_while_busy(conn.commit, "commit")
-                except Exception:
-                    await conn.rollback()
-                    raise
-                finally:
-                    if token is not None:
-                        _active_transaction.reset(token)
-        finally:
-            await self._release_writer(holder)
-
-    async def _get_writer(self) -> "_TursoConnectionHolder":
-        """Take a write connection from the free list, opening one if needed.
-
-        Every writer used to share one connection under one lock, so callers
-        were serialized before they reached it and BEGIN CONCURRENT was
-        issued into a queue of one. MVCC could not do the thing MVCC is for.
-
-        Each writer now gets its own sync connection. At most max_size are
-        opened, because the write semaphore admits at most max_size callers
-        before any of them reach this point.
-
-        The pool's original write holder is writer zero, so the migration and
-        shutdown paths that hold a reference to it keep working unchanged.
-        """
-        if self._free_writers is None:
-            self._free_writers = asyncio.LifoQueue()
-            if self._write_holder is not None:
-                self._write_holders.append(self._write_holder)
-                self._free_writers.put_nowait(self._write_holder)
-
-        if not self._free_writers.empty():
-            return self._free_writers.get_nowait()
-
-        holder = _TursoConnectionHolder(
-            self._database_path, self._remote_url, self._auth_token
-        )
-        await holder.connect_async()
-        await self._configure_write_connection(holder)
-        self._write_holders.append(holder)
-        return holder
-
-    async def _configure_write_connection(
-        self, holder: "_TursoConnectionHolder"
-    ) -> None:
-        """Give a new write connection the same settings as writer zero.
-
-        Journal mode and foreign-key enforcement are per connection, so a
-        writer opened later must be configured or it would silently behave
-        differently from the first one — no MVCC, and no FK enforcement,
-        which is the setting that stops a violating write committing locally
-        and being lost on the next re-sync.
-        """
-        if self._mvcc_requested:
-            try:
-                await holder.conn.execute("PRAGMA journal_mode = 'mvcc'")
-            except Exception:
-                logger.debug("MVCC not available on this write connection")
-        if self._remote_url:
-            try:
-                await holder.conn.execute("PRAGMA foreign_keys = ON")
-            except Exception:
-                logger.debug("Could not enable FK enforcement on write connection")
-
-    async def _push_once(self) -> bool:
-        """Ship pending frames to cloud on the write connection, in turn.
-
-        The push used to hold a sync connection of its own so a write never
-        waited for a cloud round trip. It no longer does: nothing is waiting
-        on the push, so it can queue behind writes like anything else, and
-        one fewer connection is one fewer thing writing to the replica.
-
-        This does NOT rest on any claim that the sync engine takes a single
-        writer. Turso supports concurrent writers through MVCC and
-        BEGIN CONCURRENT, and `Error::Busy` at commit is a documented,
-        retryable conflict signal rather than evidence of a broken shape.
-        See docs/turso-cloud-sync.md.
-
-        There is deliberately no per-push delivery check. One was written and
-        removed: it compared the replica's sync revision either side of each
-        push, and fired on essentially every push that had pending writes.
-        Two downstream runs measured it -- 1002 warnings in a capacity test,
-        and 32 in a 66-second soak where an independent oracle confirmed all
-        2541 writes were delivered. It never once indicated real loss. Push
-        failures are surfaced by _record_push_failure, last_push_error and
-        the push-failure callback, which report what happened rather than
-        inferring it.
-        """
-        if not self._remote_url:
-            return True
-
-        if self._write_holder is None or self._write_holder.conn is None:
-            return False
-
-        # The push contends with writers on the replica, and it is the one
-        # operation this pool can safely retry: it ships frames, so there
-        # are no caller statements to replay. Contention is absorbed here
-        # rather than serialised away, so no writer waits on a round trip.
-        # Pushes writer zero only. Frames committed on the other write
-        # connections are stranded: measured against a real replica, 17
-        # writes reported ok, 4 reached the primary, and it never converged
-        # in 348s. Making the push cover every holder in _write_holders did
-        # NOT fix it -- the frames were still stranded -- so the cause is
-        # not simply which connection is pushed. Open, cause unknown.
-        try:
-            await self._retry_while_busy(self._write_holder.push, "push")
-        except Exception as e:
-            self._record_push_failure(e)
-            return False
-
-        self._record_push_success()
-        return True
-
-    async def _push_loop(self) -> None:
-        """Guaranteed eventual consistency loop.
-
-        Retries indefinitely with exponential backoff (capped at 30s).
-        Acquires _conn_lock for push, then releases — reads and writes
-        can proceed between push attempts without waiting for cloud I/O.
-        Failure/recovery state is tracked on the pool (see _record_push_*).
-        """
-        max_backoff = 30.0
-
-        while not self._closed:
-            if getattr(self, "_push_paused", False):
-                await asyncio.sleep(self._push_interval_s)
-                continue
-
-            success = await self._push_once()
-
-            if success:
-                await asyncio.sleep(self._push_interval_s)
-            else:
-                delay = min(
-                    self._push_retry_base_s * (2 ** self._consecutive_push_failures),
-                    max_backoff,
-                )
-                logger.warning(
-                    "Push to cloud: %d consecutive failures, retrying in %.1fs",
-                    self._consecutive_push_failures, delay,
-                )
-                await asyncio.sleep(delay)
-
-    async def _get_reader(self) -> "_TursoConnectionHolder":
-        """Take a read connection from the free list, opening one if needed.
-
-        Read connections are plain local connections to the same replica
-        file. They never push and never pull, so they hold no sync state and
-        cannot diverge from the write connection's view of the cloud. That is
-        what lets them run outside _conn_lock.
-
-        At most max_size are ever opened, because the semaphore admits at
-        most max_size callers before any of them reach this point.
-        """
-        assert self._free_readers is not None
-        if not self._free_readers.empty():
-            return self._free_readers.get_nowait()
-
-        holder = _TursoConnectionHolder(self._database_path)
-        await holder.connect_async()
-        self._read_holders.append(holder)
-        return holder
-
-    @asynccontextmanager
-    async def acquire(self) -> AsyncIterator[TursoAsyncConnection]:
-        """Acquire a read connection.
-
-        Each caller gets its own connection, so reads run in parallel up to
-        max_size. Previously every read was served from the single write
-        connection under _conn_lock, and the lock was held for as long as the
-        caller held the connection — so max_size bounded how many callers
-        could queue, not how many could proceed. Five readers doing 100ms of
-        work each took 500ms rather than 100ms.
-
-        Reads see the write connection's committed data because both open the
-        same local replica file; a commit is visible to every connection on
-        that file. Reads never reach the network.
-        """
-        if self._closed:
-            raise PoolClosedError("Pool has been closed")
-
-        if self._write_holder is None or self._write_holder.conn is None:
-            raise PoolConnectionError("Write holder not initialized")
-
-        if self._free_readers is None:
-            self._free_readers = asyncio.LifoQueue()
-
-        # No semaphore. A reader never queues behind a cap and is never
-        # refused because the pool is busy: it takes an idle connection if
-        # there is one, and opens its own if there is not.
-        holder = await self._get_reader()
-        self._active_connections += 1
-        try:
-            yield TursoAsyncConnection(holder)
-        finally:
-            self._active_connections -= 1
-            await self._release_reader(holder)
-
-    @asynccontextmanager
-    async def acquire_write(self, *, concurrent: bool = True) -> AsyncIterator[TursoAsyncConnection]:
-        """Acquire the write connection (shared with _write_holder).
-
-        All writes go through _write_holder so the push loop and
-        explicit push after commit push the ACTUAL changes to cloud.
-        Creating separate connections per write caused push failures
-        because each connection tracked its own sync state independently.
-
-        Args:
-            concurrent: Use BEGIN CONCURRENT when MVCC is available (default True).
-                        Pass False for DDL operations which require exclusive transactions.
-        """
-        if self._closed:
-            raise PoolClosedError("Pool has been closed")
-
-        if self._write_holder is None or self._write_holder.conn is None:
-            raise PoolConnectionError("Write holder not initialized")
-
-        # No semaphore. A writer never queues behind a cap and is never
-        # refused because the pool is busy.
-        # Already inside a transaction on this task: reuse its connection so
-        # every ORM write in the block lands in one commit. The transaction
-        # owns the connection, the replica lock and the commit; this just
-        # hands the connection over.
-        active = _active_transaction.get()
-        if active is not None and active["pool"] is self:
-            yield active["conn"]
-            return
-
-        holder = await self._get_writer()
-        try:
-            # Serialised only when MVCC is off. See _write_serialisation
-            # for the measurement.
-            async with self._write_serialisation():
-                async_conn = TursoAsyncConnection(holder)
-                if concurrent and getattr(self, "_mvcc", False):
-                    # Retried because nothing has been staged yet.
-                    await self._retry_while_busy(
-                        lambda: async_conn.execute("BEGIN CONCURRENT"),
-                        "BEGIN CONCURRENT",
-                    )
-                try:
-                    yield async_conn
-                    # Contention here means the transaction did not land.
-                    # The statements are still staged, so re-committing
-                    # lands the same set.
-                    await self._retry_while_busy(async_conn.commit, "commit")
-                except Exception:
-                    await async_conn.rollback()
-                    raise
-        finally:
-            await self._release_writer(holder)
-        # No push here — the push loop handles cloud delivery.
-        # Any push attempt (even fire-and-forget) acquires _conn_lock
-        # and blocks reads during the cloud round-trip.
-
-    async def flush(self) -> None:
-        """Block until all pending local writes have been pushed to cloud.
-
-        Retries indefinitely with exponential backoff.  Does NOT close
-        the pool — the connection remains usable after flush returns.
-        """
-        if self._write_holder and self._remote_url:
-            attempt = 0
-            while not await self._push_once():
-                attempt += 1
-                delay = min(self._push_retry_base_s * (2 ** attempt), 30.0)
-                logger.warning("Flush attempt %d failed, retrying in %.1fs", attempt, delay)
-                await asyncio.sleep(delay)
-
-    async def close(self) -> None:
-        """Flush all pending writes to cloud, then close.
-
-        Retries push indefinitely until cloud confirms receipt.
-        After this method returns, all local writes are guaranteed
-        to be on cloud.  It is safe to delete local DB files after
-        close() completes.
-
-        Call this on SIGTERM / application shutdown before exiting.
-        """
-        self._closed = True
-        # Final push — retry indefinitely.  No persistent disk means
-        # data not pushed is lost permanently.
-        if self._write_holder and self._remote_url:
-            attempt = 0
-            while not await self._push_once():
-                attempt += 1
-                delay = min(self._push_retry_base_s * (2 ** attempt), 30.0)
-                logger.warning("Final push attempt %d failed, retrying in %.1fs", attempt, delay)
-                await asyncio.sleep(delay)
-        # Read connections hold no unpushed state, so they close after the
-        # final push rather than before it.
-        for reader in self._read_holders:
-            if reader.conn is not None:
-                try:
-                    await reader.conn.close()
-                except Exception:
-                    logger.debug("Read connection already closed")
-                reader.conn = None
-        self._read_holders.clear()
-
-        # Additional write connections. Writer zero is the write holder and
-        # is closed just below.
-        for writer in self._write_holders:
-            if writer is self._write_holder or writer.conn is None:
-                continue
-            try:
-                await writer.conn.close()
-            except Exception:
-                logger.debug("Write connection already closed")
-            writer.conn = None
-        self._write_holders.clear()
-
-        if self._write_holder:
-            if self._write_holder.conn is not None:
-                await self._write_holder.conn.close()
-                self._write_holder.conn = None
-        if self._push_task and not self._push_task.done():
-            self._push_task.cancel()
-            try:
-                await self._push_task
-            except asyncio.CancelledError:
-                pass
-
-    @property
-    def dialect(self) -> str:
-        return "turso"
-
-    @property
-    def closed(self) -> bool:
-        """Whether the pool has been closed."""
-        return self._closed
-
-    @property
-    def size(self) -> int:
-        """Maximum number of concurrent connections."""
-        return self._max_size
-
-    @property
-    def available(self) -> int:
-        """Number of available connection slots."""
-        return self._max_size - self._active_connections
 
 
 class ConnectionPool:
@@ -1485,7 +398,7 @@ class ConnectionPool:
         tier_label: str = "",
         latency_sink: str | None = None,
         latency_path: str | None = None,
-    ) -> "PostgreSQLPool":
+    ) -> PostgreSQLPool:
         """
         Create a PostgreSQL connection pool.
 
@@ -1525,7 +438,7 @@ class ConnectionPool:
         tier_label: str = "",
         latency_sink: str | None = None,
         latency_path: str | None = None,
-    ) -> "SQLitePool":
+    ) -> SQLitePool:
         """
         Create a SQLite connection pool.
 
@@ -1564,11 +477,12 @@ class ConnectionPool:
         background_pull: bool = True,
         mvcc: bool = True,
         busy_retry_budget_s: float = 5.0,
+        pooled_writes: bool = False,
         instrumentation: bool = False,
         tier_label: str = "",
         latency_sink: str | None = None,
         latency_path: str | None = None,
-    ) -> "TursoPool":
+    ) -> TursoPool:
         """
         Create a Turso connection pool using pyturso.
 
@@ -1624,6 +538,7 @@ class ConnectionPool:
             background_pull=background_pull,
             mvcc=mvcc,
             busy_retry_budget_s=busy_retry_budget_s,
+            pooled_writes=pooled_writes,
         )
         await pool._initialize()
         if instrumentation:
@@ -1633,829 +548,34 @@ class ConnectionPool:
         return pool
 
 
-# =============================================================================
-# Synchronous Pool Classes (for testing)
-# =============================================================================
 
 
-class SyncSQLitePool:
-    """
-    Synchronous SQLite connection pool for testing.
 
-    Provides a simple synchronous interface without async/await overhead.
-    """
-
-    def __init__(self, database_path: str, *, max_size: int = 5) -> None:
-        self._database_path = database_path
-        self._max_size = max_size
-        self._closed = False
-
-    def acquire(self) -> SyncSQLiteConnection:
-        """Acquire a synchronous connection."""
-        if self._closed:
-            raise PoolClosedError("Pool has been closed")
-        import sqlite3
-
-        conn = sqlite3.connect(self._database_path)
-        conn.execute("PRAGMA journal_mode=WAL")
-        return SyncSQLiteConnection(conn)
-
-    def close(self) -> None:
-        """Mark pool as closed."""
-        self._closed = True
-
-    @property
-    def closed(self) -> bool:
-        return self._closed
-
-
-class SyncSQLiteConnection:
-    """Synchronous SQLite connection wrapper."""
-
-    def __init__(self, conn: Any) -> None:
-        self._conn = conn
-
-    def execute(self, sql: str, parameters: tuple = ()) -> Any:
-        return self._conn.execute(sql, parameters)
-
-    def executemany(self, sql: str, parameters: list) -> Any:
-        return self._conn.executemany(sql, parameters)
-
-    def commit(self) -> None:
-        self._conn.commit()
-
-    def rollback(self) -> None:
-        self._conn.rollback()
-
-    def close(self) -> None:
-        self._conn.close()
-
-    def __enter__(self) -> SyncSQLiteConnection:
-        return self
-
-    def __exit__(self, *args: Any) -> None:
-        self.close()
-
-
-class SyncTursoPool:
-    """
-    Synchronous Turso (pyturso) connection pool for testing.
-
-    Provides a simple synchronous interface without async/await overhead.
-    """
-
-    def __init__(self, database_path: str, *, max_size: int = 5) -> None:
-        self._database_path = database_path
-        self._max_size = max_size
-        self._closed = False
-
-    def acquire(self) -> SyncTursoConnection:
-        """Acquire a synchronous connection."""
-        if self._closed:
-            raise PoolClosedError("Pool has been closed")
-        import turso
-
-        conn = turso.connect(self._database_path)
-        return SyncTursoConnection(conn)
-
-    def close(self) -> None:
-        """Mark pool as closed."""
-        self._closed = True
-
-    @property
-    def closed(self) -> bool:
-        return self._closed
-
-
-class SyncTursoConnection:
-    """Synchronous Turso connection wrapper."""
-
-    def __init__(self, conn: Any) -> None:
-        self._conn = conn
-
-    def execute(self, sql: str, parameters: tuple = ()) -> Any:
-        cursor = self._conn.cursor()
-        cursor.execute(sql, parameters)
-        return cursor
-
-    def executemany(self, sql: str, parameters: list) -> Any:
-        cursor = self._conn.cursor()
-        cursor.executemany(sql, parameters)
-        return cursor
-
-    def commit(self) -> None:
-        self._conn.commit()
-
-    def rollback(self) -> None:
-        self._conn.rollback()
-
-    def sync(self) -> None:
-        if hasattr(self._conn, "sync"):
-            self._conn.sync()
-
-    def close(self) -> None:
-        self._conn.__exit__(None, None, None)
-
-    def __enter__(self) -> SyncTursoConnection:
-        return self
-
-    def __exit__(self, *args: Any) -> None:
-        self.close()
-
-
-class SyncConnectionPool:
-    """
-    Synchronous connection pool factory for testing.
-
-    Usage:
-        # SQLite
-        pool = SyncConnectionPool.sqlite("./test.db")
-        with pool.acquire() as conn:
-            conn.execute("SELECT 1")
-        pool.close()
-
-        # Turso (pyturso)
-        pool = SyncConnectionPool.turso("./test.db")
-    """
-
-    @staticmethod
-    def sqlite(database_path: str, *, max_size: int = 5) -> SyncSQLitePool:
-        """Create a synchronous SQLite pool."""
-        return SyncSQLitePool(database_path, max_size=max_size)
-
-    @staticmethod
-    def turso(database_path: str, *, max_size: int = 5) -> SyncTursoPool:
-        """Create a synchronous Turso pool."""
-        return SyncTursoPool(database_path, max_size=max_size)
-
-class TursoCloudManager:
-    """
-    Multi-tenant database manager for Turso cloud.
-
-    Turso cloud is designed for one database per tenant. This manager
-    handles database provisioning, token management, and connection pooling
-    for multi-tenant applications.
-
-    Usage:
-        manager = TursoCloudManager(
-            org="mycompany",
-            api_token=os.environ["TURSO_API_TOKEN"],
-        )
-
-        # Create database for new tenant
-        db_info = await manager.create_database("tenant-123")
-
-        # Get connection pool for tenant
-        pool = await manager.get_pool("tenant-123")
-        async with pool.acquire() as conn:
-            ...
-
-        # Delete tenant database
-        await manager.delete_database("tenant-123")
-    """
-
-    def __init__(
-        self,
-        org: str,
-        api_token: str,
-        *,
-        group: str = "default",
-        region: str | None = None,
-        pool_max_size: int = 10,
-        pool_acquire_timeout: float = 30.0,
-        use_tursodb: bool = False,
-    ) -> None:
-        """
-        Initialize the Turso cloud manager.
-
-        Args:
-            org: Turso organization name
-            api_token: Platform API token (from `turso auth api-tokens mint`)
-            group: Database group (default: "default")
-            region: Optional region hint for new databases
-            pool_max_size: Max connections per tenant pool (default: 10)
-            pool_acquire_timeout: Connection acquire timeout (default: 30s)
-            use_tursodb: Beta — create databases on the new tursodb (Rust)
-                engine by default. Overridable per-call. Keep False until the
-                compatibility gate passes. (default: False)
-        """
-        self._org = org
-        self._api_token = api_token
-        self._group = group
-        self._region = region
-        self._pool_max_size = pool_max_size
-        self._pool_acquire_timeout = pool_acquire_timeout
-        self._use_tursodb = use_tursodb
-        self._base_url = "https://api.turso.tech/v1"
-
-        # Cache for tenant tokens and pools
-        self._tokens: dict[str, str] = {}
-        self._pools: dict[str, TursoPool] = {}
-
-    def _build_remote_url(self, db_name: str) -> str:
-        """Build the Turso Cloud remote URL for a database."""
-        return f"https://{db_name}-{self._org}.turso.io"
-
-    async def _api_request(
-        self,
-        method: str,
-        endpoint: str,
-        data: dict | None = None,
-    ) -> dict:
-        """Make a request to the Turso Platform API."""
-        import json
-        import urllib.error
-        import urllib.request
-
-        url = f"{self._base_url}/organizations/{self._org}{endpoint}"
-
-        body = json.dumps(data).encode() if data is not None else None
-
-        req = urllib.request.Request(url, data=body, method=method)
-        req.add_header("Authorization", f"Bearer {self._api_token}")
-        if body:
-            req.add_header("Content-Type", "application/json")
-
-        loop = asyncio.get_event_loop()
-        try:
-            response = await loop.run_in_executor(None, lambda: urllib.request.urlopen(req))
-            return json.loads(response.read())
-        except urllib.error.HTTPError as e:
-            error_body = e.read().decode()
-            raise PoolConnectionError(f"Turso API error ({e.code}): {error_body}") from e
-
-    async def create_database(
-        self,
-        db_name: str,
-        *,
-        size_limit: str | None = None,
-        use_tursodb: bool | None = None,
-        seed: dict[str, Any] | None = None,
-    ) -> dict:
-        """
-        Create a new database for a tenant.
-
-        Args:
-            db_name: Database name (lowercase, numbers, dashes; max 64 chars)
-            size_limit: Optional size limit (e.g., "256mb", "1gb")
-            use_tursodb: Beta — create on the new tursodb (Rust) engine.
-                None (default) inherits the manager's use_tursodb setting;
-                an explicit True/False overrides it for this call.
-            seed: Optional seed spec, passed through to the Turso API
-                unmodified so the new database is created as a copy of an
-                existing one rather than empty. Provisioning a tenant from a
-                pre-built template becomes a single copy instead of
-                create-empty then migrate then insert.
-
-                Passed through as an opaque dict rather than being modelled
-                as named parameters, so seed variants the API grows are
-                usable without a release here. Two forms are documented today:
-
-                    {"type": "database", "name": "<source-db>"}
-                    {"type": "database_upload"}
-
-                With type "database", an optional "timestamp" (ISO 8601)
-                selects a recovery point rather than the current state —
-                within the last 24 hours, or 30 days on the scaler plan:
-
-                    {"type": "database", "name": "tpl", "timestamp": "..."}
-
-                Not validated here; the API is the authority on which
-                combinations are legal and reports violations itself.
-
-        Returns:
-            Dict with database info (DbId, Hostname, Name)
-        """
-        payload: dict[str, Any] = {
-            "name": db_name,
-            "group": self._group,
-        }
-        if size_limit:
-            payload["size_limit"] = size_limit
-        if seed is not None:
-            payload["seed"] = seed
-
-        resolved_use_tursodb = (
-            self._use_tursodb if use_tursodb is None else use_tursodb
-        )
-        if resolved_use_tursodb:
-            payload["use_tursodb"] = True
-
-        result = await self._api_request("POST", "/databases", payload)
-        return result.get("database", result)
-
-    async def delete_database(self, db_name: str) -> None:
-        """
-        Delete a tenant's database.
-
-        Args:
-            db_name: Database name to delete
-        """
-        # Remove from cache
-        self._tokens.pop(db_name, None)
-        pool = self._pools.pop(db_name, None)
-        if pool:
-            await pool.close()
-
-        await self._api_request("DELETE", f"/databases/{db_name}")
-
-    async def create_token(self, db_name: str) -> str:
-        """
-        Create an auth token for a database.
-
-        Args:
-            db_name: Database name
-
-        Returns:
-            JWT auth token
-        """
-        result = await self._api_request(
-            "POST",
-            f"/databases/{db_name}/auth/tokens",
-            {},
-        )
-        token = result.get("jwt", "")
-        self._tokens[db_name] = token
-        return token
-
-    async def get_token(self, db_name: str) -> str:
-        """
-        Get auth token for a database (creates if not cached).
-
-        Args:
-            db_name: Database name
-
-        Returns:
-            JWT auth token
-        """
-        if db_name not in self._tokens:
-            await self.create_token(db_name)
-        return self._tokens[db_name]
-
-    async def get_pool(self, db_name: str) -> TursoPool:
-        """
-        Get a connection pool for a tenant's database.
-
-        Creates the pool on first access and caches it.
-
-        Args:
-            db_name: Database name (tenant identifier)
-
-        Returns:
-            TursoPool for the tenant's database
-        """
-        if db_name not in self._pools:
-            token = await self.get_token(db_name)
-            remote_url = self._build_remote_url(db_name)
-            # TODO: local_path derivation for multi-tenant (db_dir/db_name.db)
-            local_path = f"./db/{db_name}.db"
-            self._pools[db_name] = await ConnectionPool.turso(
-                local_path,
-                remote_url=remote_url,
-                max_size=self._pool_max_size,
-                acquire_timeout=self._pool_acquire_timeout,
-            )
-        return self._pools[db_name]
-
-    async def list_databases(self) -> list[dict]:
-        """
-        List all databases in the organization.
-
-        Returns:
-            List of database info dicts
-        """
-        result = await self._api_request("GET", "/databases")
-        return result.get("databases", [])
-
-    async def database_exists(self, db_name: str) -> bool:
-        """
-        Check if a database exists.
-
-        Args:
-            db_name: Database name to check
-
-        Returns:
-            True if database exists
-        """
-        try:
-            await self._api_request("GET", f"/databases/{db_name}")
-            return True
-        except PoolConnectionError:
-            return False
-
-    async def get_or_create_database(self, db_name: str) -> dict:
-        """
-        Get existing database or create if it doesn't exist.
-
-        Args:
-            db_name: Database name
-
-        Returns:
-            Database info dict
-        """
-        if await self.database_exists(db_name):
-            result = await self._api_request("GET", f"/databases/{db_name}")
-            return result.get("database", result)
-        return await self.create_database(db_name)
-
-    async def close(self) -> None:
-        """Close all cached connection pools."""
-        for pool in self._pools.values():
-            await pool.close()
-        self._pools.clear()
-        self._tokens.clear()
-
-
-# =============================================================================
-# Mirror Pool Classes (for replication verification)
-# =============================================================================
-
-
-class MirrorCursor:
-    """
-    Cursor wrapper for mirror results.
-
-    Either wraps a real cursor or serves pre-fetched rows.
-    """
-
-    def __init__(self, cursor: Any | None, prefetched_rows: list | None) -> None:
-        self._cursor = cursor
-        self._rows = prefetched_rows or []
-        self._position = 0
-
-    async def fetchone(self) -> Any:
-        """Fetch one row."""
-        if self._cursor:
-            result = self._cursor.fetchone()
-            if asyncio.iscoroutine(result):
-                return await result
-            return result
-        if self._position < len(self._rows):
-            row = self._rows[self._position]
-            self._position += 1
-            return row
-        return None
-
-    async def fetchall(self) -> list:
-        """Fetch all remaining rows."""
-        if self._cursor:
-            result = self._cursor.fetchall()
-            if asyncio.iscoroutine(result):
-                return await result
-            return result
-        rows = self._rows[self._position :]
-        self._position = len(self._rows)
-        return rows
-
-    async def fetchmany(self, size: int = 1) -> list:
-        """Fetch many rows."""
-        if self._cursor:
-            result = self._cursor.fetchmany(size)
-            if asyncio.iscoroutine(result):
-                return await result
-            return result
-        rows = self._rows[self._position : self._position + size]
-        self._position += len(rows)
-        return rows
-
-    @property
-    def rowcount(self) -> int:
-        """Number of rows affected."""
-        if self._cursor and hasattr(self._cursor, "rowcount"):
-            return self._cursor.rowcount
-        return len(self._rows)
-
-
-class MirrorConnection:
-    """
-    Connection wrapper that mirrors operations to two databases.
-
-    Writes go to both databases in parallel.
-    Reads fetch from both and compare results, logging any disagreements.
-    """
-
-    def __init__(
-        self,
-        primary_conn: Any,
-        mirror_conn: Any,
-        *,
-        logger: logging.Logger,
-        fail_open: bool = True,
-        compare_on_read: bool = True,
-    ) -> None:
-        self._primary = primary_conn
-        self._mirror = mirror_conn
-        self._logger = logger
-        self._fail_open = fail_open
-        self._compare_on_read = compare_on_read
-
-    def _is_read_query(self, sql: str) -> bool:
-        """Check if query is a read (SELECT) query."""
-        normalized = sql.strip().upper()
-        return normalized.startswith("SELECT") or normalized.startswith("WITH")
-
-    async def execute(self, sql: str, parameters: tuple = ()) -> MirrorCursor:
-        """Execute SQL on both connections."""
-        timestamp = datetime.now(UTC).isoformat()
-
-        if self._is_read_query(sql) and self._compare_on_read:
-            return await self._execute_with_comparison(sql, parameters, timestamp)
-        else:
-            return await self._execute_parallel(sql, parameters, timestamp)
-
-    async def _execute_parallel(self, sql: str, parameters: tuple, timestamp: str) -> MirrorCursor:
-        """Execute on both databases in parallel (for writes)."""
-        results = await asyncio.gather(
-            self._safe_execute(self._primary, sql, parameters),
-            self._safe_execute(self._mirror, sql, parameters),
-            return_exceptions=True,
-        )
-
-        primary_result, mirror_result = results
-
-        if isinstance(mirror_result, Exception):
-            self._log_mirror_error("execute", sql, parameters, timestamp, mirror_result)
-            if not self._fail_open:
-                raise mirror_result
-
-        if isinstance(primary_result, Exception):
-            raise primary_result
-
-        return MirrorCursor(primary_result, None)
-
-    async def _execute_with_comparison(
-        self, sql: str, parameters: tuple, timestamp: str
-    ) -> MirrorCursor:
-        """Execute on both and compare results (for reads)."""
-        results = await asyncio.gather(
-            self._safe_execute(self._primary, sql, parameters),
-            self._safe_execute(self._mirror, sql, parameters),
-            return_exceptions=True,
-        )
-
-        primary_result, mirror_result = results
-
-        if isinstance(primary_result, Exception):
-            raise primary_result
-
-        if isinstance(mirror_result, Exception):
-            self._log_mirror_error("execute", sql, parameters, timestamp, mirror_result)
-            if not self._fail_open:
-                raise mirror_result
-            return MirrorCursor(primary_result, None)
-
-        # Both succeeded - fetch and compare results
-        primary_rows = await self._fetch_all(primary_result)
-        mirror_rows = await self._fetch_all(mirror_result)
-
-        if primary_rows != mirror_rows:
-            self._log_data_disagreement(sql, parameters, timestamp, primary_rows, mirror_rows)
-
-        return MirrorCursor(None, primary_rows)
-
-    async def _safe_execute(self, conn: Any, sql: str, parameters: tuple) -> Any:
-        """Execute with error handling for different connection types."""
-        return await conn.execute(sql, parameters)
-
-    async def _fetch_all(self, cursor: Any) -> list:
-        """Fetch all rows from cursor."""
-        if hasattr(cursor, "fetchall"):
-            result = cursor.fetchall()
-            if asyncio.iscoroutine(result):
-                return await result
-            return result
-        return []
-
-    def _log_mirror_error(
-        self, op: str, sql: str, params: tuple, timestamp: str, error: Exception
-    ) -> None:
-        """Log mirror operation failure."""
-        self._logger.warning(
-            "Mirror %s failed | time=%s | sql=%r | params=%r | error=%s",
-            op,
-            timestamp,
-            sql,
-            params,
-            error,
-        )
-
-    def _log_data_disagreement(
-        self,
-        sql: str,
-        params: tuple,
-        timestamp: str,
-        primary_rows: list,
-        mirror_rows: list,
-    ) -> None:
-        """Log data disagreement between primary and mirror."""
-        self._logger.error(
-            "DATA DISAGREEMENT DETECTED\n"
-            "  timestamp: %s\n"
-            "  sql: %r\n"
-            "  parameters: %r\n"
-            "  primary_row_count: %d\n"
-            "  mirror_row_count: %d\n"
-            "  primary_data: %r\n"
-            "  mirror_data: %r\n"
-            "  diff: %s",
-            timestamp,
-            sql,
-            params,
-            len(primary_rows),
-            len(mirror_rows),
-            primary_rows,
-            mirror_rows,
-            self._compute_diff(primary_rows, mirror_rows),
-        )
-
-    def _compute_diff(self, primary: list, mirror: list) -> str:
-        """Compute human-readable diff between results."""
-        primary_set = set(map(tuple, primary)) if primary else set()
-        mirror_set = set(map(tuple, mirror)) if mirror else set()
-
-        only_primary = primary_set - mirror_set
-        only_mirror = mirror_set - primary_set
-
-        parts = []
-        if only_primary:
-            parts.append(f"only_in_primary={list(only_primary)}")
-        if only_mirror:
-            parts.append(f"only_in_mirror={list(only_mirror)}")
-        return "; ".join(parts) if parts else "row order differs"
-
-    async def executemany(self, sql: str, parameters: list[tuple]) -> MirrorCursor:
-        """Execute with multiple parameter sets on both databases."""
-        timestamp = datetime.now(UTC).isoformat()
-
-        results = await asyncio.gather(
-            self._primary.executemany(sql, parameters),
-            self._mirror.executemany(sql, parameters),
-            return_exceptions=True,
-        )
-
-        if isinstance(results[1], Exception):
-            self._log_mirror_error("executemany", sql, parameters, timestamp, results[1])
-            if not self._fail_open:
-                raise results[1]
-
-        if isinstance(results[0], Exception):
-            raise results[0]
-
-        return MirrorCursor(results[0], None)
-
-    async def commit(self) -> None:
-        """Commit on both connections in parallel."""
-        await asyncio.gather(
-            self._primary.commit(),
-            self._mirror.commit(),
-            return_exceptions=True,
-        )
-
-    async def rollback(self) -> None:
-        """Rollback on both connections in parallel."""
-        await asyncio.gather(
-            self._primary.rollback(),
-            self._mirror.rollback(),
-            return_exceptions=True,
-        )
-
-    async def close(self) -> None:
-        """Close both connections."""
-        await asyncio.gather(
-            self._primary.close(),
-            self._mirror.close(),
-            return_exceptions=True,
-        )
-
-
-class MirrorPool(BasePool):
-    """
-    Database mirroring pool for replication verification.
-
-    Wraps two pools (primary and mirror) to:
-    - Write to both databases in parallel
-    - Read from both and compare results
-    - Return primary data but log disagreements
-
-    Usage:
-        primary = await ConnectionPool.postgresql("postgresql://primary/db")
-        mirror = await ConnectionPool.sqlite("./mirror.db")
-        pool = MirrorPool(primary, mirror)
-
-        async with pool.acquire() as conn:
-            # Writes go to both
-            await conn.execute("INSERT INTO users (id, name) VALUES (?, ?)", (1, "Alice"))
-            await conn.commit()
-
-            # Reads compare results, return primary, log disagreements
-            cursor = await conn.execute("SELECT * FROM users")
-            rows = await cursor.fetchall()
-
-        await pool.close()
-    """
-
-    def __init__(
-        self,
-        primary: BasePool,
-        mirror: BasePool,
-        *,
-        logger: logging.Logger | None = None,
-        fail_open: bool = True,
-        compare_on_read: bool = True,
-    ) -> None:
-        """
-        Initialize the mirror pool.
-
-        Args:
-            primary: Primary database pool (source of truth)
-            mirror: Mirror database pool (for comparison)
-            logger: Logger for disagreement messages (default: declaro_persistum.mirror)
-            fail_open: If True, continue with primary if mirror fails (default: True)
-            compare_on_read: If True, compare SELECT results (default: True)
-        """
-        self._primary = primary
-        self._mirror = mirror
-        self._logger = logger or logging.getLogger("declaro_persistum.mirror")
-        self._fail_open = fail_open
-        self._compare_on_read = compare_on_read
-        self._closed = False
-
-    @asynccontextmanager
-    async def acquire(self) -> AsyncIterator[MirrorConnection | Any]:
-        """Acquire connections from both pools (or primary only if mirror detached)."""
-        if self._closed:
-            raise PoolClosedError("Pool has been closed")
-
-        if self._mirror is None:
-            # Mirror detached — pass-through to primary
-            async with self._primary.acquire() as primary_conn:
-                yield primary_conn
-        else:
-            async with (
-                self._primary.acquire() as primary_conn,
-                self._mirror.acquire() as mirror_conn,
-            ):
-                yield MirrorConnection(
-                    primary_conn,
-                    mirror_conn,
-                    logger=self._logger,
-                    fail_open=self._fail_open,
-                    compare_on_read=self._compare_on_read,
-                )
-
-    async def close(self) -> None:
-        """Close both pools (or primary only if mirror detached)."""
-        self._closed = True
-        if self._mirror is not None:
-            await asyncio.gather(
-                self._primary.close(),
-                self._mirror.close(),
-                return_exceptions=True,
-            )
-        else:
-            await self._primary.close()
-
-    @property
-    def closed(self) -> bool:
-        """Whether the pool has been closed."""
-        return self._closed
-
-    @property
-    def size(self) -> int:
-        """Size of primary pool."""
-        return getattr(self._primary, "size", 0)
-
-    @property
-    def available(self) -> int:
-        """Available connections in primary pool."""
-        return getattr(self._primary, "available", 0)
-
-    def promote_mirror(self) -> None:
-        """
-        Swap primary and mirror pools.
-
-        After this call, the former mirror becomes the primary (source of truth)
-        and the former primary becomes the mirror (shadow). Useful for live
-        cutover: run dual-write verification, then promote when confident.
-        """
-        self._primary, self._mirror = self._mirror, self._primary
-
-    def detach_mirror(self) -> BasePool:
-        """
-        Detach and return the mirror pool.
-
-        After this call, the MirrorPool operates as a pass-through to the
-        primary pool only. The returned pool can be closed independently.
-
-        Returns:
-            The detached mirror pool.
-
-        Raises:
-            PoolError: If no mirror is attached.
-        """
-        if self._mirror is None:
-            from declaro_persistum.exceptions import PoolError
-            raise PoolError("No mirror pool attached")
-        mirror = self._mirror
-        self._mirror = None
-        return mirror
+# Re-exported so `from declaro_persistum.pool import MirrorPool` keeps
+# working for consumers written before the split (declaro-tvx). The real
+# home is declaro_persistum.mirror. Imported at the END of the module: it
+# depends on BasePool, which now lives in pool_base, so there is no cycle.
+from declaro_persistum.cloud_manager import TursoCloudManager  # noqa: E402
+from declaro_persistum.mirror import (  # noqa: E402
+    MirrorConnection,
+    MirrorCursor,
+    MirrorPool,
+)
+from declaro_persistum.sync_pool import (  # noqa: E402
+    SyncConnectionPool,
+)
+
+__all__ = [
+    "BasePool",
+    "TursoAsyncConnection",
+    "TursoAsyncCursor",
+    "ConnectionPool",
+    "MirrorConnection",
+    "MirrorCursor",
+    "MirrorPool",
+    "PostgreSQLPool",
+    "SQLitePool",
+    "SyncConnectionPool",
+    "TursoCloudManager",
+    "TursoPool",
+]
