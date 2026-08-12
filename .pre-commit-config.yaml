@@ -1,0 +1,72 @@
+# Slop Audit L1.9 (pre-commit hooks) scored Absent for this repository, at the
+# monorepo root and inside every package. Nothing gated a commit: the only
+# workflow publishes to PyPI on a tag and runs no tests.
+#
+# Install once per clone:
+#     uv run pre-commit install
+#
+# The audit's own analyzer ships a `--gate` mode built for this position. It is
+# wired below as a manual-stage hook rather than an on-commit one, because it
+# needs a checkout of the slop-audit repository that a contributor may not
+# have. Run it deliberately:
+#     uv run pre-commit run --hook-stage manual slop-audit-gate --all-files
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.2
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      # L1.16 (trailing-whitespace density) is Clean at 0.0%. This keeps it
+      # there. The whitespace is harmless; it is the staleness signal that
+      # matters — a file nobody opened between generation and commit.
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+
+  - repo: local
+    hooks:
+      # This runs the WHOLE suite, not `-m precommit`. The `precommit` marker
+      # is declared in pyproject.toml and carried by zero tests, so `-m
+      # precommit` deselects all 1223 and exits green — a gate that gates
+      # nothing, which is worse than no gate because it reads as one.
+      # Tracked as declaro-wdl. The full suite is ~14s, inside the 30s budget
+      # the marker was meant to enforce, so there is nothing to trade.
+      - id: pytest-declaro-persistum
+        name: pytest (declaro-persistum)
+        entry: uv run --project packages/declaro-persistum pytest -q
+        language: system
+        pass_filenames: false
+        files: ^packages/declaro-persistum/
+        stages: [pre-commit]
+
+      # This gate PASSES: 0 production god-files. pool.py was 2689 LOC and
+      # the sole L1.17 offender; declaro-tvx split it into eight modules,
+      # none over 1000 lines.
+      #
+      # The ratchet is a COUNT of Any / # type: ignore hatches, not the
+      # per-kloc density the report shows — getting that wrong once set it
+      # to 22 against a real count of 649, and the gate caught it.
+      #
+      # Raised 649 -> 657 by the split, deliberately and reviewably. The
+      # pool code's own count went 38 -> 45: six are the `from typing
+      # import Any` line each extracted module now needs, one is a delegate
+      # signature duplicating the moved function's. No new escape in logic.
+      # Lower it as escapes are typed away (declaro-158).
+      - id: slop-audit-gate
+        name: slop audit L1 gate (manual)
+        entry: >-
+          uv run --project ~/dev/honest/open-honest/slop-audit/tools/l1_analyzer
+          l1-analyzer packages/declaro-persistum --gate --lang python
+          --max-type-escapes 657
+        language: system
+        pass_filenames: false
+        stages: [manual]

@@ -1,0 +1,80 @@
+# Slop Audit L1.10 (CI/CD pipelines) scored 1 / Not Healthy for this repo: a
+# pipeline existed, but publish-persistum.yml only builds and publishes on a
+# tag. No workflow ran the test suite, so nothing stopped a failing commit
+# reaching main — recorded as declaro-5gk.
+#
+# This is that gate. It runs the suite, the linter, and the two Slop Audit
+# runtime indicators the analyzer can only produce by executing tests:
+# L1.19 decision-space coverage and L1.20 test determinism.
+
+name: Test declaro-persistum
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "packages/declaro-persistum/**"
+      - ".github/workflows/test-persistum.yml"
+      - "pyproject.toml"
+
+concurrency:
+  group: test-persistum-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # The matrix is not thoroughness for its own sake. pyproject declares
+    # requires-python = ">=3.11" while development happens on 3.14
+    # free-threaded, and 3.14 evaluates annotations lazily by default
+    # (PEP 649) where <=3.13 evaluates them at def-time. A forward
+    # reference without `from __future__ import annotations` therefore
+    # passes the whole suite on 3.14 and NameErrors on import for every
+    # user below it.
+    #
+    # That is not hypothetical: the eight-module split of pool.py shipped
+    # exactly this in the 0.1.29 wheel. turso_driver.py annotated
+    # `-> TursoAsyncCursor` on a class defined 60 lines further down, 1546
+    # tests passed here, and it died at import on a consumer's 3.13. A
+    # single-version job cannot see that class of bug at all.
+    name: pytest + ruff (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    defaults:
+      run:
+        working-directory: packages/declaro-persistum
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Sync dependencies
+        run: uv sync --all-extras
+
+      # Cheapest possible guard, and it runs before the suite: on <=3.13
+      # this alone would have caught the 0.1.29 breakage.
+      - name: Import the package
+        run: uv run python -c "import declaro_persistum; print(declaro_persistum.__version__)"
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Run tests
+        run: uv run pytest -q
+
+      # L1.20 is measured by running the suite five times in randomised order
+      # and counting clean passes. An order-dependent test is invisible to a
+      # single run and shows up here.
+      - name: Test determinism (Slop Audit L1.20)
+        run: |
+          for i in 1 2 3 4 5; do
+            uv run pytest -q -p randomly || exit 1
+          done
