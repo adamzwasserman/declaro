@@ -1,5 +1,16 @@
 # declaro_persistum Architecture Addendum
 
+
+> ## ⚠️ DEPRECATED — POISONOUS PRACTICE
+>
+> **Its examples hand a `ConnectionPool` to the consumer**, which is forbidden. They also call `ConnectionPool.libsql(...)`, which no longer exists — libsql was removed from declaro-persistum in favour of pyturso.
+>
+> The consumer chooses **async (default) or sync**, and nothing else. Whether a pool exists behind that choice, whether a write reuses a connection, and whether the engine runs MVCC or WAL are internal, owned by exactly one writer, and invisible above that boundary. A pool exposed as a surface is promiscuous mutable state with no determinable owner — measured on this codebase 2026-08-11, where L1.18b reported the pool's holder fields as `unresolved, drives a decision`.
+>
+> Binding constraint: **[../design/state-ownership-and-the-pool-boundary.md](../design/state-ownership-and-the-pool-boundary.md)**
+>
+> Retained as a record. Not guidance.
+
 ---
 **STATUS**: PARTIALLY IMPLEMENTED — A9 (Instrumentation) complete; A1-A8 still design
 **VERSION**: 0.2.0

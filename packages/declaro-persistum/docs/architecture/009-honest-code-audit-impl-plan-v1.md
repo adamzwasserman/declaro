@@ -1,5 +1,16 @@
 # Implementation Plan: Strangler Pattern Refactoring for Honest Code Compliance
 
+
+> ## ⚠️ DEPRECATED — POISONOUS PRACTICE
+>
+> **The proposal below — a `ConnectionPool` Protocol plus factory functions — does not fix the boundary, it relocates it.** A factory is inside the pool's own boundary; a conditional there is still a conditional the pool owns. That exact move was attempted again on 2026-08-11 and was still wrong.
+>
+> The consumer chooses **async (default) or sync**, and nothing else. Whether a pool exists behind that choice, whether a write reuses a connection, and whether the engine runs MVCC or WAL are internal, owned by exactly one writer, and invisible above that boundary. A pool exposed as a surface is promiscuous mutable state with no determinable owner — measured on this codebase 2026-08-11, where L1.18b reported the pool's holder fields as `unresolved, drives a decision`.
+>
+> Binding constraint: **[../design/state-ownership-and-the-pool-boundary.md](../design/state-ownership-and-the-pool-boundary.md)**
+>
+> Retained as a record. Not guidance.
+
 ---
 **STATUS**: COMPLETE (Phases 1-4 done; Phases 5-6 deferred — stateless classes acceptable per user decision)
 **VERSION**: 1.2
