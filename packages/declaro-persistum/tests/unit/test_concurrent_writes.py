@@ -165,7 +165,10 @@ class TestWritersRunConcurrently:
         must be None once the write is done. Cost of the open is measured
         in pool.py's module docstring — 1.16ms on a live cloud replica.
         """
-        pool = await _pool(tmp_path, monkeypatch)
+        # LOCAL pool. Statelessness is the local shape; a synced pool holds
+        # one connection (declaro-dna), which is asserted in
+        # test_synced_pools_hold_one_connection.py.
+        pool = await _pool(tmp_path, monkeypatch, remote=False)
         before = len(_Holder.instances)
 
         for _ in range(20):
@@ -248,11 +251,15 @@ class TestRefreshCoversEveryConnection:
         barrier.set()
         await asyncio.gather(*tasks)
 
+        # On a SYNCED pool the writers share writer zero and open nothing, so
+        # there is no second write connection that COULD survive a migration.
+        # The stale-schema defect this class exists for is now impossible by
+        # construction rather than prevented by cleanup.
         others = [h for h in _Holder.instances if h is not pool._write_holder]
-        assert others, "expected the three writers to have opened connections"
-        assert all(h.conn is None for h in others), (
-            "a write connection was still open after its write returned; it "
-            "would survive the migration and serve the pre-migration schema"
+        assert others == [], (
+            f"{len(others)} extra write connection(s) exist on a synced pool; "
+            f"each is a sync-engine handshake against the replica tape "
+            f"(declaro-dna) and each could survive the migration"
         )
 
         before = pool._write_holder.conn

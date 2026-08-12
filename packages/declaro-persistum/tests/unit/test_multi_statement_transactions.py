@@ -240,7 +240,21 @@ class TestFailureRollsBackEverything:
                     raise RuntimeError("index write failed")
                 return await super().execute(sql, *_a)
 
-        _Holder.conn_factory = _FailsSecond
+        # Patch the LIVE connection, not the factory. Swapping the factory
+        # only reaches the write path if a new connection is opened per
+        # write, which a SYNCED pool no longer does — it holds one (see
+        # declaro-dna). The failure being tested is a statement failing
+        # mid-transaction, and that has nothing to do with how the
+        # connection was obtained.
+        live = pool._write_holder.conn
+        original = live.execute
+
+        async def fail_on_index(sql: str, *a):
+            if "tag_cooccurrence" in sql:
+                raise RuntimeError("index write failed")
+            return await original(sql, *a)
+
+        live.execute = fail_on_index
 
         with pytest.raises(RuntimeError, match="index write failed"):
             async with pool.transaction():

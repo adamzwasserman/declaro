@@ -142,7 +142,7 @@ class TestConcurrentWritersAreStillConcurrent:
     """Turso is explicitly concurrent-write. Do not take that away."""
 
     @pytest.mark.asyncio
-    async def test_the_pool_still_opens_a_connection_per_writer(
+    async def test_a_synced_pool_does_not_open_a_connection_per_writer(
         self, tmp_path, monkeypatch
     ):
         pool = await _pool(tmp_path, monkeypatch)
@@ -159,8 +159,18 @@ class TestConcurrentWritersAreStillConcurrent:
         release.set()
         await asyncio.gather(*held)
 
-        assert opened > 1, (
-            "the pool collapsed to a single write connection; MVCC and "
-            "BEGIN CONCURRENT exist so several connections can write at once"
+        # The fixture clears the counter BEFORE _initialize(), so writer zero
+        # is the one open on the list. Three concurrent writers must add none.
+        assert opened == 1, (
+            f"a SYNCED pool held {opened} write connections for three "
+            f"concurrent writers. It must hold one: a synced replica takes a "
+            f"single sync connection (declaro-eer), and opening per write is "
+            f"what killed a consumer's box (declaro-dna).\n\n"
+            f"This assertion previously read `opened > 1`, on the reasoning "
+            f"that MVCC and BEGIN CONCURRENT exist so several connections can "
+            f"write at once. True — on a LOCAL pool, where that is asserted in "
+            f"test_synced_pools_hold_one_connection.py. A synced pool runs WAL "
+            f"and serialises its writers, so one connection is the correct "
+            f"shape, not a collapse."
         )
         await pool.close()

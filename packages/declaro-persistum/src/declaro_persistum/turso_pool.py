@@ -728,6 +728,30 @@ class TursoPool(BasePool):
         connection to unrelated callers across a process lifetime. This
         docstring rejects the second shape, not the lever.
         """
+        # THE ONE BRANCH IN THE WRITE PATH, and it is a capability difference
+        # rather than a preference. A SYNCED replica takes ONE sync connection:
+        # opening a second returns "database tape error: database is busy" in
+        # 3 of 4 measured runs, and in the run where eight did open, 5 writes
+        # landed locally and 0 reached the primary (declaro-eer, 2026-08-12).
+        # A LOCAL database has no tape, and an open there is measured at
+        # 1.16ms, so nothing is held and nothing can be pinned or poisoned.
+        #
+        # 0.3.0 applied the stateless path to BOTH, which is declaro-dna: it
+        # turned a burst costing ~5 held connections in 0.1.28 into one open,
+        # one OS thread and one tape acquisition per write, and killed a
+        # consumer's box at 20 concurrent signups where 0.1.x seeded 200.
+        # The instruction that produced it said "for turso embedded" — the
+        # local case — and it was applied to synced pools too.
+        #
+        # The caller sees no difference. This is exactly the mutable state
+        # the pool is allowed to own: one connection, one owner, invisible.
+        if self._remote_url:
+            # Writer zero, held for the life of the pool, as 0.1.28 did.
+            # Writers are serialised behind _replica_write_lock on a synced
+            # pool, so sharing it is safe: only one is inside at a time.
+            yield self._write_holder
+            return
+
         holder = await self._retry_while_busy(
             self._open_write_connection, "open write connection"
         )
