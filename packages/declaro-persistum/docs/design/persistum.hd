@@ -1,0 +1,185 @@
+# declaro-persistum declared in .hd — the four-column architecture overview.
+#
+# Read it with read_hd, check it with validate, draw it with render.
+#
+# What the columns mean here:
+#   1 input boundary   reads the world: schema files, database metadata
+#   2 orchestrators    coordinate the other three; own no logic of their own
+#   3 pure functions   data in, data out; the whole diff/plan/render core
+#   4 output boundary  writes the world: DDL, DML, replication, connections
+#
+# The shape this exposes: persistum's middle column is genuinely large and
+# genuinely pure — diffing, ordering, ambiguity detection, validation, SQL
+# rendering, the write queue and the retry policy are all functions over data.
+# The boundary columns are thin except for one place, and that place is the
+# pool. See the note at the foot of this file.
+
+module declaro-persistum
+
+  layer domain
+
+  # --- the data ----------------------------------------------------------
+
+  type Column = {
+    type: str
+    nullable: bool
+    default: str
+    references: str
+  }
+
+  type Table = {
+    columns: dict<str, Column>
+    indexes: list<any>
+    constraints: list<any>
+  }
+
+  type Schema = {
+    tables: dict<str, Table>
+  }
+
+  type Operation = {
+    kind: str
+    table: str
+    detail: dict<str, any>
+  }
+
+  type DiffResult = {
+    operations: list<Operation>
+    ambiguities: list<any>
+  }
+
+  type ApplyResult = {
+    applied: list<Operation>
+    skipped: list<Operation>
+  }
+
+  type Query = {
+    sql: str
+    params: dict<str, any>
+  }
+
+  type PendingWrite = {
+    sql: str
+    params: dict<str, any>
+  }
+
+  type Receipt = {
+    ticket: str
+    ok: bool
+    error: str
+  }
+
+  type Room = {
+    pending: list<PendingWrite>
+    receipts: dict<str, Receipt>
+  }
+
+  type Retry = {
+    attempts: int
+    base_delay_s: float
+    max_delay_s: float
+  }
+
+  # --- column 1: input boundary — reads the world ------------------------
+
+  boundary_in fn load_schema_from_models : (module: any) -> Schema side_effect reads "python_module"
+
+  boundary_in fn load_models_from_module : (module_path: str) -> list<any> side_effect reads "filesystem"
+
+  boundary_in fn inspect_schema : (conn: any, dialect: str) -> Schema side_effect reads "database"
+
+  boundary_in fn stored_schema_hash : (conn: any, schema_name: str) -> str side_effect reads "database"
+
+  # --- column 3: pure functions — the core -------------------------------
+
+  fn diff : (current: Schema, target: Schema) -> DiffResult
+
+  fn build_dependency_graph : (operations: list<Operation>) -> dict<int, list<int>>
+
+  fn topological_sort : (operations: list<Operation>, graph: dict<int, list<int>>) -> list<Operation>
+
+  fn detect_ambiguities : (current: Schema, target: Schema) -> list<any>
+
+  fn calculate_rename_confidence : (from_name: str, to_name: str) -> float
+
+  fn validate_schema : (schema: Schema) -> list<str>
+
+  fn fk_insert_order : (schema: Schema) -> list<str>
+
+  fn fk_delete_order : (schema: Schema) -> list<str>
+
+  fn strip_foreign_keys : (schema: Schema) -> Schema
+
+  fn sort_operations : (schema: Schema, ops: list<any>) -> list<any>
+
+  fn partition_replica_operations : (operations: list<Operation>) -> list<Operation>
+
+  fn compute_schema_hash : (source: str, version: str) -> str
+
+  fn select : (table: str, columns: list<str>, conditions: dict<str, any>) -> Query
+
+  fn insert : (table: str, values: dict<str, any>) -> Query
+
+  fn update : (table: str, values: dict<str, any>, conditions: dict<str, any>) -> Query
+
+  fn delete : (table: str, conditions: dict<str, any>) -> Query
+
+  fn render_condition : (column: str, operator: str, value: any, dialect: str, path: str) -> Query
+
+  fn render_order_term : (term: any, dialect: str, path: str) -> Query
+
+  fn render_subquery : (expr: any, dialect: str) -> Query
+
+  fn is_subquery : (value: any) -> bool
+
+  fn new_room : () -> Room
+
+  fn deposit : (room: Room, write: PendingWrite) -> str
+
+  fn collect : (room: Room, ticket: str) -> Receipt
+
+  fn is_contention : (error: any) -> bool
+
+  fn delay_before : (retry: Retry, attempt: int) -> float
+
+  fn is_literal_type : (annotation: any) -> bool
+
+  fn get_literal_columns : (schema: Schema) -> list<str>
+
+  fn extract_literal_values : (annotation: any) -> list<str>
+
+  # --- column 2: orchestrators — coordinate, own no logic ----------------
+
+  orchestrator fn apply_migrations_async : (pool: any, dialect: str, schema_path: str) -> ApplyResult
+
+  orchestrator fn begin_cutover : (source: any, target: any, schema: Schema) -> ApplyResult
+
+  orchestrator fn bulk_transfer : (source: any, target: any, schema: Schema) -> any
+
+  orchestrator fn drain : (room: Room, execute: any, retry: Retry) -> list<Receipt>
+
+  # --- column 4: output boundary — writes the world ----------------------
+
+  boundary_out fn apply : (conn: any, operations: list<Operation>, dialect: str) -> ApplyResult side_effect writes "database"
+
+  boundary_out fn acquire : (pool: any) -> any side_effect reads "database"
+
+  boundary_out fn acquire_write : (pool: any) -> any side_effect writes "database"
+
+  boundary_out fn push_once : (pool: any) -> bool side_effect writes "network"
+
+  boundary_out fn push_loop : (pool: any) -> any side_effect writes "network"
+
+  boundary_out fn initial_replication : (pool: any) -> any side_effect reads "network"
+
+  boundary_out fn flush : (pool: any) -> any side_effect writes "network"
+
+  boundary_out fn close : (pool: any) -> any side_effect writes "network"
+
+  # --- the chain the whole library exists to run -------------------------
+
+  chain migrate = load_schema_from_models -> inspect_schema -> diff -> topological_sort -> apply
+
+  chain query = select -> acquire -> render_condition
+
+  chain write = deposit -> drain -> acquire_write -> push_once
