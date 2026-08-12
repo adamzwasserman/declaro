@@ -13,6 +13,24 @@
 
 **Status: implemented 2026-08-11, except the open defect below. Written 2026-08-10.**
 
+
+> ### THE TWO LEVERS — measured 2026-08-12, do not re-derive
+>
+> | arm | writes/s | landed | |
+> |---|---|---|---|
+> | WAL + one-and-done | 250 | 1629 / 2000 | **371 LOST** |
+> | WAL + persistent | 1,505 | 1812 / 2000 | **216 LOST** |
+> | MVCC + one-and-done | 426 | 2000 / 2000 | 0 |
+> | **MVCC + persistent** | **4,721** | **2000 / 2000** | 0 |
+>
+> **reuse alone 6.01× · MVCC concurrency alone 1.70× · both 18.87× — they compound.**
+>
+> Connection **reuse** removes the per-write OS thread and is the larger lever. **MVCC + `BEGIN CONCURRENT`** is what lets a crew write in parallel and is what makes it *correct*. Neither alone gets there; the 13,826/sec figure needs both.
+>
+> **WAL loses writes at crew 16 even after three retries. MVCC loses none.** WAL's safe crew is 1, or writers serialised behind a lock.
+>
+> **MVCC is local only** — never on a synced replica. A synced target gets no write concurrency at all.
+
 Landed: stateless writes are the default for the Turso backend (`acquire_write` and `transaction()` open their own connection and close it), the pooled/serialised path survives behind `pooled_writes=True`, and `drain` takes a required `Retry` policy so contention is retried and constraint violations are not. The rationale for stateless-by-default — and the reasoning error that first argued against it — is recorded in `pool.py`'s module docstring so it is not re-derived.
 
 Still open: the stranding defect in "The open defect" below. It was measured on the pooled code and is not caused by, or fixed by, statelessness.

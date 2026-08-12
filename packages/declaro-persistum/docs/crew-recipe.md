@@ -1,5 +1,23 @@
 # The crew recipe
 
+
+> ### THE TWO LEVERS — measured 2026-08-12, do not re-derive
+>
+> | arm | writes/s | landed | |
+> |---|---|---|---|
+> | WAL + one-and-done | 250 | 1629 / 2000 | **371 LOST** |
+> | WAL + persistent | 1,505 | 1812 / 2000 | **216 LOST** |
+> | MVCC + one-and-done | 426 | 2000 / 2000 | 0 |
+> | **MVCC + persistent** | **4,721** | **2000 / 2000** | 0 |
+>
+> **reuse alone 6.01× · MVCC concurrency alone 1.70× · both 18.87× — they compound.**
+>
+> Connection **reuse** removes the per-write OS thread and is the larger lever. **MVCC + `BEGIN CONCURRENT`** is what lets a crew write in parallel and is what makes it *correct*. Neither alone gets there; the 13,826/sec figure needs both.
+>
+> **WAL loses writes at crew 16 even after three retries. MVCC loses none.** WAL's safe crew is 1, or writers serialised behind a lock.
+>
+> **MVCC is local only** — never on a synced replica. A synced target gets no write concurrency at all.
+
 **For testing on a free-threaded build. 2026-08-12.**
 
 ## Who this is for

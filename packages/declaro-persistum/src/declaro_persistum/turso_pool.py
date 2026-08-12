@@ -21,6 +21,31 @@ docs/design/state-ownership-and-the-pool-boundary.md.
 This class currently has four writers of its holder state — the acquire
 path, the push loop, the migration refresh, and close. That is the defect
 those documents were arguing around instead of removing.
+
+THE TWO LEVERS. Measured 2026-08-12, Mac, crew 16, 2000 writes, 3 retries,
+journal mode asserted on every connection. DO NOT RE-DERIVE THIS.
+
+    WAL  + one-and-done     250 writes/s   1629/2000 landed   371 LOST
+    WAL  + persistent      1505 writes/s   1812/2000 landed   216 LOST
+    MVCC + one-and-done     426 writes/s   2000/2000 landed     0 lost
+    MVCC + persistent      4721 writes/s   2000/2000 landed     0 lost
+
+    reuse alone (WAL)          6.01x
+    concurrency alone (MVCC)   1.70x
+    both together             18.87x   <- they COMPOUND, they do not add
+
+Connection REUSE removes the per-write OS thread; that is the larger lever.
+MVCC plus BEGIN CONCURRENT is what lets a crew write in PARALLEL; that is what
+makes the crew CORRECT. Neither alone gets there. The 13,826 writes/sec figure
+on pro_ultra requires BOTH.
+
+WAL LOSES WRITES at crew 16 even after three retries. MVCC loses none. So
+"WAL plus persistent connections" is not a cheaper safe option, it is a lossy
+one. WAL's safe crew is 1, or writers serialised behind a lock.
+
+MVCC IS LOCAL ONLY. Never on a synced replica - it creates local-only internal
+tables the sync engine cannot reconcile, which is the declaro-p39 stranding.
+A synced target therefore gets NO write concurrency at all.
 """
 
 from __future__ import annotations
