@@ -188,6 +188,8 @@ Add the structural checks once the owner exists: purity, no mutation of inputs, 
 
 ## Phase 4 — separate the targets
 
+**This split is a capability boundary, not a design preference.** Concurrency requires MVCC; MVCC cannot run on a synced replica; therefore **concurrent writes and cloud sync are mutually exclusive in pyturso today**, and the synced path gets no write concurrency at all. Nobody chose that and no refactor removes it.
+
 - Postgres, SQLite and WAL-Turso replicas: pooled.
 - MVCC Turso: not pooled.
 - Different modules. Neither imports the other. The selection happens once, below the consumer's async/sync choice.
@@ -227,7 +229,45 @@ Add the structural checks once the owner exists: purity, no mutation of inputs, 
 
    **The facade therefore needs a thin retry, and the reason is better than a false-conflict one.** 18 of 20 concurrent writers to the SAME row conflict. Two requests updating one record is ordinary traffic. Every conflict we retry is a genuine one, so no retry is wasted on physical row placement, and the retry rate tracks the application's access pattern rather than page layout.
 
-   **Still not measured:** 20 writers, one process, one run per case. Not a load test, and nothing here covers the synced target.
+   **The contention curve** — 20 concurrent writers spread over K rows, `v = v + 1` so every collision is genuine, 1 try + 3 retries:
+
+   | writers/row | landed | **lost updates** | first-try | wall |
+   |---|---|---|---|---|
+   | 1 | 20/20 | **0** | 20 | 44ms |
+   | 2 | 20/20 | **0** | 10 | 64ms |
+   | 4 | 20/20 | **0** | 6 | 99ms |
+   | **5** | **20/20** | **0** | 5 | 101ms |
+   | 10 | 18/20 | **0** | 3 | 189ms |
+   | 20 | 14/20 | **0** | 1 | 179ms |
+
+   **Three retries lands everything up to five concurrent writers per row.** Degradation begins at ten. That is the number a consumer designs against, and it was previously unanswerable — both ends were measured and disagreed completely.
+
+   **Zero lost updates at every point.** Twenty-way concurrent read-modify-write on one row is the textbook lost-update test, and nothing was lost anywhere on the curve. This is the strongest result of the day and it is what one write per connection buys: COMPAT.md's silent-rollback window has zero duration when no sibling statement can exist.
+
+   Retries earn their keep well before failures appear — first-try success falls 20 → 10 → 6 → 5 while landed holds at 20/20.
+
+   **A hot row is not fixable by retrying.** At 20 writers on one row, exponential backoff landed 10/20 in 580ms and immediate re-issue landed 8/20 in 159ms — backoff buys two successes for 3.6× the wall time. Exhausting the bound is the correct outcome; no retry policy fixes a hot row, it only decides how long you spend discovering that.
+
+   **Still not measured:** one run per point, one machine, one process. The 20-per-row point read 10/20 on one run and 14/20 on another — the shape is solid, individual numbers are approximate. Nothing here covers the synced target.
+
+### There are two retries, and they are not the same
+
+Conflated in an earlier draft; separated after Adam ruled on the sync path.
+
+| | conflict absorption | durability retry |
+|---|---|---|
+| what | re-runs a commit-time conflict | keeps trying to make a deposited write durable |
+| where | **below both paths** | the **asynchronous path only** |
+| a caller argument? | **never** — the application does not know the engine | **yes**, through the ticket |
+| the bound | declared as data where the engine is known | the caller's business |
+
+**The write queue is what makes ASYNC possible, not what makes retry possible.** A query is already data on both paths, so the boundary can re-run a rejected write under sync with no queue in sight.
+
+**If a sync caller wants queuing, it builds one in its own I/O** (Adam). A hidden queue under a synchronous call would return before the write was durable — exactly what synchronous promises it does not do. Providing one would make the return value a lie.
+
+**The bound is declared beside the retryable set, never a literal in a retry loop.** At real contention it is the bound, not the engine, that decides how many writes land, so a bound nobody consciously chose is the input-side implicit default Rule 14 forbids.
+
+**Contention exhaustion is an ordinary outcome of a write, not an exception.** Under hot-row load the bound saturates routinely; a consumer that treats contention as a last-resort exception breaks in normal traffic. Every consumer surface carries it as one of the answers a write can give.
 
 **The write sequence for the MVCC target, exactly:**
 
