@@ -1,3 +1,12 @@
+"""Apply migration operations to SQLite. Functions, not a class.
+
+`SQLiteApplier` was stateless and held one real method, `apply()`. The SQL
+GENERATORS beside it — generate_column_sql, generate_create_view,
+generate_create_trigger and the rest — were already module-level functions.
+So the pure/impure split was already drawn, and drawn in the right place; the
+class simply sat around the impure half for no reason.
+"""
+
 """
 SQLite migration applier implementation.
 
@@ -23,6 +32,131 @@ from declaro_persistum.applier.shared import (
 from declaro_persistum.errors import NotSupportedError
 from declaro_persistum.exceptions import MigrationError
 from declaro_persistum.types import ApplyResult, Column, Enum, Operation, Procedure, Trigger, View
+
+
+def get_dialect() -> str:
+    """Return dialect identifier."""
+    return "sqlite"
+
+
+def get_transaction_mode() -> Literal["all_or_nothing", "per_operation"]:
+    """SQLite supports transactional DDL."""
+    return "all_or_nothing"
+
+
+async def apply(
+    connection: Any,
+    operations: list[Operation],
+    execution_order: list[int],
+    *,
+    dry_run: bool = False,
+) -> ApplyResult:
+    """
+    Apply migration operations within a transaction.
+
+    SQLite DDL is transactional, allowing safe rollback on failure.
+    Uses per-operation execution with reconstruction for unsupported operations.
+    """
+    if dry_run:
+        return dry_run_preview(operations, execution_order)
+
+    executed: list[str] = []
+
+    try:
+        # Enable foreign keys and start transaction
+        await connection.execute("PRAGMA foreign_keys = ON")
+
+        # Per-operation execution
+        for op_idx in execution_order:
+            operation = operations[op_idx]
+
+            try:
+                if requires_reconstruction(operation):
+                    # Execute with reconstruction
+                    await _execute_with_reconstruction(connection, operation)
+                    executed.append(f"Table reconstruction for {operation['table']}")
+                else:
+                    # Direct SQL execution
+                    sql = generate_operation_sql(operation)
+                    for statement in sql.split(";"):
+                        statement = statement.strip()
+                        if statement:
+                            await connection.execute(statement)
+                    executed.append(sql)
+
+            except Exception as e:
+                await connection.rollback()
+                raise MigrationError(
+                    f"Failed to execute operation",
+                    operation=operation,
+                    original_error=e,
+                ) from e
+
+        await connection.commit()
+
+        return {
+            "success": True,
+            "executed_sql": executed,
+            "operations_applied": len(executed),
+            "error": None,
+            "error_operation": None,
+        }
+
+    except MigrationError:
+        raise
+    except Exception as e:
+        await connection.rollback()
+        raise MigrationError(
+            f"Migration failed: {e}",
+            original_error=e,
+        ) from e
+
+
+async def _execute_with_reconstruction(
+    self, connection: Any, operation: Operation
+) -> None:
+    """
+    Execute an operation using table reconstruction (async).
+
+    Fresh introspection is performed before each reconstruction to ensure
+    we have the latest schema state. Uses specialized functions for
+    single-property changes when possible.
+    """
+    from declaro_persistum.abstractions.table_reconstruction import (
+        _get_full_table_schema,
+        alter_column_default,
+        alter_column_nullability,
+        alter_column_type,
+        reconstruct_table,
+    )
+
+    table = operation["table"]
+
+    # Fresh introspection for current state (includes FKs + unique constraints)
+    columns = await _get_full_table_schema(connection, table)
+
+    # Apply reconstruction changes (pure)
+    columns = apply_reconstruction_changes(columns, operation)
+
+    # Use specialized functions for single-property alter_column changes
+    single = single_change_property(operation)
+    if single is not None:
+        change_key, val = single
+        column = operation["details"]["column"]
+        _SPECIALIZED = {
+            "nullable": alter_column_nullability,
+            "type": alter_column_type,
+            "default": alter_column_default,
+        }
+        handler = _SPECIALIZED.get(change_key)
+        if handler is not None:
+            await handler(connection, table, column, val)
+            return
+
+    # General reconstruction
+    await reconstruct_table(connection, table, columns)
+
+
 
 
 
