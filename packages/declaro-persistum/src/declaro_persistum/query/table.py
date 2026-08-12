@@ -570,69 +570,89 @@ class ColumnProxy:
 
 
 class Condition:
-    """Represents a WHERE condition."""
+    """A WHERE condition.
 
-    __slots__ = ("column", "operator", "value", "_param_counter")
+    Still a class, because `&` and `|` compose conditions and only a class
+    can carry an operator. The RENDERING has moved out to `render_condition`,
+    a pure function this method delegates to — the strangler shape: the
+    caller-facing surface stays, the logic leaves, and the class is deleted
+    when the surface is retired.
 
-    # Class-level counter for unique parameter names
-    _global_param_counter = 0
+    THE PARAMETER COUNTER IS GONE. `_global_param_counter` was a
+    process-global integer incremented in `__init__`, so the same query
+    rendered different SQL every time it was built. Names now come from
+    `path` — where the node sits in the statement being rendered — which is
+    unique within a statement, the only place uniqueness is required, and
+    identical between two renderings of the same query.
+    """
+
+    __slots__ = ("column", "operator", "value")
 
     def __init__(self, column: str, operator: str, value: Any):
         self.column = column
         self.operator = operator
         self.value = value
-        # Get unique counter for this condition
-        Condition._global_param_counter += 1
-        self._param_counter = Condition._global_param_counter
 
-    def to_sql(self, dialect: str) -> tuple[str, dict[str, Any]]:
-        """Generate SQL and params for this condition."""
-        # Handle special cases
-        if self.value is None and self.operator == "IS":
-            return f"{self.column} IS NULL", {}
-        if self.value is None and self.operator == "IS NOT":
-            return f"{self.column} IS NOT NULL", {}
-        if self.operator in ("IN", "NOT IN"):
-            if is_subquery(self.value):
-                sub_sql, sub_params = render_subquery(self.value, dialect)
-                return f"{self.column} {self.operator} ({sub_sql})", sub_params
-            # Generate :param_0, :param_1, etc.
-            placeholders = ", ".join(
-                f":_in_{self._param_counter}_{i}" for i in range(len(self.value))
-            )
-            params = {f"_in_{self._param_counter}_{i}": v for i, v in enumerate(self.value)}
-            return f"{self.column} {self.operator} ({placeholders})", params
-        if self.operator == "BETWEEN":
-            return (
-                f"{self.column} BETWEEN :_between_{self._param_counter}_low AND :_between_{self._param_counter}_high",
-                {
-                    f"_between_{self._param_counter}_low": self.value[0],
-                    f"_between_{self._param_counter}_high": self.value[1],
-                },
-            )
-        if self.operator == "ILIKE" and dialect != "postgresql":
-            # SQLite doesn't have ILIKE, use LIKE with LOWER()
-            return f"LOWER({self.column}) LIKE LOWER(:_like_{self._param_counter})", {
-                f"_like_{self._param_counter}": self.value
-            }
+    def to_sql(self, dialect: str, path: str) -> tuple[str, dict[str, Any]]:
+        """Render this condition at `path`. Delegates; holds no logic.
 
-        # Column-to-column comparison (for JOIN ON clauses)
-        if isinstance(self.value, ColumnProxy):
-            return f"{self.column} {self.operator} {self.value._full_name}", {}
-
-        # Standard comparison - if value is string starting with :, it's a param reference
-        if isinstance(self.value, str) and self.value.startswith(":"):
-            return f"{self.column} {self.operator} {self.value}", {}
-
-        # Generate param with unique name
-        param_name = f"_p_{self._param_counter}"
-        return f"{self.column} {self.operator} :{param_name}", {param_name: self.value}
+        `path` is REQUIRED. A default would let a caller silently render two
+        conditions at the same path and collide their parameter names, which
+        is the failure the counter was there to prevent (Rule 14).
+        """
+        return render_condition(self.column, self.operator, self.value, dialect, path)
 
     def __and__(self, other: "Condition | ConditionGroup") -> "ConditionGroup":
         return ConditionGroup([self, other], "AND")
 
     def __or__(self, other: "Condition | ConditionGroup") -> "ConditionGroup":
         return ConditionGroup([self, other], "OR")
+
+
+def render_condition(
+    column: str, operator: str, value: Any, dialect: str, path: str
+) -> tuple[str, dict[str, Any]]:
+    """Render one condition. Pure: fields in, (sql, params) out.
+
+    Every parameter name is derived from `path`, so the result depends only
+    on the arguments — no counter, no process history. Two renderings of the
+    same condition at the same path are byte-identical.
+    """
+    if value is None and operator == "IS":
+        return f"{column} IS NULL", {}
+    if value is None and operator == "IS NOT":
+        return f"{column} IS NOT NULL", {}
+
+    if operator in ("IN", "NOT IN"):
+        if is_subquery(value):
+            sub_sql, sub_params = render_subquery(value, dialect)
+            return f"{column} {operator} ({sub_sql})", sub_params
+        placeholders = ", ".join(f":_in_{path}_{i}" for i in range(len(value)))
+        params = {f"_in_{path}_{i}": v for i, v in enumerate(value)}
+        return f"{column} {operator} ({placeholders})", params
+
+    if operator == "BETWEEN":
+        low, high = f"_between_{path}_low", f"_between_{path}_high"
+        return (
+            f"{column} BETWEEN :{low} AND :{high}",
+            {low: value[0], high: value[1]},
+        )
+
+    if operator == "ILIKE" and dialect != "postgresql":
+        # SQLite has no ILIKE; LOWER() on both sides is the portable form.
+        name = f"_like_{path}"
+        return f"LOWER({column}) LIKE LOWER(:{name})", {name: value}
+
+    # Column-to-column comparison, as in a JOIN ON clause. Binds nothing.
+    if isinstance(value, ColumnProxy):
+        return f"{column} {operator} {value._full_name}", {}
+
+    # A string already written as :name is a caller-supplied placeholder.
+    if isinstance(value, str) and value.startswith(":"):
+        return f"{column} {operator} {value}", {}
+
+    name = f"_p_{path}"
+    return f"{column} {operator} :{name}", {name: value}
 
 
 class ConditionGroup:
@@ -644,11 +664,18 @@ class ConditionGroup:
         self.conditions = conditions
         self.operator = operator
 
-    def to_sql(self, dialect: str) -> tuple[str, dict[str, Any]]:
+    def to_sql(self, dialect: str, path: str) -> tuple[str, dict[str, Any]]:
+        """Render the group, giving each child a distinct path below this one.
+
+        The child paths are what keep parameter names apart now that the
+        global counter is gone: sibling `i` renders at `{path}_{i}`, so two
+        conditions on the same column in one group cannot collide, and the
+        names are the same on every rendering.
+        """
         parts = []
         params: dict[str, Any] = {}
-        for cond in self.conditions:
-            sql, p = cond.to_sql(dialect)
+        for i, cond in enumerate(self.conditions):
+            sql, p = cond.to_sql(dialect, f"{path}_{i}")
             parts.append(f"({sql})")
             params.update(p)
         return f" {self.operator} ".join(parts), params
@@ -695,9 +722,7 @@ class CaseExpression:
         )
     """
 
-    __slots__ = ("_whens", "_else", "_alias", "_counter")
-
-    _global_case_counter: int = 0
+    __slots__ = ("_whens", "_else", "_alias")
 
     def __init__(
         self,
@@ -705,19 +730,25 @@ class CaseExpression:
         else_: Any = None,
         alias: str | None = None,
     ) -> None:
-        CaseExpression._global_case_counter += 1
-        self._counter = CaseExpression._global_case_counter
         self._whens = whens
         self._else = else_
         self._alias = alias
 
-    def _bare_sql_fragment(self, dialect: str) -> tuple[str, dict[str, Any]]:
-        """Generate CASE ... END SQL and params, without alias."""
+    def _bare_sql_fragment(
+        self, dialect: str, path: str
+    ) -> tuple[str, dict[str, Any]]:
+        """Generate CASE ... END SQL and params, without alias.
+
+        `_global_case_counter` used to name these parameters, so two
+        renderings of one expression produced different SQL. They come from
+        `path` now, for the same reason and with the same guarantee as
+        Condition.
+        """
         params: dict[str, Any] = {}
         parts = ["CASE"]
 
         for i, (cond, value) in enumerate(self._whens):
-            cond_sql, cond_params = cond.to_sql(dialect)
+            cond_sql, cond_params = cond.to_sql(dialect, f"{path}_w{i}")
             params.update(cond_params)
 
             if isinstance(value, ColumnProxy):
@@ -725,7 +756,7 @@ class CaseExpression:
             elif value is None:
                 then_sql = "NULL"
             else:
-                param_name = f"_case_{self._counter}_then_{i}"
+                param_name = f"_case_{path}_then_{i}"
                 params[param_name] = value
                 then_sql = f":{param_name}"
 
@@ -735,24 +766,25 @@ class CaseExpression:
             if isinstance(self._else, ColumnProxy):
                 parts.append(f"ELSE {self._else._full_name}")
             else:
-                param_name = f"_case_{self._counter}_else"
+                param_name = f"_case_{path}_else"
                 params[param_name] = self._else
                 parts.append(f"ELSE :{param_name}")
 
         parts.append("END")
         return " ".join(parts), params
 
-    def to_sql_fragment(self, dialect: str) -> tuple[str, dict[str, Any]]:
+    def to_sql_fragment(self, dialect: str, path: str) -> tuple[str, dict[str, Any]]:
         """Generate SQL and params, including alias if set."""
-        sql, params = self._bare_sql_fragment(dialect)
+        sql, params = self._bare_sql_fragment(dialect, path)
         if self._alias:
             return f"{sql} AS {self._alias}", params
         return sql, params
 
     @property
     def _full_name(self) -> str:
-        """SQL string for use in SELECT (includes alias if set)."""
-        sql, _ = self.to_sql_fragment("postgresql")
+        """SQL string only — parameters are DISCARDED, so never use this to
+        render a CASE that binds values. It exists for the alias-name case."""
+        sql, _ = self.to_sql_fragment("postgresql", "n")
         return sql
 
     def as_(self, alias: str) -> "CaseExpression":
@@ -776,16 +808,18 @@ class CaseOrderBy(TypedDict):
     direction: str
 
 
-def _render_order_by(term: OrderBy, _dialect: str) -> tuple[str, dict[str, Any]]:
+def _render_order_by(
+    term: OrderBy, _dialect: str, _path: str
+) -> tuple[str, dict[str, Any]]:
     """A plain column term takes no parameters."""
     return f"{term['column']} {term['direction']}", {}
 
 
 def _render_case_order_by(
-    term: CaseOrderBy, dialect: str
+    term: CaseOrderBy, dialect: str, path: str
 ) -> tuple[str, dict[str, Any]]:
     """A CASE term emits the BARE expression — an alias is not valid here."""
-    sql, params = term["expr"]._bare_sql_fragment(dialect)
+    sql, params = term["expr"]._bare_sql_fragment(dialect, path)
     return f"{sql} {term['direction']}", params
 
 
@@ -802,10 +836,10 @@ to whichever branch happened to be last.
 
 
 def render_order_term(
-    term: "OrderBy | CaseOrderBy", dialect: str
+    term: "OrderBy | CaseOrderBy", dialect: str, path: str
 ) -> tuple[str, dict[str, Any]]:
     """Render one ORDER BY term. Pure: term in, (sql, params) out."""
-    return ORDER_TERM_RENDERERS[term["kind"]](term, dialect)
+    return ORDER_TERM_RENDERERS[term["kind"]](term, dialect, path)
 
 
 class SubqueryExpr(TypedDict):
@@ -879,18 +913,18 @@ class SQLFunction:
         self.args = args
         self.alias = alias
 
-    def to_sql_fragment(self, dialect: str) -> tuple[str, dict[str, Any]]:
+    def to_sql_fragment(self, dialect: str, path: str) -> tuple[str, dict[str, Any]]:
         """Generate SQL and params, including alias if set."""
         params: dict[str, Any] = {}
         arg_parts = []
-        for a in self.args:
+        for i, a in enumerate(self.args):
             if hasattr(a, "_bare_sql_fragment"):
                 # CaseExpression inside aggregate: use bare form (no alias)
-                a_sql, a_params = a._bare_sql_fragment(dialect)
+                a_sql, a_params = a._bare_sql_fragment(dialect, f"{path}_a{i}")
                 arg_parts.append(a_sql)
                 params.update(a_params)
             elif hasattr(a, "to_sql_fragment"):
-                a_sql, a_params = a.to_sql_fragment(dialect)
+                a_sql, a_params = a.to_sql_fragment(dialect, f"{path}_a{i}")
                 arg_parts.append(a_sql)
                 params.update(a_params)
             elif isinstance(a, ColumnProxy):
@@ -905,7 +939,7 @@ class SQLFunction:
     @property
     def _full_name(self) -> str:
         """Return the SQL representation (no params — use to_sql_fragment for complex args)."""
-        sql, _ = self.to_sql_fragment("postgresql")
+        sql, _ = self.to_sql_fragment("postgresql", "n")
         return sql
 
     def as_(self, alias: str) -> "SQLFunction":

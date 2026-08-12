@@ -214,7 +214,7 @@ class PrismaQueryBuilder:
                 combined: Condition | ConditionGroup = conditions[0]
                 for c in conditions[1:]:
                     combined = combined & c
-                where_sql, where_params = combined.to_sql(dialect)
+                where_sql, where_params = combined.to_sql(dialect, "w")
                 sql += f" WHERE {where_sql}"
                 params.update(where_params)
 

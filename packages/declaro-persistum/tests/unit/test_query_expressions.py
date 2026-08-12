@@ -132,7 +132,7 @@ class TestCaseExpression:
             (tickets.severity == "high", 1),
             else_=2,
         )
-        sql, params = expr.to_sql_fragment("postgresql")
+        sql, params = expr.to_sql_fragment("postgresql", "t")
 
         assert sql.startswith("CASE")
         assert "WHEN tickets.severity = " in sql
@@ -150,7 +150,7 @@ class TestCaseExpression:
             (tickets.status == "open", 1),
             else_=0,
         ).as_("is_open")
-        sql, params = expr.to_sql_fragment("postgresql")
+        sql, params = expr.to_sql_fragment("postgresql", "t")
         assert sql.endswith("AS is_open")
         assert "END AS is_open" in sql
 
@@ -161,7 +161,7 @@ class TestCaseExpression:
             (tickets.status == "open", 1),
             else_=0,
         ).as_("is_open")
-        bare_sql, _ = expr._bare_sql_fragment("postgresql")
+        bare_sql, _ = expr._bare_sql_fragment("postgresql", "t")
         assert "AS is_open" not in bare_sql
         assert bare_sql.startswith("CASE")
         assert bare_sql.endswith("END")
@@ -209,7 +209,7 @@ class TestCaseExpression:
         """No ELSE clause when else_=None (default)."""
         tickets = table("tickets", _SCHEMA, pool=None)
         expr = case_((tickets.status == "open", 1))
-        sql, _ = expr.to_sql_fragment("postgresql")
+        sql, _ = expr.to_sql_fragment("postgresql", "t")
         assert "ELSE" not in sql
 
     def test_case_column_then_value(self):
@@ -219,7 +219,7 @@ class TestCaseExpression:
             (tickets.status == "open", tickets.amount),
             else_=0,
         )
-        sql, params = expr.to_sql_fragment("postgresql")
+        sql, params = expr.to_sql_fragment("postgresql", "t")
         assert "THEN tickets.amount" in sql
         # amount itself should not be in params
         assert "tickets.amount" not in str(params)
@@ -239,7 +239,7 @@ class TestCaseOrderBy:
         expr = case_((tickets.severity == "critical", 0), else_=1)
         order = expr.asc()
         assert order["kind"] == "case_order_by"
-        sql, params = render_order_term(order, "postgresql")
+        sql, params = render_order_term(order, "postgresql", "t")
         assert sql.endswith("ASC")
         assert "CASE" in sql
 
@@ -248,7 +248,7 @@ class TestCaseOrderBy:
         tickets = table("tickets", _SCHEMA, pool=None)
         expr = case_((tickets.severity == "critical", 0), else_=1)
         order = expr.desc()
-        sql, params = render_order_term(order, "postgresql")
+        sql, params = render_order_term(order, "postgresql", "t")
         assert sql.endswith("DESC")
 
     def test_case_order_bare_no_alias(self):
@@ -256,7 +256,7 @@ class TestCaseOrderBy:
         tickets = table("tickets", _SCHEMA, pool=None)
         expr = case_((tickets.severity == "critical", 0), else_=1).as_("priority")
         order = expr.asc()
-        sql, _ = render_order_term(order, "postgresql")
+        sql, _ = render_order_term(order, "postgresql", "t")
         assert "AS priority" not in sql
         assert sql.endswith("ASC")
 
@@ -294,7 +294,7 @@ class TestSumCase:
             )
         ).as_("paid_total")
 
-        sql, params = total.to_sql_fragment("postgresql")
+        sql, params = total.to_sql_fragment("postgresql", "t")
         assert sql.startswith("SUM(CASE")
         assert "END) AS paid_total" in sql
         # alias from CASE is not included (bare form used inside aggregate)
@@ -324,7 +324,7 @@ class TestSumCase:
         inner = case_((tickets.status == "paid", tickets.amount), else_=0).as_("inner_alias")
         total = sum_(inner).as_("paid_total")
 
-        sql, _ = total.to_sql_fragment("postgresql")
+        sql, _ = total.to_sql_fragment("postgresql", "t")
         # 'inner_alias' must NOT appear inside SUM(...)
         assert "inner_alias" not in sql
         assert "SUM(CASE" in sql

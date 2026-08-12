@@ -216,7 +216,7 @@ class UpdateQuery:
 
         # WHERE
         if self._where:
-            where_sql, where_params = self._where.to_sql(dialect)
+            where_sql, where_params = self._where.to_sql(dialect, "w")
             sql += f" WHERE {where_sql}"
             all_params.update(where_params)
 

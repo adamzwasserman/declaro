@@ -272,7 +272,7 @@ class QuerySet:
         for cond in all_conditions[1:]:
             combined = combined & cond
 
-        return combined.to_sql(dialect)
+        return combined.to_sql(dialect, "w")
 
     def to_sql(self, dialect: str = "postgresql") -> tuple[str, dict[str, Any]]:
         """Generate SQL and params."""
@@ -290,7 +290,8 @@ class QuerySet:
         # declared once in table.py and every style dispatches through it.
         if self._ordering:
             orders = ", ".join(
-                render_order_term(o, dialect)[0] for o in self._ordering
+                render_order_term(o, dialect, f"o{i}")[0]
+                for i, o in enumerate(self._ordering)
             )
             sql += f" ORDER BY {orders}"
 

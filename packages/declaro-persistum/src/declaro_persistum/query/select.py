@@ -256,9 +256,9 @@ class SelectQuery:
         # SELECT clause — collect params from complex expressions (CASE, functions with CASE args)
         if self._columns:
             col_parts = []
-            for c in self._columns:
+            for i, c in enumerate(self._columns):
                 if hasattr(c, "to_sql_fragment"):
-                    c_sql, c_params = c.to_sql_fragment(dialect)
+                    c_sql, c_params = c.to_sql_fragment(dialect, f"c{i}")
                     col_parts.append(c_sql)
                     params.update(c_params)
                 else:
@@ -269,15 +269,15 @@ class SelectQuery:
         sql = f"SELECT {cols} FROM {self._table}"
 
         # JOINs
-        for join in self._joins:
-            join_sql, join_params = join["on"].to_sql(dialect)
+        for i, join in enumerate(self._joins):
+            join_sql, join_params = join["on"].to_sql(dialect, f"j{i}")
             join_type = join["type"].upper()
             sql += f" {join_type} JOIN {join['table']} ON {join_sql}"
             params.update(join_params)
 
         # WHERE
         if self._where:
-            where_sql, where_params = self._where.to_sql(dialect)
+            where_sql, where_params = self._where.to_sql(dialect, "w")
             sql += f" WHERE {where_sql}"
             params.update(where_params)
 
@@ -288,7 +288,7 @@ class SelectQuery:
 
         # HAVING
         if self._having:
-            having_sql, having_params = self._having.to_sql(dialect)
+            having_sql, having_params = self._having.to_sql(dialect, "h")
             sql += f" HAVING {having_sql}"
             params.update(having_params)
 
@@ -297,8 +297,8 @@ class SelectQuery:
         # and would silently reroute any term that gained or lost a method.
         if self._order_by:
             order_parts = []
-            for o in self._order_by:
-                o_sql, o_params = render_order_term(o, dialect)
+            for i, o in enumerate(self._order_by):
+                o_sql, o_params = render_order_term(o, dialect, f"o{i}")
                 order_parts.append(o_sql)
                 params.update(o_params)
             sql += f" ORDER BY {', '.join(order_parts)}"
