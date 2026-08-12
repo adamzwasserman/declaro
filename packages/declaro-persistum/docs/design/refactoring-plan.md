@@ -216,7 +216,18 @@ Add the structural checks once the owner exists: purity, no mutation of inputs, 
 
    The Turso blog describes `BEGIN CONCURRENT` as a SQLite WAL-mode feature and presents it as an alternative to MVCC. **That is SQLite's experimental branch, not pyturso.** In pyturso the two are one mechanism with two required steps. A consequence worth having: because `BEGIN CONCURRENT` cannot run outside MVCC, we are always on Turso's row-level commit-time conflict detection and never on SQLite's page-level detection, so false conflicts from physical row colocation do not apply.
 
-   **Not measured, and not to be claimed:** no conflict occurred in any arm, so the retry policy is unexercised by measurement. 20 writers, one process, one run per arm — not a load test.
+   **Conflict granularity, measured with the article's exact scenario.** `journal_mode` verified `mvcc` on all 40 connections:
+
+   | case | succeeded | errors |
+   |---|---|---|
+   | 20 concurrent updates to **distinct rows**, one 20-row table | **20/20** | none |
+   | 20 concurrent updates to the **same row** | 2/20 | **18 × `Write-write conflict`** |
+
+   **Detection is row level, not page level.** Twenty logically-disjoint updates in a single small table — maximally page-colocated — produced no conflicts. Page-level detection belongs to SQLite's `BEGIN CONCURRENT`, and pyturso refuses that outside MVCC, so we never reach it.
+
+   **The facade therefore needs a thin retry, and the reason is better than a false-conflict one.** 18 of 20 concurrent writers to the SAME row conflict. Two requests updating one record is ordinary traffic. Every conflict we retry is a genuine one, so no retry is wasted on physical row placement, and the retry rate tracks the application's access pattern rather than page layout.
+
+   **Still not measured:** 20 writers, one process, one run per case. Not a load test, and nothing here covers the synced target.
 
 **The write sequence for the MVCC target, exactly:**
 
