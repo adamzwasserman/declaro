@@ -2,6 +2,14 @@
 
 **For testing on a free-threaded build. 2026-08-12.**
 
+## Who this is for
+
+**Local-only stores.** The crew depends on MVCC, and MVCC must never run on a synced replica — it creates local-only internal tables the sync engine cannot reconcile.
+
+**It does not apply to a cloud-synced write surface.** multicardz established this on 2026-08-12: their entire write path (central, ~2000 shelf databases, project pools) is synced for durability, so the crew, `BEGIN CONCURRENT`, and persistent MVCC writer connections are all the wrong tool for them. Their target is the other one — WAL, pooled, **no write concurrency at all** — and their lever is reducing write *volume*, not raising concurrency.
+
+If your durability model is cloud sync, stop here. Nothing below applies, and the numbers are unreachable by construction.
+
 Everything below uses the public API of declaro-persistum 0.1.31. There is nothing to add to the library — `deposit`, `collect`, `drain`, the retry policy, and the query builder are all exported already, and N concurrent `drain()` coroutines over one room work as-is.
 
 ## The shape
