@@ -53,31 +53,14 @@ PKG = "declaro_persistum"
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SRC = ROOT / "src" / PKG
 
-KNOWN_ORPHANS: dict[str, str] = {
-    f"{PKG}.query.sqlalchemy": (
-        "SQLAlchemy declarative_base/Session/Query emulation, 739 LOC. Not "
-        "exported from query/__init__.py and reached by no entry point, unlike "
-        "the django and prisma styles which TableProxy exposes as .objects and "
-        ".prisma. Pending a decision to wire up or delete."
-    ),
-    f"{PKG}.compat": "Package holding the second SQLAlchemy compat layer.",
-    f"{PKG}.compat.sqlalchemy_shim": (
-        "A SECOND SQLAlchemy compat layer (Base, SessionLocal), overlapping "
-        "query/sqlalchemy.py. Neither is reachable; each has its own tests."
-    ),
-    f"{PKG}.observability": "Package holding the unreachable observability modules.",
-    f"{PKG}.observability.timing": (
-        "Timer / measure_time / fingerprint_query. instrumentation.py does the "
-        "latency job the pool actually uses and IS reachable."
-    ),
-    f"{PKG}.observability.slow_queries": "Reached only via observability/__init__.",
-    f"{PKG}.functions": (
-        "Holds translations.py only, since scalars.py and aggregates.py were "
-        "deleted. query/update.py and query/insert.py each carry a private "
-        "if/elif copy of the same dialect mapping instead of using it."
-    ),
-    f"{PKG}.functions.translations": "Reached only via functions/__init__.",
-}
+KNOWN_ORPHANS: dict[str, str] = {}
+"""Empty, and the aim is to keep it empty.
+
+All four original entries were DELETED rather than listed — 1450 LOC of source
+plus the broken example that demonstrated one of them (2026-08-12). An entry
+here is a decision to ship code no entry point reaches, which needs a reason
+better than "it was already written".
+"""
 
 
 def _module_name(path: pathlib.Path) -> str:
