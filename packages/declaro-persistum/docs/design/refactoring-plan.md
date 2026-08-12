@@ -192,14 +192,46 @@ Add the structural checks once the owner exists: purity, no mutation of inputs, 
 - MVCC Turso: not pooled.
 - Different modules. Neither imports the other. The selection happens once, below the consumer's async/sync choice.
 
-**Blocking unknowns, both measured today and both unresolved:**
+**Both blockers are resolved. This phase is no longer blocked.**
 
-1. **Does MVCC Turso ever sync to a remote?** I asked and did not get an answer. If it syncs, something must own the push, and a push needs a connection that outlives a write — which needs a definition of "no pool" that allows it.
-2. **One-and-done contends badly under MVCC.** Measured 2026-08-11, raw pyturso, no declaro code: 8 concurrent writes each opening their own connection landed **1 of 8**, with 7 `database is locked`. All 8 sharing one connection landed 8 of 8. "No pool" needs an answer for that or it will not work.
+1. **MVCC Turso is local only and never syncs.** Sync is the WAL replica's job, and that target is pooled. Every failure measured on 2026-08-11 came from MVCC on a *synced* replica: `__turso_internal_mvcc_meta` exists locally and not on the primary, giving 8 ok / 6 durable / 3 on primary here, and push-fails-forever plus a hang on multicardz's box. MVCC and the sync engine do not go together, so nothing in the MVCC target needs to own a push.
 
-**Red first:** the settling measurements ARE the tests. Both unknowns above are written as failing tests against a real cloud replica before any target module is split.
+2. **One-and-done does not contend. That result was my measurement error.** Measured 2026-08-11, local Turso, 20 concurrent writers each opening their own connection:
 
-**Do not start this phase until both are settled.**
+   Mode-verified: every connection reads back its own `journal_mode` and the value is recorded, so the run can name the mode it ran in.
+
+   | arm | modes seen | durable | errors |
+   |---|---|---|---|
+   | **mvcc + `BEGIN CONCURRENT`** | `mvcc` ×20 | **20/20** | none |
+   | wal + `BEGIN CONCURRENT` | `wal` ×20 | **0/20** | 20 × refused |
+   | mvcc, no `BEGIN CONCURRENT` | `mvcc` ×20 | 1/20 | 19 × `database is locked` |
+   | wal, no `BEGIN CONCURRENT` | `wal` ×20 | 2/20 | 18 × `database is locked` |
+   | default + `BEGIN CONCURRENT` | `wal` ×20 | 0/20 | refused (default is wal) |
+
+   An earlier draft cited 1-of-8 and 2-of-8 as a blocker. **Those probes omitted `BEGIN CONCURRENT`, so they measured ordinary locking, not MVCC.** Disregard them.
+
+   **WAL and MVCC are opposites, and `BEGIN CONCURRENT` is MVCC-only.** It does not degrade under WAL, it is refused outright:
+
+       DatabaseError: Transaction error: Concurrent transaction mode is only supported when MVCC is enabled
+
+   The Turso blog describes `BEGIN CONCURRENT` as a SQLite WAL-mode feature and presents it as an alternative to MVCC. **That is SQLite's experimental branch, not pyturso.** In pyturso the two are one mechanism with two required steps. A consequence worth having: because `BEGIN CONCURRENT` cannot run outside MVCC, we are always on Turso's row-level commit-time conflict detection and never on SQLite's page-level detection, so false conflicts from physical row colocation do not apply.
+
+   **Not measured, and not to be claimed:** no conflict occurred in any arm, so the retry policy is unexercised by measurement. 20 writers, one process, one run per arm — not a load test.
+
+**The write sequence for the MVCC target, exactly:**
+
+    connect(path)                    # local turso, no sync engine
+    PRAGMA journal_mode = 'mvcc'     # the cursor MUST be fetched or it is a no-op
+    BEGIN CONCURRENT                 # mandatory; without it, ordinary locking
+    <the deposited sql, params>
+    COMMIT                           # conflicts surface here
+    close
+
+Retry the whole unit on `Error::Busy`, `Error::BusySnapshot`, or any message containing "conflict". Never retry a constraint violation.
+
+**One-and-done is required here, not merely permitted.** COMPAT.md's silent-rollback gap is about *sibling statements on a connection*. One write per connection means no sibling can exist, so the documented data-loss mode cannot arise by construction.
+
+**Red first:** the sequence above, as a test against a real local Turso — 20 concurrent one-and-done writers, all durable. Then the negative: the same test without `BEGIN CONCURRENT` must fail, so the suite pins *why* the statement is there.
 
 ## Phase 5 — close the surface
 
@@ -225,7 +257,10 @@ Largest untested blocks today: `turso_pool.py`, `cli/commands.py`'s async comman
 Each of these was made with confidence, and each was wrong.
 
 - **Moving the branch to a factory.** The factory is inside the pool's boundary. Still the pool's conditional.
-- **Calling one-and-done writes stateless** while writer zero, the reader set and the stale set stayed open. That is the contended middle, measured at 2 of 8.
+- **Calling one-and-done writes stateless** while writer zero, the reader set and the stale set stayed open. The shape is still incoherent — one-and-done writes inside an object whose remaining purpose is holding connections open — but the "2 of 8" figure once cited here was invalid, because that probe omitted `BEGIN CONCURRENT`.
+- **Measuring MVCC without `BEGIN CONCURRENT`.** Three separate times, across a whole day, I concluded from `database is locked` that one-and-done was contended, that MVCC might be unusable in this embedding, and that Phase 4 was blocked. `journal_mode = 'mvcc'` only makes MVCC available; `BEGIN CONCURRENT` is what defers locking to commit. **If a measurement says a documented feature does not work, suspect the measurement before the vendor.**
+- **Running a measurement that cannot name its own mode.** The first 20/20 set the pragma and never asserted the value, and there is a documented path — an unfetched pragma — by which it could silently have been WAL. It was caught by a peer, not by me. **A run that cannot state the configuration it ran in cannot support a claim about that configuration.** Every arm now records `journal_mode` per connection.
+- **Citing the blog for an embedded-library fact.** `PRAGMA journal_mode = 'mvcc'` is in the docs (docs.turso.tech/tursodb/concurrent-writes); the blog only gives `--experimental-mvcc`, which is the tursodb *server* CLI. Different entry points, different documents. Keep claims attached to the source that actually covers our configuration.
 - **Designing from an unchecked mechanism.** The cloud-sync redesign was built on "the push ships WAL frames." Turso Sync is logical change-data-capture and has been all along. Check the vendor's documentation before the design, not after being challenged.
 - **Writing a module header by hand** and dropping `from __future__ import annotations`, which shipped a wheel that would not import below Python 3.14.
 - **Reading L1.18b `unresolved` as coverage debt.** It means the state has no determinable owner.

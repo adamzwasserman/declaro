@@ -69,7 +69,8 @@ Writer zero, the free lists, the stale set and `_mvcc` were reachable and writab
 
 - **"The branch can live in the factory."** No. The factory is inside the pool's boundary. A conditional there is still a conditional the pool owns.
 - **"`pooled_writes=` is a reasonable escape hatch."** It is a pool decision on a consumer-facing surface, which is the thing this document forbids. It was added 2026-08-11 and is the widest the leak has ever been.
-- **"Stateless writes remove the state."** They do not. Writes stopped reusing connections while writer zero, the reader set and the stale set stayed exactly where they were — one-and-done writes inside an object whose remaining purpose is holding connections open. Measured that day: a one-and-done write alongside a long-lived connection landed 2 of 8.
+- **"Stateless writes remove the state."** They do not. Writes stopped reusing connections while writer zero, the reader set and the stale set stayed exactly where they were — one-and-done writes inside an object whose remaining purpose is holding connections open. (A "2 of 8" figure was cited here on the day and is withdrawn: that probe omitted `BEGIN CONCURRENT`, so it measured ordinary locking. One-and-done under MVCC lands 20 of 20. The shape was still incoherent; the number was wrong.)
+- **"One-and-done contends, so a pool is unavoidable."** No. `journal_mode = 'mvcc'` alone changes nothing; `BEGIN CONCURRENT` is what defers locking to commit. Measured 2026-08-11 on local Turso: 20 concurrent one-and-done writers with `BEGIN CONCURRENT` land 20/20 with no errors; without it, 2/20 and 18 `database is locked`. Do not re-derive a pool from a probe that skipped it.
 - **"L1.18b unresolved means low coverage."** It means the state has no determinable owner.
 
 ## Related
