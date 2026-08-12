@@ -43,9 +43,27 @@ WAL LOSES WRITES at crew 16 even after three retries. MVCC loses none. So
 "WAL plus persistent connections" is not a cheaper safe option, it is a lossy
 one. WAL's safe crew is 1, or writers serialised behind a lock.
 
-MVCC IS LOCAL ONLY. Never on a synced replica - it creates local-only internal
-tables the sync engine cannot reconcile, which is the declaro-p39 stranding.
-A synced target therefore gets NO write concurrency at all.
+A SYNCED REPLICA TAKES ONE SYNC CONNECTION. That is the constraint, and it
+is NOT about MVCC. Measured 2026-08-12 against a real replica, pyturso 0.7.2:
+
+    MVCC on a synced replica          journal_mode = 'mvcc', 4 of 4 runs
+    20 writes, sequential, 1 conn     20 local -> 20 ON PRIMARY, no checkpoint
+    8 writes over 8 connections       5 local -> 0 ON PRIMARY, no convergence
+    opening a 2nd sync connection     "database tape error: database is busy"
+                                      3 of 4 runs failed outright, one with
+                                      12 retries over 30s on an IDLE database
+
+So MVCC plus cloud sync is fine for sequential writes. What breaks is more
+than one sync connection against one replica, which is what persistum's
+one-connection-per-write does the moment nothing serialises it. MVCC is
+incidental: it is merely the mode in which `_write_serialisation` stops
+taking the lock, and that lock is what has been masking this on WAL.
+
+THIS PARAGRAPH PREVIOUSLY SAID "MVCC IS LOCAL ONLY ... it creates local-only
+internal tables the sync engine cannot reconcile." Both halves were wrong.
+MVCC runs on a synced replica, measured repeatedly, and the internal-table
+mechanism was asserted from one correlational observation and never proven.
+The engine has never refused this combination; persistum's policy did.
 """
 
 from __future__ import annotations
@@ -118,17 +136,29 @@ class TursoPool(BasePool):
         self._acquire_timeout = acquire_timeout
         self._push_interval_s = push_interval_s
         self._background_pull = background_pull
-        # Whether to ask the engine for MVCC. On by default: concurrent writes
-        # are a Turso feature and the pool should not decline them. Set False
-        # only to force WAL deliberately.
         # THE ENGINE CHOICE IS PERSISTUM'S, NEVER THE CALLER'S.
         #
         #   remote_url set -> synced -> MVCC OFF
         #   no remote_url  -> local  -> MVCC ON
         #
-        # MVCC cannot run on a synced replica: it creates local-only internal
-        # tables the sync engine cannot reconcile, and writes report success
-        # without reaching the primary (declaro-p39; 0.1.29 was yanked for it).
+        # WHY, STATED HONESTLY. It is NOT that MVCC cannot run on a synced
+        # replica. It can, measured 4 of 4 runs, and 20 sequential writes
+        # under it reached the primary intact. This comment used to claim
+        # the opposite and named a mechanism (local-only internal tables the
+        # sync engine cannot reconcile) that was never proven.
+        #
+        # What is measured is narrower: a synced replica takes ONE sync
+        # connection. Opening a second usually fails outright ("database
+        # tape error: database is busy"), and in the run where eight did
+        # open, 5 writes landed locally and 0 reached the primary
+        # (declaro-p39; 0.1.29 was yanked for it).
+        #
+        # MVCC is the mode in which `_write_serialisation` stops taking the
+        # replica lock, so turning it off on a synced pool is what keeps
+        # writers serialised and therefore keeps one sync connection live at
+        # a time. The rule below is correct BY CONSEQUENCE, not because the
+        # engine forbids the combination. Tracked as declaro-eer: the real
+        # fix is to stop opening a connection per write on a synced pool.
         # This was a caller parameter defaulting to True, so omitting it on a
         # synced pool selected the losing configuration. There is now no way
         # to ask for that.

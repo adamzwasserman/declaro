@@ -8,8 +8,10 @@ handling is to roll back and retry.
 
     https://docs.turso.tech/tursodb/concurrent-writes
 
-MVCC IS LOCAL ONLY, so "where the engine allows it" means a pool with no
-`remote_url`. These tests used a cloud pool and then forced `_mvcc = True`
+MVCC RUNS ONLY ON LOCAL POOLS BY PERSISTUM'S CHOICE, not the engine's, so
+"where the engine allows it" means a pool with no `remote_url`. The engine
+will run MVCC on a synced replica quite happily; what it will not do is take
+a second sync connection to one replica. These tests used a cloud pool and then forced `_mvcc = True`
 onto it, which asserted a configuration persistum now refuses to create:
 MVCC on a synced replica strands writes (declaro-p39). The overlap tests
 therefore build a LOCAL pool. Only the push test, which needs a remote at

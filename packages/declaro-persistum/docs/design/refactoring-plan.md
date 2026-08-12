@@ -18,7 +18,7 @@
 >
 > **WAL loses writes at crew 16 even after three retries. MVCC loses none.** WAL's safe crew is 1, or writers serialised behind a lock.
 >
-> **MVCC is local only** — never on a synced replica. A synced target gets no write concurrency at all.
+> **A synced replica takes ONE sync connection.** Measured 2026-08-12, pyturso 0.7.2, real replica: MVCC *does* run on a synced replica (`journal_mode = 'mvcc'`, 4 of 4 runs) and 20 sequential writes under it reached the primary intact. What fails is a *second* sync connection — `database tape error: database is busy`, 3 of 4 runs outright, one after 12 retries over 30s on an idle database. In the run where eight opened: 5 writes local, **0 on the primary**. MVCC is incidental; it is the mode in which the pool stops serialising writers, and that serialisation is what keeps one sync connection alive at a time. **The earlier claim "MVCC is local only — it creates local-only internal tables the sync engine cannot reconcile" was wrong in both halves and is retracted.**
 
 ## What we are aiming at
 
@@ -251,7 +251,7 @@ Add the structural checks once the owner exists: purity, no mutation of inputs, 
 
 ## Phase 4 — separate the targets
 
-**This split is a capability boundary, not a design preference.** Concurrency requires MVCC; MVCC cannot run on a synced replica; therefore **concurrent writes and cloud sync are mutually exclusive in pyturso today**, and the synced path gets no write concurrency at all. Nobody chose that and no refactor removes it.
+**This split is a design decision, and I made it.** The earlier text here read "a capability boundary, not a design preference … Nobody chose that and no refactor removes it." That was false on every clause. MVCC runs on a synced replica; concurrent writes and cloud sync are not mutually exclusive in the engine. The measured constraint is one *sync connection* per replica, so the synced path gets no write concurrency **as persistum is currently built** — because it opens a connection per write. A refactor that stops doing that is exactly what would remove it. Tracked as declaro-eer.
 
 - Postgres, SQLite and WAL-Turso replicas: pooled.
 - MVCC Turso: not pooled.

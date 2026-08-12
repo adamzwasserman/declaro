@@ -9,8 +9,15 @@ got the dangerous one.
 The rule persistum now applies internally, with no way for a caller to override
 it:
 
-    remote_url set  ->  synced  ->  MVCC OFF   (MVCC cannot run on a replica)
-    no remote_url   ->  local   ->  MVCC ON    (safe, and where the throughput is)
+    remote_url set  ->  synced  ->  MVCC OFF
+    no remote_url   ->  local   ->  MVCC ON
+
+The REASON changed on 2026-08-12 even though the rule did not. It is not that
+MVCC cannot run on a replica — it can, measured 4 of 4 runs, and 20 sequential
+writes under it reached the primary intact. The measured constraint is that a
+synced replica takes ONE sync connection, and MVCC is the mode in which the
+pool stops serialising writers. Turning it off on a synced pool is what keeps
+one connection live at a time, so the rule is right by consequence.
 
 The input space here is bounded and tiny — synced or not — so both members run.
 """

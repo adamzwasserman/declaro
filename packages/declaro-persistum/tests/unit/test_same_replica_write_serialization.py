@@ -22,9 +22,9 @@ serialisation is now conditional on MVCC being off.
 The fake below models exactly that: it rejects a second concurrent writer
 only when it is not in MVCC mode.
 
-WHICH ARM A POOL GETS IS NO LONGER A TEST'S CHOICE. MVCC is local only —
-never on a synced replica, where it strands writes (declaro-p39) — so the
-two arms here are now two POOL SHAPES, not two settings on one shape:
+WHICH ARM A POOL GETS IS NO LONGER A TEST'S CHOICE. persistum runs MVCC on
+local pools only, so the two arms here are two POOL SHAPES, not two settings
+on one shape:
 
     MVCC arm  ->  local pool, no remote_url
     WAL arm   ->  synced pool, remote_url set

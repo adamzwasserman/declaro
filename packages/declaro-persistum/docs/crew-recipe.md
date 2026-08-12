@@ -16,7 +16,7 @@
 >
 > **WAL loses writes at crew 16 even after three retries. MVCC loses none.** WAL's safe crew is 1, or writers serialised behind a lock.
 >
-> **MVCC is local only** — never on a synced replica. A synced target gets no write concurrency at all.
+> **A synced replica takes ONE sync connection.** Measured 2026-08-12, pyturso 0.7.2, real replica: MVCC *does* run on a synced replica (`journal_mode = 'mvcc'`, 4 of 4 runs) and 20 sequential writes under it reached the primary intact. What fails is a *second* sync connection — `database tape error: database is busy`, 3 of 4 runs outright, one after 12 retries over 30s on an idle database. In the run where eight opened: 5 writes local, **0 on the primary**. MVCC is incidental; it is the mode in which the pool stops serialising writers, and that serialisation is what keeps one sync connection alive at a time. **The earlier claim "MVCC is local only — it creates local-only internal tables the sync engine cannot reconcile" was wrong in both halves and is retracted.**
 
 **For testing on a free-threaded build. 2026-08-12.**
 
@@ -90,7 +90,7 @@ A builder `Query` is already a `PendingWrite` — `{sql, params}`, and pyturso a
 
 **3. Fetch the PRAGMA cursor.** An unfetched PRAGMA does not take effect, silently, and you will measure WAL while believing you are on MVCC.
 
-**4. MVCC is local only.** It must never be enabled on a synced replica — it creates local-only internal tables the sync engine cannot reconcile.
+**4. One sync connection per replica.** MVCC on a synced replica is fine for sequential writes (measured: 20/20 reached the primary). What must never happen is a second concurrent sync connection to one replica — that is what strands writes. The old wording here blamed MVCC and named an unproven mechanism; retracted 2026-08-12.
 
 ## Sizing the crew
 

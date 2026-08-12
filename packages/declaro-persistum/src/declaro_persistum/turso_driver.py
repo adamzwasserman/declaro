@@ -35,9 +35,27 @@ WAL LOSES WRITES at crew 16 even after three retries. MVCC loses none. So
 "WAL plus persistent connections" is not a cheaper safe option, it is a lossy
 one. WAL's safe crew is 1, or writers serialised behind a lock.
 
-MVCC IS LOCAL ONLY. Never on a synced replica - it creates local-only internal
-tables the sync engine cannot reconcile, which is the declaro-p39 stranding.
-A synced target therefore gets NO write concurrency at all.
+A SYNCED REPLICA TAKES ONE SYNC CONNECTION. That is the constraint, and it
+is NOT about MVCC. Measured 2026-08-12 against a real replica, pyturso 0.7.2:
+
+    MVCC on a synced replica          journal_mode = 'mvcc', 4 of 4 runs
+    20 writes, sequential, 1 conn     20 local -> 20 ON PRIMARY, no checkpoint
+    8 writes over 8 connections       5 local -> 0 ON PRIMARY, no convergence
+    opening a 2nd sync connection     "database tape error: database is busy"
+                                      3 of 4 runs failed outright, one with
+                                      12 retries over 30s on an IDLE database
+
+So MVCC plus cloud sync is fine for sequential writes. What breaks is more
+than one sync connection against one replica, which is what persistum's
+one-connection-per-write does the moment nothing serialises it. MVCC is
+incidental: it is merely the mode in which `_write_serialisation` stops
+taking the lock, and that lock is what has been masking this on WAL.
+
+THIS PARAGRAPH PREVIOUSLY SAID "MVCC IS LOCAL ONLY ... it creates local-only
+internal tables the sync engine cannot reconcile." Both halves were wrong.
+MVCC runs on a synced replica, measured repeatedly, and the internal-table
+mechanism was asserted from one correlational observation and never proven.
+The engine has never refused this combination; persistum's policy did.
 """
 
 from __future__ import annotations

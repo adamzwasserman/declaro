@@ -173,7 +173,8 @@ class TestWritesShareOneTransaction:
     async def test_a_synced_pool_issues_no_begin_and_is_still_atomic(
         self, tmp_path, monkeypatch
     ):
-        """MVCC is local only, so a synced transaction has no BEGIN to issue.
+        """persistum runs MVCC only on local pools, so a synced transaction has no
+        BEGIN CONCURRENT to issue.
 
         This test previously demanded one BEGIN on a synced pool and got it
         only because synced pools used to request MVCC — the configuration
@@ -200,7 +201,7 @@ class TestWritesShareOneTransaction:
                 await c.execute("UPDATE b SET x = 2")
 
         assert [s for s in _statements() if s.startswith("BEGIN")] == [], (
-            "a synced pool issued BEGIN CONCURRENT; MVCC is local only"
+            "a synced pool issued BEGIN CONCURRENT; persistum runs MVCC on local pools only"
         )
         assert _commits() == 1, (
             f"{_commits()} commits for two writes in one transaction — the "
