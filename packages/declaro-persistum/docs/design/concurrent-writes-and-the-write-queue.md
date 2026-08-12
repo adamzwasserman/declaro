@@ -1,6 +1,21 @@
 # Concurrent local writes, the write queue, and opportunistic push
 
-**Status: design agreed, not implemented. Written 2026-08-10.**
+
+> ## ⚠️ DEPRECATED IN PART — POISONOUS PRACTICE
+>
+> **Everything below about `pooled_writes` is poisonous practice.** It put a pool decision on a consumer-facing surface, which is forbidden.
+>
+> The consumer chooses **async (default) or sync**, and nothing else. Whether a pool exists, whether a write reuses a connection, and whether the engine runs MVCC or WAL are internal, owned by exactly one writer, and invisible above that boundary.
+>
+> Binding constraint: **[state-ownership-and-the-pool-boundary.md](state-ownership-and-the-pool-boundary.md)**
+>
+> The measurements in this document remain valid. The API shape does not.
+
+**Status: implemented 2026-08-11, except the open defect below. Written 2026-08-10.**
+
+Landed: stateless writes are the default for the Turso backend (`acquire_write` and `transaction()` open their own connection and close it), the pooled/serialised path survives behind `pooled_writes=True`, and `drain` takes a required `Retry` policy so contention is retried and constraint violations are not. The rationale for stateless-by-default — and the reasoning error that first argued against it — is recorded in `pool.py`'s module docstring so it is not re-derived.
+
+Still open: the stranding defect in "The open defect" below. It was measured on the pooled code and is not caused by, or fixed by, statelessness.
 
 This is the next piece of work on declaro-persistum. The goal is performance: let writers run concurrently against the local replica, absorb contention with retries instead of a lock, and deliver to cloud opportunistically for eventual consistency.
 

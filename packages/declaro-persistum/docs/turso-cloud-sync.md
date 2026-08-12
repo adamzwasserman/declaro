@@ -1,5 +1,18 @@
 # Turso Cloud Sync: Embedded Replica Limitations and Workarounds
 
+
+> ## ⚠️ DEPRECATED — POISONOUS PRACTICE
+>
+> **Every example below that hands a `ConnectionPool` to the consumer is poisonous practice. Do not copy it, and do not write new code in this shape.**
+>
+> The pool decision must never reach the consumer or the common syntax. The consumer chooses **async (default) or sync**, and nothing else. Whether a pool exists behind that choice, whether a write reuses a connection, and whether the engine runs MVCC or WAL are all internal, owned by exactly one writer, and invisible above that boundary.
+>
+> A pool exposed as a surface is promiscuous mutable state with no determinable owner — measured directly on this codebase 2026-08-11, where L1.18b reported the pool's holder fields as `unresolved, drives a decision`. It is the reason every conditional about MVCC kept ending up inside the pool: with no single owner, a branch had no outside to live in.
+>
+> Binding constraint: **[docs/design/state-ownership-and-the-pool-boundary.md](design/state-ownership-and-the-pool-boundary.md)**
+>
+> This document is retained as a record. It is not guidance.
+
 ## Architecture
 
 declaro-persistum uses pyturso's **embedded replica** mode for Turso Cloud databases:
