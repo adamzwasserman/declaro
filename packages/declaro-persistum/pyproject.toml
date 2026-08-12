@@ -1,6 +1,6 @@
 [project]
 name = "declaro_persistum"
-version = "0.1.30"
+version = "0.1.31"
 description = "Pure functional SQL library with declarative schema migrations"
 readme = "README.md"
 license = { text = "MIT" }

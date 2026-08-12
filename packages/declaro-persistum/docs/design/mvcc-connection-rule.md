@@ -67,6 +67,28 @@ The real fix is the one their own FIXME names — commit at the writer's own hal
 
 **We remove the cause instead.** It costs nothing, it closes both failure modes, and it does not depend on anyone else's release.
 
+## The framework already forbids the shape
+
+`honest-persist` has required this from the beginning, for unrelated reasons:
+
+- §7.4 — `execute(query, conn) -> [Row]`, rows are plain dicts, **no lazy loading**
+- §10 — no lazy loading; a query returns what it says it returns
+
+A conformant implementation materialises the result before `execute` returns, so the cursor is drained inside the call. **A partially-read cursor therefore cannot be alive when the next operation runs, and the object both failure modes require does not exist.** The case table above confirms it from the other side: "reader fully drained → write" is durable, and full drainage is the only read shape the rule permits.
+
+That rule was adopted for predictable queries and no ORM magic. It happens to eliminate a process abort and a silent write loss in an engine that did not exist when it was written.
+
+**The change that would reintroduce the hazard is streaming a large result set** — a reasonable-sounding relaxation of exactly this rule. Anyone proposing it should read this document first.
+
+## Prose that describes steps invites the hazard between them
+
+Both engine hazards found here share a shape: **an implementer who follows the written advice literally gets the failure.**
+
+- *"Check whether the key is claimed, then claim it"* → a guard that protects nothing, because the hazard lives between the two steps.
+- *"Finish or reset sibling statements promptly after writing"* → a process abort, because the hazard lives between the write and the finish.
+
+A rule phrased as an **absence** has no gap to fall into: *no partially-consumed cursor outliving the call*, *no read followed by a write on one connection*, *one atomic operation, not two*. State what must not exist rather than what to do in what order.
+
 ## Status of MVCC itself
 
 Experimental in every source that states a status: COMPAT.md, `docs/manual.md` (*"not production ready so do not use it for critical data right now"*), `docs/agent-guides/mvcc.md`, the pragmas docs, and the launch blog. Only `README.md` omits it from its experimental list.
