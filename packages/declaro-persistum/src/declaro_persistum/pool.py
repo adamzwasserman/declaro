@@ -118,7 +118,7 @@ writing a free list, a writer semaphore or a shared write holder.
 3. The cost of the pool is a set of quantities that DO grow with uptime
    and concurrency — resident threads, pinned row versions, checkout
    overhead, poisoned connections — and not one of them is measured
-   anywhere in this repo. See `_get_writer` for the itemised ledger.
+   anywhere in this repo. See `_write_connection` for the itemised ledger.
 
 4. The comparison was originally made by pricing (2) and giving (3) a
    pass, on the unexamined assumption that a pool is simply how this is
@@ -500,9 +500,7 @@ class ConnectionPool:
         acquire_timeout: float = 30.0,
         push_interval_s: float = 1.0,
         background_pull: bool = True,
-        mvcc: bool = True,
         busy_retry_budget_s: float = 5.0,
-        pooled_writes: bool = False,
         instrumentation: bool = False,
         tier_label: str = "",
         latency_sink: str | None = None,
@@ -561,9 +559,7 @@ class ConnectionPool:
             acquire_timeout=acquire_timeout,
             push_interval_s=push_interval_s,
             background_pull=background_pull,
-            mvcc=mvcc,
             busy_retry_budget_s=busy_retry_budget_s,
-            pooled_writes=pooled_writes,
         )
         await pool._initialize()
         if instrumentation:

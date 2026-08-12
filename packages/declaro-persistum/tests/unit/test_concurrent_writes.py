@@ -79,8 +79,7 @@ class _Holder:
 
 
 async def _pool(
-    tmp_path, monkeypatch, max_size=WRITERS, remote=True, mvcc=False,
-    pooled_writes=False,
+    tmp_path, monkeypatch, max_size=WRITERS, remote=True,
 ):
     import declaro_persistum.turso_pool as pool_mod  # TursoPool's own module since declaro-tvx split pool.py
 
@@ -93,9 +92,7 @@ async def _pool(
         str(db),
         remote_url="https://example.turso.io" if remote else None,
         auth_token="t" if remote else None,
-        mvcc=mvcc,
         max_size=max_size,
-        pooled_writes=pooled_writes,
     )
     pool._push_loop = lambda: asyncio.sleep(0)  # type: ignore[assignment]
     pool._enable_replica_fk_enforcement = lambda: asyncio.sleep(0)  # type: ignore[assignment]
@@ -158,20 +155,6 @@ class TestWritersRunConcurrently:
         assert len(set(seen)) == 2, "both writers used the same connection"
 
     @pytest.mark.asyncio
-    async def test_pooled_writes_reuse_connections(self, tmp_path, monkeypatch):
-        """Under the pooled OPT-IN, sequential writes reuse connections."""
-        pool = await _pool(tmp_path, monkeypatch, pooled_writes=True)
-
-        for _ in range(20):
-            async with pool.acquire_write():
-                pass
-
-        assert len(_Holder.instances) <= WRITERS + 2, (
-            f"opened {len(_Holder.instances)} connections for 20 sequential "
-            f"writes — they are not being returned to the pool"
-        )
-
-    @pytest.mark.asyncio
     async def test_stateless_writes_close_every_connection(
         self, tmp_path, monkeypatch
     ):
@@ -198,14 +181,16 @@ class TestWritersRunConcurrently:
         )
 
     @pytest.mark.asyncio
-    async def test_retention_is_bounded_but_concurrency_is_not(
+    async def test_nothing_is_retained_and_concurrency_is_not_capped(
         self, tmp_path, monkeypatch
     ):
-        """More callers than max_size must proceed, and not be retained after.
+        """Ten concurrent writers all proceed under max_size=2, and NONE is kept.
 
-        max_size bounds how many idle connections are kept, not how many
-        callers may run. Ten concurrent writers all proceed; at most
-        max_size connections are still held afterwards.
+        This asserted `retained <= max_size` against the write free list.
+        That list is gone with the pooled write path, so the property is now
+        the stronger one: retention is ZERO by construction, not bounded by a
+        number someone configured. `max_size` never bounded how many callers
+        may write, and now it does not bound writers at all.
         """
         pool = await _pool(tmp_path, monkeypatch, max_size=2)
 
@@ -215,8 +200,12 @@ class TestWritersRunConcurrently:
 
         await asyncio.gather(*(writer() for _ in range(10)))
 
-        retained = pool._free_writers.qsize() if pool._free_writers else 0
-        assert retained <= 2, f"retained {retained} idle write connections"
+        assert not hasattr(pool, "_free_writers"), (
+            "a write free list came back; the pooled write path is removed"
+        )
+        assert all(
+            h.conn is None for h in _Holder.instances if h is not pool._write_holder
+        ), "a write connection outlived its write"
 
 
 class TestRefreshCoversEveryConnection:
@@ -234,13 +223,21 @@ class TestRefreshCoversEveryConnection:
     """
 
     @pytest.mark.asyncio
-    async def test_all_write_connections_are_reopened(self, tmp_path, monkeypatch):
-        # Held write connections only exist on the pooled opt-in. A stateless
-        # write has nothing to reopen: it opens after the migration or it
-        # does not exist.
-        pool = await _pool(tmp_path, monkeypatch, pooled_writes=True)
+    async def test_no_write_connection_survives_a_migration(
+        self, tmp_path, monkeypatch
+    ):
+        """Reopening every write connection is a problem we no longer have.
 
-        # Force three write connections into existence.
+        This test used to force three write connections into existence and
+        assert refresh_connections() reopened all of them. Only the pooled
+        opt-in ever held them. A stateless write closes its connection before
+        acquire_write returns, so after the writes finish there is exactly
+        one long-lived write connection — writer zero — and refresh reopens
+        it. The stale-schema defect this class exists for cannot occur,
+        because there is no second write connection to leave behind.
+        """
+        pool = await _pool(tmp_path, monkeypatch)
+
         async def hold(barrier):
             async with pool.acquire_write():
                 await barrier.wait()
@@ -251,17 +248,18 @@ class TestRefreshCoversEveryConnection:
         barrier.set()
         await asyncio.gather(*tasks)
 
-        writers_before = list(pool._write_holders)
-        assert len(writers_before) >= 3
-        conns_before = [w.conn for w in writers_before]
+        others = [h for h in _Holder.instances if h is not pool._write_holder]
+        assert others, "expected the three writers to have opened connections"
+        assert all(h.conn is None for h in others), (
+            "a write connection was still open after its write returned; it "
+            "would survive the migration and serve the pre-migration schema"
+        )
 
+        before = pool._write_holder.conn
         await pool.refresh_connections()
 
-        conns_after = [w.conn for w in pool._write_holders]
-        assert all(c is not None for c in conns_after), "a writer was left closed"
-        assert all(
-            after is not before for after, before in zip(conns_after, conns_before)
-        ), "some write connections kept their pre-migration connection"
+        assert pool._write_holder.conn is not None, "writer zero was left closed"
+        assert pool._write_holder.conn is not before, "writer zero was not reopened"
 
     @pytest.mark.asyncio
     async def test_read_connections_are_discarded(self, tmp_path, monkeypatch):
@@ -325,7 +323,7 @@ class TestConcurrentWritesUseMvcc:
         # cloud replica (journal_mode='mvcc', measured 2026-08-10, survives
         # CDC and a replica reopen). It is refused only on an EXISTING
         # wal+CDC replica.
-        pool = await _pool(tmp_path, monkeypatch, remote=False, mvcc=True)
+        pool = await _pool(tmp_path, monkeypatch, remote=False)
         assert pool._mvcc is True
 
         async with pool.acquire_write(concurrent=True) as conn:

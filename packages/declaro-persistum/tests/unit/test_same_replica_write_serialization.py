@@ -21,6 +21,17 @@ serialisation is now conditional on MVCC being off.
 
 The fake below models exactly that: it rejects a second concurrent writer
 only when it is not in MVCC mode.
+
+WHICH ARM A POOL GETS IS NO LONGER A TEST'S CHOICE. MVCC is local only —
+never on a synced replica, where it strands writes (declaro-p39) — so the
+two arms here are now two POOL SHAPES, not two settings on one shape:
+
+    MVCC arm  ->  local pool, no remote_url
+    WAL arm   ->  synced pool, remote_url set
+
+These tests previously built a synced pool for both arms and passed
+`mvcc=True` to the constructor. That parameter is gone, and the
+configuration it selected is the one persistum exists to make unreachable.
 """
 
 import asyncio
@@ -109,14 +120,19 @@ async def _pool(tmp_path, monkeypatch, *, mvcc: bool, name="r.db"):
 
     db = tmp_path / name
     db.write_bytes(b"x" * 64)
-    pool = TursoPool(
-        str(db), remote_url="https://example.turso.io", auth_token="t",
-        mvcc=mvcc, max_size=24,
+    # MVCC iff local. The arm IS the pool shape; nothing else selects it.
+    remote = (
+        {} if mvcc else {"remote_url": "https://example.turso.io", "auth_token": "t"}
     )
+    pool = TursoPool(str(db), max_size=24, **remote)
     pool._push_loop = lambda: asyncio.sleep(0)  # type: ignore[assignment]
     pool._enable_replica_fk_enforcement = lambda: asyncio.sleep(0)  # type: ignore[assignment]
     pool._initial_sync = lambda: asyncio.sleep(0)  # type: ignore[assignment]
     await pool._initialize()
+    assert pool._mvcc is mvcc, (
+        "the pool did not land in the arm this test needs; the engine choice "
+        "follows remote_url and nothing else"
+    )
     return pool
 
 
@@ -206,8 +222,8 @@ class TestWithMvccWritersRunConcurrently:
 class TestDifferentReplicasNeverContend:
     @pytest.mark.asyncio
     async def test_two_replicas_run_in_parallel(self, tmp_path, monkeypatch):
-        a = await _pool(tmp_path, monkeypatch, mvcc=False, name="a.db")
-        b = await _pool(tmp_path, monkeypatch, mvcc=False, name="b.db")
+        a = await _pool(tmp_path, monkeypatch, mvcc=True, name="a.db")
+        b = await _pool(tmp_path, monkeypatch, mvcc=True, name="b.db")
 
         async def write(pool):
             async with pool.acquire_write() as conn:

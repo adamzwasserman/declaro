@@ -80,12 +80,20 @@ async def _init(pool, conn):
         pool_mod._TursoConnectionHolder = orig  # type: ignore[assignment]
 
 
-class TestMvccOnByDefault:
-    """MVCC must be on by default, including on cloud pools."""
+class TestTheEngineChoiceIsPersistumsAlone:
+    """MVCC iff local. A synced pool must never request it, and no caller can ask.
+
+    This class previously asserted the opposite — that a cloud pool "must still
+    request MVCC", on the reasoning that without it BEGIN CONCURRENT can never
+    fire and writes serialize. Serializing was the correct outcome. MVCC on a
+    synced replica creates local-only internal tables the sync engine cannot
+    reconcile, so writes report success and never reach the primary. 0.1.29 was
+    yanked for exactly that.
+    """
 
     @pytest.mark.asyncio
-    async def test_cloud_pool_enables_mvcc(self, tmp_path):
-        """A pool with a remote_url must still request MVCC."""
+    async def test_a_synced_pool_never_requests_mvcc(self, tmp_path):
+        """The safety property. A remote_url means WAL, always."""
         db = tmp_path / "r.db"
         db.write_bytes(b"x" * 64)
         conn = _FakeConn(mvcc_supported=True)
@@ -93,15 +101,14 @@ class TestMvccOnByDefault:
 
         await _init(pool, conn)
 
-        assert any("mvcc" in s for s in conn.statements), (
-            "cloud pool never issued PRAGMA journal_mode='mvcc' — "
-            "BEGIN CONCURRENT can never fire, so writes serialize"
+        assert not any("mvcc" in s for s in conn.statements), (
+            "a synced pool asked for MVCC — that is the declaro-p39 stranding"
         )
-        assert pool._mvcc is True
+        assert pool._mvcc is False
 
     @pytest.mark.asyncio
-    async def test_local_pool_still_enables_mvcc(self, tmp_path):
-        """The local path must keep working."""
+    async def test_a_local_pool_requests_mvcc(self, tmp_path):
+        """Local is where MVCC is safe, and where the throughput is."""
         conn = _FakeConn(mvcc_supported=True)
         pool = TursoPool(str(tmp_path / "l.db"))
 
@@ -110,31 +117,20 @@ class TestMvccOnByDefault:
         assert pool._mvcc is True
 
     @pytest.mark.asyncio
-    async def test_explicit_opt_out_disables_mvcc(self, tmp_path):
-        """mvcc=False must turn it off, and must not request the PRAGMA."""
-        db = tmp_path / "r.db"
-        db.write_bytes(b"x" * 64)
-        conn = _FakeConn(mvcc_supported=True)
-        pool = TursoPool(
-            str(db), remote_url="https://example.turso.io", auth_token="t", mvcc=False
-        )
+    async def test_the_engine_still_has_the_last_word_locally(self, tmp_path):
+        """Requesting is not granting. If the engine refuses, the pool records WAL."""
+        conn = _FakeConn(mvcc_supported=False)
+        pool = TursoPool(str(tmp_path / "l.db"))
 
         await _init(pool, conn)
 
         assert pool._mvcc is False
-        assert not any("mvcc" in s for s in conn.statements)
 
-    @pytest.mark.asyncio
-    async def test_engine_refusal_falls_back_cleanly(self, tmp_path):
-        """If the engine does not give MVCC, the pool records that and continues."""
-        db = tmp_path / "r.db"
-        db.write_bytes(b"x" * 64)
-        conn = _FakeConn(mvcc_supported=False)
-        pool = TursoPool(str(db), remote_url="https://example.turso.io", auth_token="t")
-
-        await _init(pool, conn)
-
-        assert pool._mvcc is False  # asked for it, did not get it, no crash
+    def test_a_caller_cannot_ask_for_either_mode(self, tmp_path):
+        """No opt-in, no opt-out. The parameter is gone in both directions."""
+        for kw in ({"mvcc": True}, {"mvcc": False}, {"pooled_writes": True}):
+            with pytest.raises(TypeError):
+                TursoPool(str(tmp_path / "x.db"), **kw)
 
 
 class _SlowReadHolder:

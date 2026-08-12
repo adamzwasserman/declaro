@@ -100,7 +100,7 @@ def _statements() -> list[str]:
     return [s for c in _Holder.conns for s in c.statements]
 
 
-async def _pool(tmp_path, monkeypatch, remote=True, mvcc=True):
+async def _pool(tmp_path, monkeypatch, remote=True):
     import declaro_persistum.turso_pool as pool_mod  # TursoPool's own module since declaro-tvx split pool.py
 
     _Holder.conns = []
@@ -113,7 +113,6 @@ async def _pool(tmp_path, monkeypatch, remote=True, mvcc=True):
         str(db),
         remote_url="https://example.turso.io" if remote else None,
         auth_token="t" if remote else None,
-        mvcc=mvcc,
     )
     pool._push_loop = lambda: asyncio.sleep(0)  # type: ignore[assignment]
     pool._enable_replica_fk_enforcement = lambda: asyncio.sleep(0)  # type: ignore[assignment]
@@ -155,9 +154,11 @@ class TestWritesShareOneTransaction:
         assert len(set(seen)) == 1, "the two writes used different connections"
 
     @pytest.mark.asyncio
-    async def test_begin_is_issued_once(self, tmp_path, monkeypatch):
-        """One transaction means one BEGIN, not one per write."""
-        pool = await _pool(tmp_path, monkeypatch)
+    async def test_begin_concurrent_is_issued_once_on_a_local_pool(
+        self, tmp_path, monkeypatch
+    ):
+        """One transaction means one BEGIN CONCURRENT, not one per write."""
+        pool = await _pool(tmp_path, monkeypatch, remote=False)
 
         async with pool.transaction():
             async with pool.acquire_write() as c:
@@ -166,7 +167,45 @@ class TestWritesShareOneTransaction:
                 await c.execute("UPDATE b SET x = 2")
 
         begins = [s for s in _statements() if s.startswith("BEGIN")]
-        assert len(begins) == 1, f"expected one BEGIN, saw {len(begins)}"
+        assert len(begins) == 1, f"expected one BEGIN CONCURRENT, saw {len(begins)}"
+
+    @pytest.mark.asyncio
+    async def test_a_synced_pool_issues_no_begin_and_is_still_atomic(
+        self, tmp_path, monkeypatch
+    ):
+        """MVCC is local only, so a synced transaction has no BEGIN to issue.
+
+        This test previously demanded one BEGIN on a synced pool and got it
+        only because synced pools used to request MVCC — the configuration
+        that strands writes. With that gone, the atomicity of a synced
+        transaction rests entirely on pyturso's DB-API implicit transaction,
+        which is a claim about the engine and therefore had to be MEASURED,
+        not reasoned:
+
+            pyturso 0.7.2, local file, no explicit BEGIN, 2026-08-12
+              two INSERTs then rollback()          -> 0 rows survive
+              INSERT then a failing statement,
+                then rollback()                    -> 0 rows survive
+
+        So the driver opens a transaction on the first DML and `commit()`
+        closes it. One commit for the whole block is the guarantee; the
+        BEGIN keyword is not.
+        """
+        pool = await _pool(tmp_path, monkeypatch, remote=True)
+
+        async with pool.transaction():
+            async with pool.acquire_write() as c:
+                await c.execute("UPDATE a SET x = 1")
+            async with pool.acquire_write() as c:
+                await c.execute("UPDATE b SET x = 2")
+
+        assert [s for s in _statements() if s.startswith("BEGIN")] == [], (
+            "a synced pool issued BEGIN CONCURRENT; MVCC is local only"
+        )
+        assert _commits() == 1, (
+            f"{_commits()} commits for two writes in one transaction — the "
+            f"implicit transaction did not hold them together"
+        )
 
 
 class TestFailureRollsBackEverything:

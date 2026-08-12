@@ -177,9 +177,17 @@ class TestRetentionIsBoundedEvenThoughConcurrencyIsNot:
     """Unbounded concurrency must not mean unbounded retained connections."""
 
     @pytest.mark.asyncio
-    async def test_idle_connections_above_max_size_are_closed(
+    async def test_no_write_connection_is_retained_at_all(
         self, tmp_path, monkeypatch
     ):
+        """Eight callers, max_size=2, and ZERO write connections kept after.
+
+        The assertion was `retained <= MAX_SIZE` against the write free list.
+        That list went with the pooled write path, so retention is no longer
+        bounded by a configured number — it is zero by construction. A bound
+        someone can raise is a weaker property than a shape that has nowhere
+        to put a retained connection.
+        """
         pool = await _pool(tmp_path, monkeypatch)
 
         async def writer():
@@ -188,9 +196,17 @@ class TestRetentionIsBoundedEvenThoughConcurrencyIsNot:
 
         await asyncio.gather(*(writer() for _ in range(CALLERS)))
 
-        retained = pool._free_writers.qsize() if pool._free_writers else 0
-        assert retained <= MAX_SIZE, (
-            f"retained {retained} idle write connections with max_size={MAX_SIZE}"
+        assert not hasattr(pool, "_free_writers"), (
+            "a write free list came back; the pooled write path is removed"
+        )
+        left_open = [
+            h
+            for h in _Holder.instances
+            if h is not pool._write_holder and h.conn is not None
+        ]
+        assert left_open == [], (
+            f"{len(left_open)} write connection(s) outlived their write with "
+            f"{CALLERS} callers and max_size={MAX_SIZE}"
         )
 
     @pytest.mark.asyncio

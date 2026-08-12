@@ -108,9 +108,7 @@ class TursoPool(BasePool):
         push_interval_s: float = 1.0,
         push_retry_base_s: float = 0.1,
         background_pull: bool = True,
-        mvcc: bool = True,
         busy_retry_budget_s: float = 5.0,
-        pooled_writes: bool = False,
     ) -> None:
         self._database_path = database_path
         self._remote_url = remote_url
@@ -123,7 +121,18 @@ class TursoPool(BasePool):
         # Whether to ask the engine for MVCC. On by default: concurrent writes
         # are a Turso feature and the pool should not decline them. Set False
         # only to force WAL deliberately.
-        self._mvcc_requested = mvcc
+        # THE ENGINE CHOICE IS PERSISTUM'S, NEVER THE CALLER'S.
+        #
+        #   remote_url set -> synced -> MVCC OFF
+        #   no remote_url  -> local  -> MVCC ON
+        #
+        # MVCC cannot run on a synced replica: it creates local-only internal
+        # tables the sync engine cannot reconcile, and writes report success
+        # without reaching the primary (declaro-p39; 0.1.29 was yanked for it).
+        # This was a caller parameter defaulting to True, so omitting it on a
+        # synced pool selected the losing configuration. There is now no way
+        # to ask for that.
+        self._mvcc_requested = remote_url is None
         # How long to keep absorbing "database is busy" at a transaction
         # boundary before giving up and telling the caller. A busy database
         # means "not now", not "no".
@@ -132,25 +141,6 @@ class TursoPool(BasePool):
         # instead of opening one per write. NOT the default, deliberately.
         # The module docstring says why, and says it in the form of an
         # argument not to re-derive. Read it before flipping this.
-        self._pooled_writes = pooled_writes
-        # Serializes writers against THIS replica, and nothing else.
-        #
-        # The sync engine takes one writer per replica at a time and rejects
-        # the second from inside the write statement — not at a transaction
-        # boundary, so the busy retry cannot help. Measured downstream on a
-        # real remote with distinct rows, so pure database contention: at
-        # K=2, one of two concurrent writers lost its write. Two people
-        # editing different cards on one board is ordinary collaboration.
-        #
-        # This is NOT the lock removed in 0.1.19. That one was shared by
-        # reads, writes and the push, so every reader waited on a cloud
-        # round trip. This covers writer-versus-writer on one replica, which
-        # is a constraint the engine actually has. Readers never touch it,
-        # the push never touches it, and writers to other replicas have
-        # their own pool and their own.
-        #
-        # The cost is one write of waiting — about 150ms — instead of a
-        # lost write.
         self._replica_write_lock = asyncio.Lock()
         # Read connections. Reads do not sync, so each gets its own plain
         # local connection and they run in parallel. See acquire().
@@ -159,8 +149,12 @@ class TursoPool(BasePool):
         # Write connections. Each concurrent writer gets its own sync
         # connection, so BEGIN CONCURRENT over MVCC can actually do what it
         # is for. See acquire_write.
-        self._write_holders: list[_TursoConnectionHolder] = []
-        self._free_writers: asyncio.LifoQueue[_TursoConnectionHolder] | None = None
+        # NO WRITE FREE LIST. A write opens its own connection and closes it
+        # (`_write_connection`). `_write_holders` / `_free_writers` /
+        # `_get_writer` / `_release_writer` were the pooled write path; they
+        # became unreachable the moment `pooled_writes` was removed, and dead
+        # machinery is how a removed feature comes back. Readers keep a free
+        # list — a read holds no unpushed state and pins no row versions.
         # Connections marked stale by a migration. Disposed of on release
         # rather than reused, so no caller waits for a refresh.
         self._stale_holders: set[_TursoConnectionHolder] = set()
@@ -333,54 +327,49 @@ class TursoPool(BasePool):
         # Waiting for writers to drain would have been simpler, but a
         # migration would then stall every write until it finished, which is
         # the cost this pool exists to keep away from callers.
+        # Only readers are tracked. Writer zero is refreshed below, and every
+        # other write connection is already gone — a stateless write closes
+        # its own connection before it returns, so none can outlive a
+        # migration and serve the pre-migration schema.
         self._stale_holders.update(self._read_holders)
-        self._stale_holders.update(
-            w for w in self._write_holders if w is not self._write_holder
+
+        if self._write_holder:
+            if self._write_holder.conn is not None:
+                await self._write_holder.conn.close()
+                self._write_holder.conn = None
+            await self._write_holder.connect_async()
+            if self._remote_url:
+                # W3: push un-pushed local frames before pull() (see
+                # _initialize).
+                await self._push_once()
+                try:
+                    await self._write_holder.pull()
+                except Exception as exc:
+                    # Not fatal: the local replica keeps the state it has
+                    # and the next pull retries. But a refresh that never
+                    # pulled has connections that cannot see remote DDL,
+                    # which is the exact confusion this refresh exists to
+                    # resolve, so it must not be invisible.
+                    logger.warning(
+                        "Pull from remote failed during connection refresh: "
+                        "%s. The local replica keeps its current state and "
+                        "may not yet see remote schema changes.",
+                        exc,
+                    )
+                await self._enable_replica_fk_enforcement()
+
+        # Close every idle connection now. Any connection currently in
+        # use is in _stale_holders and is closed when its caller releases
+        # it, so no caller is interrupted mid-operation.
+        await self._close_idle(self._free_readers)
+        self._free_readers = None
+        self._read_holders.clear()
+
+        logger.info(
+            "Refreshed the write connection and marked %d other "
+            "connection(s) stale after migration; none will be reused",
+            len(self._stale_holders),
         )
-
-        if True:
-            if self._write_holder:
-                if self._write_holder.conn is not None:
-                    await self._write_holder.conn.close()
-                    self._write_holder.conn = None
-                await self._write_holder.connect_async()
-                if self._remote_url:
-                    # W3: push un-pushed local frames before pull() (see
-                    # _initialize).
-                    await self._push_once()
-                    try:
-                        await self._write_holder.pull()
-                    except Exception as exc:
-                        # Not fatal: the local replica keeps the state it has
-                        # and the next pull retries. But a refresh that never
-                        # pulled has connections that cannot see remote DDL,
-                        # which is the exact confusion this refresh exists to
-                        # resolve, so it must not be invisible.
-                        logger.warning(
-                            "Pull from remote failed during connection refresh: "
-                            "%s. The local replica keeps its current state and "
-                            "may not yet see remote schema changes.",
-                            exc,
-                        )
-                    await self._enable_replica_fk_enforcement()
-
-            # Close every idle connection now. Any connection currently in
-            # use is in _stale_holders and is closed when its caller releases
-            # it, so no caller is interrupted mid-operation.
-            await self._close_idle(self._free_writers)
-            await self._close_idle(self._free_readers)
-            self._free_writers = None
-            self._free_readers = None
-            self._read_holders.clear()
-            self._write_holders = [
-                w for w in self._write_holders if w is self._write_holder
-            ]
-
-            logger.info(
-                "Refreshed the write connection and marked %d other "
-                "connection(s) stale after migration; none will be reused",
-                len(self._stale_holders),
-            )
 
     def pause_push(self) -> None:
         replication.pause_push(self)
@@ -422,10 +411,6 @@ class TursoPool(BasePool):
         a connection that is opened, used, and closed again — never a wait.
         """
         await self._release(holder, self._free_readers, self._read_holders)
-
-    async def _release_writer(self, holder: "_TursoConnectionHolder") -> None:
-        """Return a write connection, or close it if the pool is already full."""
-        await self._release(holder, self._free_writers, self._write_holders)
 
     async def _release(
         self,
@@ -608,71 +593,6 @@ class TursoPool(BasePool):
                 if token is not None:
                     _active_transaction.reset(token)
 
-    async def _get_writer(self) -> "_TursoConnectionHolder":
-        """Take a write connection from the free list, opening one if needed.
-
-        Every writer used to share one connection under one lock, so callers
-        were serialized before they reached it and BEGIN CONCURRENT was
-        issued into a queue of one. MVCC could not do the thing MVCC is for.
-
-        Each writer now gets its own sync connection. At most max_size are
-        opened, because the write semaphore admits at most max_size callers
-        before any of them reach this point.
-
-        The pool's original write holder is writer zero, so the migration and
-        shutdown paths that hold a reference to it keep working unchanged.
-
-        What holding these connections costs — the other side of the ledger
-        --------------------------------------------------------------------
-
-        The open cost of a connection is measured and small (module
-        docstring). The holding cost is what makes a pool a pool, and NONE
-        of it is measured in this repo. It is listed so the omission is
-        visible in the place that causes it, not so the list can be quoted
-        as evidence.
-
-        Sourced from Turso's own documentation of the MVCC preview
-        (https://turso.tech/blog/beyond-the-single-writer-limitation-with-tursos-concurrent-writes):
-
-        - Each row version stores a full 1KB copy, not a delta.
-        - Row version management uses locks, not wait-free structures.
-        - A held connection with an old read snapshot keeps versions from
-          being reclaimed. A connection that opens, writes and closes
-          cannot pin anything, because it is gone before the next write.
-
-        Reasoned, NOT measured:
-
-        - One connection is one OS worker thread for the whole life of the
-          process, writing or idle (pyturso `lib_aio.py`). Pool size is
-          thread count, exactly.
-        - Checkout and checkin are per-write overhead on the pooled path.
-          They may be a real fraction of the 1.16ms an open costs. Nobody
-          has compared the two.
-        - A pooled connection that breaks is handed to the next caller. A
-          stateless one is clean by construction.
-
-        The asymmetry is the point: the stateless path's cost is a single
-        fixed number, paid per write and known. The pool's cost is a set of
-        quantities that grow with uptime and concurrency, and that no
-        measurement here bounds.
-        """
-        if self._free_writers is None:
-            self._free_writers = asyncio.LifoQueue()
-            if self._write_holder is not None:
-                self._write_holders.append(self._write_holder)
-                self._free_writers.put_nowait(self._write_holder)
-
-        if not self._free_writers.empty():
-            return self._free_writers.get_nowait()
-
-        holder = _TursoConnectionHolder(
-            self._database_path, self._remote_url, self._auth_token
-        )
-        await holder.connect_async()
-        await self._configure_write_connection(holder)
-        self._write_holders.append(holder)
-        return holder
-
     async def _configure_write_connection(
         self, holder: "_TursoConnectionHolder"
     ) -> None:
@@ -713,22 +633,56 @@ class TursoPool(BasePool):
     async def _write_connection(self) -> AsyncIterator[_TursoConnectionHolder]:
         """Yield a connection to write on, and dispose of it correctly.
 
-        The ONLY difference between the stateless default and the pooled
-        opt-in. It lives in one place so the two cannot drift: everything
-        else about a write — serialisation, BEGIN CONCURRENT, commit,
-        rollback — is identical on both paths and is written once.
+        Open, yield, close. There is one write path and this is it. There is
+        no free list, no checkout, and no way for a caller to ask for one —
+        the pooled opt-in and its `_get_writer` free list were removed with
+        `pooled_writes`.
 
-        Stateless: open, yield, close. Pooled: take from the free list,
-        yield, put back.
+        Why the pooled write path is not coming back — the ledger
+        --------------------------------------------------------------------
+
+        This list lived on `_get_writer` and moved here when that method was
+        deleted, because a cost list that dies with the code it argues
+        against leaves nothing to re-read the next time someone proposes it.
+
+        The open cost of a connection is measured and small (module
+        docstring). The holding cost is what makes a pool a pool, and NONE
+        of it is measured in this repo. It is listed so the omission is
+        visible in the place that causes it, not so the list can be quoted
+        as evidence.
+
+        Sourced from Turso's own documentation of the MVCC preview
+        (https://turso.tech/blog/beyond-the-single-writer-limitation-with-tursos-concurrent-writes):
+
+        - Each row version stores a full 1KB copy, not a delta.
+        - Row version management uses locks, not wait-free structures.
+        - A held connection with an old read snapshot keeps versions from
+          being reclaimed. A connection that opens, writes and closes
+          cannot pin anything, because it is gone before the next write.
+
+        Reasoned, NOT measured:
+
+        - One connection is one OS worker thread for the whole life of the
+          process, writing or idle (pyturso `lib_aio.py`). Pool size is
+          thread count, exactly.
+        - Checkout and checkin are per-write overhead on the pooled path.
+          They may be a real fraction of the 1.16ms an open costs. Nobody
+          has compared the two.
+        - A pooled connection that breaks is handed to the next caller. A
+          stateless one is clean by construction.
+
+        The asymmetry is the point: the stateless path's cost is a single
+        fixed number, paid per write and known. The pool's cost is a set of
+        quantities that grow with uptime and concurrency, and that no
+        measurement here bounds.
+
+        CONNECTION REUSE IS STILL THE LARGER THROUGHPUT LEVER (6.01x on its
+        own; 18.87x combined with MVCC — see `retry.py`). That is measured
+        and it is not disputed here. Reuse belongs to a CREW that owns its
+        connections for the length of a drain, not to a pool that hands one
+        connection to unrelated callers across a process lifetime. This
+        docstring rejects the second shape, not the lever.
         """
-        if self._pooled_writes:
-            holder = await self._get_writer()
-            try:
-                yield holder
-            finally:
-                await self._release_writer(holder)
-            return
-
         holder = await self._retry_while_busy(
             self._open_write_connection, "open write connection"
         )
@@ -808,10 +762,9 @@ class TursoPool(BasePool):
         SUPERSEDED. This docstring used to read "All writes go through
         _write_holder ... Creating separate connections per write caused
         push failures because each connection tracked its own sync state
-        independently." The code below it no longer does that: `_get_writer`
-        opens a connection per concurrent writer, up to max_size. The
-        docstring described the pool as it was before that change and was
-        left behind by it.
+        independently." The code below it no longer does that: a write opens
+        its OWN connection, uses it, and closes it. The docstring described
+        the pool as it was before that change and was left behind by it.
 
         Provenance of the superseded claim: UNVERIFIED. "Each connection
         tracked its own sync state independently" is an explanation, not a
@@ -913,18 +866,8 @@ class TursoPool(BasePool):
                 reader.conn = None
         self._read_holders.clear()
 
-        # Additional write connections. Writer zero is the write holder and
-        # is closed just below.
-        for writer in self._write_holders:
-            if writer is self._write_holder or writer.conn is None:
-                continue
-            try:
-                await writer.conn.close()
-            except Exception:
-                logger.debug("Write connection already closed")
-            writer.conn = None
-        self._write_holders.clear()
-
+        # There are no additional write connections to close. Writer zero is
+        # the only long-lived one, and it is closed just below.
         if self._write_holder:
             if self._write_holder.conn is not None:
                 await self._write_holder.conn.close()
