@@ -141,27 +141,40 @@ class TursoPool(BasePool):
         #   remote_url set -> replicated -> MVCC OFF
         #   no remote_url  -> local  -> MVCC ON
         #
-        # WHY, STATED HONESTLY. It is NOT that MVCC cannot run on a replicated
-        # replica. It can, measured 4 of 4 runs, and 20 sequential writes
-        # under it reached the primary intact. This comment used to claim
-        # the opposite and named a mechanism (local-only internal tables the
-        # replication engine cannot reconcile) that was never proven.
+        # WHY, DEMONSTRATED. Measured 2026-08-12 against a real replica,
+        # pyturso 0.7.2, varying one thing at a time — 2 journal modes x 4
+        # preludes, every cell run:
         #
-        # What is measured is narrower: a replica takes ONE sync
-        # connection. Opening a second usually fails outright ("database
-        # tape error: database is busy"), and in the run where eight did
-        # open, 5 writes landed locally and 0 reached the primary
-        # (declaro-p39; 0.1.29 was yanked for it).
+        #   does a SECOND connection open on the same replica?
+        #     wal  / nothing written    OPENED
+        #     wal  / after CREATE       OPENED
+        #     wal  / after commit       OPENED
+        #     wal  / after push         OPENED
+        #     mvcc / nothing written    OPENED
+        #     mvcc / after CREATE       REFUSED  "database tape error: busy"
+        #     mvcc / after commit       REFUSED
+        #     mvcc / after push         REFUSED
         #
-        # MVCC is the mode in which `_write_serialisation` stops taking the
-        # replica lock, so turning it off on a replicated pool is what keeps
-        # writers serialised and therefore keeps one replica connection live at
-        # a time. The rule below is correct BY CONSEQUENCE, not because the
-        # engine forbids the combination. Tracked as declaro-eer: the real
-        # fix is to stop opening a connection per write on a replicated pool.
+        # UNDER MVCC ON A REPLICATED DATABASE, ONCE WRITER ZERO HAS WRITTEN
+        # ANYTHING, NO SECOND CONNECTION CAN OPEN. Persistent, not transient:
+        # 15 retries over ~35s did not get one. MVCC's whole benefit is
+        # concurrency ACROSS connections, so on a replicated database it
+        # delivers none — while still carrying the stranding that got 0.1.29
+        # yanked (declaro-eer).
+        #
+        # WAL admits many connections but the engine rejects the second
+        # WRITER: 8 connections open, no serialisation, 1 of 8 writes landed.
+        # That is what _write_serialisation's replica lock is for, and the
+        # lock costs no concurrency that MVCC could have recovered.
+        #
+        # So neither mode gives a replicated pool concurrent writers. WAL is
+        # the one that fails safely. Two earlier versions of this comment
+        # claimed MVCC "cannot run" on a replica (false — it runs) and blamed
+        # unreconcilable internal tables (never proven). Both are retracted.
+        #
         # This was a caller parameter defaulting to True, so omitting it on a
-        # replicated pool selected the losing configuration. There is now no way
-        # to ask for that.
+        # replicated pool selected the losing configuration. There is now no
+        # way to ask for that.
         self._mvcc_requested = remote_url is None
         # How long to keep absorbing "database is busy" at a transaction
         # boundary before giving up and telling the caller. A busy database
