@@ -6,7 +6,9 @@ Test levels:
 - stress: Full stress testing (requires real databases)
 """
 
+import asyncio
 import os
+
 import pytest
 from dotenv import load_dotenv
 
@@ -29,18 +31,55 @@ def precommit_timeout(request: pytest.FixtureRequest) -> None:
         request.node.add_marker(pytest.mark.timeout(5))
 
 
+DEFAULT_POSTGRESQL_URL = "postgresql://postgres:postgres@localhost/declarotodo"
+
+
 @pytest.fixture
 def require_postgresql() -> None:
-    """Require PostgreSQL for stress tests - FAIL if not available."""
-    try:
-        import asyncpg  # noqa: F401
-    except ImportError:
-        pytest.fail("PostgreSQL (asyncpg) is REQUIRED for stress tests. Install with: uv pip install asyncpg")
+    """Require PostgreSQL for stress tests — by OPENING one.
 
-    # Also check if database is accessible
-    pg_url = os.environ.get("TEST_POSTGRESQL_URL", "postgresql://postgres:postgres@localhost/declarotodo")
-    if not pg_url:
-        pytest.fail("TEST_POSTGRESQL_URL environment variable not set")
+    This used to check two proxies and no server:
+
+        import asyncpg                     # is the driver installed
+        if not pg_url:                     # a string that has a default,
+            pytest.fail(...)               # so this could never be true
+
+    Neither touches a database. The second is a guard whose condition is
+    false by construction. On 2026-08-12 two PostgreSQL scenarios reported
+    green, and they were green only because a server happened to be running
+    on that machine — the fixture would have said the environment was fine
+    either way, and the scenarios would have errored further in, blaming
+    whatever they touched first.
+
+    A check written against a proxy — a driver import, a string's length —
+    tells you about the proxy. The only thing that establishes a database is
+    there is connecting to it, so that is what this does.
+    """
+    try:
+        import asyncpg
+    except ImportError:
+        pytest.fail(
+            "PostgreSQL (asyncpg) is REQUIRED for stress tests. "
+            "Install with: uv pip install asyncpg"
+        )
+
+    url = os.environ.get("TEST_POSTGRESQL_URL") or DEFAULT_POSTGRESQL_URL
+
+    async def _probe() -> None:
+        conn = await asyncpg.connect(url, timeout=5)
+        try:
+            await conn.execute("SELECT 1")
+        finally:
+            await conn.close()
+
+    try:
+        asyncio.run(_probe())
+    except Exception as e:
+        pytest.fail(
+            f"PostgreSQL is REQUIRED for stress tests and is not reachable at "
+            f"{url}: {type(e).__name__}: {e}. Start it, or point "
+            f"TEST_POSTGRESQL_URL at one that is running."
+        )
 
 
 @pytest.fixture
@@ -163,100 +202,12 @@ def schema_with_composite_pk() -> Schema:
 # Mock connection fixtures
 
 
-class MockAsyncPGConnection:
-    """Mock asyncpg connection for testing."""
-
-    def __init__(self, schema: Schema | None = None):
-        self.schema = schema or {}
-        self.executed: list[str] = []
-        self._in_transaction = False
-
-    async def fetch(self, sql: str, *args: Any) -> list[dict[str, Any]]:
-        """Mock fetch."""
-        self.executed.append(sql)
-        # Return empty results by default
-        return []
-
-    async def fetchrow(self, sql: str, *args: Any) -> dict[str, Any] | None:
-        """Mock fetchrow."""
-        self.executed.append(sql)
-        return None
-
-    async def fetchval(self, sql: str, *args: Any) -> Any:
-        """Mock fetchval."""
-        self.executed.append(sql)
-        return None
-
-    async def execute(self, sql: str, *args: Any) -> str:
-        """Mock execute."""
-        self.executed.append(sql)
-        return "OK"
-
-    def transaction(self):
-        """Return transaction context manager."""
-        return MockTransaction(self)
-
-    async def close(self) -> None:
-        """Mock close."""
-        pass
 
 
-class MockTransaction:
-    """Mock transaction context manager."""
-
-    def __init__(self, conn: MockAsyncPGConnection):
-        self.conn = conn
-
-    async def __aenter__(self):
-        self.conn._in_transaction = True
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        self.conn._in_transaction = False
-        return False
 
 
-class MockAioSQLiteConnection:
-    """Mock aiosqlite connection for testing."""
-
-    def __init__(self, schema: Schema | None = None):
-        self.schema = schema or {}
-        self.executed: list[str] = []
-        self.row_factory = None
-
-    async def execute(self, sql: str, params: Any = None) -> "MockCursor":
-        """Mock execute."""
-        self.executed.append(sql)
-        return MockCursor()
-
-    async def commit(self) -> None:
-        """Mock commit."""
-        pass
-
-    async def rollback(self) -> None:
-        """Mock rollback."""
-        pass
-
-    async def close(self) -> None:
-        """Mock close."""
-        pass
 
 
-class MockCursor:
-    """Mock cursor for aiosqlite."""
-
-    def __init__(self, rows: list[tuple] | None = None):
-        self.rows = rows or []
-        self.description = []
-        self.rowcount = 0
-
-    async def fetchall(self) -> list[tuple]:
-        """Mock fetchall."""
-        return self.rows
-
-    async def fetchone(self) -> tuple | None:
-        """Mock fetchone."""
-        return self.rows[0] if self.rows else None
 
 
 @pytest.fixture

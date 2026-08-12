@@ -6,7 +6,9 @@ Full test suite can be expanded as needed.
 """
 
 import asyncio
+import contextlib
 import logging
+from typing import Any, TypedDict
 import pytest
 from pytest_bdd import given, when, then, parsers, scenarios
 
@@ -34,41 +36,57 @@ def event_loop():
     loop.close()
 
 
+class PragmaContext(TypedDict, total=False):
+    """What one PRAGMA scenario knows so far.
+
+    This was a `Context` class DEFINED INSIDE the fixture: seven fields
+    assigned in `__init__` and one method, `run(coro)`, that forwarded to
+    `loop.run_until_complete`. Six of the seven fields were data and the
+    seventh was the loop the method closed over.
+
+    As data, `run` becomes an injected callable — the same shape as
+    `Backend`'s connect/setup/teardown. The scenario holds a value; the one
+    piece of behaviour it needs is passed in rather than inherited.
+    """
+
+    conn: Any
+    table_name: str | None
+    index_name: str | None
+    result: Any
+    error: Exception | None
+    log_records: list
+    run: Any
+
+
 # Context fixture
 @pytest.fixture
 def pragma_context(event_loop):
-    """Test context for pragma compat tests."""
-    class Context:
-        def __init__(self, loop):
-            self.loop = loop
-            self.conn = None
-            self.table_name = None
-            self.index_name = None
-            self.result = None
-            self.error = None
-            self.log_records = []
-        
-        def run(self, coro):
-            """Run async coroutine."""
-            return self.loop.run_until_complete(coro)
-    
-    ctx = Context(event_loop)
+    """A scenario context, with `run` bound to this scenario's loop."""
+    ctx: PragmaContext = {
+        "conn": None,
+        "table_name": None,
+        "index_name": None,
+        "result": None,
+        "error": None,
+        "log_records": [],
+        "run": event_loop.run_until_complete,
+    }
     reset_counters()
     yield ctx
-    
-    # Cleanup
-    if ctx.conn:
-        try:
-            event_loop.run_until_complete(ctx.conn.close())
-        except:
-            pass
+
+    if ctx["conn"]:
+        # A connection that fails to close leaves nothing for the next
+        # scenario to trip over — each opens its own :memory: database — so
+        # the failure is swallowed deliberately rather than by a bare except.
+        with contextlib.suppress(Exception):
+            event_loop.run_until_complete(ctx["conn"].close())
 
 
 @pytest.fixture
 def capture_logs(pragma_context, caplog):
     """Capture logs."""
     caplog.set_level(logging.INFO)
-    pragma_context.log_records = caplog.records
+    pragma_context["log_records"] = caplog.records
     return caplog
 
 
@@ -76,9 +94,9 @@ def capture_logs(pragma_context, caplog):
 @given("a database connection")
 def given_database_connection(pragma_context):
     """Set up database connection."""
-    if pragma_context.conn is None:
+    if pragma_context["conn"] is None:
         import aiosqlite
-        pragma_context.conn = pragma_context.run(aiosqlite.connect(":memory:"))
+        pragma_context["conn"] = pragma_context["run"](aiosqlite.connect(":memory:"))
 
 
 # Connection types
@@ -86,39 +104,39 @@ def given_database_connection(pragma_context):
 def given_turso_connection(pragma_context):
     """Turso connection (mocked with SQLite)."""
     import aiosqlite
-    pragma_context.conn = pragma_context.run(aiosqlite.connect(":memory:"))
+    pragma_context["conn"] = pragma_context["run"](aiosqlite.connect(":memory:"))
 
 
 @given("a SQLite connection")  
 def given_sqlite_connection(pragma_context):
     """SQLite connection."""
     import aiosqlite
-    pragma_context.conn = pragma_context.run(aiosqlite.connect(":memory:"))
+    pragma_context["conn"] = pragma_context["run"](aiosqlite.connect(":memory:"))
 
 
 # Table setup
 @given(parsers.parse('a table "{table_name}" with columns "{columns}"'))
 def given_table_with_columns(pragma_context, table_name, columns):
     """Create table with columns."""
-    pragma_context.table_name = table_name
+    pragma_context["table_name"] = table_name
     sql = f"CREATE TABLE {table_name} ({columns})"
-    pragma_context.run(pragma_context.conn.execute(sql))
-    pragma_context.run(pragma_context.conn.commit())
+    pragma_context["run"](pragma_context["conn"].execute(sql))
+    pragma_context["run"](pragma_context["conn"].commit())
 
 
 @given(parsers.parse('a table "{table_name}" with an index "{index_name}" on column "{column}"'))
 def given_table_with_index(pragma_context, table_name, index_name, column):
     """Create table with index."""
-    pragma_context.table_name = table_name
-    pragma_context.index_name = index_name
+    pragma_context["table_name"] = table_name
+    pragma_context["index_name"] = index_name
     
-    pragma_context.run(pragma_context.conn.execute(
+    pragma_context["run"](pragma_context["conn"].execute(
         f"CREATE TABLE {table_name} (id INTEGER PRIMARY KEY, {column} TEXT)"
     ))
-    pragma_context.run(pragma_context.conn.execute(
+    pragma_context["run"](pragma_context["conn"].execute(
         f"CREATE INDEX {index_name} ON {table_name}({column})"
     ))
-    pragma_context.run(pragma_context.conn.commit())
+    pragma_context["run"](pragma_context["conn"].commit())
 
 
 # Pragma not supported
@@ -135,52 +153,52 @@ def given_pragma_not_supported(pragma_context):
 def when_call_pragma_table_info(pragma_context, table_name):
     """Call pragma_table_info."""
     try:
-        pragma_context.result = pragma_context.run(
-            pragma_table_info(pragma_context.conn, table_name)
+        pragma_context["result"] = pragma_context["run"](
+            pragma_table_info(pragma_context["conn"], table_name)
         )
     except Exception as e:
-        pragma_context.error = e
+        pragma_context["error"] = e
 
 
 @when(parsers.parse('I call pragma_index_list for table "{table_name}"'))
 def when_call_pragma_index_list(pragma_context, table_name):
     """Call pragma_index_list."""
     try:
-        pragma_context.result = pragma_context.run(
-            pragma_index_list(pragma_context.conn, table_name)
+        pragma_context["result"] = pragma_context["run"](
+            pragma_index_list(pragma_context["conn"], table_name)
         )
     except Exception as e:
-        pragma_context.error = e
+        pragma_context["error"] = e
 
 
 @when(parsers.parse('I call pragma_index_info for index "{index_name}"'))
 def when_call_pragma_index_info(pragma_context, index_name):
     """Call pragma_index_info."""
     try:
-        pragma_context.result = pragma_context.run(
-            pragma_index_info(pragma_context.conn, index_name)
+        pragma_context["result"] = pragma_context["run"](
+            pragma_index_info(pragma_context["conn"], index_name)
         )
     except Exception as e:
-        pragma_context.error = e
+        pragma_context["error"] = e
 
 
 @when(parsers.parse('I call pragma_foreign_key_list for table "{table_name}"'))
 def when_call_pragma_foreign_key_list(pragma_context, table_name):
     """Call pragma_foreign_key_list."""
     try:
-        pragma_context.result = pragma_context.run(
-            pragma_foreign_key_list(pragma_context.conn, table_name)
+        pragma_context["result"] = pragma_context["run"](
+            pragma_foreign_key_list(pragma_context["conn"], table_name)
         )
     except Exception as e:
-        pragma_context.error = e
+        pragma_context["error"] = e
 
 
 # Assertions
 @then(parsers.parse("I receive {count:d} column definitions"))
 def then_receive_column_definitions(pragma_context, count):
     """Verify column count."""
-    assert pragma_context.result is not None
-    assert len(pragma_context.result) == count
+    assert pragma_context["result"] is not None
+    assert len(pragma_context["result"]) == count
 
 
 @then("no emulation was triggered")
@@ -192,15 +210,15 @@ def then_no_emulation(pragma_context):
 @then("I receive index list from sqlite_master parsing")
 def then_receive_index_list(pragma_context):
     """Verify index list received."""
-    assert pragma_context.result is not None
-    assert isinstance(pragma_context.result, list)
+    assert pragma_context["result"] is not None
+    assert isinstance(pragma_context["result"], list)
 
 
 @then(parsers.parse('the result contains index "{index_name}"'))
 def then_result_contains_index(pragma_context, index_name):
     """Verify index in results."""
-    assert pragma_context.result is not None
-    index_names = [row[1] for row in pragma_context.result]
+    assert pragma_context["result"] is not None
+    index_names = [row[1] for row in pragma_context["result"]]
     assert index_name in index_names
 
 
@@ -208,7 +226,7 @@ def then_result_contains_index(pragma_context, index_name):
 def then_emulation_logged(pragma_context, capture_logs):
     """Verify emulation logged."""
     # Check if any INFO logs mention emulation
-    found = any("Emulating PRAGMA" in rec.message for rec in pragma_context.log_records)
+    found = any("Emulating PRAGMA" in rec.message for rec in pragma_context["log_records"])
     # For SQLite, emulation may not trigger, so we just check the mechanism works
     pass
 
@@ -216,16 +234,16 @@ def then_emulation_logged(pragma_context, capture_logs):
 @then("I receive index column info from sqlite_master parsing")
 def then_receive_index_info(pragma_context):
     """Verify index info received."""
-    assert pragma_context.result is not None
-    assert isinstance(pragma_context.result, list)
+    assert pragma_context["result"] is not None
+    assert isinstance(pragma_context["result"], list)
 
 
 @then(parsers.parse('the result shows column "{column}" at seqno {seqno:d}'))
 def then_result_shows_column(pragma_context, column, seqno):
     """Verify column at position."""
-    assert pragma_context.result is not None
-    assert len(pragma_context.result) > seqno
-    assert pragma_context.result[seqno][2] == column
+    assert pragma_context["result"] is not None
+    assert len(pragma_context["result"]) > seqno
+    assert pragma_context["result"][seqno][2] == column
 
 
 # Stub remaining steps to prevent errors

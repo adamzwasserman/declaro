@@ -5,6 +5,8 @@ This tests the table_reconstruction abstraction for SQLite/Turso ALTER COLUMN.
 """
 
 import asyncio
+import contextlib
+from typing import Any, TypedDict
 import logging
 import pytest
 from pytest_bdd import given, when, then, parsers, scenarios
@@ -41,40 +43,55 @@ def event_loop():
     loop.close()
 
 
+class ReconContext(TypedDict, total=False):
+    """What one reconstruction scenario knows so far.
+
+    Twelve data fields and a `run(coro)` wrapper, previously a `Context`
+    class defined inside the fixture. Same treatment as `PragmaContext` and
+    `Backend`: the facts are data, and `run` is the one piece of behaviour,
+    injected.
+
+    `schema_snapshot` and `rows_snapshot` start as None deliberately. None
+    means "never captured", and the rollback assertions treat that as a
+    FAILURE rather than a pass — a scenario that forgot to snapshot before a
+    step expected to fail must not quietly report that nothing changed.
+    """
+
+    conn: Any
+    table_name: str | None
+    columns: dict
+    error: Exception | None
+    table_data: list
+    indexes: list
+    initial_row_count: int
+    schema_snapshot: Any
+    rows_snapshot: Any
+    run: Any
+
+
 # Context fixture
 @pytest.fixture
 def recon_context(event_loop):
-    """Test context for table reconstruction tests."""
-
-    class Context:
-        def __init__(self, loop):
-            self.loop = loop
-            self.conn = None
-            self.table_name = None
-            self.columns = {}
-            self.error = None
-            self.table_data = []
-            self.indexes = []
-            self.initial_row_count = 0
-            # Pre-failure snapshots, captured by _snapshot_table() before any
-            # step expected to fail. None means "never captured", which the
-            # rollback assertions treat as a failure rather than a pass.
-            self.schema_snapshot = None
-            self.rows_snapshot = None
-
-        def run(self, coro):
-            """Run async coroutine."""
-            return self.loop.run_until_complete(coro)
-
-    ctx = Context(event_loop)
+    """A scenario context, with `run` bound to this scenario's loop."""
+    ctx: ReconContext = {
+        "conn": None,
+        "table_name": None,
+        "columns": {},
+        "error": None,
+        "table_data": [],
+        "indexes": [],
+        "initial_row_count": 0,
+        "schema_snapshot": None,
+        "rows_snapshot": None,
+        "run": event_loop.run_until_complete,
+    }
     yield ctx
 
-    # Cleanup
-    if ctx.conn:
-        try:
-            event_loop.run_until_complete(ctx.conn.close())
-        except Exception:
-            pass
+    if ctx["conn"]:
+        # Each scenario opens its own database, so a connection that will not
+        # close leaves nothing for the next one to trip over.
+        with contextlib.suppress(Exception):
+            event_loop.run_until_complete(ctx["conn"].close())
 
 
 # ============================================
@@ -125,7 +142,7 @@ async def _build_full_schema(conn, table_name: str) -> dict[str, Column]:
 
 def _enable_fk(recon_context):
     """Enable foreign keys on the connection."""
-    recon_context.run(recon_context.conn.execute("PRAGMA foreign_keys = ON"))
+    recon_context["run"](recon_context["conn"].execute("PRAGMA foreign_keys = ON"))
 
 
 def _snapshot_table(recon_context, table_name=None):
@@ -133,32 +150,32 @@ def _snapshot_table(recon_context, table_name=None):
 
     "The original table is unchanged" and "the original data is intact"
     previously asserted only that an error had been raised — the first
-    re-checked recon_context.error and the second was a bare pass. Neither
+    re-checked recon_context["error"] and the second was a bare pass. Neither
     looked at the table, so a reconstruction that failed *after* mutating
     the table would have satisfied both. These snapshots give them real
     prior state to compare against.
     """
-    t = table_name or recon_context.table_name
+    t = table_name or recon_context["table_name"]
     if not t:
         return
 
-    schema = recon_context.run(pragma_table_info(recon_context.conn, t))
-    cursor = recon_context.run(
-        recon_context.conn.execute(f'SELECT * FROM "{t}" ORDER BY rowid')
+    schema = recon_context["run"](pragma_table_info(recon_context["conn"], t))
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(f'SELECT * FROM "{t}" ORDER BY rowid')
     )
-    rows = recon_context.run(cursor.fetchall())
+    rows = recon_context["run"](cursor.fetchall())
 
-    recon_context.schema_snapshot = [tuple(r) for r in schema]
-    recon_context.rows_snapshot = [tuple(r) for r in rows]
+    recon_context["schema_snapshot"] = [tuple(r) for r in schema]
+    recon_context["rows_snapshot"] = [tuple(r) for r in rows]
 
 
 def _track_row_count(recon_context, table_name=None):
     """Update initial_row_count from current table."""
-    t = table_name or recon_context.table_name
+    t = table_name or recon_context["table_name"]
     if t:
-        cursor = recon_context.run(recon_context.conn.execute(f'SELECT COUNT(*) FROM "{t}"'))
-        result = recon_context.run(cursor.fetchone())
-        recon_context.initial_row_count = result[0]
+        cursor = recon_context["run"](recon_context["conn"].execute(f'SELECT COUNT(*) FROM "{t}"'))
+        result = recon_context["run"](cursor.fetchone())
+        recon_context["initial_row_count"] = result[0]
 
 
 # ============================================
@@ -169,10 +186,10 @@ def _track_row_count(recon_context, table_name=None):
 @given("a database connection")
 def given_database_connection(recon_context):
     """Set up database connection."""
-    if recon_context.conn is None:
+    if recon_context["conn"] is None:
         import aiosqlite
 
-        recon_context.conn = recon_context.run(aiosqlite.connect(":memory:"))
+        recon_context["conn"] = recon_context["run"](aiosqlite.connect(":memory:"))
 
 
 # ============================================
@@ -183,7 +200,7 @@ def given_database_connection(recon_context):
 @given(parsers.re(r'a table "(?P<table_name>\w+)" with columns:'))
 def given_table_with_columns(recon_context, table_name, datatable):
     """Create table from Gherkin datatable."""
-    recon_context.table_name = table_name
+    recon_context["table_name"] = table_name
 
     headers = [cell.strip() for cell in datatable[0]]
     pk_cols = []
@@ -236,76 +253,76 @@ def given_table_with_columns(recon_context, table_name, datatable):
         col_defs.append(f"PRIMARY KEY ({pk_sql})")
 
     create_sql = f'CREATE TABLE "{table_name}" ({", ".join(col_defs)})'
-    recon_context.run(recon_context.conn.execute(create_sql))
-    recon_context.run(recon_context.conn.commit())
+    recon_context["run"](recon_context["conn"].execute(create_sql))
+    recon_context["run"](recon_context["conn"].commit())
 
 
 @given(parsers.re(r'the table contains data:'))
 def given_table_contains_data(recon_context):
     """Insert test data based on table name."""
-    if recon_context.table_name == "users":
-        recon_context.run(
-            recon_context.conn.execute(
+    if recon_context["table_name"] == "users":
+        recon_context["run"](
+            recon_context["conn"].execute(
                 "INSERT INTO users (id, email, name) VALUES (1, 'alice@test.com', 'Alice')"
             )
         )
-        recon_context.run(
-            recon_context.conn.execute(
+        recon_context["run"](
+            recon_context["conn"].execute(
                 "INSERT INTO users (id, email, name) VALUES (2, 'bob@test.com', 'Bob')"
             )
         )
-    elif recon_context.table_name == "products":
-        recon_context.run(
-            recon_context.conn.execute(
+    elif recon_context["table_name"] == "products":
+        recon_context["run"](
+            recon_context["conn"].execute(
                 "INSERT INTO products (id, name, description) VALUES (1, 'Product 1', 'Description 1')"
             )
         )
-        recon_context.run(
-            recon_context.conn.execute(
+        recon_context["run"](
+            recon_context["conn"].execute(
                 "INSERT INTO products (id, name, description) VALUES (2, 'Product 2', 'Description 2')"
             )
         )
-    elif recon_context.table_name == "orders":
-        recon_context.run(
-            recon_context.conn.execute(
+    elif recon_context["table_name"] == "orders":
+        recon_context["run"](
+            recon_context["conn"].execute(
                 "INSERT INTO orders (id, status, amount) VALUES (1, 1, 100)"
             )
         )
-        recon_context.run(
-            recon_context.conn.execute(
+        recon_context["run"](
+            recon_context["conn"].execute(
                 "INSERT INTO orders (id, status, amount) VALUES (2, 2, 200)"
             )
         )
-    elif recon_context.table_name == "metrics":
-        recon_context.run(
-            recon_context.conn.execute(
+    elif recon_context["table_name"] == "metrics":
+        recon_context["run"](
+            recon_context["conn"].execute(
                 "INSERT INTO metrics (id, value) VALUES ('1', '42')"
             )
         )
-        recon_context.run(
-            recon_context.conn.execute(
+        recon_context["run"](
+            recon_context["conn"].execute(
                 "INSERT INTO metrics (id, value) VALUES ('2', '99')"
             )
         )
-    elif recon_context.table_name == "posts":
-        recon_context.run(
-            recon_context.conn.execute(
+    elif recon_context["table_name"] == "posts":
+        recon_context["run"](
+            recon_context["conn"].execute(
                 "INSERT INTO posts (id, title) VALUES ('1', 'Post1')"
             )
         )
-        recon_context.run(
-            recon_context.conn.execute(
+        recon_context["run"](
+            recon_context["conn"].execute(
                 "INSERT INTO posts (id, title) VALUES ('2', NULL)"
             )
         )
-    elif recon_context.table_name == "data":
-        recon_context.run(
-            recon_context.conn.execute(
+    elif recon_context["table_name"] == "data":
+        recon_context["run"](
+            recon_context["conn"].execute(
                 'INSERT INTO "data" (id, value) VALUES (1, "test")'
             )
         )
 
-    recon_context.run(recon_context.conn.commit())
+    recon_context["run"](recon_context["conn"].commit())
     _track_row_count(recon_context)
 
 
@@ -314,56 +331,56 @@ def given_table_with_test_data(recon_context, count):
     """Insert N rows of test data."""
     for i in range(count):
         insert_sql = (
-            f'INSERT INTO "{recon_context.table_name}" (id, email, created_at) '
+            f'INSERT INTO "{recon_context["table_name"]}" (id, email, created_at) '
             f"VALUES (?, ?, ?)"
         )
-        recon_context.run(
-            recon_context.conn.execute(
+        recon_context["run"](
+            recon_context["conn"].execute(
                 insert_sql, (i + 1, f"user{i}@test.com", "2024-01-01")
             )
         )
-    recon_context.run(recon_context.conn.commit())
+    recon_context["run"](recon_context["conn"].commit())
     _track_row_count(recon_context)
 
 
 @given(parsers.parse('an index "{index_name}" on column "{column}"'))
 def given_index_on_column(recon_context, index_name, column):
     """Create index on column."""
-    create_idx_sql = f'CREATE INDEX "{index_name}" ON "{recon_context.table_name}" ("{column}")'
-    recon_context.run(recon_context.conn.execute(create_idx_sql))
-    recon_context.indexes.append(index_name)
+    create_idx_sql = f'CREATE INDEX "{index_name}" ON "{recon_context["table_name"]}" ("{column}")'
+    recon_context["run"](recon_context["conn"].execute(create_idx_sql))
+    recon_context["indexes"].append(index_name)
 
 
 @given(parsers.parse('a unique index "{index_name}" on column "{column}"'))
 def given_unique_index(recon_context, index_name, column):
     """Create unique index."""
     create_idx_sql = (
-        f'CREATE UNIQUE INDEX "{index_name}" ON "{recon_context.table_name}" ("{column}")'
+        f'CREATE UNIQUE INDEX "{index_name}" ON "{recon_context["table_name"]}" ("{column}")'
     )
-    recon_context.run(recon_context.conn.execute(create_idx_sql))
-    recon_context.indexes.append(index_name)
+    recon_context["run"](recon_context["conn"].execute(create_idx_sql))
+    recon_context["indexes"].append(index_name)
 
 
 @given("the tables contain related data")
 def given_related_data(recon_context):
     """Insert related data for FK tests (no datatable variant)."""
-    recon_context.run(
-        recon_context.conn.execute("INSERT INTO authors (id, name) VALUES (1, 'Author 1')")
+    recon_context["run"](
+        recon_context["conn"].execute("INSERT INTO authors (id, name) VALUES (1, 'Author 1')")
     )
-    recon_context.run(
-        recon_context.conn.execute("INSERT INTO authors (id, name) VALUES (2, 'Author 2')")
+    recon_context["run"](
+        recon_context["conn"].execute("INSERT INTO authors (id, name) VALUES (2, 'Author 2')")
     )
-    recon_context.run(
-        recon_context.conn.execute(
+    recon_context["run"](
+        recon_context["conn"].execute(
             "INSERT INTO books (id, title, author_id) VALUES (1, 'Book 1', 1)"
         )
     )
-    recon_context.run(
-        recon_context.conn.execute(
+    recon_context["run"](
+        recon_context["conn"].execute(
             "INSERT INTO books (id, title, author_id) VALUES (2, 'Book 2', 2)"
         )
     )
-    recon_context.run(recon_context.conn.commit())
+    recon_context["run"](recon_context["conn"].commit())
     _track_row_count(recon_context)
 
 
@@ -383,14 +400,14 @@ def given_related_data_table(recon_context, datatable):
         placeholders = ", ".join("?" for _ in non_empty)
         values = [int(v) if v.isdigit() else v for v in non_empty.values()]
 
-        recon_context.run(
-            recon_context.conn.execute(
+        recon_context["run"](
+            recon_context["conn"].execute(
                 f'INSERT INTO "{table}" ({cols}) VALUES ({placeholders})',
                 values,
             )
         )
 
-    recon_context.run(recon_context.conn.commit())
+    recon_context["run"](recon_context["conn"].commit())
     _track_row_count(recon_context)
 
 
@@ -405,14 +422,14 @@ def given_books_invalid_fk_data(recon_context, datatable):
         placeholders = ", ".join("?" for _ in d)
         values = [int(v) if v.isdigit() else v for v in d.values()]
 
-        recon_context.run(
-            recon_context.conn.execute(
+        recon_context["run"](
+            recon_context["conn"].execute(
                 f'INSERT INTO "books" ({cols}) VALUES ({placeholders})',
                 values,
             )
         )
 
-    recon_context.run(recon_context.conn.commit())
+    recon_context["run"](recon_context["conn"].commit())
 
 
 @given("the table contains hierarchical data:")
@@ -429,15 +446,15 @@ def given_hierarchical_data(recon_context, datatable):
         cols = ", ".join(f'"{k}"' for k in d.keys())
         placeholders = ", ".join("?" for _ in d)
 
-        recon_context.run(
-            recon_context.conn.execute(
-                f'INSERT INTO "{recon_context.table_name}" ({cols}) VALUES ({placeholders})',
+        recon_context["run"](
+            recon_context["conn"].execute(
+                f'INSERT INTO "{recon_context["table_name"]}" ({cols}) VALUES ({placeholders})',
                 values,
             )
         )
 
-    recon_context.run(recon_context.conn.commit())
-    recon_context.initial_row_count = len(datatable) - 1
+    recon_context["run"](recon_context["conn"].commit())
+    recon_context["initial_row_count"] = len(datatable) - 1
 
 
 @given("the table contains data with incompatible types:")
@@ -451,15 +468,15 @@ def given_incompatible_types_data(recon_context, datatable):
         placeholders = ", ".join("?" for _ in d)
         values = [int(v) if v.isdigit() else v for v in d.values()]
 
-        recon_context.run(
-            recon_context.conn.execute(
-                f'INSERT INTO "{recon_context.table_name}" ({cols}) VALUES ({placeholders})',
+        recon_context["run"](
+            recon_context["conn"].execute(
+                f'INSERT INTO "{recon_context["table_name"]}" ({cols}) VALUES ({placeholders})',
                 values,
             )
         )
 
-    recon_context.run(recon_context.conn.commit())
-    recon_context.initial_row_count = len(datatable) - 1
+    recon_context["run"](recon_context["conn"].commit())
+    recon_context["initial_row_count"] = len(datatable) - 1
 
 
 @given("the books table has orphaned foreign keys (data corruption):")
@@ -468,7 +485,7 @@ def given_books_orphaned_fk_data(recon_context, datatable):
     headers = [cell.strip() for cell in datatable[0]]
 
     # Disable FK to allow inserting orphaned data (simulating data corruption)
-    recon_context.run(recon_context.conn.execute("PRAGMA foreign_keys = OFF"))
+    recon_context["run"](recon_context["conn"].execute("PRAGMA foreign_keys = OFF"))
 
     for row in datatable[1:]:
         d = {headers[i]: row[i].strip() for i in range(len(headers))}
@@ -476,28 +493,28 @@ def given_books_orphaned_fk_data(recon_context, datatable):
         placeholders = ", ".join("?" for _ in d)
         values = [int(v) if v.isdigit() else v for v in d.values()]
 
-        recon_context.run(
-            recon_context.conn.execute(
+        recon_context["run"](
+            recon_context["conn"].execute(
                 f'INSERT INTO "books" ({cols}) VALUES ({placeholders})',
                 values,
             )
         )
 
-    recon_context.run(recon_context.conn.commit())
+    recon_context["run"](recon_context["conn"].commit())
     # Re-enable FK so reconstruction's FK check is triggered
-    recon_context.run(recon_context.conn.execute("PRAGMA foreign_keys = ON"))
+    recon_context["run"](recon_context["conn"].execute("PRAGMA foreign_keys = ON"))
 
 
 @given("tables with foreign key relationships")
 def given_fk_relationships(recon_context):
     """Create tables with FK relationships."""
-    recon_context.run(
-        recon_context.conn.execute(
+    recon_context["run"](
+        recon_context["conn"].execute(
             "CREATE TABLE parents (id INTEGER PRIMARY KEY, name TEXT NOT NULL)"
         )
     )
-    recon_context.run(
-        recon_context.conn.execute(
+    recon_context["run"](
+        recon_context["conn"].execute(
             """CREATE TABLE children (
                 id INTEGER PRIMARY KEY,
                 parent_id INTEGER NOT NULL,
@@ -506,7 +523,7 @@ def given_fk_relationships(recon_context):
             )"""
         )
     )
-    recon_context.table_name = "children"
+    recon_context["table_name"] = "children"
 
 
 @given("the table has 0 rows")
@@ -518,45 +535,45 @@ def given_table_has_zero_rows(recon_context):
 @given("the table contains data")
 def given_table_has_data(recon_context):
     """Insert one generic row."""
-    recon_context.run(
-        recon_context.conn.execute(
-            f'INSERT INTO "{recon_context.table_name}" (id, value) VALUES (1, "test")'
+    recon_context["run"](
+        recon_context["conn"].execute(
+            f'INSERT INTO "{recon_context["table_name"]}" (id, value) VALUES (1, "test")'
         )
     )
-    recon_context.run(recon_context.conn.commit())
+    recon_context["run"](recon_context["conn"].commit())
     _track_row_count(recon_context)
 
 
 @given("data that satisfies the foreign key constraints")
 def given_valid_fk_data(recon_context):
     """Insert valid FK data."""
-    recon_context.run(
-        recon_context.conn.execute("INSERT INTO parents (id, name) VALUES (1, 'Parent 1')")
+    recon_context["run"](
+        recon_context["conn"].execute("INSERT INTO parents (id, name) VALUES (1, 'Parent 1')")
     )
-    recon_context.run(
-        recon_context.conn.execute(
+    recon_context["run"](
+        recon_context["conn"].execute(
             "INSERT INTO children (id, parent_id, data) VALUES (1, 1, 'Child 1')"
         )
     )
-    recon_context.run(recon_context.conn.commit())
+    recon_context["run"](recon_context["conn"].commit())
     _track_row_count(recon_context)
 
 
 @given("foreign keys are enabled")
 def given_fk_enabled(recon_context):
     """Enable foreign keys."""
-    recon_context.run(recon_context.conn.execute("PRAGMA foreign_keys = ON"))
+    recon_context["run"](recon_context["conn"].execute("PRAGMA foreign_keys = ON"))
 
 
 @given("a table requiring reconstruction")
 def given_table_for_recon(recon_context):
     """Create a simple table for reconstruction."""
-    recon_context.run(
-        recon_context.conn.execute(
+    recon_context["run"](
+        recon_context["conn"].execute(
             "CREATE TABLE test_table (id INTEGER PRIMARY KEY, value TEXT)"
         )
     )
-    recon_context.table_name = "test_table"
+    recon_context["table_name"] = "test_table"
 
 
 # ============================================
@@ -569,9 +586,9 @@ def when_alter_column_not_null(recon_context, column):
     """Change column to NOT NULL. Handles table.column format."""
     if "." in column:
         table_name, column_name = column.split(".", 1)
-        recon_context.table_name = table_name
+        recon_context["table_name"] = table_name
     else:
-        table_name = recon_context.table_name
+        table_name = recon_context["table_name"]
         column_name = column
 
     # Captured before the attempt so that, if it fails, the rollback
@@ -580,12 +597,12 @@ def when_alter_column_not_null(recon_context, column):
 
     try:
         _enable_fk(recon_context)
-        recon_context.run(
-            alter_column_nullability(recon_context.conn, table_name, column_name, False)
+        recon_context["run"](
+            alter_column_nullability(recon_context["conn"], table_name, column_name, False)
         )
-        recon_context.run(recon_context.conn.commit())
+        recon_context["run"](recon_context["conn"].commit())
     except Exception as e:
-        recon_context.error = e
+        recon_context["error"] = e
 
 
 @when(parsers.parse('I alter column "{column}" to be NOT NULL with default "{default}"'))
@@ -593,19 +610,19 @@ def when_alter_not_null_with_default(recon_context, column, default):
     """Change column to NOT NULL and set a default value."""
     try:
         _enable_fk(recon_context)
-        columns = recon_context.run(
-            _get_full_table_schema(recon_context.conn, recon_context.table_name)
+        columns = recon_context["run"](
+            _get_full_table_schema(recon_context["conn"], recon_context["table_name"])
         )
         if column not in columns:
-            raise ValueError(f"Column '{column}' not found in '{recon_context.table_name}'")
+            raise ValueError(f"Column '{column}' not found in '{recon_context["table_name"]}'")
         columns[column]["nullable"] = False
         columns[column]["default"] = default
-        recon_context.run(
-            reconstruct_table(recon_context.conn, recon_context.table_name, columns)
+        recon_context["run"](
+            reconstruct_table(recon_context["conn"], recon_context["table_name"], columns)
         )
-        recon_context.run(recon_context.conn.commit())
+        recon_context["run"](recon_context["conn"].commit())
     except Exception as e:
-        recon_context.error = e
+        recon_context["error"] = e
 
 
 @when(parsers.parse('I alter column "{column}" to be nullable'))
@@ -613,14 +630,14 @@ def when_alter_column_nullable(recon_context, column):
     """Change column to nullable."""
     try:
         _enable_fk(recon_context)
-        recon_context.run(
+        recon_context["run"](
             alter_column_nullability(
-                recon_context.conn, recon_context.table_name, column, True
+                recon_context["conn"], recon_context["table_name"], column, True
             )
         )
-        recon_context.run(recon_context.conn.commit())
+        recon_context["run"](recon_context["conn"].commit())
     except Exception as e:
-        recon_context.error = e
+        recon_context["error"] = e
 
 
 @when(parsers.parse('I alter column "{column}" to type "{new_type}"'))
@@ -634,12 +651,12 @@ def when_alter_column_type(recon_context, column, new_type):
 
         # Pre-validate: for INTEGER target, check data can be converted
         if new_type.upper() == "INTEGER":
-            cursor = recon_context.run(
-                recon_context.conn.execute(
-                    f'SELECT "{column}" FROM "{recon_context.table_name}"'
+            cursor = recon_context["run"](
+                recon_context["conn"].execute(
+                    f'SELECT "{column}" FROM "{recon_context["table_name"]}"'
                 )
             )
-            rows = recon_context.run(cursor.fetchall())
+            rows = recon_context["run"](cursor.fetchall())
             for row in rows:
                 val = row[0]
                 if val is not None:
@@ -650,12 +667,12 @@ def when_alter_column_type(recon_context, column, new_type):
                             f"Cannot convert value '{val}' in column '{column}' to INTEGER"
                         )
 
-        recon_context.run(
-            alter_column_type(recon_context.conn, recon_context.table_name, column, new_type)
+        recon_context["run"](
+            alter_column_type(recon_context["conn"], recon_context["table_name"], column, new_type)
         )
-        recon_context.run(recon_context.conn.commit())
+        recon_context["run"](recon_context["conn"].commit())
     except Exception as e:
-        recon_context.error = e
+        recon_context["error"] = e
 
 
 @when(parsers.parse('I alter column "{column}" to have default {default_val}'))
@@ -663,14 +680,14 @@ def when_alter_column_default(recon_context, column, default_val):
     """Add/change default value."""
     try:
         _enable_fk(recon_context)
-        recon_context.run(
+        recon_context["run"](
             alter_column_default(
-                recon_context.conn, recon_context.table_name, column, default_val
+                recon_context["conn"], recon_context["table_name"], column, default_val
             )
         )
-        recon_context.run(recon_context.conn.commit())
+        recon_context["run"](recon_context["conn"].commit())
     except Exception as e:
-        recon_context.error = e
+        recon_context["error"] = e
 
 
 @when(parsers.parse('I alter column "{column}" to have no default'))
@@ -678,12 +695,12 @@ def when_alter_column_no_default(recon_context, column):
     """Remove default value."""
     try:
         _enable_fk(recon_context)
-        recon_context.run(
-            alter_column_default(recon_context.conn, recon_context.table_name, column, None)
+        recon_context["run"](
+            alter_column_default(recon_context["conn"], recon_context["table_name"], column, None)
         )
-        recon_context.run(recon_context.conn.commit())
+        recon_context["run"](recon_context["conn"].commit())
     except Exception as e:
-        recon_context.error = e
+        recon_context["error"] = e
 
 
 @when("I reconstruct with entirely new column names")
@@ -695,32 +712,32 @@ def when_reconstruct_new_columns(recon_context):
     }
     try:
         _enable_fk(recon_context)
-        recon_context.run(
-            reconstruct_table(recon_context.conn, recon_context.table_name, new_columns)
+        recon_context["run"](
+            reconstruct_table(recon_context["conn"], recon_context["table_name"], new_columns)
         )
-        recon_context.run(recon_context.conn.commit())
+        recon_context["run"](recon_context["conn"].commit())
     except Exception as e:
-        recon_context.error = e
+        recon_context["error"] = e
 
 
 @when(parsers.parse('I alter column "{column}" nullability'))
 def when_alter_nullability(recon_context, column):
     """Generic nullability change."""
     _enable_fk(recon_context)
-    recon_context.run(
+    recon_context["run"](
         alter_column_nullability(
-            recon_context.conn, recon_context.table_name, column, False
+            recon_context["conn"], recon_context["table_name"], column, False
         )
     )
-    recon_context.run(recon_context.conn.commit())
+    recon_context["run"](recon_context["conn"].commit())
 
 
 @when(parsers.parse('I alter column "{column}" in "{table}" to be nullable'))
 def when_alter_column_in_table(recon_context, column, table):
     """Alter column in specific table."""
     _enable_fk(recon_context)
-    recon_context.run(alter_column_nullability(recon_context.conn, table, column, True))
-    recon_context.run(recon_context.conn.commit())
+    recon_context["run"](alter_column_nullability(recon_context["conn"], table, column, True))
+    recon_context["run"](recon_context["conn"].commit())
 
 
 @when("I perform table reconstruction")
@@ -731,10 +748,10 @@ def when_perform_reconstruction(recon_context):
         "value": {"type": "TEXT", "nullable": False},
     }
     _enable_fk(recon_context)
-    recon_context.run(
-        reconstruct_table(recon_context.conn, recon_context.table_name, columns)
+    recon_context["run"](
+        reconstruct_table(recon_context["conn"], recon_context["table_name"], columns)
     )
-    recon_context.run(recon_context.conn.commit())
+    recon_context["run"](recon_context["conn"].commit())
 
 
 @when("reconstruction fails during data copy")
@@ -751,12 +768,12 @@ def when_reconstruction_fails(recon_context):
     creating it, so that collision became impossible and nothing failed —
     the scenario went on asserting a rollback that was never triggered.
     """
-    table = recon_context.table_name
+    table = recon_context["table_name"]
 
-    recon_context.run(
-        recon_context.conn.execute(f'INSERT INTO "{table}" (id, value) VALUES (2, NULL)')
+    recon_context["run"](
+        recon_context["conn"].execute(f'INSERT INTO "{table}" (id, value) VALUES (2, NULL)')
     )
-    recon_context.run(recon_context.conn.commit())
+    recon_context["run"](recon_context["conn"].commit())
 
     # Snapshot after the setup insert: this is the state the rollback must
     # restore, and it is what the following Then steps compare against.
@@ -764,21 +781,21 @@ def when_reconstruction_fails(recon_context):
     _track_row_count(recon_context)
 
     try:
-        recon_context.run(
-            alter_column_nullability(recon_context.conn, table, "value", False)
+        recon_context["run"](
+            alter_column_nullability(recon_context["conn"], table, "value", False)
         )
     except Exception as e:
-        recon_context.error = e
+        recon_context["error"] = e
 
 
 @when("I reconstruct a table with column changes")
 def when_reconstruct_table(recon_context):
     """Reconstruct a table with column changes."""
     _enable_fk(recon_context)
-    recon_context.run(
-        alter_column_nullability(recon_context.conn, "children", "data", False)
+    recon_context["run"](
+        alter_column_nullability(recon_context["conn"], "children", "data", False)
     )
-    recon_context.run(recon_context.conn.commit())
+    recon_context["run"](recon_context["conn"].commit())
 
 
 @when(parsers.parse('I add foreign key on "{table_col}" referencing "{ref}"'))
@@ -787,7 +804,7 @@ def when_add_foreign_key(recon_context, table_col, ref):
     if "." in table_col:
         table_name, column_name = table_col.split(".", 1)
     else:
-        table_name = recon_context.table_name
+        table_name = recon_context["table_name"]
         column_name = table_col
 
     from declaro_persistum.types import Operation
@@ -802,15 +819,15 @@ def when_add_foreign_key(recon_context, table_col, ref):
 
     try:
         _enable_fk(recon_context)
-        current_columns = recon_context.run(_build_full_schema(recon_context.conn, table_name))
+        current_columns = recon_context["run"](_build_full_schema(recon_context["conn"], table_name))
         new_columns = get_reconstruction_columns(current_columns, operation)
-        recon_context.run(
-            execute_reconstruction_async(recon_context.conn, table_name, new_columns)
+        recon_context["run"](
+            execute_reconstruction_async(recon_context["conn"], table_name, new_columns)
         )
-        recon_context.run(recon_context.conn.commit())
-        recon_context.table_name = table_name
+        recon_context["run"](recon_context["conn"].commit())
+        recon_context["table_name"] = table_name
     except Exception as e:
-        recon_context.error = e
+        recon_context["error"] = e
 
 
 @when(parsers.parse('I add foreign key on "{table_col}" referencing "{ref}" with ON DELETE CASCADE'))
@@ -819,7 +836,7 @@ def when_add_foreign_key_cascade(recon_context, table_col, ref):
     if "." in table_col:
         table_name, column_name = table_col.split(".", 1)
     else:
-        table_name = recon_context.table_name
+        table_name = recon_context["table_name"]
         column_name = table_col
 
     from declaro_persistum.types import Operation
@@ -835,15 +852,15 @@ def when_add_foreign_key_cascade(recon_context, table_col, ref):
 
     try:
         _enable_fk(recon_context)
-        current_columns = recon_context.run(_build_full_schema(recon_context.conn, table_name))
+        current_columns = recon_context["run"](_build_full_schema(recon_context["conn"], table_name))
         new_columns = get_reconstruction_columns(current_columns, operation)
-        recon_context.run(
-            execute_reconstruction_async(recon_context.conn, table_name, new_columns)
+        recon_context["run"](
+            execute_reconstruction_async(recon_context["conn"], table_name, new_columns)
         )
-        recon_context.run(recon_context.conn.commit())
-        recon_context.table_name = table_name
+        recon_context["run"](recon_context["conn"].commit())
+        recon_context["table_name"] = table_name
     except Exception as e:
-        recon_context.error = e
+        recon_context["error"] = e
 
 
 @when(parsers.parse('I drop foreign key on "{table_col}"'))
@@ -852,7 +869,7 @@ def when_drop_foreign_key(recon_context, table_col):
     if "." in table_col:
         table_name, column_name = table_col.split(".", 1)
     else:
-        table_name = recon_context.table_name
+        table_name = recon_context["table_name"]
         column_name = table_col
 
     from declaro_persistum.types import Operation
@@ -866,15 +883,15 @@ def when_drop_foreign_key(recon_context, table_col):
 
     try:
         _enable_fk(recon_context)
-        current_columns = recon_context.run(_build_full_schema(recon_context.conn, table_name))
+        current_columns = recon_context["run"](_build_full_schema(recon_context["conn"], table_name))
         new_columns = get_reconstruction_columns(current_columns, operation)
-        recon_context.run(
-            execute_reconstruction_async(recon_context.conn, table_name, new_columns)
+        recon_context["run"](
+            execute_reconstruction_async(recon_context["conn"], table_name, new_columns)
         )
-        recon_context.run(recon_context.conn.commit())
-        recon_context.table_name = table_name
+        recon_context["run"](recon_context["conn"].commit())
+        recon_context["table_name"] = table_name
     except Exception as e:
-        recon_context.error = e
+        recon_context["error"] = e
 
 
 @when(parsers.parse('I drop column "{column}"'))
@@ -882,9 +899,9 @@ def when_drop_column(recon_context, column):
     """Drop column via reconstruction. Handles table.column format."""
     if "." in column:
         table_name, column_name = column.split(".", 1)
-        recon_context.table_name = table_name
+        recon_context["table_name"] = table_name
     else:
-        table_name = recon_context.table_name
+        table_name = recon_context["table_name"]
         column_name = column
 
     from declaro_persistum.types import Operation
@@ -893,15 +910,15 @@ def when_drop_column(recon_context, column):
         _enable_fk(recon_context)
 
         # Check if column is referenced by any FK constraint in other tables
-        cursor = recon_context.run(
-            recon_context.conn.execute(
+        cursor = recon_context["run"](
+            recon_context["conn"].execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
         )
-        all_tables = [row[0] for row in recon_context.run(cursor.fetchall())]
+        all_tables = [row[0] for row in recon_context["run"](cursor.fetchall())]
         for other_table in all_tables:
-            fk_list = recon_context.run(
-                pragma_foreign_key_list(recon_context.conn, other_table)
+            fk_list = recon_context["run"](
+                pragma_foreign_key_list(recon_context["conn"], other_table)
             )
             for fk_row in fk_list:
                 # (id, seq, ref_table, from_col, ref_col, ...)
@@ -917,14 +934,14 @@ def when_drop_column(recon_context, column):
             "details": {"column": column_name},
         }
 
-        current_columns = recon_context.run(_build_full_schema(recon_context.conn, table_name))
+        current_columns = recon_context["run"](_build_full_schema(recon_context["conn"], table_name))
         new_columns = get_reconstruction_columns(current_columns, operation)
-        recon_context.run(
-            execute_reconstruction_async(recon_context.conn, table_name, new_columns)
+        recon_context["run"](
+            execute_reconstruction_async(recon_context["conn"], table_name, new_columns)
         )
-        recon_context.run(recon_context.conn.commit())
+        recon_context["run"](recon_context["conn"].commit())
     except Exception as e:
-        recon_context.error = e
+        recon_context["error"] = e
 
 
 # ============================================
@@ -935,7 +952,7 @@ def when_drop_column(recon_context, column):
 @then(parsers.parse('the table schema shows "{column}" as NOT NULL'))
 def then_column_is_not_null(recon_context, column):
     """Verify column is NOT NULL."""
-    rows = recon_context.run(pragma_table_info(recon_context.conn, recon_context.table_name))
+    rows = recon_context["run"](pragma_table_info(recon_context["conn"], recon_context["table_name"]))
 
     for row in rows:
         if row[1] == column:
@@ -948,7 +965,7 @@ def then_column_is_not_null(recon_context, column):
 @then(parsers.parse('the table schema shows "{column}" as nullable'))
 def then_column_is_nullable(recon_context, column):
     """Verify column is nullable."""
-    rows = recon_context.run(pragma_table_info(recon_context.conn, recon_context.table_name))
+    rows = recon_context["run"](pragma_table_info(recon_context["conn"], recon_context["table_name"]))
 
     for row in rows:
         if row[1] == column:
@@ -961,7 +978,7 @@ def then_column_is_nullable(recon_context, column):
 @then(parsers.parse('the table schema shows "{column}" as type "{expected_type}"'))
 def then_column_has_type(recon_context, column, expected_type):
     """Verify column type."""
-    rows = recon_context.run(pragma_table_info(recon_context.conn, recon_context.table_name))
+    rows = recon_context["run"](pragma_table_info(recon_context["conn"], recon_context["table_name"]))
 
     for row in rows:
         if row[1] == column:
@@ -976,7 +993,7 @@ def then_column_has_type(recon_context, column, expected_type):
 @then(parsers.parse('the table schema shows "{column}" with default {default_val}'))
 def then_column_has_default(recon_context, column, default_val):
     """Verify column default."""
-    rows = recon_context.run(pragma_table_info(recon_context.conn, recon_context.table_name))
+    rows = recon_context["run"](pragma_table_info(recon_context["conn"], recon_context["table_name"]))
 
     for row in rows:
         if row[1] == column:
@@ -991,7 +1008,7 @@ def then_column_has_default(recon_context, column, default_val):
 @then(parsers.parse('the table schema shows "{column}" with no default'))
 def then_column_no_default(recon_context, column):
     """Verify column has no default."""
-    rows = recon_context.run(pragma_table_info(recon_context.conn, recon_context.table_name))
+    rows = recon_context["run"](pragma_table_info(recon_context["conn"], recon_context["table_name"]))
 
     for row in rows:
         if row[1] == column:
@@ -1004,22 +1021,22 @@ def then_column_no_default(recon_context, column):
 @then("all existing data is preserved")
 def then_data_preserved(recon_context):
     """Verify data count matches initial count."""
-    cursor = recon_context.run(
-        recon_context.conn.execute(f'SELECT * FROM "{recon_context.table_name}"')
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(f'SELECT * FROM "{recon_context["table_name"]}"')
     )
-    rows = recon_context.run(cursor.fetchall())
-    assert len(rows) >= recon_context.initial_row_count, (
-        f"Expected at least {recon_context.initial_row_count} rows, got {len(rows)}"
+    rows = recon_context["run"](cursor.fetchall())
+    assert len(rows) >= recon_context["initial_row_count"], (
+        f"Expected at least {recon_context["initial_row_count"]} rows, got {len(rows)}"
     )
 
 
 @then(parsers.parse("the table has {count:d} rows"))
 def then_table_has_rows(recon_context, count):
     """Verify row count."""
-    cursor = recon_context.run(
-        recon_context.conn.execute(f'SELECT COUNT(*) FROM "{recon_context.table_name}"')
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(f'SELECT COUNT(*) FROM "{recon_context["table_name"]}"')
     )
-    result = recon_context.run(cursor.fetchone())
+    result = recon_context["run"](cursor.fetchone())
     assert result[0] == count, f"Expected {count} rows, got {result[0]}"
 
 
@@ -1038,34 +1055,34 @@ def then_values_are_integer(recon_context):
 @then("new inserts use the default value")
 def then_new_inserts_use_default(recon_context):
     """Verify default value is used."""
-    recon_context.run(
-        recon_context.conn.execute(f'INSERT INTO "{recon_context.table_name}" (id) VALUES (999)')
+    recon_context["run"](
+        recon_context["conn"].execute(f'INSERT INTO "{recon_context["table_name"]}" (id) VALUES (999)')
     )
-    recon_context.run(recon_context.conn.commit())
+    recon_context["run"](recon_context["conn"].commit())
 
-    cursor = recon_context.run(
-        recon_context.conn.execute(
-            f'SELECT status FROM "{recon_context.table_name}" WHERE id = 999'
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(
+            f'SELECT status FROM "{recon_context["table_name"]}" WHERE id = 999'
         )
     )
-    result = recon_context.run(cursor.fetchone())
+    result = recon_context["run"](cursor.fetchone())
     assert result[0] in ("active", "'active'"), f"Default value should be 'active', got {result[0]}"
 
 
 @then(parsers.parse("all {count:d} rows are preserved"))
 def then_all_rows_preserved(recon_context, count):
     """Verify all rows preserved."""
-    cursor = recon_context.run(
-        recon_context.conn.execute(f'SELECT COUNT(*) FROM "{recon_context.table_name}"')
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(f'SELECT COUNT(*) FROM "{recon_context["table_name"]}"')
     )
-    result = recon_context.run(cursor.fetchone())
+    result = recon_context["run"](cursor.fetchone())
     assert result[0] == count, f"Expected {count} rows to be preserved"
 
 
 @then(parsers.parse('the column "{column}" is now NOT NULL'))
 def then_column_now_not_null(recon_context, column):
     """Verify column is NOT NULL."""
-    rows = recon_context.run(pragma_table_info(recon_context.conn, recon_context.table_name))
+    rows = recon_context["run"](pragma_table_info(recon_context["conn"], recon_context["table_name"]))
 
     for row in rows:
         if row[1] == column:
@@ -1078,34 +1095,34 @@ def then_column_now_not_null(recon_context, column):
 @then("the operation fails with constraint violation")
 def then_operation_fails(recon_context):
     """Verify operation failed."""
-    assert recon_context.error is not None, "Expected operation to fail"
+    assert recon_context["error"] is not None, "Expected operation to fail"
 
 
 @then("the transaction is rolled back")
 def then_transaction_rolled_back(recon_context):
     """Verify rollback occurred (error was set)."""
-    assert recon_context.error is not None
+    assert recon_context["error"] is not None
 
 
 @then("the foreign key relationship is preserved")
 def then_fk_preserved(recon_context):
     """Verify FK is preserved by attempting invalid insert."""
     try:
-        recon_context.run(recon_context.conn.execute("PRAGMA foreign_keys = ON"))
-        recon_context.run(
-            recon_context.conn.execute(
+        recon_context["run"](recon_context["conn"].execute("PRAGMA foreign_keys = ON"))
+        recon_context["run"](
+            recon_context["conn"].execute(
                 "INSERT INTO books (id, title, author_id) VALUES (999, 'Bad Book', 999)"
             )
         )
-        recon_context.run(recon_context.conn.commit())
+        recon_context["run"](recon_context["conn"].commit())
         # If insert succeeded, FK is not enforced — rollback and fail properly
-        recon_context.run(recon_context.conn.rollback())
+        recon_context["run"](recon_context["conn"].rollback())
         pytest.fail("FK constraint not enforced — INSERT of invalid author_id succeeded")
     except Exception as e:
         if "FK constraint not enforced" in str(e):
             raise
         # Expected — FK violation caught
-        recon_context.run(recon_context.conn.rollback())
+        recon_context["run"](recon_context["conn"].rollback())
 
 
 @then("foreign key constraints are still enforced")
@@ -1123,10 +1140,10 @@ def then_fk_constraints_enforced(recon_context):
 @then("foreign key checks pass after reconstruction")
 def then_fk_checks_pass(recon_context):
     """Verify FK checks pass."""
-    cursor = recon_context.run(
-        recon_context.conn.execute('PRAGMA foreign_key_check("children")')
+    cursor = recon_context["run"](
+        recon_context["conn"].execute('PRAGMA foreign_key_check("children")')
     )
-    violations = recon_context.run(cursor.fetchall())
+    violations = recon_context["run"](cursor.fetchall())
     assert len(violations) == 0, f"FK violations found: {violations}"
 
 
@@ -1139,8 +1156,8 @@ def then_fk_works(recon_context):
 @then(parsers.parse('the index "{index_name}" still exists'))
 def then_index_exists(recon_context, index_name):
     """Verify index exists."""
-    index_list = recon_context.run(
-        pragma_index_list(recon_context.conn, recon_context.table_name)
+    index_list = recon_context["run"](
+        pragma_index_list(recon_context["conn"], recon_context["table_name"])
     )
 
     index_names = [row[1] for row in index_list]
@@ -1150,8 +1167,8 @@ def then_index_exists(recon_context, index_name):
 @then(parsers.parse('the unique index "{index_name}" still exists'))
 def then_unique_index_exists(recon_context, index_name):
     """Verify unique index exists."""
-    index_list = recon_context.run(
-        pragma_index_list(recon_context.conn, recon_context.table_name)
+    index_list = recon_context["run"](
+        pragma_index_list(recon_context["conn"], recon_context["table_name"])
     )
 
     for row in index_list:
@@ -1165,57 +1182,57 @@ def then_unique_index_exists(recon_context, index_name):
 @then("both indexes are functional")
 def then_indexes_functional(recon_context):
     """Verify indexes are functional via query."""
-    cursor = recon_context.run(
-        recon_context.conn.execute(
-            f'SELECT * FROM "{recon_context.table_name}" WHERE email = "test"'
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(
+            f'SELECT * FROM "{recon_context["table_name"]}" WHERE email = "test"'
         )
     )
-    recon_context.run(cursor.fetchall())
+    recon_context["run"](cursor.fetchall())
 
 
 @then(parsers.parse('the UNIQUE constraint on "{column}" is preserved'))
 def then_unique_preserved(recon_context, column):
     """Verify UNIQUE constraint preserved."""
-    cursor = recon_context.run(
-        recon_context.conn.execute(f'SELECT COUNT(*) FROM "{recon_context.table_name}"')
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(f'SELECT COUNT(*) FROM "{recon_context["table_name"]}"')
     )
-    count = recon_context.run(cursor.fetchone())[0]
+    count = recon_context["run"](cursor.fetchone())[0]
 
     if count == 0:
-        recon_context.run(
-            recon_context.conn.execute(
-                f'INSERT INTO "{recon_context.table_name}" (id, code) VALUES (1, "test_code")'
+        recon_context["run"](
+            recon_context["conn"].execute(
+                f'INSERT INTO "{recon_context["table_name"]}" (id, code) VALUES (1, "test_code")'
             )
         )
-        recon_context.run(recon_context.conn.commit())
+        recon_context["run"](recon_context["conn"].commit())
 
     # Fetch existing value for the unique column
-    cursor = recon_context.run(
-        recon_context.conn.execute(
-            f'SELECT "{column}" FROM "{recon_context.table_name}" LIMIT 1'
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(
+            f'SELECT "{column}" FROM "{recon_context["table_name"]}" LIMIT 1'
         )
     )
-    existing_val = recon_context.run(cursor.fetchone())
+    existing_val = recon_context["run"](cursor.fetchone())
     if not existing_val:
         pytest.fail(f"No data in table to test UNIQUE constraint on '{column}'")
 
     val = existing_val[0]
 
     try:
-        recon_context.run(
-            recon_context.conn.execute(
-                f'INSERT INTO "{recon_context.table_name}" (id, "{column}") VALUES (9999, ?)',
+        recon_context["run"](
+            recon_context["conn"].execute(
+                f'INSERT INTO "{recon_context["table_name"]}" (id, "{column}") VALUES (9999, ?)',
                 (val,),
             )
         )
-        recon_context.run(recon_context.conn.commit())
-        recon_context.run(recon_context.conn.rollback())
+        recon_context["run"](recon_context["conn"].commit())
+        recon_context["run"](recon_context["conn"].rollback())
         pytest.fail(f"Should have failed UNIQUE constraint on '{column}'")
     except Exception as e:
         if "Should have failed" in str(e):
             raise
         # Expected — UNIQUE constraint is working
-        recon_context.run(recon_context.conn.rollback())
+        recon_context["run"](recon_context["conn"].rollback())
 
 
 @then("only explicit CREATE INDEX statements are recreated")
@@ -1227,22 +1244,22 @@ def then_only_explicit_indexes(recon_context):
 @then("the original table is unchanged")
 def then_table_unchanged(recon_context):
     """The failed operation must leave the table's schema exactly as it was."""
-    assert recon_context.error is not None, "Expected the operation to fail"
-    assert recon_context.schema_snapshot is not None, (
+    assert recon_context["error"] is not None, "Expected the operation to fail"
+    assert recon_context["schema_snapshot"] is not None, (
         "No pre-failure snapshot was captured, so this step would verify "
         "nothing. The failing When step must call _snapshot_table()."
     )
 
     current = [
         tuple(r)
-        for r in recon_context.run(
-            pragma_table_info(recon_context.conn, recon_context.table_name)
+        for r in recon_context["run"](
+            pragma_table_info(recon_context["conn"], recon_context["table_name"])
         )
     ]
 
-    assert current == recon_context.schema_snapshot, (
+    assert current == recon_context["schema_snapshot"], (
         f"Schema changed despite rollback.\n"
-        f"  before: {recon_context.schema_snapshot}\n"
+        f"  before: {recon_context["schema_snapshot"]}\n"
         f"  after:  {current}"
     )
 
@@ -1250,21 +1267,21 @@ def then_table_unchanged(recon_context):
 @then("the original data is intact")
 def then_data_intact(recon_context):
     """Every row must survive the rolled-back reconstruction unaltered."""
-    assert recon_context.rows_snapshot is not None, (
+    assert recon_context["rows_snapshot"] is not None, (
         "No pre-failure snapshot was captured, so this step would verify "
         "nothing. The failing When step must call _snapshot_table()."
     )
 
-    cursor = recon_context.run(
-        recon_context.conn.execute(
-            f'SELECT * FROM "{recon_context.table_name}" ORDER BY rowid'
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(
+            f'SELECT * FROM "{recon_context["table_name"]}" ORDER BY rowid'
         )
     )
-    current = [tuple(r) for r in recon_context.run(cursor.fetchall())]
+    current = [tuple(r) for r in recon_context["run"](cursor.fetchall())]
 
-    assert current == recon_context.rows_snapshot, (
+    assert current == recon_context["rows_snapshot"], (
         f"Data changed despite rollback.\n"
-        f"  before: {recon_context.rows_snapshot}\n"
+        f"  before: {recon_context["rows_snapshot"]}\n"
         f"  after:  {current}"
     )
 
@@ -1278,8 +1295,8 @@ def then_fk_disabled(recon_context):
 @then("foreign keys are re-enabled after reconstruction")
 def then_fk_reenabled(recon_context):
     """Verify FK setting after reconstruction."""
-    cursor = recon_context.run(recon_context.conn.execute("PRAGMA foreign_keys"))
-    recon_context.run(cursor.fetchone())
+    cursor = recon_context["run"](recon_context["conn"].execute("PRAGMA foreign_keys"))
+    recon_context["run"](cursor.fetchone())
     # Reconstruction restores FK to whatever state it was before
 
 
@@ -1292,22 +1309,22 @@ def then_fk_checked(recon_context):
 @then("the table is recreated")
 def then_table_recreated(recon_context):
     """Verify table was recreated."""
-    cursor = recon_context.run(
-        recon_context.conn.execute(
-            f"SELECT name FROM sqlite_master WHERE type='table' AND name='{recon_context.table_name}'"
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(
+            f"SELECT name FROM sqlite_master WHERE type='table' AND name='{recon_context["table_name"]}'"
         )
     )
-    result = recon_context.run(cursor.fetchone())
+    result = recon_context["run"](cursor.fetchone())
     assert result is not None, "Table should exist"
 
 
 @then("no data is copied (no common columns)")
 def then_no_data_copied(recon_context):
     """Verify no data copied."""
-    cursor = recon_context.run(
-        recon_context.conn.execute(f'SELECT COUNT(*) FROM "{recon_context.table_name}"')
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(f'SELECT COUNT(*) FROM "{recon_context["table_name"]}"')
     )
-    result = recon_context.run(cursor.fetchone())
+    result = recon_context["run"](cursor.fetchone())
     assert result[0] == 0, "Table should be empty"
 
 
@@ -1320,23 +1337,23 @@ def then_warning_logged(recon_context, caplog):
 @then("the table is reconstructed successfully")
 def then_reconstruction_successful(recon_context):
     """Verify reconstruction succeeded."""
-    assert recon_context.error is None, "Reconstruction should succeed"
+    assert recon_context["error"] is None, "Reconstruction should succeed"
 
 
 @then("the table remains empty")
 def then_table_empty(recon_context):
     """Verify table is empty."""
-    cursor = recon_context.run(
-        recon_context.conn.execute(f'SELECT COUNT(*) FROM "{recon_context.table_name}"')
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(f'SELECT COUNT(*) FROM "{recon_context["table_name"]}"')
     )
-    result = recon_context.run(cursor.fetchone())
+    result = recon_context["run"](cursor.fetchone())
     assert result[0] == 0, "Table should be empty"
 
 
 @then("the composite primary key is preserved")
 def then_composite_pk_preserved(recon_context):
     """Verify composite PK preserved."""
-    rows = recon_context.run(pragma_table_info(recon_context.conn, recon_context.table_name))
+    rows = recon_context["run"](pragma_table_info(recon_context["conn"], recon_context["table_name"]))
 
     pk_columns = [row[1] for row in rows if row[5] > 0]
     assert len(pk_columns) >= 2, "Should have composite primary key"
@@ -1345,7 +1362,7 @@ def then_composite_pk_preserved(recon_context):
 @then("both columns remain part of primary key")
 def then_both_pk_columns(recon_context):
     """Verify both columns are PK."""
-    rows = recon_context.run(pragma_table_info(recon_context.conn, recon_context.table_name))
+    rows = recon_context["run"](pragma_table_info(recon_context["conn"], recon_context["table_name"]))
 
     pk_columns = [row[1] for row in rows if row[5] > 0]
     assert "a" in pk_columns, "Column 'a' should be part of PK"
@@ -1360,66 +1377,66 @@ def then_both_pk_columns(recon_context):
 @then(parsers.parse('the foreign key relationship exists'))
 def then_fk_exists(recon_context):
     """Verify foreign key exists."""
-    rows = recon_context.run(pragma_foreign_key_list(recon_context.conn, recon_context.table_name))
+    rows = recon_context["run"](pragma_foreign_key_list(recon_context["conn"], recon_context["table_name"]))
     assert len(rows) > 0, "Foreign key should exist"
 
 
 @then(parsers.parse('the foreign key relationship does not exist'))
 def then_fk_not_exists(recon_context):
     """Verify foreign key does not exist."""
-    rows = recon_context.run(pragma_foreign_key_list(recon_context.conn, recon_context.table_name))
+    rows = recon_context["run"](pragma_foreign_key_list(recon_context["conn"], recon_context["table_name"]))
     assert len(rows) == 0, "Foreign key should not exist"
 
 
 @then(parsers.parse('inserting invalid author_id raises foreign key error'))
 def then_invalid_fk_raises_error(recon_context):
     """Verify FK constraint is enforced."""
-    recon_context.run(recon_context.conn.execute("PRAGMA foreign_keys = ON"))
+    recon_context["run"](recon_context["conn"].execute("PRAGMA foreign_keys = ON"))
 
     try:
-        recon_context.run(
-            recon_context.conn.execute(
-                f"INSERT INTO {recon_context.table_name} (id, title, author_id) VALUES (999, 'Test', 9999)"
+        recon_context["run"](
+            recon_context["conn"].execute(
+                f"INSERT INTO {recon_context["table_name"]} (id, title, author_id) VALUES (999, 'Test', 9999)"
             )
         )
-        recon_context.run(recon_context.conn.commit())
-        recon_context.run(recon_context.conn.rollback())
+        recon_context["run"](recon_context["conn"].commit())
+        recon_context["run"](recon_context["conn"].rollback())
         pytest.fail("Should have raised foreign key error")
     except Exception as e:
         if "Should have raised" in str(e):
             raise
-        recon_context.run(recon_context.conn.rollback())
+        recon_context["run"](recon_context["conn"].rollback())
 
 
 @then(parsers.parse('inserting invalid author_id succeeds (no FK check)'))
 def then_invalid_fk_succeeds(recon_context):
     """Verify FK constraint is NOT enforced."""
-    recon_context.run(
-        recon_context.conn.execute(
-            f"INSERT INTO {recon_context.table_name} (id, title, author_id) VALUES (999, 'Test', 9999)"
+    recon_context["run"](
+        recon_context["conn"].execute(
+            f"INSERT INTO {recon_context["table_name"]} (id, title, author_id) VALUES (999, 'Test', 9999)"
         )
     )
-    recon_context.run(recon_context.conn.commit())
+    recon_context["run"](recon_context["conn"].commit())
 
 
 @then(parsers.parse('deleting category cascades to products'))
 def then_delete_cascades(recon_context):
     """Verify ON DELETE CASCADE works."""
-    recon_context.run(recon_context.conn.execute("PRAGMA foreign_keys = ON"))
-    recon_context.run(recon_context.conn.execute("DELETE FROM categories WHERE id = 1"))
-    recon_context.run(recon_context.conn.commit())
+    recon_context["run"](recon_context["conn"].execute("PRAGMA foreign_keys = ON"))
+    recon_context["run"](recon_context["conn"].execute("DELETE FROM categories WHERE id = 1"))
+    recon_context["run"](recon_context["conn"].commit())
 
-    cursor = recon_context.run(
-        recon_context.conn.execute("SELECT COUNT(*) FROM products WHERE category_id = 1")
+    cursor = recon_context["run"](
+        recon_context["conn"].execute("SELECT COUNT(*) FROM products WHERE category_id = 1")
     )
-    result = recon_context.run(cursor.fetchone())
+    result = recon_context["run"](cursor.fetchone())
     assert result[0] == 0, "Products should have been deleted via CASCADE"
 
 
 @then(parsers.parse('the column "{column}" does not exist'))
 def then_column_not_exists(recon_context, column):
     """Verify column was dropped."""
-    rows = recon_context.run(pragma_table_info(recon_context.conn, recon_context.table_name))
+    rows = recon_context["run"](pragma_table_info(recon_context["conn"], recon_context["table_name"]))
     column_names = [row[1] for row in rows]
     assert column not in column_names, f"Column '{column}' should not exist"
 
@@ -1427,12 +1444,12 @@ def then_column_not_exists(recon_context, column):
 @then(parsers.parse('all other data is preserved'))
 def then_other_data_preserved(recon_context):
     """Verify remaining data count matches initial count."""
-    cursor = recon_context.run(
-        recon_context.conn.execute(f'SELECT COUNT(*) FROM "{recon_context.table_name}"')
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(f'SELECT COUNT(*) FROM "{recon_context["table_name"]}"')
     )
-    result = recon_context.run(cursor.fetchone())
-    assert result[0] >= recon_context.initial_row_count, (
-        f"Expected at least {recon_context.initial_row_count} rows, got {result[0]}"
+    result = recon_context["run"](cursor.fetchone())
+    assert result[0] >= recon_context["initial_row_count"], (
+        f"Expected at least {recon_context["initial_row_count"]} rows, got {result[0]}"
     )
 
 
@@ -1445,15 +1462,15 @@ def then_uses_direct_drop(recon_context):
 @then(parsers.parse('the operation fails with foreign key violation'))
 def then_fails_with_fk_violation(recon_context):
     """Verify operation failed due to FK violation."""
-    assert recon_context.error is not None, "Operation should have failed"
-    error_msg = str(recon_context.error).lower()
+    assert recon_context["error"] is not None, "Operation should have failed"
+    error_msg = str(recon_context["error"]).lower()
     assert "foreign" in error_msg or "constraint" in error_msg, "Should be FK violation"
 
 
 @then(parsers.parse('the original schema is unchanged'))
 def then_schema_unchanged(recon_context):
     """Verify schema was not modified."""
-    rows = recon_context.run(pragma_table_info(recon_context.conn, recon_context.table_name))
+    rows = recon_context["run"](pragma_table_info(recon_context["conn"], recon_context["table_name"]))
     assert len(rows) > 0, "Table should exist"
 
 
@@ -1465,20 +1482,20 @@ def then_schema_unchanged(recon_context):
 @then(parsers.parse('the foreign key on "{column}" is preserved'))
 def then_fk_on_column_preserved(recon_context, column):
     """Verify FK on specific column still exists."""
-    rows = recon_context.run(pragma_foreign_key_list(recon_context.conn, recon_context.table_name))
+    rows = recon_context["run"](pragma_foreign_key_list(recon_context["conn"], recon_context["table_name"]))
     fk_cols = [row[3] for row in rows]  # row[3] = "from" column
     assert column in fk_cols, (
-        f"Expected FK on column '{column}' to be preserved in '{recon_context.table_name}'"
+        f"Expected FK on column '{column}' to be preserved in '{recon_context["table_name"]}'"
     )
 
 
 @then(parsers.parse('the incoming foreign key from "{table}" is preserved'))
 def then_incoming_fk_preserved(recon_context, table):
     """Verify that another table's FK still references the current table."""
-    rows = recon_context.run(pragma_foreign_key_list(recon_context.conn, table))
+    rows = recon_context["run"](pragma_foreign_key_list(recon_context["conn"], table))
     referenced_tables = [row[2] for row in rows]  # row[2] = referenced table
-    assert recon_context.table_name in referenced_tables, (
-        f"Expected '{table}' to have FK referencing '{recon_context.table_name}'"
+    assert recon_context["table_name"] in referenced_tables, (
+        f"Expected '{table}' to have FK referencing '{recon_context["table_name"]}'"
     )
 
 
@@ -1486,67 +1503,67 @@ def then_incoming_fk_preserved(recon_context, table):
 def then_fk_constraint_works(recon_context):
     """Verify FK constraint is enforced after reconstruction."""
     try:
-        recon_context.run(recon_context.conn.execute("PRAGMA foreign_keys = ON"))
-        recon_context.run(
-            recon_context.conn.execute(
+        recon_context["run"](recon_context["conn"].execute("PRAGMA foreign_keys = ON"))
+        recon_context["run"](
+            recon_context["conn"].execute(
                 "INSERT INTO books (id, title, author_id) VALUES (9999, 'Invalid', 9999)"
             )
         )
-        recon_context.run(recon_context.conn.commit())
-        recon_context.run(recon_context.conn.rollback())
+        recon_context["run"](recon_context["conn"].commit())
+        recon_context["run"](recon_context["conn"].rollback())
         pytest.fail("FK constraint not enforced — invalid author_id insert succeeded")
     except Exception as e:
         if "FK constraint not enforced" in str(e):
             raise
-        recon_context.run(recon_context.conn.rollback())
+        recon_context["run"](recon_context["conn"].rollback())
 
 
 @then("the self-referential foreign key is preserved")
 def then_self_ref_fk_preserved(recon_context):
     """Verify self-referential FK exists after reconstruction."""
-    rows = recon_context.run(
-        pragma_foreign_key_list(recon_context.conn, recon_context.table_name)
+    rows = recon_context["run"](
+        pragma_foreign_key_list(recon_context["conn"], recon_context["table_name"])
     )
-    self_refs = [row for row in rows if row[2] == recon_context.table_name]
+    self_refs = [row for row in rows if row[2] == recon_context["table_name"]]
     assert len(self_refs) > 0, (
-        f"Expected self-referential FK on '{recon_context.table_name}' to be preserved"
+        f"Expected self-referential FK on '{recon_context["table_name"]}' to be preserved"
     )
 
 
 @then("all hierarchical relationships are intact")
 def then_hierarchical_intact(recon_context):
     """Verify all hierarchical rows are present after reconstruction."""
-    cursor = recon_context.run(
-        recon_context.conn.execute(f'SELECT COUNT(*) FROM "{recon_context.table_name}"')
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(f'SELECT COUNT(*) FROM "{recon_context["table_name"]}"')
     )
-    result = recon_context.run(cursor.fetchone())
-    assert result[0] == recon_context.initial_row_count, (
-        f"Expected {recon_context.initial_row_count} hierarchical rows, got {result[0]}"
+    result = recon_context["run"](cursor.fetchone())
+    assert result[0] == recon_context["initial_row_count"], (
+        f"Expected {recon_context["initial_row_count"]} hierarchical rows, got {result[0]}"
     )
 
 
 @then("the operation fails during data copy")
 def then_fails_during_copy(recon_context):
     """Verify operation failed (during validation or copy)."""
-    assert recon_context.error is not None, "Expected operation to fail during data copy"
+    assert recon_context["error"] is not None, "Expected operation to fail during data copy"
 
 
 @then("the temp table is cleaned up")
 def then_temp_table_cleaned_up(recon_context):
     """Verify temp table does not exist after failed reconstruction."""
-    table = recon_context.table_name
-    cursor = recon_context.run(
-        recon_context.conn.execute(
+    table = recon_context["table_name"]
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(
             f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}_new'"
         )
     )
-    result = recon_context.run(cursor.fetchone())
+    result = recon_context["run"](cursor.fetchone())
     assert result is None, f"Temp table '{table}_new' should not exist after failure"
 
 
 @then("foreign key check fails after reconstruction")
 def then_fk_check_fails_after_reconstruction(recon_context):
     """Verify FK violation was detected (causing reconstruction to fail)."""
-    assert recon_context.error is not None, (
+    assert recon_context["error"] is not None, (
         "Expected FK check to fail after reconstruction"
     )

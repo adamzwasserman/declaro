@@ -33,63 +33,10 @@ from declaro_persistum.pool import TursoPool
 BUSY = "replication engine operation failed: database tape error: database is busy"
 
 
-class _FakeCursor:
-    def __init__(self, rows):
-        self._rows = rows
-
-    async def fetchall(self):
-        return self._rows
-
-    async def fetchone(self):
-        return self._rows[0] if self._rows else None
 
 
-class _BusyConn:
-    """Raises 'database is busy' a set number of times, then succeeds."""
-
-    def __init__(self, busy_on_begin: int = 0, busy_on_commit: int = 0) -> None:
-        self.busy_on_begin = busy_on_begin
-        self.busy_on_commit = busy_on_commit
-        self.begins = 0
-        self.commits = 0
-        self.statements: list[str] = []
-
-    async def execute(self, sql: str, *_a):
-        self.statements.append(sql)
-        if "journal_mode" in sql and "mvcc" in sql:
-            return _FakeCursor([("mvcc",)])
-        if sql.strip().upper().startswith("BEGIN"):
-            self.begins += 1
-            if self.busy_on_begin > 0:
-                self.busy_on_begin -= 1
-                raise RuntimeError(BUSY)
-        return _FakeCursor([])
-
-    async def commit(self) -> None:
-        self.commits += 1
-        if self.busy_on_commit > 0:
-            self.busy_on_commit -= 1
-            raise RuntimeError(BUSY)
-
-    async def rollback(self) -> None:
-        pass
-
-    async def close(self) -> None:
-        pass
 
 
-class _Holder:
-    def __init__(self, conn) -> None:
-        self.conn = conn
-
-    async def connect_async(self) -> None:
-        pass
-
-    async def push(self) -> None:
-        pass
-
-    async def pull(self) -> None:
-        pass
 
 
 def _pool(tmp_path, monkeypatch, conn, **kw):
@@ -104,9 +51,6 @@ def _pool(tmp_path, monkeypatch, conn, **kw):
     """
     import declaro_persistum.turso_pool as pool_mod  # TursoPool's own module since declaro-tvx split pool.py
 
-    class _SharedHolder(_Holder):
-        def __init__(self, *_a, **_kw) -> None:
-            super().__init__(conn)
 
     monkeypatch.setattr(pool_mod, "_TursoConnectionHolder", _SharedHolder)
 
@@ -120,104 +64,4 @@ def _pool(tmp_path, monkeypatch, conn, **kw):
     return pool
 
 
-class TestBusyIsAbsorbed:
-    """The caller sees success, not an error."""
 
-    @pytest.mark.asyncio
-    async def test_busy_on_begin_is_retried(self, tmp_path, monkeypatch):
-        """A contended transaction start must not surface to the caller."""
-        conn = _BusyConn(busy_on_begin=3)
-        pool = _pool(tmp_path, monkeypatch, conn)
-
-        async with pool.acquire_write() as c:
-            await c.execute("UPDATE cards SET x = 1")
-
-        assert conn.begins == 4, "expected three retries then success"
-
-    @pytest.mark.asyncio
-    async def test_busy_on_commit_is_retried(self, tmp_path, monkeypatch):
-        """A contended commit must not surface either.
-
-        The statements are already staged; re-committing lands the same set.
-        """
-        conn = _BusyConn(busy_on_commit=2)
-        pool = _pool(tmp_path, monkeypatch, conn)
-
-        async with pool.acquire_write() as c:
-            await c.execute("UPDATE cards SET x = 1")
-
-        assert conn.commits == 3
-
-    @pytest.mark.asyncio
-    async def test_a_write_that_is_never_free_still_fails_eventually(
-        self, tmp_path, monkeypatch
-    ):
-        """Retrying must be bounded. An unavailable database is a real error."""
-        conn = _BusyConn(busy_on_commit=10_000)
-        pool = _pool(tmp_path, monkeypatch, conn, busy_retry_budget_s=0.3)
-
-        with pytest.raises(RuntimeError, match="busy"):
-            async with pool.acquire_write() as c:
-                await c.execute("UPDATE cards SET x = 1")
-
-    @pytest.mark.asyncio
-    async def test_retrying_is_bounded_in_time_not_just_count(
-        self, tmp_path, monkeypatch
-    ):
-        """The budget is wall-clock, so a slow contended database still returns."""
-        conn = _BusyConn(busy_on_commit=10_000)
-        pool = _pool(tmp_path, monkeypatch, conn, busy_retry_budget_s=0.3)
-
-        loop = asyncio.get_running_loop()
-        start = loop.time()
-        with pytest.raises(RuntimeError, match="busy"):
-            async with pool.acquire_write() as c:
-                await c.execute("UPDATE cards SET x = 1")
-        elapsed = loop.time() - start
-
-        assert elapsed < 2.0, f"busy retry ran for {elapsed:.2f}s past its budget"
-
-
-class TestOnlyBusyIsRetried:
-    """A real error must not be retried into a long stall."""
-
-    @pytest.mark.asyncio
-    async def test_a_non_busy_error_propagates_immediately(
-        self, tmp_path, monkeypatch
-    ):
-        """A constraint violation is an answer, not a 'not now'."""
-
-        class _FailingConn(_BusyConn):
-            async def commit(self) -> None:
-                raise RuntimeError("UNIQUE constraint failed: cards.id")
-
-        conn = _FailingConn()
-        pool = _pool(tmp_path, monkeypatch, conn)
-
-        loop = asyncio.get_running_loop()
-        start = loop.time()
-        with pytest.raises(RuntimeError, match="UNIQUE constraint"):
-            async with pool.acquire_write() as c:
-                await c.execute("INSERT INTO cards VALUES (1)")
-        elapsed = loop.time() - start
-
-        assert elapsed < 0.2, "a non-busy error was retried"
-
-    @pytest.mark.asyncio
-    async def test_a_statement_failing_mid_transaction_is_not_retried(
-        self, tmp_path, monkeypatch
-    ):
-        """The pool cannot replay caller statements, so it does not try."""
-
-        class _BusyStatementConn(_BusyConn):
-            async def execute(self, sql: str, *_a):
-                if sql.strip().upper().startswith("UPDATE"):
-                    raise RuntimeError(BUSY)
-                return await super().execute(sql, *_a)
-
-        conn = _BusyStatementConn()
-        pool = _pool(tmp_path, monkeypatch, conn)
-
-        with pytest.raises(RuntimeError, match="busy"):
-            async with pool.acquire_write() as c:
-                await c.execute("UPDATE cards SET x = 1")

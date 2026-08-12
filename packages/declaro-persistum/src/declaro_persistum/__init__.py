@@ -26,7 +26,6 @@ from importlib.metadata import version as _pkg_version
 __version__ = _pkg_version("declaro-persistum")
 
 from declaro_persistum.exceptions import (  # noqa: I001 - must follow __version__, see above
-    AmbiguityError,
     ConnectionError,
     CycleError,
     DeclaroError,
@@ -50,7 +49,21 @@ from declaro_persistum.write_queue import (
     drain,
     new_room,
 )
-from declaro_persistum.pool import ConnectionPool, MirrorPool, SyncConnectionPool, TursoCloudManager
+# `pool.py` held ConnectionPool, MirrorPool, SyncConnectionPool and
+# TursoCloudManager — four classes, now deleted. `database.py` replaces them
+# with a Database TypedDict and functions over it. The word "pool" is retired:
+# nothing was pooled by the time it was deleted.
+from declaro_persistum.database import (
+    Database,
+    close,
+    flush,
+    is_replicated,
+    new_database,
+    reading,
+    refresh,
+    replicate,
+    writing,
+)
 from declaro_persistum.types import (
     Ambiguity,
     ApplyResult,
@@ -76,13 +89,9 @@ from declaro_persistum.transfer import (
     BulkTransferResult,
 )
 from declaro_persistum.cutover import begin_cutover
-from declaro_persistum.query.hooks import (
-    PostHook,
-    PreHook,
-    QueryMeta,
-    table_factory,
-)
-from declaro_persistum.query.update import Increment, increment
+# `query/hooks.py` and `query/update.py` exported PreHook, PostHook,
+# QueryMeta, table_factory, Increment and increment. All six went with the
+# query builder classes and return with Group A of the map.
 
 __all__ = [
     # Types
@@ -114,7 +123,6 @@ __all__ = [
     # Exceptions
     "DeclaroError",
     "SchemaError",
-    "AmbiguityError",
     "CycleError",
     "DriftError",
     "ConnectionError",
@@ -136,13 +144,7 @@ __all__ = [
     "collect",
     "drain",
     # Query hooks
-    "PreHook",
-    "PostHook",
-    "QueryMeta",
-    "table_factory",
     # Atomic increment helper
-    "Increment",
-    "increment",
     # Version
     "__version__",
 ]

@@ -123,26 +123,6 @@ def setup_jsonl_sink(logger: logging.Logger, path: str) -> None:
     Lazy: file and directory are created on first write, not at setup time.
     """
 
-    class _LazyJSONLHandler(logging.FileHandler):
-        """FileHandler that creates the file/dir on first emit."""
-
-        def __init__(self, path: str) -> None:
-            self._path = path
-            self._initialised = False
-            # Don't call super().__init__ yet — defer file creation
-            logging.Handler.__init__(self)
-
-        def _ensure_file(self) -> None:
-            if not self._initialised:
-                import os
-
-                os.makedirs(os.path.dirname(os.path.abspath(self._path)), exist_ok=True)
-                super(_LazyJSONLHandler, self).__init__(self._path, mode="a", encoding="utf-8")
-                self._initialised = True
-
-        def emit(self, record: logging.LogRecord) -> None:
-            self._ensure_file()
-            super().emit(record)
 
     handler = _LazyJSONLHandler(path)
     handler.setFormatter(logging.Formatter("%(message)s"))
@@ -159,17 +139,6 @@ def setup_callable_sink(logger: logging.Logger, fn: Any) -> None:
     """
     import json
 
-    class _CallableHandler(logging.Handler):
-        def emit(self, record: logging.LogRecord) -> None:
-            try:
-                data = json.loads(record.getMessage())
-                fn(data)
-            except Exception:
-                # A handler must not raise into the logging call that reached
-                # it, but a caller whose callback is failing must not be left
-                # with no signal at all. handleError is the route that does
-                # not recurse back through logging.
-                self.handleError(record)
 
     handler = _CallableHandler()
     logger.addHandler(handler)

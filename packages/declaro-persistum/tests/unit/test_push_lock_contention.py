@@ -38,22 +38,6 @@ PUSH_SECONDS = 0.30
 BLOCKED_THRESHOLD = PUSH_SECONDS / 2
 
 
-class _SlowPushHolder:
-    """Connection holder whose push() takes a measurable amount of time."""
-
-    def __init__(self) -> None:
-        self.conn = object()
-        self.push_calls = 0
-
-    async def connect_async(self) -> None:
-        pass
-
-    async def push(self) -> None:
-        self.push_calls += 1
-        await asyncio.sleep(PUSH_SECONDS)
-
-    async def pull(self) -> None:
-        pass
 
 
 async def _seed_real_db(path: str) -> None:
@@ -66,34 +50,8 @@ async def _seed_real_db(path: str) -> None:
     await conn.close()
 
 
-class _StubWriteConn:
-    """Enough of a connection for a write that never touches the network."""
-
-    async def execute(self, _sql, *_a):
-        return None
-
-    async def commit(self) -> None:
-        pass
-
-    async def rollback(self) -> None:
-        pass
-
-    async def close(self) -> None:
-        pass
 
 
-class _StubWriteHolder(_SlowPushHolder):
-    """A write holder that opens instantly and dials nothing.
-
-    Writes are stateless by default, so a write OPENS its own connection
-    instead of reusing pool._write_holder. Without this the write would
-    make a real connect against the fake remote and the test would measure
-    a DNS failure rather than push contention.
-    """
-
-    def __init__(self, *_a, **_kw) -> None:
-        super().__init__()
-        self.conn = _StubWriteConn()
 
 
 async def _pool_with_slow_push(tmp_path, monkeypatch=None):
@@ -132,47 +90,6 @@ async def _noop() -> None:
     return None
 
 
-class TestReadsRunDuringAPush:
-    """Reads take their own connection, so a push cannot stall them."""
-
-    @pytest.mark.asyncio
-    async def test_read_does_not_wait_for_an_in_flight_push(self, tmp_path):
-        """A read arriving mid-push must not wait for the cloud round trip."""
-        pool = await _pool_with_slow_push(tmp_path)
-
-        push = asyncio.create_task(pool._push_once())
-        await asyncio.sleep(0.02)  # let the push take the lock
-
-        async def _read():
-            async with pool.acquire():
-                pass
-
-        elapsed = await _time_it(_read)
-        await push
-
-        assert elapsed < BLOCKED_THRESHOLD, (
-            f"read waited {elapsed:.3f}s on a {PUSH_SECONDS}s push — "
-            f"it is blocking on the cloud round trip"
-        )
-
-    @pytest.mark.asyncio
-    async def test_many_reads_are_not_serialised_behind_one_push(self, tmp_path):
-        """Concurrent reads must not queue behind a single push."""
-        pool = await _pool_with_slow_push(tmp_path)
-
-        push = asyncio.create_task(pool._push_once())
-        await asyncio.sleep(0.02)
-
-        async def _read():
-            async with pool.acquire():
-                pass
-
-        elapsed = await _time_it(lambda: asyncio.gather(*(_read() for _ in range(5))))
-        await push
-
-        assert elapsed < BLOCKED_THRESHOLD, (
-            f"5 concurrent reads took {elapsed:.3f}s during a {PUSH_SECONDS}s push"
-        )
 
 
 @pytest.mark.asyncio

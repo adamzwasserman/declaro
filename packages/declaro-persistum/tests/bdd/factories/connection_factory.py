@@ -5,7 +5,7 @@ Connection factories for managing database connections in tests.
 import os
 import tempfile
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, TypedDict
 
 from declaro_persistum.types import Schema
 
@@ -252,63 +252,86 @@ async def teardown_postgresql_schema(conn: Any, schema: Schema) -> None:
 # Connection Factory
 # =============================================================================
 
-class ConnectionFactory:
-    """Factory for creating and managing database connections."""
 
-    def __init__(self, dialect: str = "sqlite"):
-        self.dialect = dialect
+# A backend is DATA: the three callables a scenario needs, carried in a
+# TypedDict. This replaces `ConnectionFactory`, a class whose three
+# constructors and three methods did nothing but choose between the
+# module-level functions above and then forward to them.
+#
+# The shape follows honest-persist's `open_pool(db_id, connect, classify,
+# close, size)` — the dependency is injected as a callable, and what the
+# scenario holds is a value it can print, compare and pass on.
 
-    @asynccontextmanager
-    async def get_connection(self) -> AsyncGenerator[Any, None]:
-        """Get a connection for the configured dialect."""
-        if self.dialect == "sqlite":
-            async with get_sqlite_connection() as conn:
-                yield conn
-        elif self.dialect == "postgresql":
-            async with get_postgresql_connection() as conn:
-                yield conn
-        elif self.dialect == "turso":
-            # Turso uses sync API
-            import turso
-            conn = turso.connect(get_turso_url())
-            try:
-                yield conn
-            finally:
-                conn.close()
-        else:
-            raise ValueError(f"Unknown dialect: {self.dialect}")
 
-    async def setup_schema(self, conn: Any, schema: Schema) -> None:
-        """Create tables from schema."""
-        if self.dialect == "sqlite":
-            await setup_sqlite_schema(conn, schema)
-        elif self.dialect == "postgresql":
-            await setup_postgresql_schema(conn, schema)
-        elif self.dialect == "turso":
-            # Turso uses sync pyturso API with SQLite-like syntax
-            setup_turso_schema(conn, schema)
+class Backend(TypedDict):
+    """One database backend, as the callables a scenario needs."""
 
-    async def teardown_schema(self, conn: Any, schema: Schema) -> None:
-        """Drop tables from schema."""
-        if self.dialect == "sqlite":
-            await teardown_sqlite_schema(conn, schema)
-        elif self.dialect == "postgresql":
-            await teardown_postgresql_schema(conn, schema)
-        elif self.dialect == "turso":
-            # Turso uses sync pyturso API
-            teardown_turso_schema(conn, schema)
+    dialect: str
+    connect: Any  # () -> async context manager yielding a connection
+    setup: Any  # (conn, schema) -> None | awaitable
+    teardown: Any  # (conn, schema) -> None | awaitable
 
-    @classmethod
-    def sqlite(cls) -> "ConnectionFactory":
-        """Create factory for SQLite."""
-        return cls("sqlite")
 
-    @classmethod
-    def postgresql(cls) -> "ConnectionFactory":
-        """Create factory for PostgreSQL."""
-        return cls("postgresql")
+@asynccontextmanager
+async def get_turso_connection() -> AsyncGenerator[Any, None]:
+    """Open a local Turso database for a scenario.
 
-    @classmethod
-    def turso(cls) -> "ConnectionFactory":
-        """Create factory for Turso."""
-        return cls("turso")
+    This lived inside `ConnectionFactory` and was the only connect function
+    with no module-level twin, so it is the one piece the deletion actually
+    removed rather than merely unwrapped.
+    """
+    import turso
+
+    conn = turso.connect(_TURSO_TEMP_DB)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def sqlite_backend() -> Backend:
+    return {
+        "dialect": "sqlite",
+        "connect": get_sqlite_connection,
+        "setup": setup_sqlite_schema,
+        "teardown": teardown_sqlite_schema,
+    }
+
+
+def postgresql_backend() -> Backend:
+    return {
+        "dialect": "postgresql",
+        "connect": get_postgresql_connection,
+        "setup": setup_postgresql_schema,
+        "teardown": teardown_postgresql_schema,
+    }
+
+
+def turso_backend() -> Backend:
+    return {
+        "dialect": "turso",
+        "connect": get_turso_connection,
+        "setup": setup_turso_schema,
+        "teardown": teardown_turso_schema,
+    }
+
+
+BACKENDS = {
+    "sqlite": sqlite_backend,
+    "postgresql": postgresql_backend,
+    "turso": turso_backend,
+}
+"""The bounded vocabulary of backends, as a dispatch table (Rule 1)."""
+
+
+async def apply_step(fn: Any, *args: Any) -> Any:
+    """Call a setup/teardown that may be sync or async.
+
+    Turso's schema helpers are synchronous and SQLite's are not. The
+    difference belongs here, at the one place that knows it, rather than in
+    every step that calls one.
+    """
+    result = fn(*args)
+    if hasattr(result, "__await__"):
+        return await result
+    return result

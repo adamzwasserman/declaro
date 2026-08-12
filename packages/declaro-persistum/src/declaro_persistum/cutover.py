@@ -36,7 +36,6 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, Union
 
-from declaro_persistum.pool import MirrorPool
 from declaro_persistum.transfer import (
     BulkTransferResult,
     TableTransferProgress,

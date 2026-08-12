@@ -68,123 +68,18 @@ EDGE_CASE_DATES = [
 # Todo Factory
 # =============================================================================
 
-class TodoFactory:
-    """Factory for generating todo test data."""
-
-    @staticmethod
-    def create(**overrides: Any) -> dict[str, Any]:
-        """Create a single todo with optional overrides."""
-        return {
-            "id": overrides.get("id", str(uuid.uuid4())),
-            "title": overrides.get("title", fake.sentence(nb_words=5)),
-            "completed": overrides.get("completed", fake.boolean()),
-            "created_at": overrides.get("created_at", fake.date_time_this_year(tzinfo=timezone.utc)),
-        }
-
-    @staticmethod
-    def create_batch(count: int, **overrides: Any) -> list[dict[str, Any]]:
-        """Create multiple todos with optional overrides."""
-        return [TodoFactory.create(**overrides) for _ in range(count)]
-
-    @staticmethod
-    def create_with_edge_cases() -> list[dict[str, Any]]:
-        """Create todos with edge case titles."""
-        return [
-            TodoFactory.create(title=edge_title)
-            for edge_title in EDGE_CASE_STRINGS
-            if edge_title  # Skip empty string for non-nullable title
-        ]
-
-    @staticmethod
-    @st.composite
-    def hypothesis_todo(draw: st.DrawFn) -> dict[str, Any]:
-        """Hypothesis strategy for generating arbitrary todos."""
-        return {
-            "id": str(draw(st.uuids())),
-            "title": draw(st.text(min_size=1, max_size=500, alphabet=st.characters(
-                blacklist_categories=("Cs",),  # Exclude surrogates
-                blacklist_characters="\x00",   # Exclude null bytes
-            ))),
-            "completed": draw(st.booleans()),
-        }
 
 
 # =============================================================================
 # User Factory
 # =============================================================================
 
-class UserFactory:
-    """Factory for generating user test data."""
-
-    @staticmethod
-    def create(**overrides: Any) -> dict[str, Any]:
-        """Create a single user with optional overrides."""
-        return {
-            "id": overrides.get("id", str(uuid.uuid4())),
-            "email": overrides.get("email", fake.unique.email()),
-            "name": overrides.get("name", fake.name()),
-            "status": overrides.get("status", fake.random_element(["active", "inactive", "pending"])),
-            "age": overrides.get("age", fake.random_int(min=18, max=100)),
-            "created_at": overrides.get("created_at", fake.date_time_this_year(tzinfo=timezone.utc)),
-        }
-
-    @staticmethod
-    def create_batch(count: int, **overrides: Any) -> list[dict[str, Any]]:
-        """Create multiple users with optional overrides."""
-        fake.unique.clear()  # Reset unique generator
-        return [UserFactory.create(**overrides) for _ in range(count)]
-
-    @staticmethod
-    @st.composite
-    def hypothesis_user(draw: st.DrawFn) -> dict[str, Any]:
-        """Hypothesis strategy for generating arbitrary users."""
-        return {
-            "id": str(draw(st.uuids())),
-            "email": draw(st.emails()),
-            "name": draw(st.text(min_size=1, max_size=100)),
-            "status": draw(st.sampled_from(["active", "inactive", "pending"])),
-            "age": draw(st.integers(min_value=0, max_value=150)),
-        }
 
 
 # =============================================================================
 # Order Factory
 # =============================================================================
 
-class OrderFactory:
-    """Factory for generating order test data."""
-
-    @staticmethod
-    def create(**overrides: Any) -> dict[str, Any]:
-        """Create a single order with optional overrides."""
-        return {
-            "id": overrides.get("id", str(uuid.uuid4())),
-            "user_id": overrides.get("user_id", str(uuid.uuid4())),
-            "total": overrides.get("total", round(fake.pyfloat(min_value=0.01, max_value=10000.00), 2)),
-            "status": overrides.get("status", fake.random_element(["pending", "confirmed", "shipped", "delivered"])),
-            "created_at": overrides.get("created_at", fake.date_time_this_year(tzinfo=timezone.utc)),
-        }
-
-    @staticmethod
-    def create_batch(count: int, **overrides: Any) -> list[dict[str, Any]]:
-        """Create multiple orders with optional overrides."""
-        return [OrderFactory.create(**overrides) for _ in range(count)]
-
-    @staticmethod
-    def create_with_items(item_count: int = 3, **overrides: Any) -> dict[str, Any]:
-        """Create an order with associated items."""
-        order = OrderFactory.create(**overrides)
-        order["items"] = [
-            {
-                "id": str(uuid.uuid4()),
-                "order_id": order["id"],
-                "product_name": fake.word(),
-                "quantity": fake.random_int(min=1, max=10),
-                "price": round(fake.pyfloat(min_value=0.01, max_value=500.00), 2),
-            }
-            for _ in range(item_count)
-        ]
-        return order
 
 
 # =============================================================================
@@ -233,3 +128,122 @@ sql_uuid = st.uuids().map(str)
 
 # Strategy for list of values (for IN clauses)
 sql_in_list = st.lists(st.integers(), min_size=0, max_size=100)
+
+# =============================================================================
+# Test data, as functions
+# =============================================================================
+#
+# These were `TodoFactory`, `UserFactory` and `OrderFactory`: three classes
+# whose every member was a @staticmethod. They held no state, took no self,
+# and existed only to namespace functions that were already functions. The
+# call sites read `TodoFactory.create(...)`; they now read `todo(...)`.
+#
+# `create_batch(n)` is kept as `todos(n)` rather than folded into `todo()`
+# with a count argument, because a caller asking for one row and a caller
+# asking for a thousand want different return types and should say so.
+
+
+def todo(**overrides: Any) -> dict[str, Any]:
+    """One todo. Any field can be pinned; the rest are generated."""
+    return {
+        "id": overrides.get("id", str(uuid.uuid4())),
+        "title": overrides.get("title", fake.sentence(nb_words=5)),
+        "completed": overrides.get("completed", fake.boolean()),
+        "created_at": overrides.get(
+            "created_at", fake.date_time_this_year(tzinfo=timezone.utc)
+        ),
+    }
+
+
+def todos(count: int, **overrides: Any) -> list[dict[str, Any]]:
+    return [todo(**overrides) for _ in range(count)]
+
+
+def todos_with_edge_case_titles() -> list[dict[str, Any]]:
+    """One todo per hostile string. The empty one is skipped — title is NOT NULL."""
+    return [todo(title=t) for t in EDGE_CASE_STRINGS if t]
+
+
+@st.composite
+def any_todo(draw: st.DrawFn) -> dict[str, Any]:
+    """Hypothesis strategy: an arbitrary todo."""
+    return {
+        "id": str(draw(st.uuids())),
+        "title": draw(
+            st.text(
+                min_size=1,
+                max_size=500,
+                alphabet=st.characters(
+                    blacklist_categories=("Cs",), blacklist_characters="\x00"
+                ),
+            )
+        ),
+        "completed": draw(st.booleans()),
+    }
+
+
+def user(**overrides: Any) -> dict[str, Any]:
+    return {
+        "id": overrides.get("id", str(uuid.uuid4())),
+        "email": overrides.get("email", fake.unique.email()),
+        "name": overrides.get("name", fake.name()),
+        "status": overrides.get(
+            "status", fake.random_element(["active", "inactive", "pending"])
+        ),
+        "age": overrides.get("age", fake.random_int(min=18, max=100)),
+        "created_at": overrides.get(
+            "created_at", fake.date_time_this_year(tzinfo=timezone.utc)
+        ),
+    }
+
+
+def users(count: int, **overrides: Any) -> list[dict[str, Any]]:
+    fake.unique.clear()  # the unique email generator is per-run state
+    return [user(**overrides) for _ in range(count)]
+
+
+@st.composite
+def any_user(draw: st.DrawFn) -> dict[str, Any]:
+    return {
+        "id": str(draw(st.uuids())),
+        "email": draw(st.emails()),
+        "name": draw(st.text(min_size=1, max_size=100)),
+        "status": draw(st.sampled_from(["active", "inactive", "pending"])),
+        "age": draw(st.integers(min_value=0, max_value=150)),
+    }
+
+
+def order(**overrides: Any) -> dict[str, Any]:
+    return {
+        "id": overrides.get("id", str(uuid.uuid4())),
+        "user_id": overrides.get("user_id", str(uuid.uuid4())),
+        "total": overrides.get(
+            "total", round(fake.pyfloat(min_value=0.01, max_value=10000.00), 2)
+        ),
+        "status": overrides.get(
+            "status",
+            fake.random_element(["pending", "confirmed", "shipped", "delivered"]),
+        ),
+        "created_at": overrides.get(
+            "created_at", fake.date_time_this_year(tzinfo=timezone.utc)
+        ),
+    }
+
+
+def orders(count: int, **overrides: Any) -> list[dict[str, Any]]:
+    return [order(**overrides) for _ in range(count)]
+
+
+def order_with_items(item_count: int, **overrides: Any) -> dict[str, Any]:
+    """An order and its lines. `item_count` is required — see Rule 14."""
+    parent = order(**overrides)
+    parent["items"] = [
+        {
+            "id": str(uuid.uuid4()),
+            "order_id": parent["id"],
+            "quantity": fake.random_int(min=1, max=10),
+            "price": round(fake.pyfloat(min_value=0.01, max_value=1000.00), 2),
+        }
+        for _ in range(item_count)
+    ]
+    return parent

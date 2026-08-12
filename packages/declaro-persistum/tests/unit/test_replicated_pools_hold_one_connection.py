@@ -34,57 +34,10 @@ import pytest
 from declaro_persistum.turso_pool import TursoPool
 
 
-class _Cursor:
-    def __init__(self, rows):
-        self._rows = rows
-        self.description = None
-        self.rowcount = 1
-
-    async def fetchall(self):
-        return self._rows
-
-    async def fetchone(self):
-        return self._rows[0] if self._rows else None
 
 
-class _Conn:
-    def __init__(self):
-        self.closed = False
-
-    async def execute(self, sql, *_a):
-        if "journal_mode" in sql and "mvcc" in sql:
-            return _Cursor([("mvcc",)])
-        return _Cursor([])
-
-    async def commit(self):
-        pass
-
-    async def rollback(self):
-        pass
-
-    async def close(self):
-        self.closed = True
 
 
-class _Holder:
-    """Counts opens, which is the quantity the regression changed."""
-
-    opened: list["_Holder"] = []
-
-    def __init__(self, database_path, remote_url=None, _auth_token=None):
-        self.database_path = database_path
-        self._remote_url = remote_url
-        self.conn = None
-        type(self).opened.append(self)
-
-    async def connect_async(self):
-        self.conn = _Conn()
-
-    async def push(self):
-        pass
-
-    async def pull(self):
-        pass
 
 
 async def _pool(tmp_path, monkeypatch, *, replicated: bool):
