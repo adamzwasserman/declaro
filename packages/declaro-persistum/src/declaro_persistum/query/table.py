@@ -38,7 +38,7 @@ It propagates to every internal component automatically. You do not touch
 -------------------------------------------------------------------------------
 """
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from declaro_persistum.types import Column, Schema
 
@@ -802,15 +802,29 @@ class SubqueryExpr:
         return self._query.to_sql(dialect)
 
 
-class JoinClause:
-    """JOIN clause."""
+class JoinClause(TypedDict):
+    """A JOIN clause. Data, not an object — there is no behaviour here.
 
-    __slots__ = ("table", "on", "type")
+    This was a class whose whole body was an `__init__` assigning three
+    fields. `query/builder.py` already rendered joins from plain dicts
+    (`join["table"]`, `join.get("type")`), so one concept had two
+    representations and only one of them needed a class.
 
-    def __init__(self, table: str, on: "Condition", join_type: str = "inner"):
-        self.table = table
-        self.on = on
-        self.type = join_type
+    `join_type` also carried an implicit default of "inner", which made a
+    caller who omitted it indistinguishable from one who chose it. A
+    TypedDict has no defaults, so the omission is now a construction error
+    instead of a silent decision (Rule 14). `SelectQuery.join` keeps its own
+    documented default at the CONSUMER boundary, where a default is visible
+    in the signature the caller reads.
+
+    First slice of the strangler on this module: smallest possible unit,
+    converted end to end rather than wrapped, because a facade that still
+    reads `self` moves nothing.
+    """
+
+    table: str
+    on: "Condition"
+    type: str
 
 
 class SQLFunction:

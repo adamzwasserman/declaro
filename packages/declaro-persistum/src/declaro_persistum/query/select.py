@@ -170,7 +170,9 @@ class SelectQuery:
         type: Literal["inner", "left", "right", "full"] = "inner",
     ) -> "SelectQuery":
         """Add JOIN clause (returns new query)."""
-        new_joins = list(self._joins) + [JoinClause(other._table_name, on, type)]
+        new_joins = list(self._joins) + [
+            JoinClause(table=other._table_name, on=on, type=type)
+        ]
         return SelectQuery(
             self._table,
             self._schema,
@@ -266,9 +268,9 @@ class SelectQuery:
 
         # JOINs
         for join in self._joins:
-            join_sql, join_params = join.on.to_sql(dialect)
-            join_type = join.type.upper()
-            sql += f" {join_type} JOIN {join.table} ON {join_sql}"
+            join_sql, join_params = join["on"].to_sql(dialect)
+            join_type = join["type"].upper()
+            sql += f" {join_type} JOIN {join['table']} ON {join_sql}"
             params.update(join_params)
 
         # WHERE
