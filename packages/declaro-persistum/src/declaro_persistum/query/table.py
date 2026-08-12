@@ -38,7 +38,7 @@ It propagates to every internal component automatically. You do not touch
 -------------------------------------------------------------------------------
 """
 
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from declaro_persistum.types import Column, Schema
 
@@ -540,7 +540,7 @@ class ColumnProxy:
     def not_in_(self, values: "list[Any] | SubqueryExpr") -> "Condition":
         """NOT IN clause. Accepts a list of values or a SubqueryExpr.
         Raises ValueError if any value in a list is None — NOT IN with NULLs silently returns no rows."""
-        if not isinstance(values, SubqueryExpr) and any(v is None for v in values):
+        if not is_subquery(values) and any(v is None for v in values):
             raise ValueError(
                 f"not_in_() on '{self._full_name}' received a list containing None. "
                 "NOT IN with NULLs always returns no rows (SQL NULL semantics). "
@@ -562,11 +562,11 @@ class ColumnProxy:
 
     def desc(self) -> "OrderBy":
         """Order by descending."""
-        return OrderBy(self._full_name, "DESC")
+        return OrderBy(kind="order_by", column=self._full_name, direction="DESC")
 
     def asc(self) -> "OrderBy":
         """Order by ascending."""
-        return OrderBy(self._full_name, "ASC")
+        return OrderBy(kind="order_by", column=self._full_name, direction="ASC")
 
 
 class Condition:
@@ -593,8 +593,8 @@ class Condition:
         if self.value is None and self.operator == "IS NOT":
             return f"{self.column} IS NOT NULL", {}
         if self.operator in ("IN", "NOT IN"):
-            if isinstance(self.value, SubqueryExpr):
-                sub_sql, sub_params = self.value.to_sql_fragment(dialect)
+            if is_subquery(self.value):
+                sub_sql, sub_params = render_subquery(self.value, dialect)
                 return f"{self.column} {self.operator} ({sub_sql})", sub_params
             # Generate :param_0, :param_1, etc.
             placeholders = ", ".join(
@@ -660,17 +660,19 @@ class ConditionGroup:
         return ConditionGroup([self, other], "OR")
 
 
-class OrderBy:
-    """ORDER BY clause."""
+class OrderBy(TypedDict):
+    """An ORDER BY term over a plain column. Data, not an object.
 
-    __slots__ = ("column", "direction")
+    `kind` is load-bearing. Rendering used to pick a branch with
+    `hasattr(o, "to_sql_fragment")`, which classifies by shape and silently
+    reclassifies anything that gains or loses a method. Terms now dispatch
+    through ORDER_TERM_RENDERERS on this tag (Rule 1), which fails loudly on
+    an unknown one.
+    """
 
-    def __init__(self, column: str, direction: str):
-        self.column = column
-        self.direction = direction
-
-    def to_sql(self) -> str:
-        return f"{self.column} {self.direction}"
+    kind: Literal["order_by"]
+    column: str
+    direction: str
 
 
 class CaseExpression:
@@ -759,29 +761,54 @@ class CaseExpression:
 
     def asc(self) -> "CaseOrderBy":
         """Order by this expression ascending."""
-        return CaseOrderBy(self, "ASC")
+        return CaseOrderBy(kind="case_order_by", expr=self, direction="ASC")
 
     def desc(self) -> "CaseOrderBy":
         """Order by this expression descending."""
-        return CaseOrderBy(self, "DESC")
+        return CaseOrderBy(kind="case_order_by", expr=self, direction="DESC")
 
 
-class CaseOrderBy:
-    """ORDER BY clause for CASE expressions."""
+class CaseOrderBy(TypedDict):
+    """An ORDER BY term over a CASE expression. The other bounded member."""
 
-    __slots__ = ("_expr", "_direction")
-
-    def __init__(self, expr: CaseExpression, direction: str) -> None:
-        self._expr = expr
-        self._direction = direction
-
-    def to_sql_fragment(self, dialect: str) -> tuple[str, dict[str, Any]]:
-        """Generate ORDER BY SQL — emits bare CASE expression (no alias)."""
-        sql, params = self._expr._bare_sql_fragment(dialect)
-        return f"{sql} {self._direction}", params
+    kind: Literal["case_order_by"]
+    expr: "CaseExpression"
+    direction: str
 
 
-class SubqueryExpr:
+def _render_order_by(term: OrderBy, _dialect: str) -> tuple[str, dict[str, Any]]:
+    """A plain column term takes no parameters."""
+    return f"{term['column']} {term['direction']}", {}
+
+
+def _render_case_order_by(
+    term: CaseOrderBy, dialect: str
+) -> tuple[str, dict[str, Any]]:
+    """A CASE term emits the BARE expression — an alias is not valid here."""
+    sql, params = term["expr"]._bare_sql_fragment(dialect)
+    return f"{sql} {term['direction']}", params
+
+
+ORDER_TERM_RENDERERS: dict[str, Any] = {
+    "order_by": _render_order_by,
+    "case_order_by": _render_case_order_by,
+}
+"""The bounded ORDER BY vocabulary. Two members, both rendered by tests.
+
+Replaces `if hasattr(o, "to_sql_fragment"): ... else: ...` in select.py. A
+term carrying an unrecognised tag raises KeyError instead of falling through
+to whichever branch happened to be last.
+"""
+
+
+def render_order_term(
+    term: "OrderBy | CaseOrderBy", dialect: str
+) -> tuple[str, dict[str, Any]]:
+    """Render one ORDER BY term. Pure: term in, (sql, params) out."""
+    return ORDER_TERM_RENDERERS[term["kind"]](term, dialect)
+
+
+class SubqueryExpr(TypedDict):
     """
     Subquery expression for use in IN/NOT IN.
 
@@ -792,14 +819,24 @@ class SubqueryExpr:
         rows = await users.select(users.id).where(users.id.in_(admin_ids)).execute()
     """
 
-    __slots__ = ("_query",)
+    kind: Literal["subquery"]
+    query: Any
 
-    def __init__(self, query: Any) -> None:
-        self._query = query
 
-    def to_sql_fragment(self, dialect: str) -> tuple[str, dict[str, Any]]:
-        """Return (sql, params) for the inner SELECT."""
-        return self._query.to_sql(dialect)
+def is_subquery(value: Any) -> bool:
+    """True when a value is a subquery expression.
+
+    `isinstance` cannot be used on a TypedDict, and the operand it guards is
+    caller-supplied — a list, a scalar, or a subquery — so the check is on
+    the tag, not the type. A plain dict passed as a value has no `kind` and
+    is correctly not a subquery.
+    """
+    return isinstance(value, dict) and value.get("kind") == "subquery"
+
+
+def render_subquery(expr: SubqueryExpr, dialect: str) -> tuple[str, dict[str, Any]]:
+    """Render the inner SELECT."""
+    return expr["query"].to_sql(dialect)
 
 
 class JoinClause(TypedDict):
@@ -951,4 +988,4 @@ def subquery(query: Any) -> SubqueryExpr:
             .execute()
         )
     """
-    return SubqueryExpr(query)
+    return SubqueryExpr(kind="subquery", query=query)

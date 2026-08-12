@@ -10,26 +10,19 @@ Tests SQL generation for:
 - Condition.to_sql() with SubqueryExpr
 """
 
-import pytest
 
 from declaro_persistum.query.table import (
-    CaseExpression,
-    CaseOrderBy,
-    ColumnProxy,
-    Condition,
-    OrderBy,
-    SQLFunction,
     SubqueryExpr,
-    TableProxy,
     case_,
     count_,
+    is_subquery,
+    render_order_term,
+    render_subquery,
     subquery,
     sum_,
     table,
 )
-from declaro_persistum.query.select import SelectQuery
 from declaro_persistum.types import Schema
-
 
 # ---------------------------------------------------------------------------
 # Minimal schema
@@ -245,8 +238,8 @@ class TestCaseOrderBy:
         tickets = table("tickets", _SCHEMA, pool=None)
         expr = case_((tickets.severity == "critical", 0), else_=1)
         order = expr.asc()
-        assert isinstance(order, CaseOrderBy)
-        sql, params = order.to_sql_fragment("postgresql")
+        assert order["kind"] == "case_order_by"
+        sql, params = render_order_term(order, "postgresql")
         assert sql.endswith("ASC")
         assert "CASE" in sql
 
@@ -255,7 +248,7 @@ class TestCaseOrderBy:
         tickets = table("tickets", _SCHEMA, pool=None)
         expr = case_((tickets.severity == "critical", 0), else_=1)
         order = expr.desc()
-        sql, params = order.to_sql_fragment("postgresql")
+        sql, params = render_order_term(order, "postgresql")
         assert sql.endswith("DESC")
 
     def test_case_order_bare_no_alias(self):
@@ -263,7 +256,7 @@ class TestCaseOrderBy:
         tickets = table("tickets", _SCHEMA, pool=None)
         expr = case_((tickets.severity == "critical", 0), else_=1).as_("priority")
         order = expr.asc()
-        sql, _ = order.to_sql_fragment("postgresql")
+        sql, _ = render_order_term(order, "postgresql")
         assert "AS priority" not in sql
         assert sql.endswith("ASC")
 
@@ -383,14 +376,14 @@ class TestSubquery:
         """subquery() returns a SubqueryExpr instance."""
         users = table("users", _SCHEMA, pool=None)
         result = subquery(users.select(users.id))
-        assert isinstance(result, SubqueryExpr)
+        assert is_subquery(result), result
 
     def test_subquery_to_sql_fragment(self):
-        """SubqueryExpr.to_sql_fragment() returns inner query SQL and params."""
+        """render_subquery() returns the inner query's SQL and params."""
         users = table("users", _SCHEMA, pool=None)
         inner = users.select(users.id).where(users.email == "alice@example.com")
-        sq = SubqueryExpr(inner)
-        sql, params = sq.to_sql_fragment("postgresql")
+        sq = SubqueryExpr(kind="subquery", query=inner)
+        sql, params = render_subquery(sq, "postgresql")
 
         assert "SELECT" in sql
         assert "FROM users" in sql

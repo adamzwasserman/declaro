@@ -13,6 +13,7 @@ from declaro_persistum.query.table import (
     Condition,
     ConditionGroup,
     OrderBy,
+    render_order_term,
 )
 from declaro_persistum.types import Schema
 
@@ -222,7 +223,13 @@ class QuerySet:
                     f"Available columns: {available}"
                 )
 
-            ordering.append(OrderBy(f"{self._table_name}.{col_name}", direction))
+            ordering.append(
+                OrderBy(
+                    kind="order_by",
+                    column=f"{self._table_name}.{col_name}",
+                    direction=direction,
+                )
+            )
 
         return self._clone(ordering=ordering)
 
@@ -278,9 +285,13 @@ class QuerySet:
             sql += f" WHERE {where_sql}"
             params.update(where_params)
 
-        # ORDER BY
+        # ORDER BY — same renderer as SelectQuery. This was a third private
+        # copy of ORDER BY rendering (`o.to_sql()`); the term vocabulary is
+        # declared once in table.py and every style dispatches through it.
         if self._ordering:
-            orders = ", ".join(o.to_sql() for o in self._ordering)
+            orders = ", ".join(
+                render_order_term(o, dialect)[0] for o in self._ordering
+            )
             sql += f" ORDER BY {orders}"
 
         # LIMIT/OFFSET

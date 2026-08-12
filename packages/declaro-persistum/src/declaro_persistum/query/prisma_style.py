@@ -264,7 +264,13 @@ class PrismaQueryBuilder:
                         f"Available columns: {available}"
                     )
                 dir_sql = "DESC" if direction.lower() == "desc" else "ASC"
-                result.append(OrderBy(f"{self._table_name}.{field}", dir_sql))
+                result.append(
+                    OrderBy(
+                        kind="order_by",
+                        column=f"{self._table_name}.{field}",
+                        direction=dir_sql,
+                    )
+                )
         return result
 
     def _build_select_query(

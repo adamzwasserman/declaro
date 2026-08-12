@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from declaro_persistum.query.builder import Query
 from declaro_persistum.query.table import (
-    CaseExpression,
     CaseOrderBy,
     ColumnProxy,
     Condition,
@@ -16,6 +15,7 @@ from declaro_persistum.query.table import (
     JoinClause,
     OrderBy,
     SQLFunction,
+    render_order_term,
 )
 from declaro_persistum.types import Schema
 
@@ -104,7 +104,9 @@ class SelectQuery:
         normalized: list[OrderBy | CaseOrderBy] = []
         for order in orders:
             if isinstance(order, ColumnProxy):
-                normalized.append(OrderBy(order._full_name, "ASC"))
+                normalized.append(
+                    OrderBy(kind="order_by", column=order._full_name, direction="ASC")
+                )
             else:
                 normalized.append(order)
 
@@ -290,16 +292,15 @@ class SelectQuery:
             sql += f" HAVING {having_sql}"
             params.update(having_params)
 
-        # ORDER BY — CaseOrderBy uses to_sql_fragment; OrderBy uses to_sql
+        # ORDER BY — one call, dispatch on the term's `kind` tag. This was
+        # `if hasattr(o, "to_sql_fragment")`, which classified terms by shape
+        # and would silently reroute any term that gained or lost a method.
         if self._order_by:
             order_parts = []
             for o in self._order_by:
-                if hasattr(o, "to_sql_fragment"):
-                    o_sql, o_params = o.to_sql_fragment(dialect)
-                    order_parts.append(o_sql)
-                    params.update(o_params)
-                else:
-                    order_parts.append(o.to_sql())
+                o_sql, o_params = render_order_term(o, dialect)
+                order_parts.append(o_sql)
+                params.update(o_params)
             sql += f" ORDER BY {', '.join(order_parts)}"
 
         # LIMIT/OFFSET
