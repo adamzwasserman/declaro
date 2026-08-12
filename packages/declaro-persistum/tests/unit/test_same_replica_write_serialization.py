@@ -27,9 +27,9 @@ local pools only, so the two arms here are two POOL SHAPES, not two settings
 on one shape:
 
     MVCC arm  ->  local pool, no remote_url
-    WAL arm   ->  synced pool, remote_url set
+    WAL arm   ->  replicated pool, remote_url set
 
-These tests previously built a synced pool for both arms and passed
+These tests previously built a replicated pool for both arms and passed
 `mvcc=True` to the constructor. That parameter is gone, and the
 configuration it selected is the one persistum exists to make unreachable.
 """
@@ -76,7 +76,7 @@ class _TapeConn:
                 if counts[self.replica] > 1 and not type(self).mvcc:
                     type(self).collisions += 1
                     raise RuntimeError(
-                        "sync engine operation failed: database tape error: "
+                        "replication engine operation failed: database tape error: "
                         "database is busy"
                     )
                 await asyncio.sleep(0.02)
@@ -127,7 +127,7 @@ async def _pool(tmp_path, monkeypatch, *, mvcc: bool, name="r.db"):
     pool = TursoPool(str(db), max_size=24, **remote)
     pool._push_loop = lambda: asyncio.sleep(0)  # type: ignore[assignment]
     pool._enable_replica_fk_enforcement = lambda: asyncio.sleep(0)  # type: ignore[assignment]
-    pool._initial_sync = lambda: asyncio.sleep(0)  # type: ignore[assignment]
+    pool._initial_replication = lambda: asyncio.sleep(0)  # type: ignore[assignment]
     await pool._initialize()
     assert pool._mvcc is mvcc, (
         "the pool did not land in the arm this test needs; the engine choice "

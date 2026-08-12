@@ -40,25 +40,25 @@ WAL LOSES WRITES at crew 16 even after three retries. MVCC loses none. So
 "WAL plus persistent connections" is not a cheaper safe option, it is a lossy
 one. WAL's safe crew is 1, or writers serialised behind a lock.
 
-A SYNCED REPLICA TAKES ONE SYNC CONNECTION. That is the constraint, and it
+A REPLICA TAKES ONE REPLICA CONNECTION. That is the constraint, and it
 is NOT about MVCC. Measured 2026-08-12 against a real replica, pyturso 0.7.2:
 
-    MVCC on a synced replica          journal_mode = 'mvcc', 4 of 4 runs
+    MVCC on a replica          journal_mode = 'mvcc', 4 of 4 runs
     20 writes, sequential, 1 conn     20 local -> 20 ON PRIMARY, no checkpoint
     8 writes over 8 connections       5 local -> 0 ON PRIMARY, no convergence
-    opening a 2nd sync connection     "database tape error: database is busy"
+    opening a 2nd replica connection     "database tape error: database is busy"
                                       3 of 4 runs failed outright, one with
                                       12 retries over 30s on an IDLE database
 
-So MVCC plus cloud sync is fine for sequential writes. What breaks is more
-than one sync connection against one replica, which is what persistum's
+So MVCC plus replication is fine for sequential writes. What breaks is more
+than one replica connection against one replica, which is what persistum's
 one-connection-per-write does the moment nothing serialises it. MVCC is
 incidental: it is merely the mode in which `_write_serialisation` stops
 taking the lock, and that lock is what has been masking this on WAL.
 
 THIS PARAGRAPH PREVIOUSLY SAID "MVCC IS LOCAL ONLY ... it creates local-only
-internal tables the sync engine cannot reconcile." Both halves were wrong.
-MVCC runs on a synced replica, measured repeatedly, and the internal-table
+internal tables the replication engine cannot reconcile." Both halves were wrong.
+MVCC runs on a replica, measured repeatedly, and the internal-table
 mechanism was asserted from one correlational observation and never proven.
 The engine has never refused this combination; persistum's policy did.
 """
@@ -137,12 +137,12 @@ def record_push_success(pool) -> None:
 def local_replica_has_data(pool) -> bool:
     """True when a non-empty local replica file already exists.
 
-    Decides whether the initial sync can be backgrounded: with data on
+    Decides whether the initial replication can be backgrounded: with data on
     disk the pool can serve reads immediately, without it the pool would
     otherwise hand out an empty database.
 
     An unreadable or missing path answers False — the conservative
-    direction, since a False answer only costs a blocking sync while a
+    direction, since a False answer only costs a blocking replication while a
     wrong True serves empty results.
     """
     try:
@@ -151,7 +151,7 @@ def local_replica_has_data(pool) -> bool:
         return False
 
 
-async def initial_sync(pool) -> None:
+async def initial_replication(pool) -> None:
     """Deliver un-pushed local writes, then pull cloud state.
 
     The push must precede the pull: a prior process may have committed
@@ -170,46 +170,46 @@ async def initial_sync(pool) -> None:
         if pool._write_holder:
             await pool._write_holder.pull()
     except Exception as e:
-        pool._initial_sync_error = e
+        pool._initial_replication_error = e
         logger.warning(
-            "Initial sync failed for %s; serving the local replica at its "
+            "Initial replication failed for %s; serving the local replica at its "
             "current revision and retrying via the push loop: %s",
             pool._database_path,
             e,
         )
     finally:
-        if pool._initial_sync_event:
-            pool._initial_sync_event.set()
+        if pool._initial_replication_event:
+            pool._initial_replication_event.set()
 
 
 async def initial_pull_complete(pool) -> None:
-    """Wait until the pool's initial cloud sync has finished.
+    """Wait until the pool's initial replication has finished.
 
     Await this before any operation that must not observe a stale
     replica — schema introspection above all, where a stale read makes
     the differ compute against a schema that is not the primary's and
     emit operations that correct code then faithfully applies.
 
-    Returns immediately for local-only pools, and for pools whose sync
-    already ran inline. Re-raises the initial sync's failure, so a caller
+    Returns immediately for local-only pools, and for pools whose replication
+    already ran inline. Re-raises the initial replication's failure, so a caller
     that asked for a consistent view is told it did not get one rather
     than proceeding on stale data.
     """
-    if pool._initial_sync_event is not None:
-        await pool._initial_sync_event.wait()
-    if pool._initial_sync_error is not None:
-        raise pool._initial_sync_error
+    if pool._initial_replication_event is not None:
+        await pool._initial_replication_event.wait()
+    if pool._initial_replication_error is not None:
+        raise pool._initial_replication_error
 
 
 async def push_once(pool) -> bool:
     """Ship pending frames to cloud on the write connection, in turn.
 
-    The push used to hold a sync connection of its own so a write never
+    The push used to hold a replica connection of its own so a write never
     waited for a cloud round trip. It no longer does: nothing is waiting
     on the push, so it can queue behind writes like anything else, and
     one fewer connection is one fewer thing writing to the replica.
 
-    This does NOT rest on any claim that the sync engine takes a single
+    This does NOT rest on any claim that the replication engine takes a single
     writer. Turso supports concurrent writers through MVCC and
     BEGIN CONCURRENT, and `Error::Busy` at commit is a documented,
     retryable conflict signal rather than evidence of a broken shape.

@@ -35,25 +35,25 @@ WAL LOSES WRITES at crew 16 even after three retries. MVCC loses none. So
 "WAL plus persistent connections" is not a cheaper safe option, it is a lossy
 one. WAL's safe crew is 1, or writers serialised behind a lock.
 
-A SYNCED REPLICA TAKES ONE SYNC CONNECTION. That is the constraint, and it
+A REPLICA TAKES ONE REPLICA CONNECTION. That is the constraint, and it
 is NOT about MVCC. Measured 2026-08-12 against a real replica, pyturso 0.7.2:
 
-    MVCC on a synced replica          journal_mode = 'mvcc', 4 of 4 runs
+    MVCC on a replica          journal_mode = 'mvcc', 4 of 4 runs
     20 writes, sequential, 1 conn     20 local -> 20 ON PRIMARY, no checkpoint
     8 writes over 8 connections       5 local -> 0 ON PRIMARY, no convergence
-    opening a 2nd sync connection     "database tape error: database is busy"
+    opening a 2nd replica connection     "database tape error: database is busy"
                                       3 of 4 runs failed outright, one with
                                       12 retries over 30s on an IDLE database
 
-So MVCC plus cloud sync is fine for sequential writes. What breaks is more
-than one sync connection against one replica, which is what persistum's
+So MVCC plus replication is fine for sequential writes. What breaks is more
+than one replica connection against one replica, which is what persistum's
 one-connection-per-write does the moment nothing serialises it. MVCC is
 incidental: it is merely the mode in which `_write_serialisation` stops
 taking the lock, and that lock is what has been masking this on WAL.
 
 THIS PARAGRAPH PREVIOUSLY SAID "MVCC IS LOCAL ONLY ... it creates local-only
-internal tables the sync engine cannot reconcile." Both halves were wrong.
-MVCC runs on a synced replica, measured repeatedly, and the internal-table
+internal tables the replication engine cannot reconcile." Both halves were wrong.
+MVCC runs on a replica, measured repeatedly, and the internal-table
 mechanism was asserted from one correlational observation and never proven.
 The engine has never refused this combination; persistum's policy did.
 """
@@ -79,7 +79,7 @@ class _TursoConnectionHolder:
       Used by TursoPool. No executor or threading needed.
 
     When remote_url is provided, connect_async() uses turso.aio.sync
-    to enable push()/pull() cloud synchronisation.
+    to enable push()/pull() replicationhronisation.
     """
 
     def __init__(self, database_path: str, remote_url: str | None = None, auth_token: str | None = None) -> None:
@@ -93,7 +93,7 @@ class _TursoConnectionHolder:
     # ------------------------------------------------------------------
 
     async def connect_async(self) -> None:
-        """Open async connection with optional cloud sync."""
+        """Open areplica connection with optional replication."""
         if self._remote_url:
             import turso.aio.sync
 
@@ -147,8 +147,13 @@ class _TursoConnectionHolder:
     def rollback(self) -> None:
         self.conn.rollback()
 
-    def sync(self) -> None:
-        """Sync the database (pyturso-specific operation)."""
+    def replicate(self) -> None:
+        """Bring this replica and the cloud primary into conformity.
+
+        `conn.sync()` is PYTURSO's name for it and cannot be renamed here.
+        Ours is `replicate`: in this package "sync" means synchronous, and
+        nothing else.
+        """
         if hasattr(self.conn, "sync"):
             self.conn.sync()
 
@@ -166,7 +171,7 @@ class TursoAsyncConnection:
 
     Supports two modes determined by whether an executor is supplied:
     - **Native async** (executor=None): the holder contains a
-      turso.aio / turso.aio.sync connection. All calls delegate
+      turso.aio / turso.aio.replica connection. All calls delegate
       directly — no threading overhead.
     - **Legacy sync** (executor provided): the holder contains a
       turso.connect() connection. Calls are dispatched via
@@ -216,7 +221,7 @@ class TursoAsyncConnection:
         """Commit the current transaction."""
         if self._executor is not None:
             await self._loop.run_in_executor(self._executor, self._holder.commit)
-            await self.sync()
+            await self.replicate()
         else:
             await self._holder.conn.commit()
 
@@ -227,10 +232,10 @@ class TursoAsyncConnection:
         else:
             await self._holder.conn.rollback()
 
-    async def sync(self) -> None:
-        """Sync the database."""
+    async def replicate(self) -> None:
+        """Bring this replica and the cloud primary into conformity."""
         if self._executor is not None:
-            await self._loop.run_in_executor(self._executor, self._holder.sync)
+            await self._loop.run_in_executor(self._executor, self._holder.replicate)
         else:
             await self._holder.pull()
 

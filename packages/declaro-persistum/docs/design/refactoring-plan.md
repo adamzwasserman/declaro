@@ -18,7 +18,7 @@
 >
 > **WAL loses writes at crew 16 even after three retries. MVCC loses none.** WAL's safe crew is 1, or writers serialised behind a lock.
 >
-> **A synced replica takes ONE sync connection.** Measured 2026-08-12, pyturso 0.7.2, real replica: MVCC *does* run on a synced replica (`journal_mode = 'mvcc'`, 4 of 4 runs) and 20 sequential writes under it reached the primary intact. What fails is a *second* sync connection — `database tape error: database is busy`, 3 of 4 runs outright, one after 12 retries over 30s on an idle database. In the run where eight opened: 5 writes local, **0 on the primary**. MVCC is incidental; it is the mode in which the pool stops serialising writers, and that serialisation is what keeps one sync connection alive at a time. **The earlier claim "MVCC is local only — it creates local-only internal tables the sync engine cannot reconcile" was wrong in both halves and is retracted.**
+> **A replica takes ONE replica connection.** Measured 2026-08-12, pyturso 0.7.2, real replica: MVCC *does* run on a replica (`journal_mode = 'mvcc'`, 4 of 4 runs) and 20 sequential writes under it reached the primary intact. What fails is a *second* replica connection — `database tape error: database is busy`, 3 of 4 runs outright, one after 12 retries over 30s on an idle database. In the run where eight opened: 5 writes local, **0 on the primary**. MVCC is incidental; it is the mode in which the pool stops serialising writers, and that serialisation is what keeps one replica connection alive at a time. **The earlier claim "MVCC is local only — it creates local-only internal tables the replication engine cannot reconcile" was wrong in both halves and is retracted.**
 
 ## What we are aiming at
 
@@ -251,7 +251,7 @@ Add the structural checks once the owner exists: purity, no mutation of inputs, 
 
 ## Phase 4 — separate the targets
 
-**This split is a design decision, and I made it.** The earlier text here read "a capability boundary, not a design preference … Nobody chose that and no refactor removes it." That was false on every clause. MVCC runs on a synced replica; concurrent writes and cloud sync are not mutually exclusive in the engine. The measured constraint is one *sync connection* per replica, so the synced path gets no write concurrency **as persistum is currently built** — because it opens a connection per write. A refactor that stops doing that is exactly what would remove it. Tracked as declaro-eer.
+**This split is a design decision, and I made it.** The earlier text here read "a capability boundary, not a design preference … Nobody chose that and no refactor removes it." That was false on every clause. MVCC runs on a replica; concurrent writes and replication are not mutually exclusive in the engine. The measured constraint is one *replica connection* per replica, so the replicated path gets no write concurrency **as persistum is currently built** — because it opens a connection per write. A refactor that stops doing that is exactly what would remove it. Tracked as declaro-eer.
 
 - Postgres, SQLite and WAL-Turso replicas: pooled.
 - MVCC Turso: not pooled.
@@ -259,7 +259,7 @@ Add the structural checks once the owner exists: purity, no mutation of inputs, 
 
 **Both blockers are resolved. This phase is no longer blocked.**
 
-1. **MVCC Turso is local only and never syncs.** Sync is the WAL replica's job, and that target is pooled. Every failure measured on 2026-08-11 came from MVCC on a *synced* replica: `__turso_internal_mvcc_meta` exists locally and not on the primary, giving 8 ok / 6 durable / 3 on primary here, and push-fails-forever plus a hang on multicardz's box. MVCC and the sync engine do not go together, so nothing in the MVCC target needs to own a push.
+1. **MVCC Turso is local only and never syncs.** Sync is the WAL replica's job, and that target is pooled. Every failure measured on 2026-08-11 came from MVCC on a *replicated* replica: `__turso_internal_mvcc_meta` exists locally and not on the primary, giving 8 ok / 6 durable / 3 on primary here, and push-fails-forever plus a hang on multicardz's box. MVCC and the replication engine do not go together, so nothing in the MVCC target needs to own a push.
 
 2. **One-and-done does not contend. That result was my measurement error.** Measured 2026-08-11, local Turso, 20 concurrent writers each opening their own connection:
 
@@ -324,7 +324,7 @@ Add the structural checks once the owner exists: purity, no mutation of inputs, 
 
    **A hot row is not fixable by retrying.** At 20 writers on one row, exponential backoff landed 10/20 in 580ms and immediate re-issue landed 8/20 in 159ms — backoff buys two successes for 3.6× the wall time. Exhausting the bound is the correct outcome; no retry policy fixes a hot row, it only decides how long you spend discovering that.
 
-   **Still not measured:** one run per point, one machine, one process. The 20-per-row point read 10/20 on one run and 14/20 on another — the shape is solid, individual numbers are approximate. Nothing here covers the synced target.
+   **Still not measured:** one run per point, one machine, one process. The 20-per-row point read 10/20 on one run and 14/20 on another — the shape is solid, individual numbers are approximate. Nothing here covers the replicated target.
 
 ### There are two retries, and they are not the same
 
@@ -347,7 +347,7 @@ Conflated in an earlier draft; separated after Adam ruled on the sync path.
 
 **The write sequence for the MVCC target, exactly:**
 
-    connect(path)                    # local turso, no sync engine
+    connect(path)                    # local turso, no replication engine
     PRAGMA journal_mode = 'mvcc'     # the cursor MUST be fetched or it is a no-op
     BEGIN CONCURRENT                 # mandatory; without it, ordinary locking
     <the deposited sql, params>
@@ -377,7 +377,7 @@ Largest untested blocks today: `turso_pool.py`, `cli/commands.py`'s async comman
 
 - `abstractions/` is the emulation library and is the right shape already.
 - `applier/` and `inspector/` are per-dialect behind protocols and are the model the connection layer should follow.
-- MVCC on a synced database stays off. Turso documents the gap: all statements on a connection share one MVCC transaction, and a write that reported success "is silently rolled back if the transaction then ends abnormally." MVCC is beta.
+- MVCC on a replicated database stays off. Turso documents the gap: all statements on a connection share one MVCC transaction, and a write that reported success "is silently rolled back if the transaction then ends abnormally." MVCC is beta.
 
 ## Mistakes from 2026-08-11 not to repeat
 

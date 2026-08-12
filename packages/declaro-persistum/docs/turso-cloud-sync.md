@@ -1,4 +1,4 @@
-# Turso Cloud Sync: Embedded Replica Limitations and Workarounds
+# Turso Replication: Embedded Replica Limitations and Workarounds
 
 
 > ## ⚠️ DEPRECATED — POISONOUS PRACTICE
@@ -29,7 +29,7 @@
 >
 > **WAL loses writes at crew 16 even after three retries. MVCC loses none.** WAL's safe crew is 1, or writers serialised behind a lock.
 >
-> **A synced replica takes ONE sync connection.** Measured 2026-08-12, pyturso 0.7.2, real replica: MVCC *does* run on a synced replica (`journal_mode = 'mvcc'`, 4 of 4 runs) and 20 sequential writes under it reached the primary intact. What fails is a *second* sync connection — `database tape error: database is busy`, 3 of 4 runs outright, one after 12 retries over 30s on an idle database. In the run where eight opened: 5 writes local, **0 on the primary**. MVCC is incidental; it is the mode in which the pool stops serialising writers, and that serialisation is what keeps one sync connection alive at a time. **The earlier claim "MVCC is local only — it creates local-only internal tables the sync engine cannot reconcile" was wrong in both halves and is retracted.**
+> **A replica takes ONE replica connection.** Measured 2026-08-12, pyturso 0.7.2, real replica: MVCC *does* run on a replica (`journal_mode = 'mvcc'`, 4 of 4 runs) and 20 sequential writes under it reached the primary intact. What fails is a *second* replica connection — `database tape error: database is busy`, 3 of 4 runs outright, one after 12 retries over 30s on an idle database. In the run where eight opened: 5 writes local, **0 on the primary**. MVCC is incidental; it is the mode in which the pool stops serialising writers, and that serialisation is what keeps one replica connection alive at a time. **The earlier claim "MVCC is local only — it creates local-only internal tables the replication engine cannot reconcile" was wrong in both halves and is retracted.**
 
 ## Architecture
 
@@ -41,18 +41,18 @@ declaro-persistum uses pyturso's **embedded replica** mode for Turso Cloud datab
 
 This gives sub-ms read latency while keeping Turso Cloud as the source of truth.
 
-## The Problem: DDL Cannot Be Synced
+## The Problem: DDL Cannot Be Replicated
 
-pyturso's sync engine uses WAL-based replication. It can replicate **DML** (INSERT, UPDATE, DELETE) but **cannot replicate DDL** (CREATE TABLE, ALTER TABLE, DROP TABLE).
+pyturso's replication engine uses WAL-based replication. It can replicate **DML** (INSERT, UPDATE, DELETE) but **cannot replicate DDL** (CREATE TABLE, ALTER TABLE, DROP TABLE).
 
 When `apply_migrations_async()` creates tables locally and tries to push:
 
 ```
-sync engine operation failed: database sync engine error:
+replication engine operation failed: database replication engine error:
 failed to execute sql: Error { message: "SQLite error: no such table: users" }
 ```
 
-The push fails because the cloud DB has no schema. The sync engine tries to replay changes against tables that don't exist on cloud.
+The push fails because the cloud DB has no schema. The replication engine tries to replay changes against tables that don't exist on cloud.
 
 ### Consequences
 
@@ -62,7 +62,7 @@ The push fails because the cloud DB has no schema. The sync engine tries to repl
 
 ## Workaround: `declaro migrate-remote`
 
-A CLI command that creates/updates the schema directly on Turso Cloud, bypassing the embedded replica sync engine entirely.
+A CLI command that creates/updates the schema directly on Turso Cloud, bypassing the embedded replica replication engine entirely.
 
 ### First-time setup (empty cloud DB)
 
@@ -102,7 +102,7 @@ uv run declaro migrate-remote \
 ### How it works
 
 1. Creates a temporary local file
-2. Opens a sync connection (`turso.aio.sync.connect`) to that temp file with the cloud URL
+2. Opens a replica connection (`turso.aio.sync.connect`) to that temp file with the cloud URL
 3. Pulls current cloud state into the temp file
 4. Introspects the temp file to get current schema
 5. Diffs against the target schema (Pydantic models)
@@ -164,7 +164,7 @@ A cloud replica named `<name>` is **four files**, and they are one atomic unit:
 
 Both a raw `turso.aio.sync` connection and `ConnectionPool.turso` produce the same four.
 
-**Never delete some of them and keep the rest.** `-info` is what lets the engine place the local database in the sync stream. Sweep it while keeping `<name>` and the next open fails with `sync engine operation failed: database error: Database schema changed` — the engine has a database it cannot relate to the remote.
+**Never delete some of them and keep the rest.** `-info` is what lets the engine place the local database in the sync stream. Sweep it while keeping `<name>` and the next open fails with `replication engine operation failed: database error: Database schema changed` — the engine has a database it cannot relate to the remote.
 
 If you want a clean re-pull, delete **all four together**. That is a genuine cold start and the engine handles it correctly.
 
@@ -194,13 +194,13 @@ Twenty concurrent writers land twenty writes with no lock anywhere. Single-write
 
 This section previously reported a "2–3 concurrent writer ceiling" and called it the engine at its limit, with advice to shard around it. **That was wrong, and the advice was wrong.**
 
-The original measurement is real — it is the MVCC-off row above. But it was taken with the engine running in WAL mode, where rejecting the second writer is documented default behaviour. It measured the absence of a feature, not a limit. The explanation later attached to it here — that the sync engine is a single-appender log — was invented and is not in any Turso documentation.
+The original measurement is real — it is the MVCC-off row above. But it was taken with the engine running in WAL mode, where rejecting the second writer is documented default behaviour. It measured the absence of a feature, not a limit. The explanation later attached to it here — that the replication engine is a single-appender log — was invented and is not in any Turso documentation.
 
 If you were told to shard hot data because of this ceiling, that advice does not apply. Check that MVCC is active first: the pool logs it at startup, and `PRAGMA journal_mode` returns `mvcc` when it is.
 
 The residual failures under MVCC — one at K=5, one at K=10 — are the background push contending with writers, not writers contending with each other. The push absorbs that by retrying, which is safe because it ships frames rather than replaying a caller's statements.
 
-## Known pyturso Sync Engine Limitations
+## Known pyturso Replication Engine Limitations
 
 **This list has been emptied. Every entry that was here was written as an engine fact and stated without a measurement; three were later disproved outright, and the rest were never checked.**
 

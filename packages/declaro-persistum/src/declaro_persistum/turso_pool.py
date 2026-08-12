@@ -43,25 +43,25 @@ WAL LOSES WRITES at crew 16 even after three retries. MVCC loses none. So
 "WAL plus persistent connections" is not a cheaper safe option, it is a lossy
 one. WAL's safe crew is 1, or writers serialised behind a lock.
 
-A SYNCED REPLICA TAKES ONE SYNC CONNECTION. That is the constraint, and it
+A REPLICA TAKES ONE REPLICA CONNECTION. That is the constraint, and it
 is NOT about MVCC. Measured 2026-08-12 against a real replica, pyturso 0.7.2:
 
-    MVCC on a synced replica          journal_mode = 'mvcc', 4 of 4 runs
+    MVCC on a replica          journal_mode = 'mvcc', 4 of 4 runs
     20 writes, sequential, 1 conn     20 local -> 20 ON PRIMARY, no checkpoint
     8 writes over 8 connections       5 local -> 0 ON PRIMARY, no convergence
-    opening a 2nd sync connection     "database tape error: database is busy"
+    opening a 2nd replica connection     "database tape error: database is busy"
                                       3 of 4 runs failed outright, one with
                                       12 retries over 30s on an IDLE database
 
-So MVCC plus cloud sync is fine for sequential writes. What breaks is more
-than one sync connection against one replica, which is what persistum's
+So MVCC plus replication is fine for sequential writes. What breaks is more
+than one replica connection against one replica, which is what persistum's
 one-connection-per-write does the moment nothing serialises it. MVCC is
 incidental: it is merely the mode in which `_write_serialisation` stops
 taking the lock, and that lock is what has been masking this on WAL.
 
 THIS PARAGRAPH PREVIOUSLY SAID "MVCC IS LOCAL ONLY ... it creates local-only
-internal tables the sync engine cannot reconcile." Both halves were wrong.
-MVCC runs on a synced replica, measured repeatedly, and the internal-table
+internal tables the replication engine cannot reconcile." Both halves were wrong.
+MVCC runs on a replica, measured repeatedly, and the internal-table
 mechanism was asserted from one correlational observation and never proven.
 The engine has never refused this combination; persistum's policy did.
 """
@@ -102,12 +102,12 @@ _active_transaction: contextvars.ContextVar[Any | None] = contextvars.ContextVar
 
 class TursoPool(BasePool):
     """
-    Turso connection pool using pyturso with optional cloud sync.
+    Turso connection pool using pyturso with optional replication.
 
     Two modes:
     - **Local-only** (no remote_url): turso.aio.connect() — embedded
       SQLite-compatible DB with MVCC for concurrent writers.
-    - **Cloud sync** (remote_url provided): turso.aio.sync.connect() —
+    - **Replication** (remote_url provided): turso.aio.sync.connect() —
       local writes commit sub-ms, background push loop sends changes
       to Turso Cloud every ``push_interval_s`` seconds.
 
@@ -138,29 +138,29 @@ class TursoPool(BasePool):
         self._background_pull = background_pull
         # THE ENGINE CHOICE IS PERSISTUM'S, NEVER THE CALLER'S.
         #
-        #   remote_url set -> synced -> MVCC OFF
+        #   remote_url set -> replicated -> MVCC OFF
         #   no remote_url  -> local  -> MVCC ON
         #
-        # WHY, STATED HONESTLY. It is NOT that MVCC cannot run on a synced
+        # WHY, STATED HONESTLY. It is NOT that MVCC cannot run on a replicated
         # replica. It can, measured 4 of 4 runs, and 20 sequential writes
         # under it reached the primary intact. This comment used to claim
         # the opposite and named a mechanism (local-only internal tables the
-        # sync engine cannot reconcile) that was never proven.
+        # replication engine cannot reconcile) that was never proven.
         #
-        # What is measured is narrower: a synced replica takes ONE sync
+        # What is measured is narrower: a replica takes ONE sync
         # connection. Opening a second usually fails outright ("database
         # tape error: database is busy"), and in the run where eight did
         # open, 5 writes landed locally and 0 reached the primary
         # (declaro-p39; 0.1.29 was yanked for it).
         #
         # MVCC is the mode in which `_write_serialisation` stops taking the
-        # replica lock, so turning it off on a synced pool is what keeps
-        # writers serialised and therefore keeps one sync connection live at
+        # replica lock, so turning it off on a replicated pool is what keeps
+        # writers serialised and therefore keeps one replica connection live at
         # a time. The rule below is correct BY CONSEQUENCE, not because the
         # engine forbids the combination. Tracked as declaro-eer: the real
-        # fix is to stop opening a connection per write on a synced pool.
+        # fix is to stop opening a connection per write on a replicated pool.
         # This was a caller parameter defaulting to True, so omitting it on a
-        # synced pool selected the losing configuration. There is now no way
+        # replicated pool selected the losing configuration. There is now no way
         # to ask for that.
         self._mvcc_requested = remote_url is None
         # How long to keep absorbing "database is busy" at a transaction
@@ -172,7 +172,7 @@ class TursoPool(BasePool):
         # The module docstring says why, and says it in the form of an
         # argument not to re-derive. Read it before flipping this.
         self._replica_write_lock = asyncio.Lock()
-        # Read connections. Reads do not sync, so each gets its own plain
+        # Read connections. Reads do not replicate, so each gets its own plain
         # local connection and they run in parallel. See acquire().
         self._read_holders: list[_TursoConnectionHolder] = []
         self._free_readers: asyncio.LifoQueue[_TursoConnectionHolder] | None = None
@@ -192,12 +192,12 @@ class TursoPool(BasePool):
         # has no connection of its own; it uses the write connection and
         # takes its turn. See _push_once.
         self._push_holder: _TursoConnectionHolder | None = None
-        # Initial-sync state. The event is created in _initialize, on the
+        # Initial-replication state. The event is created in _initialize, on the
         # running loop, rather than here — a pool may be constructed outside
         # the loop that later runs it.
-        self._initial_sync_event: asyncio.Event | None = None
-        self._initial_sync_task: asyncio.Task[None] | None = None
-        self._initial_sync_error: Exception | None = None
+        self._initial_replication_event: asyncio.Event | None = None
+        self._initial_replication_task: asyncio.Task[None] | None = None
+        self._initial_replication_error: Exception | None = None
         # No semaphore and no lock. A consumer must never wait on this pool's
         # bookkeeping: not on a lock, not behind a concurrency cap, and never
         # refused because the pool is busy. Reads, writes and the push each
@@ -228,26 +228,26 @@ class TursoPool(BasePool):
 
         await self._write_holder.connect_async()
         if self._remote_url:
-            self._initial_sync_event = asyncio.Event()
+            self._initial_replication_event = asyncio.Event()
             if self._background_pull and had_local_data:
                 # There is a populated replica on disk, so reads can be served
-                # the instant connect_async returns. The initial sync is then
+                # the instant connect_async returns. The initial replication is then
                 # a freshness step, not a correctness precondition, and
                 # blocking the open on it would push network latency onto
                 # every caller for no benefit.
                 #
                 # Callers needing a primary-consistent view await
                 # initial_pull_complete(). apply_migrations_async does exactly
-                # that before introspecting, so a backgrounded sync can never
+                # that before introspecting, so a backgrounded replication can never
                 # feed the differ a stale schema.
-                self._initial_sync_task = asyncio.create_task(self._initial_sync())
+                self._initial_replication_task = asyncio.create_task(self._initial_replication())
             else:
                 # No local data to serve (first creation, or a wiped ephemeral
-                # disk). Returning here without syncing would hand out a pool
+                # disk). Returning here without replicating would hand out a pool
                 # that reads an empty database and reports success — silently
                 # wrong. Blocking is the only correct option in this case, and
                 # it is a once-per-replica cost, not a per-open one.
-                await self._initial_sync()
+                await self._initial_replication()
         # MVCC is requested on every pool, cloud-backed or not. Turso supports
         # concurrent writes through BEGIN CONCURRENT over MVCC, and
         # acquire_write only issues BEGIN CONCURRENT when self._mvcc is true.
@@ -298,12 +298,12 @@ class TursoPool(BasePool):
                 logger.debug("PRAGMA cache_size not supported — using default")
             await self._write_holder.conn.commit()
         else:
-            # Cloud-sync replicas must enforce the same FK constraints as the
+            # Replicas must enforce the same FK constraints as the
             # primary. The FK *definition* bootstraps down with the schema, but
             # pyturso leaves enforcement OFF per connection by default — so a
             # write that violates a primary FK commits locally, fails to push
             # ("FOREIGN KEY constraint failed"), and is silently lost on the
-            # next re-sync. Enabling enforcement makes that write fail fast at
+            # next re-replicate. Enabling enforcement makes that write fail fast at
             # commit instead. Must run outside any transaction (fresh conn here).
             await self._enable_replica_fk_enforcement()
         if self._remote_url:
@@ -427,8 +427,8 @@ class TursoPool(BasePool):
     def _local_replica_has_data(self) -> bool:
         return replication.local_replica_has_data(self)
 
-    async def _initial_sync(self) -> None:
-        await replication.initial_sync(self)
+    async def _initial_replication(self) -> None:
+        await replication.initial_replication(self)
 
     async def initial_pull_complete(self) -> None:
         await replication.initial_pull_complete(self)
@@ -525,10 +525,10 @@ class TursoPool(BasePool):
         at K=20 above), so serialised-and-correct beats concurrent-and-lossy.
 
         The consequence is worth stating plainly for anyone measuring write
-        throughput against a synced replica: concurrent writers do not
+        throughput against a replica: concurrent writers do not
         increase it, because they queue. A write-concurrency ceiling on a
-        cloud-synced pool is this lock doing its job, not a limit to tune
-        away. Raising it means not being synced on that path, not a setting.
+        cloud-replicated pool is this lock doing its job, not a limit to tune
+        away. Raising it means not being replicated on that path, not a setting.
 
         This paragraph previously said "`mvcc=True` is the default and the
         engine has the last word". That parameter was removed in 0.2.0 and
@@ -546,7 +546,7 @@ class TursoPool(BasePool):
 
         The documented retryable set is Error::Busy, Error::BusySnapshot and
         anything reporting a conflict — a commit-time row conflict under
-        BEGIN CONCURRENT. The sync engine also wraps contention as
+        BEGIN CONCURRENT. The replication engine also wraps contention as
         "database tape error: database is busy".
         """
         text = str(error).lower()
@@ -647,7 +647,7 @@ class TursoPool(BasePool):
         writer opened later must be configured or it would silently behave
         differently from the first one — no MVCC, and no FK enforcement,
         which is the setting that stops a violating write committing locally
-        and being lost on the next re-sync.
+        and being lost on the next re-replicate.
         """
         if self._mvcc_requested:
             try:
@@ -729,7 +729,7 @@ class TursoPool(BasePool):
         docstring rejects the second shape, not the lever.
         """
         # THE ONE BRANCH IN THE WRITE PATH, and it is a capability difference
-        # rather than a preference. A SYNCED replica takes ONE sync connection:
+        # rather than a preference. A REPLICA takes ONE replica connection:
         # opening a second returns "database tape error: database is busy" in
         # 3 of 4 measured runs, and in the run where eight did open, 5 writes
         # landed locally and 0 reached the primary (declaro-eer, 2026-08-12).
@@ -741,13 +741,13 @@ class TursoPool(BasePool):
         # one OS thread and one tape acquisition per write, and killed a
         # consumer's box at 20 concurrent signups where 0.1.x seeded 200.
         # The instruction that produced it said "for turso embedded" — the
-        # local case — and it was applied to synced pools too.
+        # local case — and it was applied to replicated pools too.
         #
         # The caller sees no difference. This is exactly the mutable state
         # the pool is allowed to own: one connection, one owner, invisible.
         if self._remote_url:
             # Writer zero, held for the life of the pool, as 0.1.28 did.
-            # Writers are serialised behind _replica_write_lock on a synced
+            # Writers are serialised behind _replica_write_lock on a replicated
             # pool, so sharing it is safe: only one is inside at a time.
             yield self._write_holder
             return
@@ -773,7 +773,7 @@ class TursoPool(BasePool):
         """Take a read connection from the free list, opening one if needed.
 
         Read connections are plain local connections to the same replica
-        file. They never push and never pull, so they hold no sync state and
+        file. They never push and never pull, so they hold no replication state and
         cannot diverge from the write connection's view of the cloud. That is
         what lets them run outside _conn_lock.
 
@@ -830,13 +830,13 @@ class TursoPool(BasePool):
 
         SUPERSEDED. This docstring used to read "All writes go through
         _write_holder ... Creating separate connections per write caused
-        push failures because each connection tracked its own sync state
+        push failures because each connection tracked its own replication state
         independently." The code below it no longer does that: a write opens
         its OWN connection, uses it, and closes it. The docstring described
         the pool as it was before that change and was left behind by it.
 
         Provenance of the superseded claim: UNVERIFIED. "Each connection
-        tracked its own sync state independently" is an explanation, not a
+        tracked its own replication state independently" is an explanation, not a
         measurement, and no probe in this repo establishes it. Do not cite
         it as a reason against per-write connections. Do not treat it as
         disproved either — it has not been tested.

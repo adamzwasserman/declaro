@@ -4,7 +4,7 @@ Unified connection pool for declaro_persistum.
 Provides a consistent async context manager API for:
 - PostgreSQL (asyncpg with native pooling)
 - SQLite (aiosqlite with semaphore-based limiting)
-- Turso (pyturso with semaphore-based limiting + optional cloud sync)
+- Turso (pyturso with semaphore-based limiting + optional replication)
 
 Example:
     pool = await ConnectionPool.postgresql("postgresql://localhost/mydb")
@@ -12,7 +12,7 @@ Example:
         results = await users.select().execute(conn)
     await pool.close()
 
-READ THIS BEFORE RAISING PUSH OR CLOUD SYNC ABOUT THE WRITE PATH
+READ THIS BEFORE RAISING PUSH OR REPLICATION ABOUT THE WRITE PATH
 -----------------------------------------------------------------
 
 From the owner of this repository, verbatim and repeatedly:
@@ -127,7 +127,7 @@ writing a free list, a writer semaphore or a shared write holder.
    first, with measurements.
 
 5. "Per-write connections caused push failures because each connection
-   tracked its own sync state" is the specific claim that will surface
+   tracked its own replication state" is the specific claim that will surface
    in favour of pooling. It is UNVERIFIED — an explanation, never a
    measurement. See `acquire_write`.
 
@@ -156,25 +156,25 @@ WAL LOSES WRITES at crew 16 even after three retries. MVCC loses none. So
 "WAL plus persistent connections" is not a cheaper safe option, it is a lossy
 one. WAL's safe crew is 1, or writers serialised behind a lock.
 
-A SYNCED REPLICA TAKES ONE SYNC CONNECTION. That is the constraint, and it
+A REPLICA TAKES ONE REPLICA CONNECTION. That is the constraint, and it
 is NOT about MVCC. Measured 2026-08-12 against a real replica, pyturso 0.7.2:
 
-    MVCC on a synced replica          journal_mode = 'mvcc', 4 of 4 runs
+    MVCC on a replica          journal_mode = 'mvcc', 4 of 4 runs
     20 writes, sequential, 1 conn     20 local -> 20 ON PRIMARY, no checkpoint
     8 writes over 8 connections       5 local -> 0 ON PRIMARY, no convergence
-    opening a 2nd sync connection     "database tape error: database is busy"
+    opening a 2nd replica connection     "database tape error: database is busy"
                                       3 of 4 runs failed outright, one with
                                       12 retries over 30s on an IDLE database
 
-So MVCC plus cloud sync is fine for sequential writes. What breaks is more
-than one sync connection against one replica, which is what persistum's
+So MVCC plus replication is fine for sequential writes. What breaks is more
+than one replica connection against one replica, which is what persistum's
 one-connection-per-write does the moment nothing serialises it. MVCC is
 incidental: it is merely the mode in which `_write_serialisation` stops
 taking the lock, and that lock is what has been masking this on WAL.
 
 THIS PARAGRAPH PREVIOUSLY SAID "MVCC IS LOCAL ONLY ... it creates local-only
-internal tables the sync engine cannot reconcile." Both halves were wrong.
-MVCC runs on a synced replica, measured repeatedly, and the internal-table
+internal tables the replication engine cannot reconcile." Both halves were wrong.
+MVCC runs on a replica, measured repeatedly, and the internal-table
 mechanism was asserted from one correlational observation and never proven.
 The engine has never refused this combination; persistum's policy did.
 """
@@ -420,7 +420,7 @@ class ConnectionPool:
         # Turso (local)
         pool = await ConnectionPool.turso("./app.db")
 
-        # Turso (with cloud sync)
+        # Turso (with replication)
         pool = await ConnectionPool.turso("./app.db", remote_url="https://db.turso.io")
 
         # Use with queries
@@ -533,7 +533,7 @@ class ConnectionPool:
 
         background_pull (default True) keeps network latency off the open
         path. When a populated local replica already exists, the pool becomes
-        usable as soon as the connection is open and the initial sync runs as
+        usable as soon as the connection is open and the initial replication runs as
         a background task; opening does not wait on the cloud. When no local
         replica exists there is nothing to serve, so the sync is awaited
         inline — a once-per-replica cost, not a per-open one.
@@ -548,11 +548,11 @@ class ConnectionPool:
         at once and none of them waits on a cloud push.
 
         Reads issued before the background sync finishes see the replica at
-        its last-synced revision. Callers that must not observe a stale
+        its last-replicated revision. Callers that must not observe a stale
         replica await initial_pull_complete(); apply_migrations_async does so
         before introspecting, so schema diffs are never computed against
         stale state. Pass background_pull=False to restore fully inline
-        syncing.
+        replicating.
 
         Args:
             database_path: Path to database (or ":memory:" for in-memory)

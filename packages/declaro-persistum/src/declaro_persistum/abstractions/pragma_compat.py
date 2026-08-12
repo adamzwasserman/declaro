@@ -79,7 +79,7 @@ async def _maybe_await(value: Any) -> Any:
 
 
 async def _execute(conn: Any, query: str, params: tuple[Any, ...] | None = None) -> Any:
-    """Execute SQL against sync or async connection and return cursor."""
+    """Execute SQL against sync or areplica connection and return cursor."""
     if params is None:
         return await _maybe_await(conn.execute(query))
     return await _maybe_await(conn.execute(query, params))

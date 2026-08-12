@@ -134,7 +134,7 @@ class SyncTursoConnection:
     def rollback(self) -> None:
         self._conn.rollback()
 
-    def sync(self) -> None:
+    def replicate(self) -> None:
         if hasattr(self._conn, "sync"):
             self._conn.sync()
 

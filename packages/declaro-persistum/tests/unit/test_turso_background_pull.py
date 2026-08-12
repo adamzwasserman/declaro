@@ -1,4 +1,4 @@
-"""Tests for non-blocking initial cloud sync on TursoPool.
+"""Tests for non-blocking initial replication on TursoPool.
 
 Opening a cloud-backed pool used to await push() then pull() inline every
 time, so every open paid a network round trip — measured downstream at
@@ -98,7 +98,7 @@ class TestLocalReplicaDetection:
         assert pool._local_replica_has_data() is False
 
     def test_unreadable_path_answers_false(self, tmp_path):
-        """Errors answer False: a blocking sync costs latency, a wrong True
+        """Errors answer False: a blocking replication costs latency, a wrong True
         serves empty results."""
         pool = TursoPool(str(tmp_path / "no" / "such" / "dir" / "r.db"), remote_url="https://x")
         assert pool._local_replica_has_data() is False
@@ -107,7 +107,7 @@ class TestLocalReplicaDetection:
 class TestOpenDoesNotBlock:
     """THE INVARIANT.
 
-    A cloud sync on pool open MUST NOT block the caller unless there is no
+    A replication on pool open MUST NOT block the caller unless there is no
     local copy.
 
     When the local replica file already exists — every re-open, and the
@@ -116,7 +116,7 @@ class TestOpenDoesNotBlock:
     cold start with no local file may block to pull the initial copy,
     because there is nothing local to serve.
 
-    A shared lock held across the initial sync broke this before 0.1.19: the
+    A shared lock held across the initial replication broke this before 0.1.19: the
     open returned, but the first write queued behind the background sync, so
     the caller paid for it anyway. Downstream measured 474.9ms. These tests
     exist so that regression cannot return unnoticed.
@@ -132,7 +132,7 @@ class TestOpenDoesNotBlock:
 
         # The pull is still in flight; open did not wait for it.
         assert "pull" not in holder.calls
-        assert pool._initial_sync_task is not None
+        assert pool._initial_replication_task is not None
 
         await pool.initial_pull_complete()
         assert "pull" in holder.calls
@@ -164,18 +164,18 @@ class TestNoLocalReplicaBlocks:
 
         # Sync already completed by the time the pool was handed out.
         assert "pull" in holder.calls
-        assert pool._initial_sync_task is None
+        assert pool._initial_replication_task is None
 
     @pytest.mark.asyncio
     async def test_background_pull_false_awaits_inline(self, tmp_path):
-        """The opt-out restores fully inline syncing even with local data."""
+        """The opt-out restores fully inline replicating even with local data."""
         holder = _FakeHolder()
         pool, _ = _pool(tmp_path, holder=holder, background_pull=False, populated=True)
 
         await _initialize(pool, holder)
 
         assert "pull" in holder.calls
-        assert pool._initial_sync_task is None
+        assert pool._initial_replication_task is None
 
 
 class TestPushBeforePullOrdering:
@@ -242,7 +242,7 @@ class TestFailureHandling:
 
         await _initialize(pool, holder)  # must not raise
 
-        assert pool._initial_sync_task is not None
+        assert pool._initial_replication_task is not None
 
     @pytest.mark.asyncio
     async def test_barrier_reraises_background_failure(self, tmp_path):
@@ -372,4 +372,4 @@ class TestTheInvariantEndToEnd:
             "a cold open returned without pulling; the pool would serve an "
             "empty database and report success"
         )
-        assert pool._initial_sync_task is None
+        assert pool._initial_replication_task is None

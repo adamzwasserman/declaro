@@ -176,7 +176,7 @@ both together             18.87x     <- they compound, not add
 
 **Reuse is the larger single lever. MVCC is what makes the crew correct.**
 
-**WAL LOSES WRITES AT CREW 16, even with three retries** — 371 and 216 of 2,000, to `database is locked`. MVCC loses none in either arm. So "WAL plus persistent connections" is not a cheaper safe option; it is a lossy one. **WAL's safe crew size is 1, or writers serialised behind a lock** — which is what a pooled WAL path with a write lock already does, and why a synced target gets no write concurrency.
+**WAL LOSES WRITES AT CREW 16, even with three retries** — 371 and 216 of 2,000, to `database is locked`. MVCC loses none in either arm. So "WAL plus persistent connections" is not a cheaper safe option; it is a lossy one. **WAL's safe crew size is 1, or writers serialised behind a lock** — which is what a pooled WAL path with a write lock already does, and why a replicated target gets no write concurrency.
 
 **Do not re-derive:** the 13,826/sec figure requires reuse AND MVCC together. Neither alone approaches it, and reuse on WAL cannot even complete the work at crew 16.
 

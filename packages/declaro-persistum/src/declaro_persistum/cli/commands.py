@@ -306,12 +306,12 @@ async def cmd_migrate_remote(
     """
     Apply schema migrations directly to a remote Turso cloud DB.
 
-    Bypasses the embedded replica sync engine (which cannot replicate DDL).
+    Bypasses the embedded replica replication engine (which cannot replicate DDL).
     Uses a temp local file with turso.aio.sync to pull/push cloud state.
 
     When --no-fks is set, FK constraints are stripped from the target schema
     before diffing.  This creates cloud tables without FK enforcement, avoiding
-    sync engine replay-order violations.  FKs remain on local replicas.
+    replication engine replay-order violations.  FKs remain on local replicas.
 
     Safety: if the cloud DB appears empty (0 tables introspected) and the
     diff produces create_table ops, the --init flag is required.  This
@@ -377,7 +377,7 @@ async def cmd_migrate_remote(
                 await conn.pull()
 
             if verbose:
-                print("Synced current schema from cloud")
+                print("Replicated current schema from cloud")
 
             # Introspect cloud DB (via local replica)
             inspector = create_inspector(dialect)

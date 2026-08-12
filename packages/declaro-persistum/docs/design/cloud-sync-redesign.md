@@ -1,4 +1,4 @@
-# Cloud sync, redesigned: split the directions
+# Replication, redesigned: split the directions
 
 **Status: RETRACTED the same day it was written, 2026-08-11. Do not build this.**
 
@@ -28,7 +28,7 @@ MVCC is also **beta, not GA** — Turso 0.5 moved it from tech preview to beta w
 
 **What remains my inference and is NOT in any Turso document:** that the `__turso_internal_mvcc_meta` divergence is what produces multicardz's "Database schema changed". No Turso documentation states MVCC is incompatible with sync. I measured a divergence and attached a mechanism to it. The mechanism is unsourced.
 
-**The actual conclusion:** don't run MVCC on a synced database — it is beta and has a documented silent-rollback gap that matches what we measured. That is a one-line change, not a redesign.
+**The actual conclusion:** don't run MVCC on a replicated database — it is beta and has a documented silent-rollback gap that matches what we measured. That is a one-line change, not a redesign.
 
 The rest of this document is kept as a record of a design argued from a mechanism nobody had checked — the same error its own closing section warns about.
 
@@ -52,7 +52,7 @@ MVCC ON   local_only_tables: ["__turso_internal_mvcc_meta"]
 MVCC OFF  local_only_tables: []
 ```
 
-Under WAL the local and primary schemas are identical. Under MVCC they are not, and the sync engine — which relates local state to the remote — cannot place the difference. multicardz observed the consequence directly: `sync engine operation failed: database error: Database schema changed`, retrying forever.
+Under WAL the local and primary schemas are identical. Under MVCC they are not, and the replication engine — which relates local state to the remote — cannot place the difference. multicardz observed the consequence directly: `replication engine operation failed: database error: Database schema changed`, retrying forever.
 
 ## The shape underneath the defect
 
@@ -74,7 +74,7 @@ So the redesign is not a better push. It is: **stop making one mechanism carry b
 
 ## The unlock, measured 2026-08-11
 
-Turso Cloud accepts statements over plain HTTP at `/v2/pipeline`. Verified against a real database: `CREATE TABLE`, a parameterised `INSERT`, and a `SELECT` all returned `ok`, with no sync engine and no pyturso in the path.
+Turso Cloud accepts statements over plain HTTP at `/v2/pipeline`. Verified against a real database: `CREATE TABLE`, a parameterised `INSERT`, and a `SELECT` all returned `ok`, with no replication engine and no pyturso in the path.
 
 **Including DDL** — the thing frame replication has never been able to do.
 
@@ -99,7 +99,7 @@ Reads and writes both stay on the local replica, exactly as today. **Only the pu
 |---|---|---|
 | local write | replica, sub-ms | **unchanged** |
 | read | replica, sub-ms | **unchanged** |
-| pull (others' writes) | sync engine | **unchanged** |
+| pull (others' writes) | replication engine | **unchanged** |
 | **push (my writes → primary)** | **WAL frames** | **statements over `/v2/pipeline`** |
 
 That is the whole redesign. Everything that works is untouched; the one mechanism that fails is replaced.
@@ -145,7 +145,7 @@ That keeps the standing 0.1.12 requirement intact: no request path waits on remo
 2. **Does a pull disturb a local-only table?** The outbox lives in the replica and must survive every pull. Unverified, and the design rests on it.
 3. **Ordering across instances.** seq is per-instance. Two instances writing the same row still need a conflict rule, exactly as they do today.
 4. **HTTP cost per shipment.** The `/v2/pipeline` round trip was not timed. It is off the request path so it does not gate a write, but it sets how far behind the primary runs. Batching is the obvious answer and is unmeasured.
-5. **Does the local write still land when the sync engine is not pushing?** Today the replica's writes are captured by CDC for the frame push. With frames abandoned, whether CDC can be left off — and whether the engine still pulls correctly with it off — is unestablished.
+5. **Does the local write still land when the replication engine is not pushing?** Today the replica's writes are captured by CDC for the frame push. With frames abandoned, whether CDC can be left off — and whether the engine still pulls correctly with it off — is unestablished.
 
 ## Beliefs to not re-derive
 

@@ -29,7 +29,7 @@
 >
 > **WAL loses writes at crew 16 even after three retries. MVCC loses none.** WAL's safe crew is 1, or writers serialised behind a lock.
 >
-> **A synced replica takes ONE sync connection.** Measured 2026-08-12, pyturso 0.7.2, real replica: MVCC *does* run on a synced replica (`journal_mode = 'mvcc'`, 4 of 4 runs) and 20 sequential writes under it reached the primary intact. What fails is a *second* sync connection — `database tape error: database is busy`, 3 of 4 runs outright, one after 12 retries over 30s on an idle database. In the run where eight opened: 5 writes local, **0 on the primary**. MVCC is incidental; it is the mode in which the pool stops serialising writers, and that serialisation is what keeps one sync connection alive at a time. **The earlier claim "MVCC is local only — it creates local-only internal tables the sync engine cannot reconcile" was wrong in both halves and is retracted.**
+> **A replica takes ONE replica connection.** Measured 2026-08-12, pyturso 0.7.2, real replica: MVCC *does* run on a replica (`journal_mode = 'mvcc'`, 4 of 4 runs) and 20 sequential writes under it reached the primary intact. What fails is a *second* replica connection — `database tape error: database is busy`, 3 of 4 runs outright, one after 12 retries over 30s on an idle database. In the run where eight opened: 5 writes local, **0 on the primary**. MVCC is incidental; it is the mode in which the pool stops serialising writers, and that serialisation is what keeps one replica connection alive at a time. **The earlier claim "MVCC is local only — it creates local-only internal tables the replication engine cannot reconcile" was wrong in both halves and is retracted.**
 
 Landed: stateless writes are the default for the Turso backend (`acquire_write` and `transaction()` open their own connection and close it), the pooled/serialised path survives behind `pooled_writes=True`, and `drain` takes a required `Retry` policy so contention is retried and constraint violations are not. The rationale for stateless-by-default — and the reasoning error that first argued against it — is recorded in `pool.py`'s module docstring so it is not re-derived.
 
@@ -99,7 +99,7 @@ Single-writer is Turso's documented **default**; MVCC lifts it. `_write_serialis
 - Requested by default. `PRAGMA journal_mode` returns `mvcc` on a cloud replica.
 - Survives CDC capture coming up, and survives reopening the replica.
 - **Refused on an existing wal+CDC replica**: `cannot change journal_mode (from wal to mvcc) while CDC capture is active`. A replica must be created in MVCC mode.
-- persistum never enables CDC; the sync engine does, because capture is how it tracks frames to push.
+- persistum never enables CDC; the replication engine does, because capture is how it tracks frames to push.
 
 ### Write latency (2026-08-09)
 
@@ -115,7 +115,7 @@ Separately measured the same day: concurrent writers to one table under MVCC rai
 
 **Whether the conflicts and the stranding are the same failure is unknown.** A conflicted write never lands, so there would be nothing to push and nothing to converge — plausible, unproven. Do not treat it as established.
 
-Unmeasured lead: whether MVCC writes produce WAL frames at all. A startup error once reported `CheckpointResult { wal_max_frame: 0, ... }`. The sync engine ships WAL frames; if MVCC rows live only in the in-memory version index, there would be nothing to ship. A probe for this crashed before measuring.
+Unmeasured lead: whether MVCC writes produce WAL frames at all. A startup error once reported `CheckpointResult { wal_max_frame: 0, ... }`. The replication engine ships WAL frames; if MVCC rows live only in the in-memory version index, there would be nothing to ship. A probe for this crashed before measuring.
 
 ## How to measure this engine
 
@@ -132,7 +132,7 @@ Unmeasured lead: whether MVCC writes produce WAL frames at all. A startup error 
 Each of these was stated confidently in this codebase and each was wrong. They are recorded so they are not reconstructed from first principles.
 
 - **"There is a 2–3 concurrent writer ceiling."** No. That was measured in WAL mode and published as an engine limit. See the table above.
-- **"The sync engine is a single-appender log."** Invented. No Turso documentation says this.
+- **"The replication engine is a single-appender log."** Invented. No Turso documentation says this.
 - **"MVCC is skipped for cloud replicas because CDC is incompatible."** No. MVCC activates and survives CDC.
 - **"The write queue was never wired up."** It was, until commit `15f72b6` (2026-03-11) detached it as a side effect of a driver migration. Use `git log -S` to ask what was ever called; the working tree cannot answer that.
 - **"Writers off writer-zero don't get their frames pushed."** Plausible, and disproved — pushing every holder did not fix the stranding.

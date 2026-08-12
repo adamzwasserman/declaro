@@ -4,7 +4,7 @@ Nothing waits on the push -- the write is already durable locally before it
 runs -- so it can queue behind writes rather than hold a second connection
 open against the replica.
 
-This is NOT a claim that the sync engine takes a single writer. Turso
+This is NOT a claim that the replication engine takes a single writer. Turso
 supports concurrent writers through MVCC and BEGIN CONCURRENT, and the pool
 still opens a write connection per concurrent caller. `Error::Busy` at
 commit is a documented, retryable conflict signal.
@@ -82,7 +82,7 @@ async def _pool(tmp_path, monkeypatch):
     pool = TursoPool(str(db), remote_url="https://example.turso.io", auth_token="t")
     pool._push_loop = lambda: asyncio.sleep(0)  # type: ignore[assignment]
     pool._enable_replica_fk_enforcement = lambda: asyncio.sleep(0)  # type: ignore[assignment]
-    pool._initial_sync = lambda: asyncio.sleep(0)  # type: ignore[assignment]
+    pool._initial_replication = lambda: asyncio.sleep(0)  # type: ignore[assignment]
     await pool._initialize()
     return pool
 
@@ -125,7 +125,7 @@ class TestThePushHasNoConnectionOfItsOwn:
             attempts.append(1)
             if len(attempts) < 3:
                 raise RuntimeError(
-                    "sync engine operation failed: database tape error: "
+                    "replication engine operation failed: database tape error: "
                     "database is busy"
                 )
 
@@ -142,7 +142,7 @@ class TestConcurrentWritersAreStillConcurrent:
     """Turso is explicitly concurrent-write. Do not take that away."""
 
     @pytest.mark.asyncio
-    async def test_a_synced_pool_does_not_open_a_connection_per_writer(
+    async def test_a_replicated_pool_does_not_open_a_connection_per_writer(
         self, tmp_path, monkeypatch
     ):
         pool = await _pool(tmp_path, monkeypatch)
@@ -162,14 +162,14 @@ class TestConcurrentWritersAreStillConcurrent:
         # The fixture clears the counter BEFORE _initialize(), so writer zero
         # is the one open on the list. Three concurrent writers must add none.
         assert opened == 1, (
-            f"a SYNCED pool held {opened} write connections for three "
-            f"concurrent writers. It must hold one: a synced replica takes a "
-            f"single sync connection (declaro-eer), and opening per write is "
+            f"a REPLICATED pool held {opened} write connections for three "
+            f"concurrent writers. It must hold one: a replica takes a "
+            f"single replica connection (declaro-eer), and opening per write is "
             f"what killed a consumer's box (declaro-dna).\n\n"
             f"This assertion previously read `opened > 1`, on the reasoning "
             f"that MVCC and BEGIN CONCURRENT exist so several connections can "
             f"write at once. True — on a LOCAL pool, where that is asserted in "
-            f"test_synced_pools_hold_one_connection.py. A synced pool runs WAL "
+            f"test_synced_pools_hold_one_connection.py. A replicated pool runs WAL "
             f"and serialises its writers, so one connection is the correct "
             f"shape, not a collapse."
         )

@@ -2,7 +2,7 @@
 
 ## Overview
 
-declaro-persistum wraps pyturso's embedded replica connection in `TursoPool` to provide a reliable, application-safe interface. pyturso provides the raw SQLite-compatible database engine with cloud sync. We add the safety, ordering, and lifecycle management that production applications need.
+declaro-persistum wraps pyturso's embedded replica connection in `TursoPool` to provide a reliable, application-safe interface. pyturso provides the raw SQLite-compatible database engine with replication. We add the safety, ordering, and lifecycle management that production applications need.
 
 This document explains each wrapping decision and the pyturso behavior that necessitated it.
 
@@ -14,7 +14,7 @@ This document explains each wrapping decision and the pyturso behavior that nece
 # Local-only connection
 conn = await turso.aio.connect("local.db")
 
-# Embedded replica with cloud sync
+# Embedded replica with replication
 conn = await turso.aio.sync.connect("local.db", remote_url="libsql://...", auth_token="...")
 await conn.push()  # send local changes to cloud
 await conn.pull()  # fetch cloud changes to local
@@ -24,7 +24,7 @@ await conn.pull()  # fetch cloud changes to local
 
 **Single shared connection** (`_write_holder`). Both reads and writes go through one pyturso connection. pyturso connections are single-threaded internally (worker thread model). Creating separate connections per operation caused three problems:
 
-1. **Sync state isolation** — each pyturso sync connection tracks its own changes. Connection A can't push changes committed by Connection B. Writes on ephemeral connections were committed locally but lost to cloud sync when the connection closed.
+1. **Sync state isolation** — each pyturso replica connection tracks its own changes. Connection A can't push changes committed by Connection B. Writes on ephemeral connections were committed locally but lost to replication when the connection closed.
 
 2. **Driver mismatch** — `turso.aio.connect()` (plain) and `turso.aio.sync.connect()` (sync) on the same file don't share WAL state. Tables created by one driver are invisible to the other.
 
@@ -36,7 +36,7 @@ await conn.pull()  # fetch cloud changes to local
 - `acquire_write()` holds the lock during local commit, releases before push
 - `_push_once()` acquires the lock only during the push call
 
-## Cloud Sync
+## Replication
 
 ### What pyturso provides
 
@@ -50,24 +50,24 @@ await conn.pull()  # fetch cloud changes to local
 
 **Blocking shutdown**. `close()` retries push indefinitely until cloud confirms receipt. On ephemeral infrastructure (no persistent disk), data not pushed before shutdown is lost permanently. The shutdown push is the last line of defense.
 
-**Push pause** (`pause_push` / `resume_push`). Migrations pause the push loop during DDL to prevent the sync engine from seeing partial state (e.g., a table that's been dropped but not yet renamed during reconstruction).
+**Push pause** (`pause_push` / `resume_push`). Migrations pause the push loop during DDL to prevent the replication engine from seeing partial state (e.g., a table that's been dropped but not yet renamed during reconstruction).
 
 ## DDL (Schema Migrations)
 
-### What pyturso's sync engine cannot do
+### What pyturso's replication engine cannot do
 
-pyturso's sync engine uses WAL-based replication. It can replicate DML (INSERT, UPDATE, DELETE) but **cannot replicate DDL** (CREATE TABLE, ALTER TABLE, DROP TABLE). When migration creates tables locally and tries to push:
+pyturso's replication engine uses WAL-based replication. It can replicate DML (INSERT, UPDATE, DELETE) but **cannot replicate DDL** (CREATE TABLE, ALTER TABLE, DROP TABLE). When migration creates tables locally and tries to push:
 
 ```
-sync engine operation failed: failed to execute sql:
+replication engine operation failed: failed to execute sql:
 Error { message: "SQLite error: no such table: users" }
 ```
 
-The cloud has no schema. The sync engine tries to replay changes against tables that don't exist.
+The cloud has no schema. The replication engine tries to replay changes against tables that don't exist.
 
 ### What we wrap
 
-**`migrate-remote` CLI command**. Creates a temp local file, connects via `turso.aio.sync.connect()`, pulls current cloud state, diffs against the target schema, applies DDL locally, pushes to cloud. This bypasses the sync engine's DDL limitation by using a dedicated sync connection that starts clean.
+**`migrate-remote` CLI command**. Creates a temp local file, connects via `turso.aio.sync.connect()`, pulls current cloud state, diffs against the target schema, applies DDL locally, pushes to cloud. This bypasses the replication engine's DDL limitation by using a dedicated replica connection that starts clean.
 
 ```bash
 uv run declaro migrate-remote \
@@ -129,9 +129,9 @@ WHERE type = 'table'
 
 ## FK Ordering
 
-### What pyturso's sync engine does wrong
+### What pyturso's replication engine does wrong
 
-The sync engine replays writes in an arbitrary order. If a parent row and child row (with FK reference) are pushed together, the sync engine may try to insert the child before the parent, causing:
+The replication engine replays writes in an arbitrary order. If a parent row and child row (with FK reference) are pushed together, the replication engine may try to insert the child before the parent, causing:
 
 ```
 SQLite error: FOREIGN KEY constraint failed
@@ -146,7 +146,7 @@ SQLite error: FOREIGN KEY constraint failed
 - `sort_operations(schema, ops)` — sort a DML batch by FK deps
 - `execute_fk_ordered(pool, schema, ops)` — batch execution in FK-safe order
 
-**`migrate-remote --no-fks`**. Creates cloud tables without FK constraints. FK enforcement stays on the local replica (where write order is controlled). The cloud becomes a data store without referential integrity enforcement, avoiding sync engine replay-order violations.
+**`migrate-remote --no-fks`**. Creates cloud tables without FK constraints. FK enforcement stays on the local replica (where write order is controlled). The cloud becomes a data store without referential integrity enforcement, avoiding replication engine replay-order violations.
 
 **`strip_foreign_keys(schema)`**. Pure function that returns a schema copy with all `references`, `on_delete`, `on_update` removed.
 
@@ -186,7 +186,7 @@ TursoAsyncConnection (pool.py)
 _TursoConnectionHolder (pool.py)
     |-- connect_async()  turso.aio.sync.connect() with remote_url
     |-- push()           WAL sync to cloud
-    |-- pull()           cloud sync to local
+    |-- pull()           replication to local
     |
     v
 pyturso (turso.aio.sync)

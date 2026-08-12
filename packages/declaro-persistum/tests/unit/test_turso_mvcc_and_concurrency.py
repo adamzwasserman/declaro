@@ -81,18 +81,18 @@ async def _init(pool, conn):
 
 
 class TestTheEngineChoiceIsPersistumsAlone:
-    """MVCC iff local. A synced pool must never request it, and no caller can ask.
+    """MVCC iff local. A replicated pool must never request it, and no caller can ask.
 
     This class previously asserted the opposite — that a cloud pool "must still
     request MVCC", on the reasoning that without it BEGIN CONCURRENT can never
     fire and writes serialize. Serializing was the correct outcome. MVCC on a
-    synced replica creates local-only internal tables the sync engine cannot
+    replica creates local-only internal tables the replication engine cannot
     reconcile, so writes report success and never reach the primary. 0.1.29 was
     yanked for exactly that.
     """
 
     @pytest.mark.asyncio
-    async def test_a_synced_pool_never_requests_mvcc(self, tmp_path):
+    async def test_a_replicated_pool_never_requests_mvcc(self, tmp_path):
         """The safety property. A remote_url means WAL, always."""
         db = tmp_path / "r.db"
         db.write_bytes(b"x" * 64)
@@ -102,7 +102,7 @@ class TestTheEngineChoiceIsPersistumsAlone:
         await _init(pool, conn)
 
         assert not any("mvcc" in s for s in conn.statements), (
-            "a synced pool asked for MVCC — that is the declaro-p39 stranding"
+            "a replicated pool asked for MVCC — that is the declaro-p39 stranding"
         )
         assert pool._mvcc is False
 

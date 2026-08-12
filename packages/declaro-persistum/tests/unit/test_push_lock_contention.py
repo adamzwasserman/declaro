@@ -6,7 +6,7 @@ across `await push()` — the whole cloud round trip. Every consumer
 operation therefore waited on the network while a push was in flight.
 
 Both are now fixed. Reads take their own plain local connection. The push
-takes its own sync connection. Neither takes _conn_lock, so no consumer
+takes its own replica connection. Neither takes _conn_lock, so no consumer
 operation waits on a cloud round trip.
 
 That the push may run on a separate connection was not assumed. It was

@@ -6,7 +6,7 @@ writer went through one shared connection under one lock, so callers were
 serialized before they ever reached the connection. BEGIN CONCURRENT was
 issued into a queue of one.
 
-Each writer now takes its own sync connection, so max_size bounds how many
+Each writer now takes its own replica connection, so max_size bounds how many
 writers proceed rather than how many queue.
 
 A push on a separate connection delivers the frames committed on a write
@@ -58,7 +58,7 @@ class _FakeConn:
 
 
 class _Holder:
-    """Stands in for a sync connection holder, one per writer."""
+    """Stands in for a replica connection holder, one per writer."""
 
     instances: list["_Holder"] = []
 
@@ -165,7 +165,7 @@ class TestWritersRunConcurrently:
         must be None once the write is done. Cost of the open is measured
         in pool.py's module docstring — 1.16ms on a live cloud replica.
         """
-        # LOCAL pool. Statelessness is the local shape; a synced pool holds
+        # LOCAL pool. Statelessness is the local shape; a replicated pool holds
         # one connection (declaro-dna), which is asserted in
         # test_synced_pools_hold_one_connection.py.
         pool = await _pool(tmp_path, monkeypatch, remote=False)
@@ -251,14 +251,14 @@ class TestRefreshCoversEveryConnection:
         barrier.set()
         await asyncio.gather(*tasks)
 
-        # On a SYNCED pool the writers share writer zero and open nothing, so
+        # On a REPLICATED pool the writers share writer zero and open nothing, so
         # there is no second write connection that COULD survive a migration.
         # The stale-schema defect this class exists for is now impossible by
         # construction rather than prevented by cleanup.
         others = [h for h in _Holder.instances if h is not pool._write_holder]
         assert others == [], (
-            f"{len(others)} extra write connection(s) exist on a synced pool; "
-            f"each is a sync-engine handshake against the replica tape "
+            f"{len(others)} extra write connection(s) exist on a replicated pool; "
+            f"each is a replication-engine handshake against the replica tape "
             f"(declaro-dna) and each could survive the migration"
         )
 

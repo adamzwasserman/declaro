@@ -60,7 +60,7 @@ SQLAlchemy and Alembic represent the dominant Python database toolkit, but they 
 4. Drift detection comparing introspected DB against cached expected state
 5. Dependency-aware diff engine with topological sorting
 6. Interactive and unattended modes for ambiguity resolution
-7. Dialect-specific adapters for PostgreSQL, SQLite and Turso (embedded, with optional cloud sync). These adapters are the mechanism of priority 2 — they exist so one API holds steady across all three.
+7. Dialect-specific adapters for PostgreSQL, SQLite and Turso (embedded, with optional replication). These adapters are the mechanism of priority 2 — they exist so one API holds steady across all three.
 8. Multi-tenant support via TursoCloudManager for Turso cloud deployments
 
 ### Expected Outcomes
@@ -1479,7 +1479,7 @@ declaro_persistum/
 │   ├── shared.py         # Shared pure functions (type normalization, FK parsing, etc.)
 │   ├── postgresql.py     # PostgreSQL implementation
 │   ├── sqlite.py         # SQLite implementation
-│   └── turso.py          # Turso implementation (embedded, optional cloud sync)
+│   └── turso.py          # Turso implementation (embedded, optional replication)
 ├── differ/
 │   ├── __init__.py
 │   ├── core.py           # Main diff logic

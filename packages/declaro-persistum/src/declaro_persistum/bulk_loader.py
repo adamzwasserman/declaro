@@ -164,7 +164,7 @@ class GenericBulkLoader:
     Bulk loader for SQLite and Turso using executemany().
 
     Uses ORDER BY rowid for stable row ordering on reads.
-    Works with any DB-API 2.0 compatible async connection wrapper.
+    Works with any DB-API 2.0 compatible areplica connection wrapper.
     """
 
     async def read_rows(

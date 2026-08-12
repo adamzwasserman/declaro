@@ -16,17 +16,17 @@
 >
 > **WAL loses writes at crew 16 even after three retries. MVCC loses none.** WAL's safe crew is 1, or writers serialised behind a lock.
 >
-> **A synced replica takes ONE sync connection.** Measured 2026-08-12, pyturso 0.7.2, real replica: MVCC *does* run on a synced replica (`journal_mode = 'mvcc'`, 4 of 4 runs) and 20 sequential writes under it reached the primary intact. What fails is a *second* sync connection — `database tape error: database is busy`, 3 of 4 runs outright, one after 12 retries over 30s on an idle database. In the run where eight opened: 5 writes local, **0 on the primary**. MVCC is incidental; it is the mode in which the pool stops serialising writers, and that serialisation is what keeps one sync connection alive at a time. **The earlier claim "MVCC is local only — it creates local-only internal tables the sync engine cannot reconcile" was wrong in both halves and is retracted.**
+> **A replica takes ONE replica connection.** Measured 2026-08-12, pyturso 0.7.2, real replica: MVCC *does* run on a replica (`journal_mode = 'mvcc'`, 4 of 4 runs) and 20 sequential writes under it reached the primary intact. What fails is a *second* replica connection — `database tape error: database is busy`, 3 of 4 runs outright, one after 12 retries over 30s on an idle database. In the run where eight opened: 5 writes local, **0 on the primary**. MVCC is incidental; it is the mode in which the pool stops serialising writers, and that serialisation is what keeps one replica connection alive at a time. **The earlier claim "MVCC is local only — it creates local-only internal tables the replication engine cannot reconcile" was wrong in both halves and is retracted.**
 
 **For testing on a free-threaded build. 2026-08-12.**
 
 ## Who this is for
 
-**Local-only stores.** The crew depends on MVCC, and MVCC must never run on a synced replica — it creates local-only internal tables the sync engine cannot reconcile.
+**Local-only stores.** The crew depends on MVCC, and MVCC must never run on a replica — it creates local-only internal tables the replication engine cannot reconcile.
 
-**It does not apply to a cloud-synced write surface.** multicardz established this on 2026-08-12: their entire write path (central, ~2000 shelf databases, project pools) is synced for durability, so the crew, `BEGIN CONCURRENT`, and persistent MVCC writer connections are all the wrong tool for them. Their target is the other one — WAL, pooled, **no write concurrency at all** — and their lever is reducing write *volume*, not raising concurrency.
+**It does not apply to a cloud-replicated write surface.** multicardz established this on 2026-08-12: their entire write path (central, ~2000 shelf databases, project pools) is replicated for durability, so the crew, `BEGIN CONCURRENT`, and persistent MVCC writer connections are all the wrong tool for them. Their target is the other one — WAL, pooled, **no write concurrency at all** — and their lever is reducing write *volume*, not raising concurrency.
 
-If your durability model is cloud sync, stop here. Nothing below applies, and the numbers are unreachable by construction.
+If your durability model is replication, stop here. Nothing below applies, and the numbers are unreachable by construction.
 
 Everything below uses the public API of declaro-persistum 0.1.31. There is nothing to add to the library — `deposit`, `collect`, `drain`, the retry policy, and the query builder are all exported already, and N concurrent `drain()` coroutines over one room work as-is.
 
@@ -90,7 +90,7 @@ A builder `Query` is already a `PendingWrite` — `{sql, params}`, and pyturso a
 
 **3. Fetch the PRAGMA cursor.** An unfetched PRAGMA does not take effect, silently, and you will measure WAL while believing you are on MVCC.
 
-**4. One sync connection per replica.** MVCC on a synced replica is fine for sequential writes (measured: 20/20 reached the primary). What must never happen is a second concurrent sync connection to one replica — that is what strands writes. The old wording here blamed MVCC and named an unproven mechanism; retracted 2026-08-12.
+**4. One replica connection per replica.** MVCC on a replica is fine for sequential writes (measured: 20/20 reached the primary). What must never happen is a second concurrent replica connection to one replica — that is what strands writes. The old wording here blamed MVCC and named an unproven mechanism; retracted 2026-08-12.
 
 ## Sizing the crew
 

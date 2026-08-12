@@ -4,7 +4,7 @@ Durability regression tests for the Turso embedded-replica sync path.
 Covers the FK-push silent-data-loss bug (BUG_REPORT_fk_push_silent_data_loss.md)
 and its defense-in-depth remediation (W1-W5).
 
-The pyturso sync connection + network is replaced by an in-process fake holder
+The pyturso replica connection + network is replaced by an in-process fake holder
 (_FakeHolder) so the pool's *orchestration* logic — the code under repair — is
 tested deterministically with no cloud DB. The real-cloud enforcement mechanism
 for W1 (PRAGMA foreign_keys = ON causing an IntegrityError at commit) was proven
@@ -32,7 +32,7 @@ class _FakeCursor:
 
 
 class _FakeConn:
-    """In-process stand-in for a pyturso sync connection."""
+    """In-process stand-in for a pyturso replica connection."""
 
     def __init__(self):
         self.executed: list[tuple[str, tuple]] = []
@@ -114,7 +114,7 @@ def fake_holder(monkeypatch):
 
 class TestW1ForeignKeyEnforcementOnReplica:
     """W1: the replica connection must enforce FKs so a violating write fails
-    fast at commit rather than committing locally and being lost on re-sync."""
+    fast at commit rather than committing locally and being lost on re-replicate."""
 
     @pytest.mark.asyncio
     async def test_remote_init_enables_foreign_keys(self, fake_holder):
@@ -184,7 +184,7 @@ class TestW2SurfacePushFailures:
 
 
 class TestW3ProtectUnpushedFramesOnResync:
-    """W3: bootstrap/re-sync pull() must not silently overwrite writes that a
+    """W3: bootstrap/re-replicate pull() must not silently overwrite writes that a
     prior process committed locally but never pushed. Deliver them first."""
 
     @pytest.mark.asyncio

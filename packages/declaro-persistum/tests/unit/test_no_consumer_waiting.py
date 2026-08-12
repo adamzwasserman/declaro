@@ -281,7 +281,7 @@ class TestPoolOpenPaysOneHandshake:
     async def _open_only(tmp_path, monkeypatch):
         """Run _initialize with the background sync stubbed out.
 
-        The background initial sync may open the push connection shortly
+        The background initial replication may open the push connection shortly
         after open, which is fine — it runs in a task, not on the path a
         caller awaits. Stubbing it isolates _initialize's own work.
         """
@@ -294,15 +294,15 @@ class TestPoolOpenPaysOneHandshake:
         pool = TursoPool(str(db), remote_url="https://example.turso.io", auth_token="t")
         pool._push_loop = lambda: asyncio.sleep(0)
         pool._enable_replica_fk_enforcement = lambda: asyncio.sleep(0)
-        pool._initial_sync = lambda: asyncio.sleep(0)
+        pool._initial_replication = lambda: asyncio.sleep(0)
         await pool._initialize()
         return pool
 
     @pytest.mark.asyncio
     async def test_pool_open_pays_only_the_write_handshake(self, tmp_path, monkeypatch):
-        """_initialize must open exactly one sync connection.
+        """_initialize must open exactly one replica connection.
 
-        A sync connection costs a cloud handshake — measured at ~790ms
+        A replica connection costs a cloud handshake — measured at ~790ms
         against a real remote. Opening the write connection and the push
         connection during _initialize made pool open pay two of them when
         only one is needed before the pool can serve a caller.
@@ -310,7 +310,7 @@ class TestPoolOpenPaysOneHandshake:
         pool = await self._open_only(tmp_path, monkeypatch)
 
         assert len(_Holder.instances) == 1, (
-            f"pool open opened {len(_Holder.instances)} sync connections; it "
+            f"pool open opened {len(_Holder.instances)} replica connections; it "
             f"must open only the write connection, since each costs a "
             f"handshake on the path a caller waits on"
         )

@@ -29,7 +29,7 @@ USE_CLOUD = bool(os.environ.get("TEST_TURSO_CLOUD") and TURSO_URL and TURSO_TOKE
 
 @pytest.fixture
 async def turso_connection():
-    """Create Turso async connection via TursoPool."""
+    """Create Turso areplica connection via TursoPool."""
     from declaro_persistum.pool import ConnectionPool
 
     if USE_CLOUD:

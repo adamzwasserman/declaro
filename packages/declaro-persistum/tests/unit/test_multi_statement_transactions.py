@@ -116,7 +116,7 @@ async def _pool(tmp_path, monkeypatch, remote=True):
     )
     pool._push_loop = lambda: asyncio.sleep(0)  # type: ignore[assignment]
     pool._enable_replica_fk_enforcement = lambda: asyncio.sleep(0)  # type: ignore[assignment]
-    pool._initial_sync = lambda: asyncio.sleep(0)  # type: ignore[assignment]
+    pool._initial_replication = lambda: asyncio.sleep(0)  # type: ignore[assignment]
     await pool._initialize()
     return pool
 
@@ -170,15 +170,15 @@ class TestWritesShareOneTransaction:
         assert len(begins) == 1, f"expected one BEGIN CONCURRENT, saw {len(begins)}"
 
     @pytest.mark.asyncio
-    async def test_a_synced_pool_issues_no_begin_and_is_still_atomic(
+    async def test_a_replicated_pool_issues_no_begin_and_is_still_atomic(
         self, tmp_path, monkeypatch
     ):
-        """persistum runs MVCC only on local pools, so a synced transaction has no
+        """persistum runs MVCC only on local pools, so a replicated transaction has no
         BEGIN CONCURRENT to issue.
 
-        This test previously demanded one BEGIN on a synced pool and got it
-        only because synced pools used to request MVCC — the configuration
-        that strands writes. With that gone, the atomicity of a synced
+        This test previously demanded one BEGIN on a replicated pool and got it
+        only because replicated pools used to request MVCC — the configuration
+        that strands writes. With that gone, the atomicity of a replicated
         transaction rests entirely on pyturso's DB-API implicit transaction,
         which is a claim about the engine and therefore had to be MEASURED,
         not reasoned:
@@ -201,7 +201,7 @@ class TestWritesShareOneTransaction:
                 await c.execute("UPDATE b SET x = 2")
 
         assert [s for s in _statements() if s.startswith("BEGIN")] == [], (
-            "a synced pool issued BEGIN CONCURRENT; persistum runs MVCC on local pools only"
+            "a replicated pool issued BEGIN CONCURRENT; persistum runs MVCC on local pools only"
         )
         assert _commits() == 1, (
             f"{_commits()} commits for two writes in one transaction — the "
@@ -242,7 +242,7 @@ class TestFailureRollsBackEverything:
 
         # Patch the LIVE connection, not the factory. Swapping the factory
         # only reaches the write path if a new connection is opened per
-        # write, which a SYNCED pool no longer does — it holds one (see
+        # write, which a REPLICATED pool no longer does — it holds one (see
         # declaro-dna). The failure being tested is a statement failing
         # mid-transaction, and that has nothing to do with how the
         # connection was obtained.

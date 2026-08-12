@@ -2,7 +2,7 @@
 
 Concurrent writes to one cloud replica can fail with:
 
-    sync engine operation failed: database tape error: database is busy
+    replication engine operation failed: database tape error: database is busy
 
 Measured downstream: 30 concurrent writes across 8 replicas produced 5
 failures, surfaced to users as HTTP 500. A single writer never sees it; it
@@ -30,7 +30,7 @@ import pytest
 
 from declaro_persistum.pool import TursoPool
 
-BUSY = "sync engine operation failed: database tape error: database is busy"
+BUSY = "replication engine operation failed: database tape error: database is busy"
 
 
 class _FakeCursor:

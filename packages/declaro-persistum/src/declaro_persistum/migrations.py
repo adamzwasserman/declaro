@@ -92,7 +92,7 @@ def partition_replica_operations(
     """Partition migration ops for an embedded replica.
 
     Reconstruction ops (add/drop FK, alter column) can't replicate through the
-    sync engine, so they are deferred to ``declaro migrate-remote``. Returns
+    replication engine, so they are deferred to ``declaro migrate-remote``. Returns
     ``(safe_order, skipped)`` where ``safe_order`` is ``execution_order`` filtered
     to safe ops, and ``skipped`` describes each deferred op as ``{"op", "table"}``
     so callers can see what was NOT applied instead of mistaking a no-op for
@@ -387,7 +387,7 @@ async def apply_migrations_async(
 
     # Everything below reads the database to decide what to change: the
     # skip-if-clean probe, then introspection feeding the differ. A pool that
-    # backgrounded its initial cloud sync may still be at an older revision,
+    # backgrounded its initial replication may still be at an older revision,
     # and a diff computed against a stale replica produces operations that
     # correct code then faithfully applies. Wait for the sync here, at the one
     # call site that genuinely needs a primary-consistent view, rather than
@@ -491,7 +491,7 @@ async def apply_migrations_async(
         }
 
     # On embedded replicas (remote_url set), skip reconstruction ops —
-    # the sync engine can't replicate DDL, and partial sync (DROP reaches
+    # the replication engine can't replicate DDL, and partial sync (DROP reaches
     # cloud but CREATE doesn't) destroys tables on both sides.
     # Use `declaro migrate-remote` for schema changes that need reconstruction.
     is_cloud_replica = hasattr(pool, "_remote_url") and pool._remote_url

@@ -11,7 +11,7 @@
 >
 > Retained as a record. Not guidance.
 
-> **Note (2026-03-08)**: The synchronous pool and connection API was removed from declaro-persistum. This document describes a fix that was subsequently superseded by the full removal of all sync surface area. `SyncConnectionPool`, `SyncLibSQLPool`, `SyncSQLitePool`, `SyncTursoPool`, and all sync connection types were deleted. declaro-persistum is async-only going forward.
+> **Note (2026-03-08)**: The synchronous pool and connection API was removed from declaro-persistum. This document describes a fix that was subsequently superseded by the full removal of all sync surface area. `SyncConnectionPool`, `SyncLibSQLPool`, `SyncSQLitePool`, `SyncTursoPool`, and all replica connection types were deleted. declaro-persistum is async-only going forward.
 
 ## Summary
 

@@ -96,7 +96,7 @@ def strip_foreign_keys(schema: Schema) -> Schema:
     """Return a copy of the schema with all FK constraints removed.
 
     Used by migrate-remote --no-fks to create cloud tables without
-    FK constraints, avoiding sync engine replay-order violations.
+    FK constraints, avoiding replication engine replay-order violations.
     """
     stripped: Schema = {}
     for table_name, table_def in schema.items():

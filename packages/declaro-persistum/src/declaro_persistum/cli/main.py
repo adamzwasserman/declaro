@@ -205,7 +205,7 @@ Examples:
     remote_parser.add_argument(
         "--no-fks",
         action="store_true",
-        help="Strip foreign key constraints from cloud schema (avoids sync engine FK violations)",
+        help="Strip foreign key constraints from cloud schema (avoids replication engine FK violations)",
     )
 
     # generate command

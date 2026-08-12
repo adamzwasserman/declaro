@@ -549,12 +549,12 @@ pool = await ConnectionPool.turso("./app.db")
 async with pool.acquire() as conn:
     await conn.execute("INSERT INTO users (name) VALUES (?)", ("Alice",))
     await conn.commit()
-    await conn.sync()  # Ensure data is synced
+    await conn.sync()  # Ensure data is replicated
 ```
 
 ### Async-Only
 
-declaro-persistum is async-only. `SyncConnectionPool` and all sync connection types were removed in 2026-03-08. Use `pytest-asyncio` and `asyncio.run()` for tests.
+declaro-persistum is async-only. `SyncConnectionPool` and all replica connection types were removed in 2026-03-08. Use `pytest-asyncio` and `asyncio.run()` for tests.
 
 ### Mirror Pool (Replication Verification)
 
@@ -1426,7 +1426,7 @@ declaro diff -c "sqlite:///./data/app.db" -d turso
 
 ### LibSQL (Turso Cloud)
 
-- SQLite-compatible with cloud sync
+- SQLite-compatible with replication
 - Uses `pyturso`; no separate cloud package
 - Same limitations as SQLite
 
