@@ -155,6 +155,31 @@ Zero failures at every level. The shape — flat then collapsing — is right, a
 
 ---
 
+## 5b. Reuse and MVCC are separate levers, and they compound
+
+Written because the 14x reuse result was once asserted to carry over to WAL. **It does not.** WAL permits one writer at a time, so reuse removes the per-write thread but the writes still serialise.
+
+Four arms, one variable each. Mac, `TOTAL=2000`, crew 16, distinct keys, 3 retries so every arm can complete, journal mode read back and asserted on every connection. GIL on (importing `turso` disables free-threading locally).
+
+| arm | writes/s | **landed** | failed |
+|---|---|---|---|
+| WAL + one-and-done | 250 | **1629 / 2000** | 371 |
+| WAL + persistent | 1,505 | **1812 / 2000** | 216 |
+| MVCC + one-and-done | 426 | 2000 / 2000 | 0 |
+| **MVCC + persistent** | **4,721** | **2000 / 2000** | 0 |
+
+```
+reuse alone (WAL)          6.01x
+concurrency alone (MVCC)   1.70x
+both together             18.87x     <- they compound, not add
+```
+
+**Reuse is the larger single lever. MVCC is what makes the crew correct.**
+
+**WAL LOSES WRITES AT CREW 16, even with three retries** — 371 and 216 of 2,000, to `database is locked`. MVCC loses none in either arm. So "WAL plus persistent connections" is not a cheaper safe option; it is a lossy one. **WAL's safe crew size is 1, or writers serialised behind a lock** — which is what a pooled WAL path with a write lock already does, and why a synced target gets no write concurrency.
+
+**Do not re-derive:** the 13,826/sec figure requires reuse AND MVCC together. Neither alone approaches it, and reuse on WAL cannot even complete the work at crew 16.
+
 ## 6. Storage dominates everything at these rates
 
 Same code, same box, same concurrency (1,000), different filesystem:
