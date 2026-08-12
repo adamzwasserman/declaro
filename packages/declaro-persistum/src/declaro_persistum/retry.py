@@ -52,8 +52,23 @@ class Retry(TypedDict):
 NO_RETRY: Retry = {"attempts": 1, "base_delay_s": 0.0, "max_delay_s": 0.0}
 """Run the write once. Any failure, contention or not, goes to its caller."""
 
-ON_CONTENTION: Retry = {"attempts": 5, "base_delay_s": 0.01, "max_delay_s": 0.25}
-"""Absorb write-write conflicts under MVCC. Anything else still raises."""
+ON_CONTENTION: Retry = {"attempts": 4, "base_delay_s": 0.01, "max_delay_s": 0.25}
+"""Absorb write-write conflicts under MVCC. Anything else still raises.
+
+Four attempts is one try plus THREE RETRIES, then raise (Adam, 2026-08-11).
+`attempts` counts the total, so the retry count is `attempts - 1`.
+
+Three is a bound, not a guarantee. Measured 2026-08-11: 20 concurrent
+one-and-done writers to the SAME row produce 18 write-write conflicts out of
+20. Under contention that heavy, some callers will exhaust three retries and
+see the error — which is correct. A retry layer that never gives up is a hang
+wearing a different name, and the caller holding the ticket is the one that
+gets to decide what to do about a write that genuinely could not land.
+
+Disjoint rows do not need this at all: 20 concurrent writers to 20 distinct
+rows in one small table conflicted zero times. Conflict rate tracks the
+application's access pattern, not page layout — pyturso detects at row level,
+never SQLite's page level."""
 
 
 def is_contention(error: BaseException) -> bool:
