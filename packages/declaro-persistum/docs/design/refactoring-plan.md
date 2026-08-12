@@ -127,6 +127,28 @@ The rules that follow, and they apply to every phase:
 3. **One run is a sample, not a number.** Repeat anything that will be designed against, and publish the spread. The shape is usually solid long before the digits are.
 4. **A shell edit is not done because the script printed something.** Verify the file changed, and never describe changes in a commit message without checking they are in the commit.
 5. **Check the vendor's documentation before the design, not after being challenged.**
+6. **A before/after delta cannot see a file that did not exist before.** Gate on the absolute set, never on the difference.
+
+### The delta blindness, in full — because it shipped a runtime bug
+
+The eight-module split created **eight new source files**. Afterwards a lint check was run and reported "no new errors" — by comparing the error list against `HEAD` for `pool.py`, `write_queue.py` and five test files. **Every file the split created was absent from both sides of that comparison**, so nothing they contained could appear as new.
+
+What was hiding in one of them: `sync_pool.py` raises `PoolClosedError` in two places and never imported it. Ruff reported it as `F821 Undefined name`. Any caller reaching a closed sync pool got
+
+```
+NameError: name 'PoolClosedError' is not defined
+```
+
+instead of the typed exception. It survived a full day, a released wheel, and two peers reviewing the work.
+
+**This is the second failure of the same class.** The first dropped `from __future__ import annotations` from the same hand-written module headers and shipped a wheel that would not import below Python 3.14. Both are: *extraction wrote a fresh header by hand and omitted something the original had*. By the standing rule, twice makes it the architecture, not the instance.
+
+Two things follow:
+
+- **Do not hand-write a module header when extracting.** Derive the imports from the code that moved, or move the import block wholesale and prune afterwards with the linter.
+- **`F821` is a hard failure, never a style warning.** It means a name is used and does not exist. The pre-commit hook and the CI matrix both run ruff over the whole tree, which closes this going forward — but only because they lint the absolute set rather than a delta.
+
+A further tell that was also ignored: the lint output said "Found 19 errors" and was treated as a count to compare rather than a list to read. **Counting errors is not reading them.**
 
 ## Every phase is red first
 

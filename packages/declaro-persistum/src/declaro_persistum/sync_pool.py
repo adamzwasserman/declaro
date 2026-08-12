@@ -18,6 +18,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from declaro_persistum.exceptions import PoolClosedError
+
 logger = logging.getLogger(__name__)
 
 
