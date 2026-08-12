@@ -486,8 +486,23 @@ class TursoPool(BasePool):
         0.1.22 added this lock unconditionally, on a measurement taken in
         WAL mode. That measurement is the MVCC-off row above: real, but a
         measurement of the engine running without the feature rather than a
-        limit of the engine. `mvcc=True` is the default and the engine has
-        the last word; this covers the case where it says no.
+        limit of the engine.
+
+        WHICH ARM A POOL LANDS IN IS NOT A CHOICE ANY CALLER MAKES. MVCC is
+        local only, so a pool with a `remote_url` is ALWAYS in the MVCC-off
+        arm and its writers are ALWAYS serialised here. That is deliberate:
+        without this lock a WAL replica loses writes outright (6 of 20 land
+        at K=20 above), so serialised-and-correct beats concurrent-and-lossy.
+
+        The consequence is worth stating plainly for anyone measuring write
+        throughput against a synced replica: concurrent writers do not
+        increase it, because they queue. A write-concurrency ceiling on a
+        cloud-synced pool is this lock doing its job, not a limit to tune
+        away. Raising it means not being synced on that path, not a setting.
+
+        This paragraph previously said "`mvcc=True` is the default and the
+        engine has the last word". That parameter was removed in 0.2.0 and
+        the sentence was left behind by the change.
 
         See https://docs.turso.tech/tursodb/concurrent-writes
         """
