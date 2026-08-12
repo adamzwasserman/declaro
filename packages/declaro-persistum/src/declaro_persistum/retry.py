@@ -93,8 +93,29 @@ spread over K rows, `v = v + 1` so every collision is a genuine conflict:
        10         18/20         0             3
        20         14/20         0             1
 
-THREE RETRIES LANDS EVERYTHING UP TO FIVE CONCURRENT WRITERS PER ROW.
-Degradation begins at ten. Design against that number.
+THE KNEE, repeated five times per point, because the single-run version of
+this said five and was wrong:
+
+    writers/row   landed across 5 runs      all 20?
+        1         20, 20, 20, 20, 20          yes
+        2         20, 20, 20, 20, 20          yes
+        4         20, 20, 20, 20, 20          yes
+        5         19, 20, 20, 20, 20          NO
+
+THREE RETRIES LANDS EVERYTHING UP TO FOUR CONCURRENT WRITERS PER ROW. At
+five, one run in five drops a write. Four held across five runs — a bound on
+the evidence, not a proof of four.
+
+FIRST-ATTEMPT SUCCESS IS THE LEADING INDICATOR. It falls 20 -> 10 -> 5 -> 4
+while landed still reads 20/20, so the retry absorbs a rising load silently
+and by the time anything fails the system has been deep into its budget for
+some time. Emit first-attempt success SEPARATELY from eventual success; an
+implementation that reports only the eventual rate gives an operator no
+warning at all.
+
+THIS BOUND WAS VERIFIED AT FOUR CONCURRENT WRITERS PER ROW, five runs, one
+machine. A declared bound carries the contention level it was verified at,
+or it is a preference rather than a claim anyone can check.
 
 ZERO LOST UPDATES AT EVERY POINT. The sum of counters equals the landed count
 on all six. Twenty-way concurrent read-modify-write on one row is the textbook

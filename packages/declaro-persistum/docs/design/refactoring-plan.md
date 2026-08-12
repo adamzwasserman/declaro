@@ -87,6 +87,29 @@ Every test this plan calls for follows the same discipline:
 
 This bites hardest in Phase 3. Once a field has one owner, the set of states it can hold becomes **enumerable**, and the test can run all of them. While four things write it, that set is unbounded and only samples are possible. **Single ownership is what makes exhaustive testing available at all** — which is why L1.18 must move before L1.19, and why the order is not a preference.
 
+## Claims about the code need verifying too, not just the code
+
+The plan has a discipline for code — red first, real databases, exhaustive where bounded. It had none for the **reports about** the code, and every serious error on 2026-08-11 landed there rather than in the code:
+
+| what was asserted | how it was actually wrong |
+|---|---|
+| "MVCC is active" | the `PRAGMA` was never fetched, so it never took |
+| "this run was MVCC" | the mode was never read back; a peer had to ask |
+| "detection is row level, so page conflicts don't apply" | an inference from an article, stated as settled |
+| "the commit contains the plan changes" | a shell edit failed silently and was reported as landed |
+| "three retries is safe to five writers per row" | one run per point; repeating it broke the claim |
+| "the push ships WAL frames" | never checked against the vendor's docs before designing on it |
+
+**Same shape, six surfaces: an unverified assertion reported as fact.** Not one of them was a coding mistake.
+
+The rules that follow, and they apply to every phase:
+
+1. **A measurement must be able to name its own configuration.** Read the mode back from the connection that did the work and record it. A run that cannot state what it ran in cannot support a claim about it.
+2. **The claim and the check must not come from the same place.** This is why a peer fetching `COMPAT.md` independently was worth more than a peer trusting the quote. Where a claim matters, verify it by a different route than the one that produced it.
+3. **One run is a sample, not a number.** Repeat anything that will be designed against, and publish the spread. The shape is usually solid long before the digits are.
+4. **A shell edit is not done because the script printed something.** Verify the file changed, and never describe changes in a commit message without checking they are in the commit.
+5. **Check the vendor's documentation before the design, not after being challenged.**
+
 ## Every phase is red first
 
 **No change in any phase begins without a failing test that describes the behaviour being asked for.** Write the test, watch it fail for the right reason, then make it pass.
@@ -240,7 +263,20 @@ Add the structural checks once the owner exists: purity, no mutation of inputs, 
    | 10 | 18/20 | **0** | 3 | 189ms |
    | 20 | 14/20 | **0** | 1 | 179ms |
 
-   **Three retries lands everything up to five concurrent writers per row.** Degradation begins at ten. That is the number a consumer designs against, and it was previously unanswerable — both ends were measured and disagreed completely.
+   **The knee, repeated five times per point** — because the single-sample version of this said "five is safe" and was wrong:
+
+   | writers/row | landed across 5 runs | all 20? | first-try |
+   |---|---|---|---|
+   | 1 | 20, 20, 20, 20, 20 | yes | 20 each |
+   | 2 | 20, 20, 20, 20, 20 | yes | 10 each |
+   | **4** | 20, 20, 20, 20, 20 | **yes** | 5, 5, 7, 6, 5 |
+   | **5** | **19**, 20, 20, 20, 20 | **no** | 4 each |
+
+   **Three retries lands everything up to FOUR concurrent writers per row.** At five, one run in five dropped a write. An earlier draft said five, from a single run at each point; repeating it broke that claim immediately. **Four held across five runs — which is a bound on the evidence, not a proof of four.**
+
+   **First-attempt success is the leading indicator.** It falls 20 → 10 → 5 → 4 while landed still reads 20/20. The retry absorbs a rising load silently, so by the time anything fails the system has been running deep into its budget for some time. An implementation that emits only the eventual success rate gives an operator no warning at all; first-attempt success must be counted and emitted separately.
+
+   **Zero lost updates across all 20 runs** — 400 concurrent read-modify-writes on contended rows, nothing lost anywhere.
 
    **Zero lost updates at every point.** Twenty-way concurrent read-modify-write on one row is the textbook lost-update test, and nothing was lost anywhere on the curve. This is the strongest result of the day and it is what one write per connection buys: COMPAT.md's silent-rollback window has zero duration when no sibling statement can exist.
 
