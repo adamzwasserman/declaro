@@ -53,6 +53,27 @@ from declaro_persistum.write_queue import (
 # TursoCloudManager — four classes, now deleted. `database.py` replaces them
 # with a Database TypedDict and functions over it. The word "pool" is retired:
 # nothing was pooled by the time it was deleted.
+# The query API. This package was UNREACHABLE from here after the query
+# rewrite — the reachability ratchet caught it, which is what it exists for.
+# Nobody could `from declaro_persistum import select`.
+from declaro_persistum.query import (
+    OPERATORS,
+    execute,
+    execute_many,
+    execute_one,
+    execute_scalar,
+    Query,
+    case_,
+    count_,
+    delete,
+    insert,
+    raw,
+    render_condition,
+    select,
+    subquery,
+    table,
+    update,
+)
 from declaro_persistum.database import (
     Database,
     close,
@@ -94,6 +115,23 @@ from declaro_persistum.cutover import begin_cutover
 # query builder classes and return with Group A of the map.
 
 __all__ = [
+    # query — functions over data
+    "select",
+    "execute",
+    "execute_one",
+    "execute_scalar",
+    "execute_many",
+    "insert",
+    "update",
+    "delete",
+    "raw",
+    "Query",
+    "render_condition",
+    "OPERATORS",
+    "table",
+    "count_",
+    "case_",
+    "subquery",
     # Types
     "Column",
     "Index",
@@ -104,10 +142,6 @@ __all__ = [
     "Ambiguity",
     "ApplyResult",
     # Connection Pool
-    "ConnectionPool",
-    "SyncConnectionPool",
-    "MirrorPool",
-    "TursoCloudManager",
     # Pydantic Loader
     "load_schema_from_models",
     "load_models_from_module",

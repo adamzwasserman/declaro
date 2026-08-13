@@ -8,7 +8,7 @@ by calling the table_reconstruction abstraction.
 import pytest
 import aiosqlite
 
-from declaro_persistum.applier.sqlite import SQLiteApplier
+from declaro_persistum.applier import apply
 from declaro_persistum.types import Operation
 from declaro_persistum.abstractions.pragma_compat import pragma_table_info
 
@@ -35,8 +35,7 @@ async def test_applier_handles_alter_column_nullability():
         ]
 
         # Apply operation
-        applier = SQLiteApplier()
-        result = await applier.apply(conn, operations, [0])
+        result = await apply(conn, operations, [0], "sqlite")
 
         # Verify success
         assert result["success"] is True
@@ -75,8 +74,7 @@ async def test_applier_handles_alter_column_type():
         ]
 
         # Apply operation
-        applier = SQLiteApplier()
-        result = await applier.apply(conn, operations, [0])
+        result = await apply(conn, operations, [0], "sqlite")
 
         # Verify success
         assert result["success"] is True
@@ -108,8 +106,7 @@ async def test_applier_handles_alter_column_default():
         ]
 
         # Apply operation
-        applier = SQLiteApplier()
-        result = await applier.apply(conn, operations, [0])
+        result = await apply(conn, operations, [0], "sqlite")
 
         # Verify success
         assert result["success"] is True
@@ -141,8 +138,7 @@ async def test_applier_dry_run_shows_reconstruction_marker():
         ]
 
         # Dry run
-        applier = SQLiteApplier()
-        result = await applier.apply(conn, operations, [0], dry_run=True)
+        result = await apply(conn, operations, [0], "sqlite", dry_run=True)
 
         # Verify dry run result
         assert result["success"] is True
@@ -172,9 +168,8 @@ async def test_applier_rollback_on_reconstruction_error():
             }
         ]
 
-        applier = SQLiteApplier()
         with pytest.raises(Exception):
-            await applier.apply(conn, operations, [0])
+            await apply(conn, operations, [0], "sqlite")
 
         # Verify table unchanged (original schema preserved)
         rows = await pragma_table_info(conn, "posts")
@@ -211,8 +206,7 @@ async def test_applier_multiple_operations_with_reconstruction():
         ]
 
         # Apply operations
-        applier = SQLiteApplier()
-        result = await applier.apply(conn, operations, [0, 1])
+        result = await apply(conn, operations, [0, 1], "sqlite")
 
         # Verify success
         assert result["success"] is True

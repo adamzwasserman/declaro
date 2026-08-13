@@ -23,17 +23,53 @@ class Query(TypedDict):
     dialect: str | None
 
 
+
+def _clause(
+    where: str | dict[str, Any] | None,
+    params: dict[str, Any] | None,
+    path: str,
+) -> tuple[str, dict[str, Any]]:
+    """Turn a `where` into SQL and params, whichever form it arrived in.
+
+    A DICT is the condition language (`query/conditions.py`) and is what a
+    caller should write:
+
+        where={"age": {"gt": 18}, "status": "active"}
+
+    A STRING is raw SQL with `:name` placeholders and the caller's own params.
+    It is kept because an escape hatch for SQL the condition language cannot
+    express is worth having, and removing it would push people back to
+    string-building with no parameters at all.
+
+    They are not mixed: a dict brings its own params, a string relies on the
+    caller's, and merging is done here so no caller has to remember which.
+    """
+    given = dict(params or {})
+    if where is None:
+        return "", given
+    if isinstance(where, str):
+        return where, given
+
+    from declaro_persistum.query.conditions import render
+
+    sql, built = render(where, "sql", path)
+    # The caller's params win. A dict-built name is derived from the path and
+    # cannot collide with one a caller chose, so an overlap means the caller
+    # meant it.
+    return sql, {**built, **given}
+
+
 def select(
     *columns: str,
     from_table: str,
-    where: str | None = None,
+    where: str | dict[str, Any] | None = None,
     params: dict[str, Any] | None = None,
     order_by: list[str] | None = None,
     limit: int | None = None,
     offset: int | None = None,
     joins: list[dict[str, str]] | None = None,
     group_by: list[str] | None = None,
-    having: str | None = None,
+    having: str | dict[str, Any] | None = None,
 ) -> Query:
     """
     Build a SELECT query.
@@ -80,8 +116,9 @@ def select(
             sql_parts.append(f'{join_type} JOIN "{join_table}" ON {join_on}')
 
     # Add WHERE
-    if where:
-        sql_parts.append(f"WHERE {where}")
+    where_sql, params = _clause(where, params, "w")
+    if where_sql:
+        sql_parts.append(f"WHERE {where_sql}")
 
     # Add GROUP BY
     if group_by:
@@ -89,8 +126,9 @@ def select(
         sql_parts.append(f"GROUP BY {group_cols}")
 
     # Add HAVING
-    if having:
-        sql_parts.append(f"HAVING {having}")
+    having_sql, params = _clause(having, params, "h")
+    if having_sql:
+        sql_parts.append(f"HAVING {having_sql}")
 
     # Add ORDER BY
     if order_by:
@@ -193,7 +231,7 @@ def update(
     table: str,
     set_values: dict[str, Any],
     *,
-    where: str,
+    where: str | dict[str, Any],
     params: dict[str, Any] | None = None,
     returning: list[str] | None = None,
 ) -> Query:
@@ -219,6 +257,8 @@ def update(
         raise ValueError("set_values cannot be empty")
 
     if not where:
+        # Required on purpose: an UPDATE with no WHERE rewrites every row, and
+        # a caller who means that should have to say so.
         raise ValueError("where clause is required for UPDATE (use '1=1' for all rows)")
 
     # Build SET clause
@@ -235,7 +275,8 @@ def update(
         all_params.update(params)
 
     set_sql = ", ".join(set_parts)
-    sql_parts = [f'UPDATE "{table}"', f"SET {set_sql}", f"WHERE {where}"]
+    where_sql, params = _clause(where, params, "w")
+    sql_parts = [f'UPDATE "{table}"', f"SET {set_sql}", f"WHERE {where_sql}"]
 
     # Add RETURNING
     if returning:
@@ -252,7 +293,7 @@ def update(
 def delete(
     from_table: str,
     *,
-    where: str,
+    where: str | dict[str, Any],
     params: dict[str, Any] | None = None,
     returning: list[str] | None = None,
 ) -> Query:
@@ -276,8 +317,8 @@ def delete(
     if not where:
         raise ValueError("where clause is required for DELETE (use '1=1' for all rows)")
 
-    params = params or {}
-    sql_parts = [f'DELETE FROM "{from_table}"', f"WHERE {where}"]
+    where_sql, params = _clause(where, params, "w")
+    sql_parts = [f'DELETE FROM "{from_table}"', f"WHERE {where_sql}"]
 
     # Add RETURNING
     if returning:

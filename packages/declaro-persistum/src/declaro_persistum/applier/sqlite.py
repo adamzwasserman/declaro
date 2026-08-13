@@ -113,7 +113,7 @@ async def apply(
 
 
 async def _execute_with_reconstruction(
-    self, connection: Any, operation: Operation
+    connection: Any, operation: Operation
 ) -> None:
     """
     Execute an operation using table reconstruction (async).

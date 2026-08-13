@@ -187,7 +187,7 @@ async def apply(
 
 
 async def _execute_coalesced_reconstruction(
-    self, connection: Any, table: str, ops: list[Operation]
+    connection: Any, table: str, ops: list[Operation]
 ) -> None:
     """
     Apply multiple reconstruction ops to the same table in one pass.
