@@ -4,7 +4,7 @@ Live cutover workflow for database migration.
 Orchestrates a 4-phase cutover from a local database to a remote database:
 
     Phase 1: bulk_transfer(local → remote)
-    Phase 2: MirrorPool(primary=local, mirror=remote) — dual-write verification
+    Phase 2: mirror(primary=local, replica=remote) — dual-write verification
     Phase 3: promote_mirror() — remote becomes primary
     Phase 4: detach_mirror() — run on remote alone
 
@@ -36,6 +36,7 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, Union
 
+from declaro_persistum.mirror import Mirror, mirror
 from declaro_persistum.transfer import (
     BulkTransferResult,
     TableTransferProgress,
@@ -59,16 +60,16 @@ async def begin_cutover(
     resume: bool = True,
     fail_open: bool = True,
     compare_on_read: bool = True,
-) -> tuple[MirrorPool, BulkTransferResult]:
+) -> tuple[Mirror, BulkTransferResult]:
     """
     Begin a live cutover from source to target database.
 
     Performs Phase 1 (bulk transfer) and sets up Phase 2 (dual-write
-    verification via MirrorPool).
+    verification via the mirror).
 
     Args:
-        source_pool: Source (local) database pool — becomes MirrorPool primary
-        target_pool: Target (remote) database pool — becomes MirrorPool mirror
+        source_pool: Source (local) database — becomes the mirror's primary
+        target_pool: Target (remote) database — becomes the mirror's replica
         source_dialect: Source database dialect
         target_dialect: Target database dialect
         schema_path: Path to Python module with Pydantic models
@@ -77,13 +78,13 @@ async def begin_cutover(
         expand_enums: Expand Literal types to enum lookup tables
         on_progress: Callback for per-table progress updates
         resume: Skip completed tables on retry
-        fail_open: MirrorPool fail_open setting (default True)
-        compare_on_read: MirrorPool compare_on_read setting (default True)
+        fail_open: what a REPLICA failure means; True keeps serving from primary
+        compare_on_read: run reads against both and record disagreement
 
     Returns:
-        Tuple of (MirrorPool, BulkTransferResult).
-        The MirrorPool has source as primary and target as mirror.
-        Use promote_mirror() for Phase 3 and detach_mirror() for Phase 4.
+        Tuple of (Mirror, BulkTransferResult).
+        The Mirror has source as primary and target as replica.
+        Use promote() for Phase 3 and detach() for Phase 4.
 
     Raises:
         TransferError: If bulk transfer fails critically
@@ -107,17 +108,15 @@ async def begin_cutover(
         f"{result['total_rows']} rows in {result['duration_seconds']:.1f}s"
     )
 
-    # Phase 2: Set up MirrorPool for dual-write verification
-    logger.info("Phase 2: Setting up MirrorPool for dual-write verification")
-    mirror_pool = MirrorPool(
-        source_pool,
-        target_pool,
+    # Phase 2: dual-write verification. A mirror is DATA — two databases and
+    # two policies — and the phases are functions over it.
+    logger.info("Phase 2: setting up the mirror for dual-write verification")
+    m = mirror(
+        primary=source_pool,
+        replica=target_pool,
         fail_open=fail_open,
         compare_on_read=compare_on_read,
     )
-    logger.info(
-        "MirrorPool ready. Use promote_mirror() for Phase 3, "
-        "detach_mirror() for Phase 4."
-    )
+    logger.info("Mirror ready. promote() is Phase 3, detach() is Phase 4.")
 
-    return mirror_pool, result
+    return m, result

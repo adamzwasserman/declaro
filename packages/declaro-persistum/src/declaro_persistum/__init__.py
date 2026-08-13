@@ -77,6 +77,14 @@ from declaro_persistum.query import (
 # Opening a Turso database, and the crew that writes to a local one
 # concurrently. The reachability ratchet caught both of these unexported.
 from declaro_persistum.crew import Crew, start_crew, stop_crew
+from declaro_persistum.mirror import (
+    Divergence,
+    Mirror,
+    detach,
+    mirror,
+    parallel_write,
+    promote,
+)
 from declaro_persistum.turso_database import migrating, open_turso
 from declaro_persistum.database import (
     Database,
@@ -119,7 +127,13 @@ from declaro_persistum.cutover import begin_cutover
 # query builder classes and return with Group A of the map.
 
 __all__ = [
-    # databases and the crew
+    # databases, the crew, the cutover mirror
+    "Mirror",
+    "Divergence",
+    "mirror",
+    "promote",
+    "detach",
+    "parallel_write",
     "open_turso",
     "migrating",
     "start_crew",

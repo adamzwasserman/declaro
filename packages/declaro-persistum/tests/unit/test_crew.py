@@ -5,12 +5,22 @@ queue, each holding ONE connection for its whole life. That connection reuse
 is the larger of the two throughput levers — 6.01x on its own, 18.87x
 compounded with MVCC — and a connection per write throws it away.
 
-CREW SIZE IS 2 HERE, and that is a test-harness number, not a
-recommendation. The measured knees are 16 and 64 on two different Render
-tiers. macOS file locking behaves differently enough that concurrent-writer
-numbers taken on a laptop say nothing about a server, so this file asserts
-CORRECTNESS — every deposited write lands, exactly once, in order — and
-asserts nothing about throughput.
+CREW SIZE IS 1 HERE, DELIBERATELY. What this file tests is the MACHINERY:
+deposit returns a ticket at once, a drainer picks the write up, executes it on
+its held connection, and the receipt comes back. None of that needs two
+drainers.
+
+Two DOES NOT WORK ON A LAPTOP, and that is a property of the laptop. pyturso
+is thread-per-connection with a blocking driver, so two drainers writing to
+one local file on macOS hit the engine's busy-wait INSIDE a worker thread,
+which never returns — the await never completes and the test hangs rather than
+failing. Measured directly: one-connection-per-write on macOS loses writes at
+2 concurrent writers and locks the file outright by 10.
+
+The crew's concurrency was measured on Render — 4,721 writes/s at crew 16,
+knees at 16 and 64 on two tiers — and belongs there. Asserting it here would
+be asserting server behaviour on a MacBook, which this package has now done
+twice and been corrected for twice.
 
 DDL goes through `migrating`, which is WAL. A table created on an MVCC
 connection is invisible to every other connection.
@@ -30,7 +40,7 @@ from declaro_persistum.write_queue import collect, deposit, new_room
 
 pytestmark = pytest.mark.turso
 
-CREW = 2
+CREW = 1   # machinery, not concurrency — see the module docstring
 WRITES = 12
 
 

@@ -129,11 +129,17 @@ class Room(TypedDict):
 
     writes: list[tuple[str, PendingWrite]]
     waiting: dict[str, asyncio.Future]
+    arrived: asyncio.Event
 
 
 def new_room() -> Room:
-    """An empty waiting room."""
-    return {"writes": [], "waiting": {}}
+    """An empty waiting room.
+
+    `arrived` is how a drainer learns there is work without polling. A polling
+    drainer can be starved by a busy event loop while `collect` waits on a
+    future that has no timeout, which is a hang rather than a slowdown.
+    """
+    return {"writes": [], "waiting": {}, "arrived": asyncio.Event()}
 
 
 def deposit(room: Room, write: PendingWrite) -> str:
@@ -144,6 +150,11 @@ def deposit(room: Room, write: PendingWrite) -> str:
     ticket = str(uuid.uuid4())
     room["writes"].append((ticket, write))
     room["waiting"][ticket] = asyncio.get_running_loop().create_future()
+    # Wake a drainer. Without this the crew has to POLL, and a polling
+    # drainer can be starved by a busy event loop while `collect` waits on a
+    # future with no timeout — which is exactly how this flaked once in a
+    # full-suite run and passed every time it was run alone.
+    room["arrived"].set()
     return ticket
 
 

@@ -81,14 +81,33 @@ async def drainer(
     conn = await db["connect"](db)
     try:
         while not stop.is_set():
+            # CLEAR BEFORE CHECKING. The reverse order is a lost wakeup: a
+            # drainer finds the queue empty, `deposit` appends and sets
+            # `arrived`, and then the drainer clears the flag it was just
+            # signalled with. Every drainer sleeps, `collect` waits on a
+            # future nobody will resolve, and the caller hangs.
+            #
+            # That is not hypothetical — it is the bug this loop had for one
+            # revision, and it presented as a test that passed alone and hung
+            # roughly one run in six.
+            #
+            # Clearing first makes the window harmless. A deposit landing
+            # before the check is seen by the check; one landing after leaves
+            # `arrived` set, so the wait returns at once.
+            room["arrived"].clear()
+
             if not room["writes"]:
-                # Nothing to do. Sleeping beats spinning, and the interval is
-                # a parameter because the right value depends on how bursty
-                # the caller is, which this module cannot know.
-                try:
-                    await asyncio.wait_for(stop.wait(), timeout=idle_s)
-                except TimeoutError:
-                    pass
+                # `idle_s` still bounds the wait, so a drainer notices `stop`
+                # even when nothing is ever deposited.
+                waiters = [
+                    asyncio.create_task(room["arrived"].wait()),
+                    asyncio.create_task(stop.wait()),
+                ]
+                _done, pending = await asyncio.wait(
+                    waiters, timeout=idle_s, return_when=asyncio.FIRST_COMPLETED
+                )
+                for task in pending:
+                    task.cancel()
                 continue
 
             async def execute(write: Any) -> None:
