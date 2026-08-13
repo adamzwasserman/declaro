@@ -15,7 +15,7 @@ Retry is only possible where the write is held as data. `acquire_write`
 cannot retry, because it never sees the caller's statements -- it yields a
 connection and the caller runs whatever it likes on it. A deposited write
 carries its own SQL and parameters, so `drain` can run it again. That is
-the difference between the queue and the pool, and it is the reason the
+the difference between the queue and the database, and it is the reason the
 queue exists at all.
 
 THERE ARE TWO RETRIES AND THEY ARE NOT THE SAME. They were conflated here on
@@ -194,7 +194,7 @@ def is_contention(error: BaseException) -> bool:
     CONCURRENT. The replication engine also wraps contention as "database tape
     error: database is busy".
 
-    NOTE: `TursoPool._is_busy` in pool.py carries the same predicate. Two
+    NOTE: the same predicate is carried elsewhere. Two
     definitions of "retryable" WILL drift. Tracked as a task to unify; do
     not add a third.
     """

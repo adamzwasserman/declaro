@@ -1,6 +1,6 @@
 """Dual-write during a cutover: write to both databases, read from the primary.
 
-`MirrorPool`, `MirrorConnection` and `MirrorCursor` were three classes wrapping
+Three classes used to wrap
 two connections and a pair of booleans. A mirror is two databases and two
 policies — that is data, and what is done with it is functions.
 

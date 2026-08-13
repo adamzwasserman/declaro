@@ -31,10 +31,10 @@ from declaro_persistum.exceptions import (  # noqa: I001 - must follow __version
     DeclaroError,
     DriftError,
     MigrationError,
-    PoolClosedError,
-    PoolConnectionError,
-    PoolError,
-    PoolExhaustedError,
+    DatabaseClosedError,
+    ConnectionFailedError,
+    DatabaseError,
+    ConnectionsExhaustedError,
     RollbackError,
     SchemaError,
     TransferError,
@@ -49,10 +49,7 @@ from declaro_persistum.write_queue import (
     drain,
     new_room,
 )
-# `pool.py` held ConnectionPool, MirrorPool, SyncConnectionPool and
 # TursoCloudManager — four classes, now deleted. `database.py` replaces them
-# with a Database TypedDict and functions over it. The word "pool" is retired:
-# nothing was pooled by the time it was deleted.
 # The query API. This package was UNREACHABLE from here after the query
 # rewrite — the reachability ratchet caught it, which is what it exists for.
 # Nobody could `from declaro_persistum import select`.
@@ -165,7 +162,7 @@ __all__ = [
     "DiffResult",
     "Ambiguity",
     "ApplyResult",
-    # Connection Pool
+    # Databases and connections
     # Pydantic Loader
     "load_schema_from_models",
     "load_models_from_module",
@@ -186,10 +183,10 @@ __all__ = [
     "ConnectionError",
     "MigrationError",
     "RollbackError",
-    "PoolError",
-    "PoolClosedError",
-    "PoolExhaustedError",
-    "PoolConnectionError",
+    "DatabaseError",
+    "DatabaseClosedError",
+    "ConnectionsExhaustedError",
+    "ConnectionFailedError",
     "TransferError",
     # Instrumentation
     "LatencyRecord",

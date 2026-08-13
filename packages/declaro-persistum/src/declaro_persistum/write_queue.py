@@ -8,7 +8,7 @@ So the only job left is to buffer callers who arrive at the same instant and
 hand their writes to the log in order. That is all this module does.
 
 It is NOT a claim that the engine takes one writer. Turso supports concurrent
-writers through MVCC and BEGIN CONCURRENT, and the pool still opens a write
+writers through MVCC and BEGIN CONCURRENT, and a writer still opens a
 connection per concurrent caller. This buffers callers; it does not serialise
 the database.
 

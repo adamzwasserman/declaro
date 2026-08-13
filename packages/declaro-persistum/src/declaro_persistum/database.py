@@ -1,35 +1,25 @@
 """A database is a value. Functions open it, read it, write it, close it.
 
-THE WORD "POOL" IS ABOLISHED HERE, and not as a rename. There was nothing
-pooled left to name. On a replicated database persistum held exactly one write
-connection — one is not a pool. On a local database it opened a connection per
-write and closed it — nothing retained, so nothing pooled. The class was called
-`ConnectionPool` after a mechanism that had already been removed, and the name
-went on shaping how the code was reasoned about long after the free list was
-gone.
+A local database file, sometimes with a primary in the cloud. So it is called a
+`Database`, it is a TypedDict, and the operations are functions that take it.
 
-What the thing IS: a local database file, sometimes with a primary in the
-cloud. So it is called a `Database`, it is a TypedDict, and the operations are
-functions that take it.
-
-    db = await open_turso(path, shutdown="exit_immediately")                      local only
-    db = await open_turso(path, primary=..., token=..., shutdown="exit_immediately")   with a primary
+    db = await open_turso(path, shutdown=...)                    local only
+    db = await open_turso(path, primary=..., token=..., shutdown=...)
 
     async with reading(db) as conn: ...
     async with writing(db) as conn: ...
 
     await flush(db)      block until local writes reach the primary
-    await close(db)      final flush, then release everything
+    await close(db)      final replication, then release everything
 
-THE CONNECTION IS NEVER STORED ON ANYTHING. `reading` and `writing` are
-context managers, so a connection exists for the span of the block and not one
+THE CONNECTION IS NEVER STORED ON ANYTHING. `reading` and `writing` are context
+managers, so a connection exists for the span of the block and not one
 statement longer (Rule 12). What `Database` carries is configuration and the
 injected callables — never a live handle a caller could reach around and use.
 
-CALLABLES ARE INJECTED, following honest-persist's
-`open_pool(db_id, connect, classify, close, size)`. `connect` and `close` come
-in as arguments, so the same functions drive SQLite, Turso and PostgreSQL, and
-a test drives them against a real database rather than a fake.
+CALLABLES ARE INJECTED. `connect` and `close_connection` come in as arguments,
+so the same functions drive SQLite, Turso and PostgreSQL, and a test drives
+them against a real database rather than a fake.
 """
 
 from __future__ import annotations
@@ -39,7 +29,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any, Literal, TypedDict
 
-from declaro_persistum.exceptions import PoolClosedError
+from declaro_persistum.exceptions import DatabaseClosedError
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +177,7 @@ def is_replicated(db: Database) -> bool:
 
 def _check_open(db: Database) -> None:
     if db["closed"]:
-        raise PoolClosedError("Database has been closed")
+        raise DatabaseClosedError("Database has been closed")
 
 
 @asynccontextmanager
@@ -246,12 +236,8 @@ async def writing(db: Database) -> AsyncIterator[Any]:
 
 
 # ---------------------------------------------------------------------------
-# Replication — and this is where "replicate" IS the correct word.
-#
-# "pool" was abolished because nothing was pooled. Replication is not a
-# euphemism for anything: two copies of one database exist, and these
-# functions bring them into conformity. The word stays, and it is the ONLY
-# word for it — "sync" now means synchronous and nothing else.
+# Replication. Two copies of one database exist, and these functions bring them
+# into conformity. "Sync" means synchronous and nothing else.
 # ---------------------------------------------------------------------------
 
 

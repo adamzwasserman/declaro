@@ -274,39 +274,39 @@ class LoaderError(SchemaError):
 
 
 # =============================================================================
-# Connection Pool Exceptions
+# Database and connection exceptions
 # =============================================================================
 
 
-class PoolError(DeclaroError):
-    """Base exception for connection pool errors."""
+class DatabaseError(DeclaroError):
+    """Base exception for database and connection errors."""
 
     pass
 
 
-class PoolClosedError(PoolError):
+class DatabaseClosedError(DatabaseError):
     """
-    Pool has been closed.
+    The database has been closed.
 
-    Raised when attempting to acquire a connection from a pool
+    Raised when attempting to acquire a connection from a database
     that has already been closed.
     """
 
     pass
 
 
-class PoolExhaustedError(PoolError):
+class ConnectionsExhaustedError(DatabaseError):
     """
     No connections available (acquire timeout).
 
-    Raised when the pool cannot provide a connection within
+    Raised when the database cannot provide a connection within
     the configured acquire_timeout period.
     """
 
     pass
 
 
-class PoolConnectionError(PoolError):
+class ConnectionFailedError(DatabaseError):
     """
     Failed to create a connection.
 

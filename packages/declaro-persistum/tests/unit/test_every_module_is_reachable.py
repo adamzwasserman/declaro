@@ -54,17 +54,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 SRC = ROOT / "src" / PKG
 
 KNOWN_ORPHANS: dict[str, str] = {
-    f"{PKG}.replication": (
-        "279 lines of push/pull/backoff logic whose every function takes a "
-        "`pool` — the object deleted with the rest. `database.py` replaces it "
-        "with a Database TypedDict that takes `replicate_once` and "
-        "`refresh_once` as INJECTED callables, and nothing yet builds a Turso "
-        "Database to inject them into. So this is not dead code, it is code "
-        "waiting for the factory (`open_turso`) that has not been written. "
-        "Listed rather than deleted because the retry-and-backoff behaviour in "
-        "it is measured and worth keeping; listed rather than left silent "
-        "because an orphan nobody has written down is how the last four got in."
-    ),
 }
 """One entry, and the aim is to get back to none.
 
