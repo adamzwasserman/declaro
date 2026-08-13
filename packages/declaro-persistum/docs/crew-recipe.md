@@ -22,7 +22,7 @@
 
 ## Who this is for
 
-**Local-only stores.** The crew depends on MVCC, and MVCC must never run on a replica — it creates local-only internal tables the replication engine cannot reconcile.
+**Local-only stores.** The crew depends on MVCC, and MVCC gives a replica nothing: measured 2026-08-12, once anything has been written no second connection can open on a replicated database under MVCC (`database tape error: database is busy`, persistent across 15 retries), and MVCC's whole benefit is concurrency *across* connections. The earlier reason given here — "it creates local-only internal tables the replication engine cannot reconcile" — was asserted from one correlational observation, never proven, and is retracted.
 
 **It does not apply to a cloud-replicated write surface.** multicardz established this on 2026-08-12: their entire write path (central, ~2000 shelf databases, project pools) is replicated for durability, so the crew, `BEGIN CONCURRENT`, and persistent MVCC writer connections are all the wrong tool for them. Their target is the other one — WAL, pooled, **no write concurrency at all** — and their lever is reducing write *volume*, not raising concurrency.
 

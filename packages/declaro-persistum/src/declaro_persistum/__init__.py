@@ -74,6 +74,10 @@ from declaro_persistum.query import (
     table,
     update,
 )
+# Opening a Turso database, and the crew that writes to a local one
+# concurrently. The reachability ratchet caught both of these unexported.
+from declaro_persistum.crew import Crew, start_crew, stop_crew
+from declaro_persistum.turso_database import migrating, open_turso
 from declaro_persistum.database import (
     Database,
     close,
@@ -115,6 +119,12 @@ from declaro_persistum.cutover import begin_cutover
 # query builder classes and return with Group A of the map.
 
 __all__ = [
+    # databases and the crew
+    "open_turso",
+    "migrating",
+    "start_crew",
+    "stop_crew",
+    "Crew",
     # query — functions over data
     "select",
     "execute",
