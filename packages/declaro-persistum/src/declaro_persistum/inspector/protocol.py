@@ -54,7 +54,7 @@ class DatabaseInspector(Protocol):
             DeclaroError: If schema cannot be read due to permissions or other issues
 
         Example:
-            >>> inspector = PostgreSQLInspector()
+            >>> inspector = create_inspector("postgresql")
             >>> schema = await inspector.introspect(conn)
             >>> print(schema.keys())
             dict_keys(['users', 'orders', 'products'])
@@ -118,19 +118,18 @@ def create_inspector(dialect: str) -> DatabaseInspector:
     Raises:
         ValueError: If dialect is not supported
     """
-    from declaro_persistum.inspector.postgresql import PostgreSQLInspector
-    from declaro_persistum.inspector.sqlite import SQLiteInspector
-    from declaro_persistum.inspector.turso import TursoInspector
+    from declaro_persistum.inspector import postgresql, sqlite, turso
 
-    INSPECTORS: dict[str, type] = {
-        "postgresql": PostgreSQLInspector,
-        "sqlite": SQLiteInspector,
-        "turso": TursoInspector,
+    INSPECTORS = {
+        "postgresql": postgresql,
+        "sqlite": sqlite,
+        "turso": turso,
     }
 
-    inspector_cls = INSPECTORS.get(dialect)
-    if inspector_cls is None:
+    inspector = INSPECTORS.get(dialect)
+    if inspector is None:
         raise ValueError(
-            f"Unsupported dialect: {dialect}. Supported dialects: {', '.join(INSPECTORS)}"
+            f"Unsupported dialect: {dialect}. "
+            f"Supported dialects: {', '.join(INSPECTORS)}"
         )
-    return inspector_cls()  # type: ignore[return-value]
+    return inspector  # type: ignore[return-value]

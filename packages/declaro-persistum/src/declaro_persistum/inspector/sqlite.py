@@ -34,8 +34,17 @@ _USER_TABLES = """
     WHERE type = 'table'
       AND name NOT LIKE 'sqlite_%'
       AND name NOT LIKE '_declaro_%'
+      AND name NOT LIKE '__turso_%'
+      AND name NOT LIKE 'turso_%'
     ORDER BY name
 """
+
+# The turso patterns are here as well as in the turso inspector because
+# `open_turso` runs the Turso engine even for a local database, and that engine
+# creates __turso_internal_mvcc_meta. A caller passing dialect="sqlite" for a
+# SQLite-compatible file would otherwise have the differ read a system table as
+# a user table and emit drop_table for it. The engine refuses the drop, so the
+# migration fails outright.
 
 
 async def _rows(connection: Any, sql: str) -> list[tuple]:

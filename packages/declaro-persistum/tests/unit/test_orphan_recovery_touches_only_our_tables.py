@@ -49,31 +49,53 @@ class _Conn:
         }
 
 
-class _Pool:
-    def __init__(self, conn: _Conn) -> None:
-        self._conn = conn
-        self._remote_url = None
+def _database(conn: _Conn):
+    """A Database whose connect hands back the real sqlite3 connection.
 
-    def acquire(self, **_kw):
-        conn = self._conn
+    Recovery takes a Database now, not the deleted object. Building one here
+    rather than a fake of the old shape is what keeps this test honest about
+    the interface it is exercising.
+    """
+    from declaro_persistum.database import new_database
 
-        class _Ctx:
-            async def __aenter__(self):
-                return conn
+    async def connect(db):
+        return conn
 
-            async def __aexit__(self, *a):
-                return False
+    async def close_connection(c):
+        return None
 
-        return _Ctx()
+    async def nothing(db):
+        return True
 
-    def acquire_write(self, **_kw):
-        return self.acquire()
+    async def nothing_down(db):
+        return None
+
+    async def release(db):
+        return None
+
+    async def sleep(_s):
+        return None
+
+    return new_database(
+        path=":memory:",
+        primary=None,
+        token=None,
+        connect=connect,
+        close_connection=close_connection,
+        serialise=None,
+        shutdown="exit_immediately",
+        replicate_once=nothing,
+        refresh_once=nothing_down,
+        release=release,
+        sleep=sleep,
+        retry_delay_s=0.001,
+    )
 
 
 async def _recover(conn: _Conn) -> int:
     from declaro_persistum.migrations import _recover_orphaned_tmp_tables
 
-    return await _recover_orphaned_tmp_tables(_Pool(conn))
+    return await _recover_orphaned_tmp_tables(_database(conn))
 
 
 @pytest.mark.asyncio

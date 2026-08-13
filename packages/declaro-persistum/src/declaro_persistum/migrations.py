@@ -11,7 +11,7 @@ hasn't changed since the last successful migration (skip-if-clean).
 
 Usage:
     # Async
-    await apply_migrations_async(pool, dialect, schema_path)
+    await apply_migrations_async(db, dialect, schema_path)
 """
 
 import hashlib
@@ -27,25 +27,28 @@ from declaro_persistum.pydantic_loader import load_models_from_module
 from declaro_persistum.abstractions.enums import expand_schema_enums
 from declaro_persistum.types import ApplyResult, Operation, Schema
 
+from declaro_persistum.database import (
+    Database,
+    is_replicated,
+    reading,
+    refresh,
+    writing,
+)
+
 META_TABLE = "_declaro_meta"
 
 logger = logging.getLogger(__name__)
 
 
-def _acquire_write_or_read(pool: Any) -> Any:
-    """Return pool.acquire_write(concurrent=False) if available, else pool.acquire().
+def _for_ddl(db: Database) -> Any:
+    """A write connection. DDL and hash writes never go through a read.
 
-    DDL and hash writes must go through the write connection on pools
-    with split read/write paths (e.g. TursoPool) so that changes reach
-    the cloud primary rather than only the local replica file.
-
-    concurrent=False because DDL (CREATE TABLE, ALTER TABLE, etc.)
-    requires exclusive transactions — BEGIN CONCURRENT is rejected by
-    Turso for DDL statements.
+    On a replicated database a read connection reaches the local copy only, so
+    DDL applied through one would never reach the primary. `writing` also takes
+    the serialise lock, which is what keeps a schema change from interleaving
+    with an ordinary write.
     """
-    if hasattr(pool, "acquire_write"):
-        return pool.acquire_write(concurrent=False)
-    return pool.acquire()
+    return writing(db)
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +84,7 @@ def _dialect_needs_orphan_recovery(dialect: str) -> bool:
 
     Postgres reconstruction does not produce ``_declaro_tmp_*`` tables and
     has no ``sqlite_master`` system table, so running the recovery scan on
-    a Postgres pool crashes startup with UndefinedTableError.
+    a Postgres database crashes startup with UndefinedTableError.
     """
     return dialect in ("sqlite", "turso")
 
@@ -240,7 +243,7 @@ async def _has_user_tables(conn: Any) -> bool:
     return row is not None
 
 
-async def _recover_orphaned_tmp_tables(pool: Any) -> int:
+async def _recover_orphaned_tmp_tables(db: Database) -> int:
     """Detect and recover orphaned temp tables from failed reconstruction.
 
     Reconstruction uses temp tables named ``_declaro_tmp_<table>_<8hex>``.  If
@@ -253,7 +256,7 @@ async def _recover_orphaned_tmp_tables(pool: Any) -> int:
 
     Returns the number of tables recovered.
     """
-    async with _acquire_write_or_read(pool) as conn:
+    async with _for_ddl(db) as conn:
         cursor = await conn.execute(
             "SELECT name FROM sqlite_master "
             "WHERE type = 'table' AND name LIKE '_declaro_tmp_%'"
@@ -332,7 +335,7 @@ async def _recover_orphaned_tmp_tables(pool: Any) -> int:
 
 
 async def apply_migrations_async(
-    pool: Any,
+    db: Database,
     dialect: str,
     schema_path: Union[str, Path],
     *,
@@ -349,7 +352,7 @@ async def apply_migrations_async(
     the schema hasn't changed since the last successful migration.
 
     Args:
-        pool: The database connection pool (async)
+        db: The database
         dialect: Database dialect ('sqlite', 'turso', 'postgresql')
         schema_path: Path to Python module containing Pydantic models
         expand_enums: Whether to expand Literal types to lookup tables (default True)
@@ -381,19 +384,16 @@ async def apply_migrations_async(
         }
 
     # Everything below reads the database to decide what to change: the
-    # skip-if-clean probe, then introspection feeding the differ. A pool that
-    # backgrounded its initial replication may still be at an older revision,
-    # and a diff computed against a stale replica produces operations that
-    # correct code then faithfully applies. Wait for the sync here, at the one
-    # call site that genuinely needs a primary-consistent view, rather than
-    # making every pool open pay for it.
-    if hasattr(pool, "initial_pull_complete"):
-        await pool.initial_pull_complete()
+    # A migration diffs the live schema against the target, so the local copy
+    # must be current first. A warm open does not replicate, so without this the
+    # diff is computed against whatever the copy held when it was last touched
+    # and emits DDL for a schema that has moved.
+    await refresh(db)
 
     # Pre-flight: recover orphaned _new tables from failed reconstruction.
     # Decision lives in the pure helper so it can be tested without mocks.
     if _dialect_needs_orphan_recovery(dialect):
-        await _recover_orphaned_tmp_tables(pool)
+        await _recover_orphaned_tmp_tables(db)
 
     # Skip-if-clean: compare schema file hash with stored hash.
     # Version is passed explicitly so _compute_schema_hash stays a pure
@@ -403,7 +403,7 @@ async def apply_migrations_async(
     schema_hash = _compute_schema_hash(schema_path, __version__)
 
     if not force:
-        async with pool.acquire() as conn:
+        async with reading(db) as conn:
             if await _schema_is_clean(conn, schema_path, schema_hash):
                 logger.info(f"Schema unchanged (hash match) — skipping migration")
                 return {
@@ -421,7 +421,7 @@ async def apply_migrations_async(
     if not target_schema:
         logger.warning("No tables found in schema models")
         # Store hash so next call skips
-        async with _acquire_write_or_read(pool) as conn:
+        async with _for_ddl(db) as conn:
             await _ensure_meta_table(conn)
             await _store_hash(conn, schema_path.name, schema_hash)
         return {
@@ -444,7 +444,7 @@ async def apply_migrations_async(
 
     # Introspect current database state
     inspector = create_inspector(dialect)
-    async with pool.acquire() as conn:
+    async with reading(db) as conn:
         current_schema = await inspector.introspect(conn)
 
     logger.info(f"Introspected {len(current_schema)} tables from database")
@@ -455,7 +455,7 @@ async def apply_migrations_async(
     if not diff_result["operations"]:
         logger.info("Schema is up to date - no migrations needed")
         # Store hash so next call skips introspection
-        async with _acquire_write_or_read(pool) as conn:
+        async with _for_ddl(db) as conn:
             await _ensure_meta_table(conn)
             await _store_hash(conn, schema_path.name, schema_hash)
         return {
@@ -489,7 +489,7 @@ async def apply_migrations_async(
     # the replication engine can't replicate DDL, and partial sync (DROP reaches
     # cloud but CREATE doesn't) destroys tables on both sides.
     # Use `declaro migrate-remote` for schema changes that need reconstruction.
-    is_cloud_replica = hasattr(pool, "_remote_url") and pool._remote_url
+    is_cloud_replica = is_replicated(db)
     operations = diff_result["operations"]
     execution_order = diff_result["execution_order"]
     skipped_operations: list[dict[str, Any]] = []
@@ -520,21 +520,12 @@ async def apply_migrations_async(
                 "error": None,
             }
 
-    # Pause cloud push during DDL — a push mid-transaction would sync
-    # partial state.
-    if hasattr(pool, "pause_push"):
-        pool.pause_push()
-
-    # Apply safe migrations
+    # No pause. A migration is a writer, and it holds the serialise lock for
+    # the whole of `_for_ddl`; opportunistic replication defers to a waiting
+    # writer, so nothing can push mid-transaction.
     applier = create_applier(dialect)
-    try:
-        async with _acquire_write_or_read(pool) as conn:
-            result = await applier.apply(
-                conn, operations, execution_order
-            )
-    finally:
-        if hasattr(pool, "resume_push"):
-            pool.resume_push()
+    async with _for_ddl(db) as conn:
+        result = await applier.apply(conn, operations, execution_order)
 
     if result["success"]:
         logger.info(f"Successfully applied {result['operations_applied']} migrations")
@@ -543,7 +534,7 @@ async def apply_migrations_async(
         for sql in result["executed_sql"]:
             logger.debug(f"  Executed: {sql}")
         # Store hash after successful migration
-        async with _acquire_write_or_read(pool) as conn:
+        async with _for_ddl(db) as conn:
             await _ensure_meta_table(conn)
             await _store_hash(conn, schema_path.name, schema_hash)
         return {

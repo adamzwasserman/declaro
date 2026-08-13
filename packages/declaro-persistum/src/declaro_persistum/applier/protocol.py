@@ -69,7 +69,7 @@ class MigrationApplier(Protocol):
             RollbackError: If rollback after failure also fails
 
         Example:
-            >>> applier = PostgreSQLApplier()
+            >>> applier = create_applier("postgresql")
             >>> result = await applier.apply(conn, operations, order)
             >>> if result["success"]:
             ...     print(f"Applied {result['operations_applied']} operations")
@@ -121,19 +121,18 @@ def create_applier(dialect: str) -> MigrationApplier:
     Raises:
         ValueError: If dialect is not supported
     """
-    from declaro_persistum.applier.postgresql import PostgreSQLApplier
-    from declaro_persistum.applier.sqlite import SQLiteApplier
-    from declaro_persistum.applier.turso import TursoApplier
+    from declaro_persistum.applier import postgresql, sqlite, turso
 
-    APPLIERS: dict[str, type] = {
-        "postgresql": PostgreSQLApplier,
-        "sqlite": SQLiteApplier,
-        "turso": TursoApplier,
+    APPLIERS = {
+        "postgresql": postgresql,
+        "sqlite": sqlite,
+        "turso": turso,
     }
 
-    applier_cls = APPLIERS.get(dialect)
-    if applier_cls is None:
+    applier = APPLIERS.get(dialect)
+    if applier is None:
         raise ValueError(
-            f"Unsupported dialect: {dialect}. Supported dialects: {', '.join(APPLIERS)}"
+            f"Unsupported dialect: {dialect}. "
+            f"Supported dialects: {', '.join(APPLIERS)}"
         )
-    return applier_cls()
+    return applier  # type: ignore[return-value]
