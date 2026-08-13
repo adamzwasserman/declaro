@@ -12,8 +12,8 @@ What the thing IS: a local database file, sometimes with a primary in the
 cloud. So it is called a `Database`, it is a TypedDict, and the operations are
 functions that take it.
 
-    db = await open_turso(path)                      local only
-    db = await open_turso(path, primary=..., token=...)   with a primary
+    db = await open_turso(path, shutdown="exit_immediately")                      local only
+    db = await open_turso(path, primary=..., token=..., shutdown="exit_immediately")   with a primary
 
     async with reading(db) as conn: ...
     async with writing(db) as conn: ...
@@ -34,23 +34,76 @@ a test drives them against a real database rather than a fake.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
 
 from declaro_persistum.exceptions import PoolClosedError
 
+logger = logging.getLogger(__name__)
+
 __all__ = [
     "Database",
+    "ShutdownPolicy",
+    "WriteLock",
     "new_database",
+    "new_write_lock",
+    "writers_waiting",
     "reading",
     "writing",
     "is_replicated",
     "replicate",
+    "replicate_if_idle",
+    "replication_loop",
+    "replicate_on_shutdown",
     "refresh",
     "flush",
     "close",
 ]
+
+
+# WHAT HAPPENS TO UNREPLICATED WRITES WHEN THE PROCESS IS SIGNALLED.
+# No default, and not for symmetry with Rule 14 for its own sake. persistum's
+# usual home has ephemeral disk, where anything not replicated when the process
+# dies is gone — so a default would silently pick the losing side of the exact
+# failure this exists to prevent, for every caller who never read the changelog.
+#
+#   "replicate"         trap SIGTERM/SIGINT, replicate to completion, then exit
+#   "exit_immediately"  install no handler; exit without replicating
+#
+# "exit_immediately" is a real answer — a read-only copy, a test, a host that
+# already calls close(). Stating it is the difference between a decision and an
+# omission, and a default cannot tell those apart.
+ShutdownPolicy = Literal["replicate", "exit_immediately"]
+
+
+class WriteLock(TypedDict):
+    """The serialise lock, and the count of writers waiting on it.
+
+    THE COUNT LIVES WITH THE LOCK BECAUSE IT DESCRIBES THE LOCK. Opportunistic
+    replication yields when a writer is waiting, and the resource it yields is
+    this one: replication goes out on the held connection, and so does every
+    write. Counting anything else — CPU, active readers, a queue length — is a
+    cheaper signal standing in for the real noun, which is the substitution
+    behind every replication incident this package has had.
+
+    A reader is not counted. `reading` takes no lock, so a reader never
+    contends with replication and must never defer it.
+    """
+
+    lock: Any
+    waiting: int
+
+
+def new_write_lock(lock: Any) -> WriteLock:
+    return {"lock": lock, "waiting": 0}
+
+
+def writers_waiting(db: Database) -> int:
+    """How many writers are blocked on the serialise lock right now."""
+    serialise = db["serialise"]
+    return 0 if serialise is None else serialise["waiting"]
 
 
 class Database(TypedDict):
@@ -71,7 +124,8 @@ class Database(TypedDict):
     token: str | None
     connect: Callable[..., Any]
     close_connection: Callable[..., Any]
-    serialise: Any
+    serialise: WriteLock | None
+    shutdown: ShutdownPolicy
     closed: bool
     replicate_once: Callable[..., Any]
     refresh_once: Callable[..., Any]
@@ -86,7 +140,8 @@ def new_database(
     token: str | None,
     connect: Callable[..., Any],
     close_connection: Callable[..., Any],
-    serialise: Any,
+    serialise: WriteLock | None,
+    shutdown: ShutdownPolicy,
     replicate_once: Callable[..., Any],
     refresh_once: Callable[..., Any],
     release: Callable[..., Any],
@@ -107,6 +162,7 @@ def new_database(
         "connect": connect,
         "close_connection": close_connection,
         "serialise": serialise,
+        "shutdown": shutdown,
         "closed": False,
         "replicate_once": replicate_once,
         "refresh_once": refresh_once,
@@ -160,8 +216,8 @@ async def writing(db: Database) -> AsyncIterator[Any]:
     there.
     """
     _check_open(db)
-    lock = db["serialise"]
-    if lock is None:
+    serialise = db["serialise"]
+    if serialise is None:
         conn = await db["connect"](db)
         try:
             yield conn
@@ -169,12 +225,24 @@ async def writing(db: Database) -> AsyncIterator[Any]:
             await db["close_connection"](conn)
         return
 
-    async with lock:
+    # INCREMENTED AROUND THE AWAIT, not anywhere convenient. A counter that is
+    # initialised and never incremented satisfies every test that sets it by
+    # hand, which is how machinery that does nothing passes for healthy.
+    # Around the await it means exactly: writers currently blocked on the
+    # resource replication would take.
+    serialise["waiting"] += 1
+    try:
+        await serialise["lock"].acquire()
+    finally:
+        serialise["waiting"] -= 1
+    try:
         conn = await db["connect"](db)
         try:
             yield conn
         finally:
             await db["close_connection"](conn)
+    finally:
+        serialise["lock"].release()
 
 
 # ---------------------------------------------------------------------------
@@ -188,15 +256,112 @@ async def writing(db: Database) -> AsyncIterator[Any]:
 
 
 async def replicate(db: Database) -> bool:
-    """Send local commits to the primary. Returns whether they landed.
+    """Bring this copy and its primary into conformity. BOTH DIRECTIONS, one pass.
 
-    A local-only database has no primary, so there is nothing to replicate
-    and this is true by vacuity rather than by success.
+    UP FIRST, THEN DOWN, AND THE ORDER IS LOAD-BEARING. Bringing the primary's
+    changes down first could overwrite a local commit that has been waiting
+    since the last shutdown. Sending up first makes the local copy the
+    primary's problem before the primary becomes the local copy's.
+
+    THIS USED TO SEND ONLY. `replicate` pushed, `refresh` pulled, and the
+    comment above them claimed the pair "bring the two copies into conformity"
+    — which neither did alone. A caller that only ever called `replicate` had a
+    local copy that learned nothing about its primary for the life of the
+    process, and nothing said so.
+
+    It also returned True for a local-only database, and its own docstring said
+    the value meant nothing: "true by vacuity rather than by success". A caller
+    cannot tell that apart from a replication that worked, so it now raises.
     """
     if not is_replicated(db):
-        return True
+        raise ValueError(
+            f"cannot replicate {db['path']}: it has no primary. A local-only "
+            f"database has nothing to bring into conformity — open it with a "
+            f"primary, or do not ask."
+        )
     _check_open(db)
-    return await db["replicate_once"](db)
+    if not await db["replicate_once"](db):
+        return False
+    await db["refresh_once"](db)
+    return True
+
+
+async def replicate_if_idle(db: Database) -> bool:
+    """Replicate only when no writer is waiting. Returns whether a pass ran.
+
+    OPPORTUNISTIC MEANS YIELDING TO REAL WORK. Replication holds the same
+    connection every write holds, so a writer waiting on the serialise lock is
+    a request paying for the round trip.
+
+    A DEFERRED PASS IS DROPPED, NOT QUEUED. Ten passes skipped under load
+    produce one pass when the load clears, not ten — otherwise recovering load
+    releases a backlog onto a connection at the moment it can least afford it.
+    """
+    if db["closed"] or not is_replicated(db):
+        return False
+    if writers_waiting(db) > 0:
+        return False
+    return await replicate(db)
+
+
+async def replication_loop(db: Database, wanted: Any) -> None:
+    """Replicate when work arrives and no writer waits. NOTHING IS ON A CLOCK.
+
+    `wanted` is an event a commit sets, and the caller's idleness sets. A timer
+    would wake whether or not anything was pending, take the connection to find
+    out, and still leave a fresh write sitting for a whole interval.
+    """
+    while not db["closed"]:
+        await wanted.wait()
+        # Cleared BEFORE the pass, never after. Clearing afterwards discards a
+        # signal that arrived while the pass was running, and that write then
+        # waits for an unrelated trigger — a lost wakeup, which is how an
+        # eventual-consistency loop quietly stops being eventual.
+        wanted.clear()
+        if db["closed"]:
+            return
+        await replicate_if_idle(db)
+
+
+async def replicate_on_shutdown(db: Database, *, now: Callable[[], float]) -> None:
+    """Block until the primary has everything, and SAY SO WHILE IT HAPPENS.
+
+    THE ONE PLACE BLOCKING IS CORRECT, AND THE ONE PLACE POLITENESS IS WRONG.
+    On ephemeral disk anything not replicated when the process dies is gone,
+    and sustained load is exactly when the most unreplicated data is sitting
+    there. So this ignores `writers_waiting` entirely.
+
+    IT LOGS BECAUSE A PROCESS THAT WILL NOT EXIT IS INDISTINGUISHABLE FROM A
+    HUNG ONE. Every line carries the path and the elapsed time, so an operator
+    can tell work from a stall, and can tell WHICH database is holding up the
+    exit when several are open.
+
+    `now` is injected rather than called here, which is what lets a test assert
+    the elapsed time appears without sleeping for it.
+    """
+    if not is_replicated(db):
+        return
+
+    started = now()
+    logger.info(
+        "Shutdown: replicating %s to its primary before exit. The process will "
+        "not exit until this completes.",
+        db["path"],
+    )
+    attempt = 0
+    while not await db["replicate_once"](db):
+        attempt += 1
+        logger.warning(
+            "Shutdown: replicating %s — attempt %d failed after %.1fs. "
+            "Not yet delivered to the primary.",
+            db["path"], attempt, now() - started,
+        )
+        await db["sleep"](db["retry_delay_s"])
+    await db["refresh_once"](db)
+    logger.info(
+        "Shutdown: %s is in conformity with its primary after %.1fs (%d retries).",
+        db["path"], now() - started, attempt,
+    )
 
 
 async def refresh(db: Database) -> None:
@@ -220,8 +385,11 @@ async def flush(db: Database) -> None:
     """
     if not is_replicated(db):
         return
-    while not await replicate(db):
+    # IGNORES LOAD. A caller that awaited this has said it is willing to wait;
+    # politeness belongs to the background pass, not here.
+    while not await db["replicate_once"](db):
         await db["sleep"](db["retry_delay_s"])
+    await db["refresh_once"](db)
 
 
 async def close(db: Database) -> Database:

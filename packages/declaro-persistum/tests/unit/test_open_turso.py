@@ -42,19 +42,19 @@ pytestmark = pytest.mark.turso
 class TestALocalDatabase:
     @pytest.mark.asyncio
     async def test_it_is_not_replicated(self, tmp_path):
-        db = await open_turso(str(tmp_path / "t.db"))
+        db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
         assert is_replicated(db) is False
         assert db["primary"] is None
 
     @pytest.mark.asyncio
     async def test_it_takes_no_write_lock(self, tmp_path):
         """MVCC exists so writers run concurrently. A lock would throw that away."""
-        db = await open_turso(str(tmp_path / "t.db"))
+        db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
         assert db["serialise"] is None
 
     @pytest.mark.asyncio
     async def test_a_write_is_readable_afterwards(self, tmp_path):
-        db = await open_turso(str(tmp_path / "t.db"))
+        db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
 
         # DDL goes through `migrating`, which is WAL. Creating the table on an
         # MVCC connection makes it INVISIBLE to every later connection —
@@ -73,12 +73,31 @@ class TestALocalDatabase:
             assert (await cur.fetchone())[0] == "hello"
 
     @pytest.mark.asyncio
-    async def test_replicating_a_local_database_is_a_no_op(self, tmp_path):
-        """No primary means nothing to send. True by vacuity, not by success."""
+    async def test_replicating_a_local_database_raises_rather_than_pretending(
+        self, tmp_path
+    ):
+        """"True by vacuity" cannot be told apart from a replication that worked.
+
+        This asserted `replicate(db) is True` for a database with no primary,
+        and its own docstring conceded the value meant nothing: "True by
+        vacuity, not by success". That is the failure mode this package keeps
+        paying for — a call reporting success while doing nothing, which no
+        caller can distinguish from one that did the job.
+
+        A caller asking a database with no primary to reach its primary has
+        made a mistake, and hearing it at the call site is the difference
+        between learning it now and believing for months that replication was
+        happening.
+        """
         from declaro_persistum.database import flush, replicate
 
-        db = await open_turso(str(tmp_path / "t.db"))
-        assert await replicate(db) is True
+        db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
+
+        with pytest.raises(ValueError, match="no primary"):
+            await replicate(db)
+
+        # flush stays quiet for a local database: nothing was promised, so
+        # there is nothing to fail to deliver. Only the direct ask raises.
         await flush(db)  # must not hang or raise
 
     @pytest.mark.asyncio
@@ -97,7 +116,7 @@ class TestALocalDatabase:
         at once: that is the crew's job, and a laptop cannot say what a server
         would do anyway.
         """
-        db = await open_turso(str(tmp_path / "t.db"))
+        db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
         conn = await migrating(db)
         await conn.execute("CREATE TABLE t (v INT)")
         await conn.commit()
@@ -125,8 +144,45 @@ class TestTheEngineChoiceIsNotTheCallers:
 
     @pytest.mark.asyncio
     async def test_a_local_database_gets_no_serialisation(self, tmp_path):
-        db = await open_turso(str(tmp_path / "t.db"))
+        db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
         assert db["serialise"] is None, (
             "a local database serialised its writers, which throws away the "
             "concurrency MVCC is enabled for"
+        )
+
+
+class TestTheShutdownPolicyIsActedOn:
+    """A policy that is stored and never read is a swallowed argument.
+
+    `shutdown="replicate"` has to DO something at the point the database is
+    opened. If a caller must also know to call `trap_shutdown` by hand, then
+    the argument is decoration and the guarantee is still "whoever remembers" —
+    the shape this package has already paid for more than once.
+    """
+
+    @pytest.mark.asyncio
+    async def test_asking_to_replicate_on_shutdown_installs_the_trap(self, tmp_path):
+        import signal
+
+        from declaro_persistum.shutdown import restore_shutdown
+
+        before = signal.getsignal(signal.SIGTERM)
+        try:
+            await open_turso(str(tmp_path / "t.db"), shutdown="replicate")
+            assert signal.getsignal(signal.SIGTERM) is not before, (
+                'the database was opened with shutdown="replicate" and no '
+                "handler was installed; the policy was stored and ignored"
+            )
+        finally:
+            restore_shutdown()
+            signal.signal(signal.SIGTERM, before)
+
+    @pytest.mark.asyncio
+    async def test_exit_immediately_installs_nothing(self, tmp_path):
+        import signal
+
+        before = signal.getsignal(signal.SIGTERM)
+        await open_turso(str(tmp_path / "t2.db"), shutdown="exit_immediately")
+        assert signal.getsignal(signal.SIGTERM) is before, (
+            "a database that asked to exit immediately installed a handler anyway"
         )

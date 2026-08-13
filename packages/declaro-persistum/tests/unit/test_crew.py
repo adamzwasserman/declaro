@@ -45,7 +45,7 @@ WRITES = 12
 
 
 async def _database_with_table(tmp_path):
-    db = await open_turso(str(tmp_path / "t.db"))
+    db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
     conn = await migrating(db)
     await conn.execute("CREATE TABLE t (v INTEGER)")
     await conn.commit()
@@ -133,6 +133,7 @@ async def test_a_crew_refuses_a_replicated_database(tmp_path):
         release=unused,
         sleep=asyncio.sleep,
         retry_delay_s=0.1,
+        shutdown="exit_immediately",
     )
 
     with pytest.raises(ValueError, match="local databases only"):

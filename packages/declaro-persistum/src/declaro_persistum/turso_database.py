@@ -53,11 +53,84 @@ arrived at connection-per-write three separate times.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import logging
 from typing import Any
 
-from declaro_persistum.database import Database, new_database
+from declaro_persistum.database import (
+    Database,
+    ShutdownPolicy,
+    new_database,
+    new_write_lock,
+)
 
-__all__ = ["open_turso", "migrating"]
+__all__ = ["open_turso", "migrating", "replicate_path"]
+
+logger = logging.getLogger(__name__)
+
+# A primary under continuous write can answer "there may be more" forever.
+# Reaching this bound means the copy is not converging, which is worth saying
+# out loud rather than looping in silence.
+_MAX_PULL_BATCHES = 64
+
+
+async def _pull_until_level(conn: Any) -> bool:
+    """Keep pulling until the primary reports nothing further.
+
+    pyturso's `pull()` fetches ONE batch and returns whether it fetched
+    anything — "there may be more". Calling it once and discarding the answer
+    leaves a copy part-way through and reports it current.
+
+    Measured 2026-08-13 against a real replica: a copy re-claimed after the
+    primary moved on shows nothing after connect, gains the missing table on
+    pull #1, and pull #2 returns False. One call was never enough.
+    """
+    fetched_any = False
+    for _ in range(_MAX_PULL_BATCHES):
+        if not await conn.pull():
+            return fetched_any
+        fetched_any = True
+    logger.warning(
+        "Pulled %d batches and the primary still reports more; the local copy "
+        "may not be converging",
+        _MAX_PULL_BATCHES,
+    )
+    return fetched_any
+
+
+async def replicate_path(path: str, *, primary: str, token: str | None) -> None:
+    """Bring a PATH into conformity with its primary, creating it if absent.
+
+    THE SAME VERB WHETHER OR NOT A COPY EXISTS YET. A caller should not have to
+    know which case it is in to ask for the same outcome: this path and that
+    primary, in conformity, when this returns.
+
+      no local copy   the whole database is copied down before returning
+      local copy      local commits go up, then the primary's changes come down
+
+    THIS IS THE PROVISIONING VERB and it has no predecessor. A database can be
+    prepared and filled before anyone opens it. It takes its own connection and
+    releases it, so it neither disturbs nor depends on an open Database.
+
+    Raises whatever the engine raises. A caller that asked for conformity and
+    did not get it is told, rather than left to infer it later from a missing
+    table.
+    """
+    if not primary:
+        raise ValueError(
+            f"cannot replicate {path}: no primary given. A local-only database "
+            f"has nothing to bring into conformity."
+        )
+
+    import turso.aio.sync
+
+    conn = await turso.aio.sync.connect(path, remote_url=primary, auth_token=token)
+    try:
+        await conn.push()
+        await _pull_until_level(conn)
+    finally:
+        with contextlib.suppress(Exception):
+            await conn.close()
 
 _DEFAULT_RETRY_DELAY_S = 0.1
 
@@ -135,22 +208,48 @@ async def open_turso(
     path: str,
     primary: str | None = None,
     token: str | None = None,
+    *,
+    shutdown: ShutdownPolicy,
 ) -> Database:
     """Open a Turso database, local or replicated.
 
-        db = await open_turso("/tmp/app.db")                     local
-        db = await open_turso("/tmp/app.db", primary=..., token=...)
+        db = await open_turso("/tmp/app.db", shutdown="exit_immediately")                     local
+        db = await open_turso("/tmp/app.db", primary=..., token=..., shutdown="exit_immediately")
 
     `primary` decides everything else. There is no engine argument, and adding
     one would put the choice back on a call site that cannot know the
     measurements above.
+
+    `shutdown` IS REQUIRED — see ShutdownPolicy. On ephemeral disk a default
+    would silently pick the losing side of the exact failure it exists to
+    prevent, and a default cannot tell "chose this" from "never knew there was
+    a choice".
+
+    A WARM OPEN DOES NOT REPLICATE. The schema is already on local disk, so
+    only data can be behind, and that is the eventual consistency the caller
+    asked for. A COLD open copies the whole database before returning, because
+    a database with no schema is unusable rather than merely stale — and that
+    copy is pyturso's `bootstrap_if_empty`, not persistum's. Measured
+    2026-08-13: 2.8s alone, 20-25s for 25 cold opens at once, because they
+    serialize.
     """
-    if primary is None:
-        return _open_local(path)
-    return await _open_replicated(path, primary, token)
+    db = (
+        _open_local(path, shutdown)
+        if primary is None
+        else await _open_replicated(path, primary, token, shutdown)
+    )
+    # THE POLICY IS ACTED ON HERE, not left for a caller to remember. A
+    # `shutdown` field that is stored and never read is a swallowed argument,
+    # and "whoever remembers to call trap_shutdown" is the same shape as
+    # "whoever remembers to call close" — which is the shape this exists to
+    # remove. trap_shutdown returns immediately for "exit_immediately".
+    from declaro_persistum.shutdown import trap_shutdown
+
+    trap_shutdown(db)
+    return db
 
 
-def _open_local(path: str) -> Database:
+def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
     """A local database: MVCC, no lock, a connection per `writing` block.
 
     `writing(db)` is the SINGLE-WRITER door and opening a connection per call
@@ -184,6 +283,7 @@ def _open_local(path: str) -> Database:
         connect=_connect_local(path, "mvcc"),
         close_connection=_close_connection,
         serialise=None,  # MVCC: writers run concurrently, which is the point
+        shutdown=shutdown,
         replicate_once=nothing_to_replicate,
         refresh_once=nothing_to_refresh,
         release=release,
@@ -192,7 +292,9 @@ def _open_local(path: str) -> Database:
     )
 
 
-async def _open_replicated(path: str, primary: str, token: str | None) -> Database:
+async def _open_replicated(
+    path: str, primary: str, token: str | None, shutdown: ShutdownPolicy
+) -> Database:
     """A replicated database: WAL, serialised writers, ONE held connection.
 
     The connection is opened here and handed to every write, because opening
@@ -222,7 +324,11 @@ async def _open_replicated(path: str, primary: str, token: str | None) -> Databa
             return False
 
     async def refresh_once(db: Database) -> None:
-        await held.pull()
+        # KEEPS ASKING UNTIL THE PRIMARY REPORTS NOTHING FURTHER. This called
+        # `pull()` exactly once. pyturso's pull fetches ONE batch and returns
+        # "there may be more", so a copy more than one batch behind was left
+        # part-way and reported current.
+        await _pull_until_level(held)
 
     async def release(db: Database) -> None:
         await held.close()
@@ -233,7 +339,8 @@ async def _open_replicated(path: str, primary: str, token: str | None) -> Databa
         token=token,
         connect=connect,
         close_connection=close_connection,
-        serialise=asyncio.Lock(),  # WAL: the engine allows one writer
+        serialise=new_write_lock(asyncio.Lock()),  # WAL: one writer
+        shutdown=shutdown,
         replicate_once=replicate_once,
         refresh_once=refresh_once,
         release=release,
