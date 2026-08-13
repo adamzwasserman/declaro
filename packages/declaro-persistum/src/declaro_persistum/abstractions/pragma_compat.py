@@ -1,515 +1,56 @@
-"""
-PRAGMA compatibility abstraction for Turso Database (Rust).
+"""PRAGMA access.
 
-Turso Database (Rust) supports most PRAGMAs needed for introspection:
-- Supported: table_info, table_list, table_xinfo, index_list, index_info, index_xinfo,
-             foreign_keys, integrity_check, schema_version, and more
-- foreign_key_list: natively supported by current Turso (verified against
-  pyturso 0.7.2, where PRAGMA foreign_key_list returns correct rows). It is
-  NOT available on pyturso 0.5.1, which raises "Not a valid pragma name", so
-  the sqlite_master emulation below remains the fallback for older engines.
+persistum reads a database's shape through these four PRAGMAs: the columns of a
+table, the indexes on it, the columns those indexes cover, and the foreign keys
+declared. Every supported backend answers all four natively.
 
-This module provides compatibility functions that:
-1. Try native PRAGMA first
-2. Fall back to emulation via sqlite_master parsing if not supported
-3. Return exact same format as native SQLite PRAGMA
-4. Log emulation usage for monitoring
-
-See: https://github.com/tursodatabase/turso/blob/main/COMPAT.md
+Errors are not caught. A backend that cannot answer fails at the point of the
+missing capability.
 """
 
-import logging
-import re
+from __future__ import annotations
+
 import inspect
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
-# I/O-boundary monitoring state (not business logic).
-# These counters track emulation usage for debugging/observability.
-# Use reset_counters() between tests.
-_emulation_counters = {
-    "index_list": 0,
-    "index_info": 0,
-    "foreign_key_list": 0,
-}
-
-_native_success_counters = {
-    "index_list": 0,
-    "index_info": 0,
-    "foreign_key_list": 0,
-}
-
-_affected_tables: set[str] = set()
-
-
-def get_emulation_count(pragma_name: str) -> int:
-    """Get emulation count for a specific PRAGMA."""
-    return _emulation_counters.get(pragma_name, 0)
-
-
-def get_native_success_count(pragma_name: str) -> int:
-    """Get native success count for a specific PRAGMA."""
-    return _native_success_counters.get(pragma_name, 0)
-
-
-def get_affected_tables() -> set[str]:
-    """Get set of tables that required emulation."""
-    return _affected_tables.copy()
-
-
-def reset_counters() -> None:
-    """Reset all monitoring counters."""
-    global _emulation_counters, _native_success_counters, _affected_tables
-    _emulation_counters = {k: 0 for k in _emulation_counters}
-    _native_success_counters = {k: 0 for k in _native_success_counters}
-    _affected_tables = set()
-
-
-# =============================================================================
-# Helper Functions for sync/async compatibility
-# =============================================================================
+__all__ = [
+    "pragma_table_info",
+    "pragma_index_list",
+    "pragma_index_info",
+    "pragma_foreign_key_list",
+]
 
 
 async def _maybe_await(value: Any) -> Any:
-    """Await value if it's awaitable, otherwise return as-is."""
+    """Await a value if it is awaitable.
+
+    The drivers disagree: some return a cursor, some a coroutine yielding one.
+    """
     if inspect.isawaitable(value):
         return await value
     return value
 
 
-async def _execute(conn: Any, query: str, params: tuple[Any, ...] | None = None) -> Any:
-    """Execute SQL against sync or areplica connection and return cursor."""
-    if params is None:
-        return await _maybe_await(conn.execute(query))
-    return await _maybe_await(conn.execute(query, params))
-
-
-async def _fetchall(cursor: Any) -> list[Any]:
-    """Fetch all rows from sync or async cursor."""
-    return await _maybe_await(cursor.fetchall())
-
-
-async def _fetchone(cursor: Any) -> Any:
-    """Fetch one row from sync or async cursor."""
-    return await _maybe_await(cursor.fetchone())
-
-
-# =============================================================================
-# PRAGMA table_info - Native pass-through
-# =============================================================================
+async def _rows(conn: Any, query: str) -> list[tuple]:
+    cursor = await _maybe_await(conn.execute(query))
+    return list(await _maybe_await(cursor.fetchall()) or [])
 
 
 async def pragma_table_info(conn: Any, table: str) -> list[tuple]:
-    """
-    Get table column information.
-
-    This is natively supported by both SQLite and Turso, so we pass through directly.
-
-    Args:
-        conn: Database connection (async for SQLite, sync for Turso)
-        table: Table name
-
-    Returns:
-        List of tuples: (cid, name, type, notnull, dflt_value, pk)
-    """
-    cursor = await _execute(conn, f"PRAGMA table_info('{table}')")
-    rows = await _fetchall(cursor)
-    return [tuple(row) for row in rows]
-
-
-# =============================================================================
-# PRAGMA index_list - Try native, fall back to emulation
-# =============================================================================
+    """Columns of `table`."""
+    return await _rows(conn, f'PRAGMA table_info("{table}")')
 
 
 async def pragma_index_list(conn: Any, table: str) -> list[tuple]:
-    """
-    Get index list for a table.
-
-    Tries native PRAGMA first. If not supported (Turso), falls back to
-    emulation via sqlite_master parsing.
-
-    Args:
-        conn: Database connection
-        table: Table name
-
-    Returns:
-        List of tuples: (seq, name, unique, origin, partial)
-        - seq: Index sequence number
-        - name: Index name
-        - unique: 1 if unique, 0 otherwise
-        - origin: 'c' (CREATE INDEX), 'u' (UNIQUE constraint), 'pk' (PRIMARY KEY)
-        - partial: 1 if partial index (has WHERE clause), 0 otherwise
-    """
-    try:
-        cursor = await _execute(conn, f"PRAGMA index_list('{table}')")
-        rows = await _fetchall(cursor)
-
-        # If we get here with Turso, it means native support was added
-        if _is_turso_connection(conn):
-            logger.warning(
-                f"PRAGMA index_list native support detected for Turso - "
-                f"emulation may no longer be needed (table: {table})"
-            )
-            _native_success_counters["index_list"] += 1
-
-        return [tuple(row) for row in rows]
-    except Exception as e:
-        # Check if it's a "not supported" error
-        error_msg = str(e).lower()
-        if "not supported" in error_msg or "no such pragma" in error_msg or "unknown" in error_msg or "not a valid" in error_msg:
-            logger.info(f"Emulating PRAGMA index_list for table '{table}' (native not supported)")
-            _emulation_counters["index_list"] += 1
-            _affected_tables.add(table)
-            return await _emulate_index_list(conn, table)
-        raise
-
-
-async def _emulate_index_list(conn: Any, table: str) -> list[tuple]:
-    """
-    Emulate PRAGMA index_list via sqlite_master parsing.
-
-    Returns same format as native PRAGMA: (seq, name, unique, origin, partial)
-    """
-    cursor = await _execute(
-        conn,
-        "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ?",
-        (table,)
-    )
-    rows = await _fetchall(cursor)
-
-    results = []
-    for seq, (name, sql) in enumerate(rows):
-        if not sql:
-            # Auto-generated index (e.g., for UNIQUE constraint or PRIMARY KEY)
-            # Determine origin based on name
-            if name.startswith("sqlite_autoindex"):
-                origin = "u"  # UNIQUE constraint
-            elif "pk" in name.lower():
-                origin = "pk"  # PRIMARY KEY
-            else:
-                origin = "u"  # Default to UNIQUE constraint
-            unique = 1
-            partial = 0
-        else:
-            # Parse CREATE INDEX statement
-            sql_upper = sql.upper()
-
-            # Check for UNIQUE
-            unique = 1 if "UNIQUE INDEX" in sql_upper else 0
-
-            # Origin is always 'c' for explicit CREATE INDEX
-            origin = "c"
-
-            # Check for partial index (WHERE clause)
-            partial = 1 if " WHERE " in sql_upper else 0
-
-        results.append((seq, name, unique, origin, partial))
-
-    return results
-
-
-# =============================================================================
-# PRAGMA index_info - Try native, fall back to emulation
-# =============================================================================
+    """Indexes on `table`."""
+    return await _rows(conn, f'PRAGMA index_list("{table}")')
 
 
 async def pragma_index_info(conn: Any, index_name: str) -> list[tuple]:
-    """
-    Get column information for an index.
-
-    Tries native PRAGMA first. If not supported (Turso), falls back to
-    emulation via sqlite_master parsing.
-
-    Args:
-        conn: Database connection
-        index_name: Index name
-
-    Returns:
-        List of tuples: (seqno, cid, name)
-        - seqno: Column sequence in index (0-based)
-        - cid: Column ID in table (-1 for expressions, -2 for rowid)
-        - name: Column name (or expression text)
-    """
-    try:
-        cursor = await _execute(conn, f"PRAGMA index_info('{index_name}')")
-        rows = await _fetchall(cursor)
-
-        # If we get here with Turso, it means native support was added
-        if _is_turso_connection(conn):
-            logger.warning(
-                f"PRAGMA index_info native support detected for Turso - "
-                f"emulation may no longer be needed (index: {index_name})"
-            )
-            _native_success_counters["index_info"] += 1
-
-        return [tuple(row) for row in rows]
-    except Exception as e:
-        # Check if it's a "not supported" error
-        error_msg = str(e).lower()
-        if "not supported" in error_msg or "no such pragma" in error_msg or "unknown" in error_msg or "not a valid" in error_msg:
-            logger.info(f"Emulating PRAGMA index_info for index '{index_name}' (native not supported)")
-            _emulation_counters["index_info"] += 1
-            return await _emulate_index_info(conn, index_name)
-        raise
-
-
-async def _emulate_index_info(conn: Any, index_name: str) -> list[tuple]:
-    """
-    Emulate PRAGMA index_info via sqlite_master parsing.
-
-    Returns same format as native PRAGMA: (seqno, cid, name)
-    """
-    cursor = await _execute(
-        conn,
-        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
-        (index_name,)
-    )
-    row = await _fetchone(cursor)
-
-    if not row or not row[0]:
-        # Index not found or auto-generated (no SQL)
-        return []
-
-    sql = row[0]
-
-    # Parse: CREATE [UNIQUE] INDEX name ON table(col1, col2, ...)
-    # Extract column list between parentheses after ON table
-    match = re.search(r'\bON\s+\w+\s*\((.+?)\)', sql, re.IGNORECASE | re.DOTALL)
-    if not match:
-        return []
-
-    columns_str = match.group(1)
-
-    # Parse individual columns (handle expressions, DESC, COLLATE, etc.)
-    results = []
-    seqno = 0
-
-    # Split by comma, but be careful with nested parentheses (for expressions)
-    parts = _split_columns(columns_str)
-
-    for part in parts:
-        part = part.strip()
-
-        # Extract column name or expression
-        # Remove DESC, ASC, COLLATE clauses
-        col_match = re.match(r'(.+?)(?:\s+(?:ASC|DESC|COLLATE\s+\w+))*$', part, re.IGNORECASE)
-        if col_match:
-            col_expr = col_match.group(1).strip()
-
-            # Check if it's an expression (contains function call or operators)
-            if '(' in col_expr or any(op in col_expr for op in ['+', '-', '*', '/', '||']):
-                # It's an expression
-                name = col_expr
-                cid = -1  # Expression
-            else:
-                # Simple column reference
-                name = col_expr.strip('"').strip("'").strip('`')
-                cid = -2  # We don't have table schema here, use -2 as placeholder
-
-            results.append((seqno, cid, name))
-            seqno += 1
-
-    return results
-
-
-def _split_columns(columns_str: str) -> list[str]:
-    """Split column list by comma, respecting nested parentheses."""
-    parts = []
-    current = []
-    depth = 0
-
-    for char in columns_str:
-        if char == '(':
-            depth += 1
-            current.append(char)
-        elif char == ')':
-            depth -= 1
-            current.append(char)
-        elif char == ',' and depth == 0:
-            parts.append(''.join(current))
-            current = []
-        else:
-            current.append(char)
-
-    if current:
-        parts.append(''.join(current))
-
-    return parts
-
-
-# =============================================================================
-# PRAGMA foreign_key_list - Try native, fall back to emulation
-# =============================================================================
+    """Columns covered by `index_name`."""
+    return await _rows(conn, f'PRAGMA index_info("{index_name}")')
 
 
 async def pragma_foreign_key_list(conn: Any, table: str) -> list[tuple]:
-    """
-    Get foreign key constraints for a table.
-
-    Tries native PRAGMA first. If not supported (Turso), falls back to
-    emulation via CREATE TABLE parsing.
-
-    Args:
-        conn: Database connection
-        table: Table name
-
-    Returns:
-        List of tuples: (id, seq, table, from, to, on_update, on_delete, match)
-        - id: Foreign key ID (0-based)
-        - seq: Column sequence in FK (0 for single-column, 0+ for multi-column)
-        - table: Referenced table name
-        - from: Column name in this table
-        - to: Column name in referenced table
-        - on_update: ON UPDATE action (CASCADE, SET NULL, etc.)
-        - on_delete: ON DELETE action
-        - match: MATCH clause (usually "NONE")
-    """
-    try:
-        cursor = await _execute(conn, f"PRAGMA foreign_key_list('{table}')")
-        rows = await _fetchall(cursor)
-
-        # If we get here with Turso, it means native support was added
-        if _is_turso_connection(conn):
-            logger.warning(
-                f"PRAGMA foreign_key_list native support detected for Turso - "
-                f"emulation may no longer be needed (table: {table})"
-            )
-            _native_success_counters["foreign_key_list"] += 1
-
-        return [tuple(row) for row in rows]
-    except Exception as e:
-        # Check if it's a "not supported" error
-        error_msg = str(e).lower()
-        if "not supported" in error_msg or "no such pragma" in error_msg or "unknown" in error_msg or "not a valid" in error_msg:
-            logger.info(f"Emulating PRAGMA foreign_key_list for table '{table}' (native not supported)")
-            _emulation_counters["foreign_key_list"] += 1
-            _affected_tables.add(table)
-            return await _emulate_foreign_key_list(conn, table)
-        raise
-
-
-async def _emulate_foreign_key_list(conn: Any, table: str) -> list[tuple]:
-    """
-    Emulate PRAGMA foreign_key_list via CREATE TABLE parsing.
-
-    Returns same format as native PRAGMA:
-    (id, seq, table, from, to, on_update, on_delete, match)
-    """
-    cursor = await _execute(
-        conn,
-        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
-        (table,)
-    )
-    row = await _fetchone(cursor)
-
-    if not row or not row[0]:
-        return []
-
-    sql = row[0]
-
-    # Parse foreign keys from CREATE TABLE
-    fks = []
-    fk_id = 0
-
-    # Pattern 1: Inline foreign key
-    # col_name TYPE REFERENCES table(col) [ON DELETE action] [ON UPDATE action]
-    # The column-name group is anchored to the start of a column definition -
-    # the '(' opening the column list or the ',' ending the previous column.
-    # Without that anchor, and with an unbounded '.*?' spanning the optional
-    # constraints, the scan started at the top of the DDL and captured
-    # "CREATE" as the referencing column: "CREATE TABLE o (id TEXT PRIMARY
-    # KEY, user_id TEXT REFERENCES u(id))" yielded from_col="CREATE". The
-    # inspector then found no column by that name and dropped the foreign key
-    # from the introspected schema entirely - a wrong answer, silently.
-    # It only ever worked on DDL with newlines between columns, since '.'
-    # does not cross a newline without re.DOTALL.
-    #
-    # The constraint gap is bounded to [^,()]* so it cannot span into an
-    # adjacent column definition.
-    inline_pattern = re.compile(
-        r'[(,]\s*'  # Start of a column definition
-        r'(\w+|"[^"]+"|\'[^\']+\'|`[^`]+`)\s+'  # Column name
-        r'[A-Za-z][A-Za-z0-9_ ]*?(?:\s*\([^)]*\))?'  # Type, incl. VARCHAR(50)
-        r'(?:\s+[^,()]*?)?\s+'  # Optional constraints, no boundary crossing
-        r'REFERENCES\s+'
-        r'(\w+|"[^"]+"|\'[^\']+\'|`[^`]+`)\s*'  # Referenced table
-        r'\(\s*(\w+|"[^"]+"|\'[^\']+\'|`[^`]+`)\s*\)'  # Referenced column
-        r'(?:\s+ON\s+DELETE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION))?'
-        r'(?:\s+ON\s+UPDATE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION))?',
-        re.IGNORECASE
-    )
-
-    for match in inline_pattern.finditer(sql):
-        from_col = _unquote(match.group(1))
-        ref_table = _unquote(match.group(2))
-        to_col = _unquote(match.group(3))
-        on_delete = match.group(4).upper() if match.group(4) else "NO ACTION"
-        on_update = match.group(5).upper() if match.group(5) else "NO ACTION"
-
-        fks.append((fk_id, 0, ref_table, from_col, to_col, on_update, on_delete, "NONE"))
-        fk_id += 1
-
-    # Pattern 2: Table-level foreign key
-    # FOREIGN KEY(col1, col2) REFERENCES table(col1, col2) [actions]
-    table_level_pattern = re.compile(
-        r'FOREIGN\s+KEY\s*\(([^)]+)\)\s+'
-        r'REFERENCES\s+'
-        r'(\w+|"[^"]+"|\'[^\']+\'|`[^`]+`)\s*'
-        r'\(([^)]+)\)'
-        r'(?:\s+ON\s+DELETE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION))?'
-        r'(?:\s+ON\s+UPDATE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION))?',
-        re.IGNORECASE
-    )
-
-    for match in table_level_pattern.finditer(sql):
-        from_cols = [_unquote(c.strip()) for c in match.group(1).split(',')]
-        ref_table = _unquote(match.group(2))
-        to_cols = [_unquote(c.strip()) for c in match.group(3).split(',')]
-        on_delete = match.group(4).upper() if match.group(4) else "NO ACTION"
-        on_update = match.group(5).upper() if match.group(5) else "NO ACTION"
-
-        for seq, (from_col, to_col) in enumerate(zip(from_cols, to_cols)):
-            fks.append((fk_id, seq, ref_table, from_col, to_col, on_update, on_delete, "NONE"))
-
-        fk_id += 1
-
-    # If no FKs found, try best-effort parsing
-    if not fks:
-        logger.debug(f"No foreign keys found in standard patterns for table '{table}'")
-
-    return fks
-
-
-def _unquote(identifier: str) -> str:
-    """Remove quotes from SQL identifier."""
-    identifier = identifier.strip()
-    if identifier.startswith('"') and identifier.endswith('"'):
-        return identifier[1:-1]
-    if identifier.startswith("'") and identifier.endswith("'"):
-        return identifier[1:-1]
-    if identifier.startswith("`") and identifier.endswith("`"):
-        return identifier[1:-1]
-    return identifier
-
-
-def _is_turso_connection(conn: Any) -> bool:
-    """
-    Detect if connection is Turso (pyturso) vs SQLite.
-
-    This is a heuristic check based on connection type/module.
-    """
-    conn_type = type(conn).__name__
-    conn_module = type(conn).__module__
-
-    # Check if it's turso
-    if "turso" in conn_module.lower():
-        return True
-
-    # aiosqlite is definitely SQLite
-    if "aiosqlite" in conn_module.lower():
-        return False
-
-    # Default to False (assume SQLite)
-    return False
+    """Foreign keys declared on `table`."""
+    return await _rows(conn, f'PRAGMA foreign_key_list("{table}")')

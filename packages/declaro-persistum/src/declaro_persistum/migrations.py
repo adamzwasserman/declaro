@@ -243,21 +243,20 @@ async def _has_user_tables(conn: Any) -> bool:
 async def _recover_orphaned_tmp_tables(pool: Any) -> int:
     """Detect and recover orphaned temp tables from failed reconstruction.
 
-    Reconstruction uses temp tables named ``_declaro_tmp_<table>`` (current)
-    or ``<table>_new`` (legacy).  If reconstruction partially committed
-    (CREATE tmp + DROP original) but failed before RENAME, the database has
-    the tmp table but not the original.  This renames them back to recover.
+    Reconstruction uses temp tables named ``_declaro_tmp_<table>_<8hex>``.  If
+    it partially committed (CREATE tmp + DROP original) but failed before
+    RENAME, the database has the tmp table and not the original.  This renames
+    them back.
+
+    Only that prefix is matched.  It is a name persistum owns, so anything
+    carrying it was created here and is ours to move.
 
     Returns the number of tables recovered.
     """
     async with _acquire_write_or_read(pool) as conn:
-        # Detect both naming patterns:
-        #   _declaro_tmp_<table>  (current)
-        #   <table>_new           (legacy)
         cursor = await conn.execute(
             "SELECT name FROM sqlite_master "
-            "WHERE type = 'table' "
-            "  AND (name LIKE '_declaro_tmp_%' OR name LIKE '%\\_new' ESCAPE '\\')"
+            "WHERE type = 'table' AND name LIKE '_declaro_tmp_%'"
         )
         tmp_tables = await cursor.fetchall()
 
@@ -265,7 +264,6 @@ async def _recover_orphaned_tmp_tables(pool: Any) -> int:
         for row in tmp_tables:
             tmp_name = row[0]
 
-            # Derive original table name from whichever pattern matched
             if tmp_name.startswith("_declaro_tmp_"):
                 # Strip prefix and UUID suffix: _declaro_tmp_<table>_<8hex>
                 remainder = tmp_name[len("_declaro_tmp_"):]
@@ -273,10 +271,7 @@ async def _recover_orphaned_tmp_tables(pool: Any) -> int:
                 if len(remainder) > 9 and remainder[-9] == "_":
                     original_name = remainder[:-9]
                 else:
-                    # No UUID suffix (old format) — use remainder as-is
                     original_name = remainder
-            elif tmp_name.endswith("_new"):
-                original_name = tmp_name[:-4]
             else:
                 continue
 

@@ -238,7 +238,7 @@ class Ambiguity(TypedDict):
     An ambiguous change that requires human decision.
 
     Attributes:
-        type: The type of ambiguity (possible_rename, confirm_drop, etc.)
+        type: The type of ambiguity (possible_rename or type_change)
         table: The table involved
         from_column: The original column name (for renames)
         to_column: The new column name (for renames)
@@ -247,7 +247,7 @@ class Ambiguity(TypedDict):
         message: Human-readable description of the ambiguity
     """
 
-    type: Literal["possible_rename", "confirm_drop", "type_change"]
+    type: Literal["possible_rename", "type_change"]
     table: str
     from_column: str | None
     to_column: str | None
