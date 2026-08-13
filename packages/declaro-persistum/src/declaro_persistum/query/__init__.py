@@ -1,37 +1,25 @@
-"""
-Query building and execution layer.
+"""Query building: functions over data. No proxies, no operators, no classes.
 
-Provides a functional query builder that generates parameterized SQL
-without ORM overhead.
+    from declaro_persistum.query import select, insert, update, delete, table
 
-Two APIs are available:
+    q = select("users", ["id", "email"], where={"status": "active"})
 
-1. Schema-validated dot notation (recommended):
-   ```python
-   from declaro_persistum.query import table
+A WHERE clause is a DICT, not a Python expression:
 
-   schema = load_schema("./schema")
-   users = table("users", schema)
+    {"age": {"gt": 18}, "status": "active"}
+    {"or": [{"status": "active"}, {"status": "pending"}]}
 
-   results = await (
-       users
-       .select(users.id, users.email)
-       .where(users.status == "active")
-       .execute(conn)
-   )
-   ```
+The fluent layer that spelled this `users.age > 18` is gone — `TableProxy`,
+`ColumnProxy`, `Condition`, `ConditionGroup`, `SelectQuery`, `InsertQuery`,
+`UpdateQuery`, `DeleteQuery`, `QuerySet` and `PrismaQueryBuilder`. Between
+them they carried eight dunder methods whose only purpose was to borrow
+Python\'s expression grammar so the interpreter would assemble an AST. A dict
+is already that AST.
 
-2. Legacy string-based functions (for compatibility):
-   ```python
-   from declaro_persistum.query import select, execute
-
-   q = select("id", "email", from_table="users", where="status = :status", params={"status": "active"})
-   results = await execute(q, conn)
-   ```
+`builder.py` — the pure select/insert/update/delete — was in this package the
+whole time, exported and called by nothing. It is now the API.
 """
 
-# New schema-validated API
-# Legacy string-based API (still supported)
 from declaro_persistum.query.builder import (
     Query,
     delete,
@@ -43,78 +31,36 @@ from declaro_persistum.query.builder import (
     with_offset,
     with_params,
 )
-from declaro_persistum.query.delete import DeleteQuery
-
-# Django-style API
-from declaro_persistum.query.django_style import (
-    DoesNotExist,
-    MultipleObjectsReturned,
-    QuerySet,
-)
-from declaro_persistum.query.executor import execute, execute_many, execute_one, execute_scalar
-from declaro_persistum.query.insert import InsertQuery
-
-# Prisma-style API
-from declaro_persistum.query.prisma_style import PrismaQueryBuilder
-from declaro_persistum.query.select import SelectQuery
-from declaro_persistum.query.table import (
-    CaseExpression,
+from declaro_persistum.query.conditions import COMBINATORS, OPERATORS
+from declaro_persistum.query.conditions import render as render_condition
+from declaro_persistum.query.expressions import (
     CaseOrderBy,
-    ColumnProxy,
-    Condition,
-    ConditionGroup,
     JoinClause,
     OrderBy,
-    SQLFunction,
     SubqueryExpr,
-    TableProxy,
+    is_subquery,
+    render_order_term,
+    render_subquery,
+)
+from declaro_persistum.query.table import (
+    CaseExpression,
+    SQLFunction,
     avg_,
-    # Aggregate functions
     case_,
     count_,
     max_,
     min_,
     now_,
+    render_case,
+    render_function,
     subquery,
     sum_,
     table,
 )
-from declaro_persistum.query.update import UpdateQuery
 
 __all__ = [
-    # New API (fluent SQL-like)
-    "table",
-    "TableProxy",
-    "ColumnProxy",
-    "Condition",
-    "ConditionGroup",
-    "OrderBy",
-    "JoinClause",
-    "SQLFunction",
-    "SelectQuery",
-    "InsertQuery",
-    "UpdateQuery",
-    "DeleteQuery",
-    # Expression classes
-    "CaseExpression",
-    "CaseOrderBy",
-    "SubqueryExpr",
-    # Functions
-    "count_",
-    "sum_",
-    "avg_",
-    "min_",
-    "max_",
-    "now_",
-    "case_",
-    "subquery",
-    # Django-style API
-    "QuerySet",
-    "DoesNotExist",
-    "MultipleObjectsReturned",
-    # Prisma-style API
-    "PrismaQueryBuilder",
-    # Legacy string-based API
+    # building
+    "Query",
     "select",
     "insert",
     "update",
@@ -123,9 +69,30 @@ __all__ = [
     "with_limit",
     "with_offset",
     "with_params",
-    "Query",
-    "execute",
-    "execute_one",
-    "execute_scalar",
-    "execute_many",
+    # conditions, as data
+    "render_condition",
+    "OPERATORS",
+    "COMBINATORS",
+    # expressions, as data
+    "SQLFunction",
+    "CaseExpression",
+    "OrderBy",
+    "CaseOrderBy",
+    "JoinClause",
+    "SubqueryExpr",
+    "table",
+    "count_",
+    "sum_",
+    "avg_",
+    "min_",
+    "max_",
+    "now_",
+    "case_",
+    "subquery",
+    # rendering
+    "render_function",
+    "render_case",
+    "render_order_term",
+    "render_subquery",
+    "is_subquery",
 ]

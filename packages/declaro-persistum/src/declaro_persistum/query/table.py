@@ -1,50 +1,37 @@
-"""
-Schema-validated table and column proxies.
+"""SQL functions and CASE expressions, as data.
 
-Provides dot-notation access to tables and columns that validates
-against the loaded schema at query-build time, not execution time.
+`count_("*")` used to return an `SQLFunction` OBJECT carrying an `.as_()`
+method. It now returns a dict:
 
--------------------------------------------------------------------------------
-STOP. THIS MODULE CONTAINS INTERNAL IMPLEMENTATION DETAILS.
--------------------------------------------------------------------------------
+    count_("*", alias="n")  ->  {"kind": "function", "name": "COUNT",
+                                 "args": ["*"], "alias": "n"}
 
-``Condition``, ``ConditionGroup``, ``CaseExpression``, ``CaseOrderBy``,
-``SubqueryExpr``, and ``SQLFunction`` are **internal classes**. Their
-``.to_sql()`` and ``.to_sql_fragment()`` methods are called by ``SelectQuery``
-as part of query assembly. They are not part of the public API. They carry no
-stability guarantee. Their signatures may change without notice.
+`.as_()` is gone and nothing is lost: every factory already took `alias=` as a
+parameter, so the method was a second spelling of an argument that shipped
+beside it. `case_` gains the same parameter, which is the only shape that
+lacked one.
 
-If you are calling ``.to_sql()`` on a ``Condition`` or any other internal class
-directly, **stop doing that immediately**. You are bypassing the query layer and
-will be broken by the next refactor with no sympathy.
+`TableProxy` and `ColumnProxy` are gone entirely. They existed so that
+`users.age > 18` would resolve and compare — eight dunder methods borrowing
+Python's expression grammar so the interpreter would build our AST. A
+condition is a dict now (`query/conditions.py`), so a column is just its name
+and there is nothing left for a proxy to do.
 
-The public API is ``SelectQuery``:
+Two defects left with them: `ColumnProxy.__eq__` returned a `Condition`
+instead of a bool, so `col == col` was not True and `col in [a, b]` silently
+misbehaved; and overriding `__eq__` without `__hash__` made the class
+unhashable, so a column could not go in a set.
 
-    # Build a query using the table proxy
-    rows = await (
-        users.select(users.id, users.email)
-        .where(users.status == "active")
-        .order_by(users.created_at.desc())
-        .execute()
-    )
-
-    # Or get the SQL string + params if you need to inspect them
-    sql, params = q.to_sql()           # defaults to postgresql dialect
-    sql, params = q.to_sql("sqlite")   # explicit dialect
-
-``SelectQuery.to_sql(dialect)`` is the one place the dialect is exposed.
-It propagates to every internal component automatically. You do not touch
-``Condition``, ``ConditionGroup``, or anything else in this module directly.
--------------------------------------------------------------------------------
+`table(name, schema)` survives, because checking a table name against the
+schema at build time is real work. It returns the schema's own table
+definition rather than a proxy.
 """
 
-from typing import TYPE_CHECKING, Any
+from __future__ import annotations
 
-# The expression data types and their renderers live in `expressions.py` and
-# are re-exported here because `table.py` is the documented home of the query
-# API. The dependency runs one way: expressions.py imports nothing from here.
+from typing import Any, Literal, TypedDict
+
 from declaro_persistum.query.expressions import (  # noqa: F401
-    ORDER_TERM_RENDERERS,
     CaseOrderBy,
     JoinClause,
     OrderBy,
@@ -53,178 +40,167 @@ from declaro_persistum.query.expressions import (  # noqa: F401
     render_order_term,
     render_subquery,
 )
-from declaro_persistum.types import Column, Schema
+from declaro_persistum.types import Schema
 
-if TYPE_CHECKING:
-    from declaro_persistum.query.delete import DeleteQuery
-    from declaro_persistum.query.django_style import QuerySet
-    from declaro_persistum.query.hooks import PostHook, PreHook
-    from declaro_persistum.query.insert import InsertQuery
-    from declaro_persistum.query.prisma_style import PrismaQueryBuilder
-    from declaro_persistum.query.select import SelectQuery
-    from declaro_persistum.query.update import UpdateQuery
+__all__ = [
+    "SQLFunction",
+    "CaseExpression",
+    "table",
+    "count_",
+    "sum_",
+    "avg_",
+    "min_",
+    "max_",
+    "now_",
+    "case_",
+    "subquery",
+    "render_function",
+    "render_case",
+]
 
 
-def table(
-    name: str,
-    schema: Schema,
-    pool: Any = None,
-    *,
-    pre: "PreHook | None" = None,
-    post: "PostHook | None" = None,
-) -> "TableProxy":
-    """
-    Create a schema-validated table proxy.
+class SQLFunction(TypedDict):
+    """A SQL function call. Data, so it can be printed, diffed and stored."""
 
-    Args:
-        name: Table name (must exist in schema)
-        schema: Schema dict
-        pool: Connection pool with acquire() context manager
-        pre: Optional pre-hook — runs before SQL is built, transforms the query object.
-        post: Optional post-hook — runs after DB returns, transforms rows.
+    kind: Literal["function"]
+    name: str
+    args: list[Any]
+    alias: str | None
 
-    Returns:
-        TableProxy for building queries
 
-    Raises:
-        ValueError: If table not found in schema
+class CaseExpression(TypedDict):
+    """A CASE expression. `whens` pairs a condition dict with a result."""
+
+    kind: Literal["case"]
+    whens: list[tuple[dict[str, Any], Any]]
+    else_: Any
+    alias: str | None
+
+
+def table(name: str, schema: Schema) -> dict[str, Any]:
+    """Look a table up in the schema, failing loudly if it is absent.
+
+    This returned a `TableProxy` whose `__getattr__` manufactured a
+    `ColumnProxy` per attribute. It returns the schema's own table definition
+    now — what a caller actually wants to consult — and a column is referred
+    to by name, because that is all a column ever was.
     """
     if name not in schema:
-        raise ValueError(f"Table '{name}' not found in schema. Available: {list(schema.keys())}")
-    return TableProxy(name, schema, pool, pre=pre, post=post)
-
-
-
-
-
-
-
-
-def render_condition(
-    column: str, operator: str, value: Any, dialect: str, path: str
-) -> tuple[str, dict[str, Any]]:
-    """Render one condition. Pure: fields in, (sql, params) out.
-
-    Every parameter name is derived from `path`, so the result depends only
-    on the arguments — no counter, no process history. Two renderings of the
-    same condition at the same path are byte-identical.
-    """
-    if value is None and operator == "IS":
-        return f"{column} IS NULL", {}
-    if value is None and operator == "IS NOT":
-        return f"{column} IS NOT NULL", {}
-
-    if operator in ("IN", "NOT IN"):
-        if is_subquery(value):
-            sub_sql, sub_params = render_subquery(value, dialect)
-            return f"{column} {operator} ({sub_sql})", sub_params
-        placeholders = ", ".join(f":_in_{path}_{i}" for i in range(len(value)))
-        params = {f"_in_{path}_{i}": v for i, v in enumerate(value)}
-        return f"{column} {operator} ({placeholders})", params
-
-    if operator == "BETWEEN":
-        low, high = f"_between_{path}_low", f"_between_{path}_high"
-        return (
-            f"{column} BETWEEN :{low} AND :{high}",
-            {low: value[0], high: value[1]},
+        raise ValueError(
+            f"Table {name!r} not found in schema. Available: {sorted(schema)}"
         )
-
-    if operator == "ILIKE" and dialect != "postgresql":
-        # SQLite has no ILIKE; LOWER() on both sides is the portable form.
-        name = f"_like_{path}"
-        return f"LOWER({column}) LIKE LOWER(:{name})", {name: value}
-
-    # Column-to-column comparison, as in a JOIN ON clause. Binds nothing.
-    if isinstance(value, ColumnProxy):
-        return f"{column} {operator} {value._full_name}", {}
-
-    # A string already written as :name is a caller-supplied placeholder.
-    if isinstance(value, str) and value.startswith(":"):
-        return f"{column} {operator} {value}", {}
-
-    name = f"_p_{path}"
-    return f"{column} {operator} :{name}", {name: value}
+    return schema[name]
 
 
+def _function(name: str, *args: Any, alias: str | None) -> SQLFunction:
+    return {"kind": "function", "name": name, "args": list(args), "alias": alias}
 
 
+def count_(column: str = "*", alias: str | None = None) -> SQLFunction:
+    return _function("COUNT", column, alias=alias)
 
 
+def sum_(column: str, alias: str | None = None) -> SQLFunction:
+    return _function("SUM", column, alias=alias)
 
 
-# Function factories
-def count_(column: str | ColumnProxy = "*", alias: str | None = None) -> SQLFunction:
-    """COUNT aggregate function."""
-    return SQLFunction("COUNT", column, alias=alias)
+def avg_(column: str, alias: str | None = None) -> SQLFunction:
+    return _function("AVG", column, alias=alias)
 
 
-def sum_(column: ColumnProxy, alias: str | None = None) -> SQLFunction:
-    """SUM aggregate function."""
-    return SQLFunction("SUM", column, alias=alias)
+def min_(column: str, alias: str | None = None) -> SQLFunction:
+    return _function("MIN", column, alias=alias)
 
 
-def avg_(column: ColumnProxy, alias: str | None = None) -> SQLFunction:
-    """AVG aggregate function."""
-    return SQLFunction("AVG", column, alias=alias)
+def max_(column: str, alias: str | None = None) -> SQLFunction:
+    return _function("MAX", column, alias=alias)
 
 
-def min_(column: ColumnProxy, alias: str | None = None) -> SQLFunction:
-    """MIN aggregate function."""
-    return SQLFunction("MIN", column, alias=alias)
+def now_(alias: str | None = None) -> SQLFunction:
+    return _function("NOW", alias=alias)
 
 
-def max_(column: ColumnProxy, alias: str | None = None) -> SQLFunction:
-    """MAX aggregate function."""
-    return SQLFunction("MAX", column, alias=alias)
+def case_(
+    *whens: tuple[dict[str, Any], Any],
+    else_: Any = None,
+    alias: str | None = None,
+) -> CaseExpression:
+    """A CASE expression.
 
+    Each `when` is (condition, result), where the condition is a condition
+    DICT — the same shape `where` takes:
 
-def now_() -> SQLFunction:
-    """Current timestamp function (dialect-aware)."""
-    return SQLFunction("NOW")
+        case_(({"age": {"gt": 18}}, "adult"), else_="minor", alias="band")
 
-
-def case_(*whens: tuple[Any, Any], else_: Any = None) -> CaseExpression:
+    `alias` is new here. Every other factory took one; CaseExpression was the
+    only shape that needed `.as_()` instead, which is why that method outlived
+    its usefulness.
     """
-    Build a CASE WHEN ... THEN ... ELSE ... END expression.
-
-    Each positional argument is a (condition, value) tuple.
-    The optional else_ keyword sets the ELSE value.
-
-    Example:
-        priority = case_(
-            (tickets.severity == "critical", 0),
-            (tickets.severity == "high", 1),
-            else_=2,
-        ).as_("priority")
-
-        # Use in SELECT + ORDER BY
-        rows = await (
-            tickets.select(tickets.id, priority)
-            .order_by(priority.asc())
-            .execute()
-        )
-
-        # Use inside an aggregate
-        total = sum_(case_(
-            (orders.status == "paid", orders.amount),
-            else_=0,
-        )).as_("paid_total")
-    """
-    return CaseExpression(*whens, else_=else_)
+    return {"kind": "case", "whens": list(whens), "else_": else_, "alias": alias}
 
 
 def subquery(query: Any) -> SubqueryExpr:
-    """
-    Wrap a SelectQuery for use in IN / NOT IN.
+    return {"kind": "subquery", "query": query}
 
-    Example:
-        admin_ids = subquery(
-            roles.select(roles.user_id).where(roles.name == "admin")
-        )
-        rows = await (
-            users.select(users.id, users.email)
-            .where(users.id.in_(admin_ids))
-            .execute()
-        )
+
+def render_case(
+    expr: CaseExpression, dialect: str, path: str, *, with_alias: bool
+) -> tuple[str, dict[str, Any]]:
+    """Render CASE WHEN ... THEN ... ELSE ... END.
+
+    `with_alias` is REQUIRED, not defaulted, because the two callers want
+    opposite things and neither is the obvious one: a SELECT column wants the
+    alias, and an ORDER BY term must not have it — `... END AS band ASC` is
+    not valid SQL.
     """
-    return SubqueryExpr(kind="subquery", query=query)
+    from declaro_persistum.query.conditions import render as render_condition
+
+    params: dict[str, Any] = {}
+    parts = ["CASE"]
+
+    for i, (condition, result) in enumerate(expr["whens"]):
+        cond_sql, cond_params = render_condition(condition, dialect, f"{path}_w{i}")
+        params.update(cond_params)
+        name = f"{path}_t{i}"
+        params[name] = result
+        parts.append(f"WHEN {cond_sql} THEN :{name}")
+
+    if expr["else_"] is not None:
+        name = f"{path}_else"
+        params[name] = expr["else_"]
+        parts.append(f"ELSE :{name}")
+
+    parts.append("END")
+    sql = " ".join(parts)
+    if with_alias and expr["alias"]:
+        sql = f"{sql} AS {expr['alias']}"
+    return sql, params
+
+
+def render_function(
+    fn: SQLFunction, dialect: str, path: str
+) -> tuple[str, dict[str, Any]]:
+    """Render a function call, and any expression nested inside it.
+
+    A nested argument gets its own sub-path, so a CASE inside an aggregate
+    cannot collide with one in the SELECT list.
+    """
+    parts: list[str] = []
+    params: dict[str, Any] = {}
+
+    for i, arg in enumerate(fn["args"]):
+        if isinstance(arg, dict) and arg.get("kind") == "case":
+            sql, p = render_case(arg, dialect, f"{path}_a{i}", with_alias=False)
+            parts.append(sql)
+            params.update(p)
+        elif isinstance(arg, dict) and arg.get("kind") == "subquery":
+            sql, p = render_subquery(arg, dialect)
+            parts.append(f"({sql})")
+            params.update(p)
+        else:
+            parts.append(str(arg))
+
+    sql = f"{fn['name']}({', '.join(parts)})"
+    if fn["alias"]:
+        sql = f"{sql} AS {fn['alias']}"
+    return sql, params
