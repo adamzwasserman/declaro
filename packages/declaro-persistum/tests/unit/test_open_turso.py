@@ -164,8 +164,6 @@ class TestTheShutdownPolicyIsActedOn:
     async def test_asking_to_replicate_on_shutdown_installs_the_trap(self, tmp_path):
         import signal
 
-        from declaro_persistum.shutdown import restore_shutdown
-
         before = signal.getsignal(signal.SIGTERM)
         try:
             await open_turso(str(tmp_path / "t.db"), shutdown="replicate")
@@ -174,7 +172,6 @@ class TestTheShutdownPolicyIsActedOn:
                 "handler was installed; the policy was stored and ignored"
             )
         finally:
-            restore_shutdown()
             signal.signal(signal.SIGTERM, before)
 
     @pytest.mark.asyncio

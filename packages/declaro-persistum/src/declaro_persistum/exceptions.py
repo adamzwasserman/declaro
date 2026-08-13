@@ -362,3 +362,19 @@ class TransferError(DeclaroError):
             details_str = "\n\n  " + "\n  ".join(details)
 
         super().__init__(f"{message}{details_str}")
+
+
+class NotSupportedError(DeclaroError):
+    """Raised when a feature is not supported by the target database.
+
+    `alternatives` is required: a caller says either what to do instead, or
+    explicitly that there is nothing. The list is folded into the message and
+    not retained, because nothing outside this class ever read it back.
+    """
+
+    def __init__(self, message: str, alternatives: list[str]) -> None:
+        if alternatives:
+            message += "\n\nOptions:\n" + "\n".join(
+                f"  {i + 1}. {alt}" for i, alt in enumerate(alternatives)
+            )
+        super().__init__(message)

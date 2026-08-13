@@ -29,7 +29,7 @@ from declaro_persistum.applier.shared import (
     requires_reconstruction,
     single_change_property,
 )
-from declaro_persistum.errors import NotSupportedError
+
 from declaro_persistum.exceptions import MigrationError
 from declaro_persistum.types import ApplyResult, Column, Enum, Operation, Procedure, Trigger, View
 
