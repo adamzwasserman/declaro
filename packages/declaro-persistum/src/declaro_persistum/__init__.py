@@ -112,6 +112,8 @@ from declaro_persistum.pydantic_loader import (
     get_literal_columns,
 )
 from declaro_persistum.writers import WRITERS
+from declaro_persistum.sqlite_database import open_sqlite
+from declaro_persistum.postgres_database import open_postgresql
 from declaro_persistum.migrations import (
     apply_migrations_async,
 )
@@ -126,6 +128,8 @@ from declaro_persistum.cutover import begin_cutover
 
 __all__ = [
     "WRITERS",
+    "open_sqlite",
+    "open_postgresql",
     # databases, the crew, the cutover mirror
     "Mirror",
     "Divergence",

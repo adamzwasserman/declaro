@@ -78,6 +78,10 @@ _MAX_PULL_BATCHES = 64
 # chances for a Database to say it is one engine and write like another.
 DIALECT = "turso"
 
+# How long a writer waits for the replica lock before failing. A property of
+# the engine's own retry behaviour, not of any caller.
+_BUSY_TIMEOUT_S = 5.0
+
 
 async def _pull_until_level(conn: Any) -> bool:
     """Keep pulling until the primary reports nothing further.
@@ -274,6 +278,7 @@ def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
         path=path,
         dialect=DIALECT,
         journal_mode="mvcc",
+        busy_timeout_s=_BUSY_TIMEOUT_S,
         primary=None,
         token=None,
         connect=connect_local,
@@ -334,6 +339,7 @@ async def _open_replicated(
         path=path,
         dialect=DIALECT,
         journal_mode="wal",
+        busy_timeout_s=_BUSY_TIMEOUT_S,
         primary=primary,
         token=token,
         connect=connect,

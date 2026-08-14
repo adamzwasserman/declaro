@@ -105,6 +105,7 @@ async def test_a_drainer_runs_whatever_writer_it_was_given() -> None:
             path=f"/tmp/{label}.db",
             dialect="sqlite",
             journal_mode="wal",
+            busy_timeout_s=5.0,
             primary=None,
             token=None,
             connect=connect,

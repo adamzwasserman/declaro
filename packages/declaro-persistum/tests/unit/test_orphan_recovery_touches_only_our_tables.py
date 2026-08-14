@@ -86,6 +86,7 @@ def _database(conn: _Conn):
         path=":memory:",
         dialect="sqlite",
         journal_mode="wal",
+        busy_timeout_s=5.0,
         primary=None,
         token=None,
         connect=connect,

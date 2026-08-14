@@ -112,6 +112,7 @@ class Database(TypedDict):
     path: str
     dialect: str
     journal_mode: str
+    busy_timeout_s: float
     primary: str | None
     token: str | None
     connect: Callable[..., Any]
@@ -131,6 +132,7 @@ def new_database(
     path: str,
     dialect: str,
     journal_mode: str,
+    busy_timeout_s: float,
     primary: str | None,
     token: str | None,
     connect: Callable[..., Any],
@@ -155,6 +157,7 @@ def new_database(
         "path": path,
         "dialect": dialect,
         "journal_mode": journal_mode,
+        "busy_timeout_s": busy_timeout_s,
         "primary": primary,
         "token": token,
         "connect": connect,
