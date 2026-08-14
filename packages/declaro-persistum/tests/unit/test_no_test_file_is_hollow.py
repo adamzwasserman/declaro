@@ -78,9 +78,8 @@ def _holds_a_test(path: pathlib.Path) -> bool:
     unknown number of feature scenarios but never zero.
     """
     for node in ast.walk(ast.parse(path.read_text())):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            if node.name.startswith("test_"):
-                return True
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name.startswith("test_"):
+            return True
         if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "scenarios":
             return True
     return False
