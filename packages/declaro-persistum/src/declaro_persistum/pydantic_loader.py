@@ -275,7 +275,7 @@ def pydantic_model_to_table(model_cls: type) -> tuple[str, Table] | None:
             # Remove primary_key flag from individual columns when using composite PK
             for col_name in columns:
                 if "primary_key" in columns[col_name]:
-                    del columns[col_name]["primary_key"]  # type: ignore
+                    del columns[col_name]["primary_key"]
 
         indexes = getattr(meta_cls, "indexes", None)
         if indexes:
@@ -403,7 +403,7 @@ def get_literal_columns(schema: Schema) -> dict[str, dict[str, list[str]]]:
     for table_name, table in schema.items():
         columns = table.get("columns", {})
         for col_name, col in columns.items():
-            literal_values = col.get("literal_values")  # type: ignore[typeddict-item]
+            literal_values = col.get("literal_values")
             if literal_values:
                 if table_name not in result:
                     result[table_name] = {}

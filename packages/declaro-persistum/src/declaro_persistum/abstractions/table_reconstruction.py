@@ -307,7 +307,7 @@ async def _get_full_table_schema(connection: Any, table_name: str) -> dict[str, 
             if len(idx_info) == 1:  # Single-column unique constraint
                 col_name = idx_info[0][2]
                 if col_name in columns:
-                    columns[col_name]["unique"] = True  # type: ignore
+                    columns[col_name]["unique"] = True
 
     # Detect foreign key constraints
     fk_list = await pragma_foreign_key_list(connection, table_name)
@@ -316,11 +316,11 @@ async def _get_full_table_schema(connection: Any, table_name: str) -> dict[str, 
         from_col, ref_table, ref_col = fk_row[3], fk_row[2], fk_row[4]
         on_delete, on_update = fk_row[6], fk_row[5]
         if from_col in columns:
-            columns[from_col]["references"] = f"{ref_table}.{ref_col}"  # type: ignore
+            columns[from_col]["references"] = f"{ref_table}.{ref_col}"
             if on_delete and on_delete.upper() not in ("NO ACTION", "NONE", ""):
-                columns[from_col]["on_delete"] = on_delete.lower()  # type: ignore
+                columns[from_col]["on_delete"] = on_delete.lower()
             if on_update and on_update.upper() not in ("NO ACTION", "NONE", ""):
-                columns[from_col]["on_update"] = on_update.lower()  # type: ignore
+                columns[from_col]["on_update"] = on_update.lower()
 
     return columns
 

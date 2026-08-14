@@ -132,4 +132,4 @@ def create_inspector(dialect: str) -> DatabaseInspector:
             f"Unsupported dialect: {dialect}. "
             f"Supported dialects: {', '.join(INSPECTORS)}"
         )
-    return inspector  # type: ignore[return-value]
+    return inspector

@@ -240,9 +240,9 @@ def _apply_add_foreign_key(columns: dict[str, Column], details: dict[str, Any]) 
         col_def = columns[column_name].copy()
         col_def["references"] = references
         if details.get("on_delete"):
-            col_def["on_delete"] = details["on_delete"]  # type: ignore
+            col_def["on_delete"] = details["on_delete"]
         if details.get("on_update"):
-            col_def["on_update"] = details["on_update"]  # type: ignore
+            col_def["on_update"] = details["on_update"]
         columns[column_name] = col_def
     return columns
 

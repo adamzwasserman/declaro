@@ -106,7 +106,7 @@ def strip_foreign_keys(schema: Schema) -> Schema:
         for col_name, col_def in table_def.get("columns", {}).items():
             new_col = {k: v for k, v in col_def.items()
                        if k not in ("references", "on_delete", "on_update")}
-            new_columns[col_name] = new_col  # type: ignore
+            new_columns[col_name] = new_col
         new_table = {**table_def, "columns": new_columns}
         stripped[table_name] = new_table  # type: ignore
     return stripped

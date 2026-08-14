@@ -135,4 +135,4 @@ def create_applier(dialect: str) -> MigrationApplier:
             f"Unsupported dialect: {dialect}. "
             f"Supported dialects: {', '.join(APPLIERS)}"
         )
-    return applier  # type: ignore[return-value]
+    return applier
