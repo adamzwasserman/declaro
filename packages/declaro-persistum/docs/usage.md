@@ -626,49 +626,80 @@ except PoolClosedError:
 
 ## Instrumentation
 
-Record every query's duration, op type, and success/failure.
+`instrumentation.py` gives you everything needed to record a query's duration, op type and outcome. **It is not wired into the write path.** Nothing in the package calls these functions; you call them around your own `writing(db)` block.
 
-### Enabling Instrumentation
+### What this section used to say, and why it was wrong
+
+It described `ConnectionPool.turso(..., instrumentation=True)`, `pool.configure_instrumentation(...)` and `pool._latency_logger`. `ConnectionPool` no longer exists, `configure_instrumentation` is defined nowhere in the package, and there is no `_latency_logger`. Following those instructions produced an `AttributeError`. The functions below are what is actually there, and the example was run before being written down.
+
+### Recording a query
 
 ```python
-# At pool creation
-pool = await ConnectionPool.turso(
-    "./app.db",                          # local replica path
-    remote_url="libsql://your-db.turso.io",
-    auth_token="...",
-    instrumentation=True,
-    tier_label="project",
-    latency_sink="jsonl",
-    latency_path="./data/db_latency.jsonl",
-)
+import io, logging, time
 
-# Or post-creation with a callable sink
-pool = await ConnectionPool.sqlite("./app.db")
-pool.configure_instrumentation(
-    tier_label="my-app",
-    callable_sink=lambda record: metrics.record(record),
-)
+from declaro_persistum import open_sqlite
+from declaro_persistum.database import close, writing
+from declaro_persistum.instrumentation import build_record, classify_sql, emit_record
+
+logger = logging.getLogger("latency")
+logger.setLevel(logging.INFO)
+logger.addHandler(logging.StreamHandler())
+
+db = await open_sqlite("./app.db", shutdown="exit_immediately", busy_timeout_s=5.0)
+
+sql = "CREATE TABLE t (id INTEGER)"
+started = time.perf_counter()
+async with writing(db) as conn:
+    await conn.execute(sql)
+    await conn.commit()
+
+emit_record(logger, build_record(
+    tier="my-app",
+    op=classify_sql(sql),
+    duration_ms=(time.perf_counter() - started) * 1000,
+    success=True,
+    sql=sql,
+))
 ```
+
+emits one JSONL line:
+
+```json
+{"ts": "2026-08-14T03:19:18.332541+00:00", "tier": "my-app", "op": "create", "duration_ms": 7.913, "success": true, "sql": "CREATE TABLE t (id INTEGER)", "error": ""}
+```
+
+Where that line goes is the logger's business, which is why there is no `latency_sink` or `latency_path` argument: a `FileHandler` writes it to a file, a custom handler forwards it to a metrics system.
+
+### The pieces
+
+| function | takes | returns |
+|---|---|---|
+| `classify_sql(sql)` | a statement | `select` \| `insert` \| `update` \| `delete` \| `create` \| `alter` \| `other` |
+| `is_write_op(op)` | a classified op | whether it writes |
+| `has_returning_clause(sql)` | a statement | whether it has `RETURNING` |
+| `build_record(...)` | tier, op, duration_ms, success, sql, error | a `LatencyRecord` |
+| `format_jsonl(record)` | a record | one JSON line |
+| `emit_record(logger, record)` | a logger and a record | nothing; logs at INFO |
+
+All six are pure except `emit_record`, which is the single output boundary.
 
 ### LatencyRecord
 
-Each recorded query produces a `LatencyRecord` TypedDict:
-
 ```python
 {
-    "ts": "2026-03-11T14:22:01-0500",  # ISO 8601
-    "tier": "project",                  # Pool label
-    "op": "insert",                     # select|insert|update|delete|create|alter|other
+    "ts": "2026-08-14T03:19:18.332541+00:00",  # ISO 8601, UTC
+    "tier": "my-app",                           # whatever label you pass
+    "op": "insert",                             # from classify_sql
     "duration_ms": 842.31,
     "success": True,
-    "sql": "INSERT INTO cards (id, name...",  # First 120 chars
-    "error": "",                               # First 200 chars on failure
+    "sql": "INSERT INTO cards (id, name...",    # first 120 chars
+    "error": "",                                # first 200 chars on failure
 }
 ```
 
-### Zero Overhead When Disabled
+### Overhead when you do not use it
 
-When `configure_instrumentation()` has not been called, `pool._latency_logger` is `None`. The record path is never entered — no timing, no allocations.
+Zero, because nothing calls it. There is no flag to leave off and no branch on a hot path: the cost is exactly the calls you write yourself.
 
 ---
 
