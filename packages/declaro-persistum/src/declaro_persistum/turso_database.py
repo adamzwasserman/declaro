@@ -57,13 +57,13 @@ import contextlib
 import logging
 from typing import Any
 
-from declaro_persistum.writers import WRITERS
 from declaro_persistum.database import (
     Database,
     ShutdownPolicy,
     new_database,
     new_write_lock,
 )
+from declaro_persistum.writers import WRITERS
 
 __all__ = ["open_turso", "migrating", "replicate_path"]
 
@@ -153,17 +153,17 @@ async def _set_journal_mode(conn: Any, mode: str) -> str:
     return row[0] if row else "unknown"
 
 
-def _connect_local(path: str, mode: str):
-    async def connect(db: Database) -> Any:
-        import turso.aio
+async def connect_local(db: Database) -> Any:
+    """Open a connection to a local database in the journal mode it declares.
 
-        conn = await turso.aio.connect(db["path"])
-        # Requested, not assumed. The engine has the last word, and a refusal
-        # is not an error — it means WAL, and the writers still work.
-        await _set_journal_mode(conn, mode)
-        return conn
+    The mode is requested, not assumed. The engine has the last word, and a
+    refusal is not an error — it means WAL, and the writers still work.
+    """
+    import turso.aio
 
-    return connect
+    conn = await turso.aio.connect(db["path"])
+    await _set_journal_mode(conn, db["journal_mode"])
+    return conn
 
 
 async def migrating(db: Database) -> Any:
@@ -273,9 +273,10 @@ def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
     return new_database(
         path=path,
         dialect=DIALECT,
+        journal_mode="mvcc",
         primary=None,
         token=None,
-        connect=_connect_local(path, "mvcc"),
+        connect=connect_local,
         close_connection=_close_connection,
         serialise=None,  # MVCC: writers run concurrently, which is the point
         shutdown=shutdown,
@@ -332,6 +333,7 @@ async def _open_replicated(
     return new_database(
         path=path,
         dialect=DIALECT,
+        journal_mode="wal",
         primary=primary,
         token=token,
         connect=connect,

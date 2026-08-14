@@ -111,6 +111,7 @@ class Database(TypedDict):
 
     path: str
     dialect: str
+    journal_mode: str
     primary: str | None
     token: str | None
     connect: Callable[..., Any]
@@ -129,6 +130,7 @@ class Database(TypedDict):
 def new_database(
     path: str,
     dialect: str,
+    journal_mode: str,
     primary: str | None,
     token: str | None,
     connect: Callable[..., Any],
@@ -152,6 +154,7 @@ def new_database(
     return {
         "path": path,
         "dialect": dialect,
+        "journal_mode": journal_mode,
         "primary": primary,
         "token": token,
         "connect": connect,

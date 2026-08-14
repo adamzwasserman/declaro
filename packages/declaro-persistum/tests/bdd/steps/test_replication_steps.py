@@ -112,6 +112,7 @@ def _make(tmp_path, *, replicated=True, recorder=None, shutdown="exit_immediatel
     db = new_database(
         path=str(tmp_path / "copy.db"),
         dialect="sqlite",
+        journal_mode="wal",
         primary="https://example.turso.io" if replicated else None,
         token="t" if replicated else None,
         connect=connect,

@@ -85,6 +85,7 @@ def _database(conn: _Conn):
     return new_database(
         path=":memory:",
         dialect="sqlite",
+        journal_mode="wal",
         primary=None,
         token=None,
         connect=connect,

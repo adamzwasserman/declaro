@@ -104,6 +104,7 @@ async def test_a_drainer_runs_whatever_writer_it_was_given() -> None:
         return new_database(
             path=f"/tmp/{label}.db",
             dialect="sqlite",
+            journal_mode="wal",
             primary=None,
             token=None,
             connect=connect,
