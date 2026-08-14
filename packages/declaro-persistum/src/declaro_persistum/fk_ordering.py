@@ -14,11 +14,11 @@ Also provides:
 """
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
-from declaro_persistum.types import Schema
-
 from declaro_persistum.database import Database, writing
+from declaro_persistum.types import Schema
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +148,52 @@ def sort_operations(schema: Schema, ops: list[DMLOp]) -> list[DMLOp]:
 # ---------------------------------------------------------------------------
 
 
+def insert_statement(table: str, data: dict[str, Any]) -> tuple[str, tuple[Any, ...]]:
+    """Every key becomes a column; every value binds positionally."""
+    cols = ", ".join(f'"{k}"' for k in data)
+    placeholders = ", ".join("?" for _ in data)
+    return (
+        f'INSERT INTO "{table}" ({cols}) VALUES ({placeholders})',
+        tuple(data.values()),
+    )
+
+
+def delete_statement(table: str, data: dict[str, Any]) -> tuple[str, tuple[Any, ...]]:
+    """Every key is a filter, ANDed together."""
+    wheres = " AND ".join(f'"{k}" = ?' for k in data)
+    return f'DELETE FROM "{table}" WHERE {wheres}', tuple(data.values())
+
+
+def update_statement(table: str, data: dict[str, Any]) -> tuple[str, tuple[Any, ...]]:
+    """`_where` is the filter; everything else is the assignment.
+
+    Set values come before where values because the placeholders bind by
+    position, and SET is written before WHERE.
+    """
+    where = data.get("_where", {})
+    updates = {k: v for k, v in data.items() if k != "_where"}
+    set_clause = ", ".join(f'"{k}" = ?' for k in updates)
+    where_clause = " AND ".join(f'"{k}" = ?' for k in where)
+    return (
+        f'UPDATE "{table}" SET {set_clause} WHERE {where_clause}',
+        tuple(updates.values()) + tuple(where.values()),
+    )
+
+
+# The SQL half of `execute_fk_ordered`, lifted out of it.
+#
+# It was an if/elif/else on op_type inside the write loop (Rule 1), which meant
+# the only way to assert on the SQL was to drive the whole function through a
+# recording connection and read what it issued. That mock was the cost of the
+# mixing, not a fact about the code (Rule 4, then Rule 10). These take data and
+# return data, so the tests are `assert f(input) == expected`.
+STATEMENTS: dict[str, Callable[[str, dict[str, Any]], tuple[str, tuple[Any, ...]]]] = {
+    "insert": insert_statement,
+    "delete": delete_statement,
+    "update": update_statement,
+}
+
+
 async def execute_fk_ordered(
     db: Database,
     schema: Schema,
@@ -170,28 +216,23 @@ async def execute_fk_ordered(
     rowcounts: list[int] = []
 
     for table_name, op_type, data in sorted_ops:
-        async with writing(db) as conn:
-            if op_type == "insert":
-                cols = ", ".join(f'"{k}"' for k in data)
-                placeholders = ", ".join("?" for _ in data)
-                sql = f'INSERT INTO "{table_name}" ({cols}) VALUES ({placeholders})'
-                params = tuple(data.values())
-            elif op_type == "delete":
-                wheres = " AND ".join(f'"{k}" = ?' for k in data)
-                sql = f'DELETE FROM "{table_name}" WHERE {wheres}'
-                params = tuple(data.values())
-            elif op_type == "update":
-                # data must have "_where" key with filter dict
-                where = data.get("_where", {})
-                updates = {k: v for k, v in data.items() if k != "_where"}
-                set_clause = ", ".join(f'"{k}" = ?' for k in updates)
-                where_clause = " AND ".join(f'"{k}" = ?' for k in where)
-                sql = f'UPDATE "{table_name}" SET {set_clause} WHERE {where_clause}'
-                params = tuple(updates.values()) + tuple(where.values())
-            else:
-                raise ValueError(f"Unknown op_type: {op_type}")
+        statement = STATEMENTS.get(op_type)
+        if statement is None:
+            raise ValueError(f"Unknown op_type: {op_type}")
+        sql, params = statement(table_name, data)
 
+        async with writing(db) as conn:
             cursor = await conn.execute(sql, params)
+            # COMMIT, WHICH THIS DID NOT DO. `writing(db)` closes the
+            # connection when the block ends and does not commit, so every
+            # operation here was rolled back on the way out — while
+            # `cursor.rowcount` still reported 1 and this function still
+            # returned a list of successes. Measured 2026-08-13 against a real
+            # SQLite file: rowcount 1, zero rows in the table.
+            #
+            # The old tests could not see it. They drove this through a
+            # recording connection that had no transaction to discard.
+            await conn.commit()
             rowcounts.append(cursor.rowcount)
             logger.debug("FK-ordered %s on %s: %d rows", op_type, table_name, cursor.rowcount)
 

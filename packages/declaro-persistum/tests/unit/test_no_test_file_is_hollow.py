@@ -1,15 +1,22 @@
-"""A file named `test_*.py` must contain a test.
+r"""A file named `test_*.py` must contain a test.
 
-TWENTY-FOUR DO NOT. Between them they once held 600 tests. Every one is now a
+TWENTY-THREE DO NOT. Between them they once held 597 tests. Every one is now a
 docstring, its imports, sometimes a helper, and then blank space where the tests
-were. The suite reports 245 tests and does not mention the other 600.
+were, and the suite total says nothing about the gap.
 
     test_query_builder.py         58 tests -> 0
+    test_views.py                 48 tests -> 0
     test_validator.py             45 tests -> 0
     test_enum_abstraction.py      39 tests -> 0
-    test_views.py                 38 tests -> 0
-    test_fk_ordering.py           36 tests -> 0
-    ... twenty more, measured by `git show <rev>:<path> | grep -c 'def test_'`
+    test_cli_commands.py          31 tests -> 0
+    ... eighteen more
+
+COUNTED WITH `grep -cE '^\s*(async )?def test_'`. An earlier version of this
+docstring said 600 across twenty-four files. That count used a pattern without
+`async def`, so it missed every asynchronous test and reported
+test_fk_ordering.py as 36 when it held 43. The true figure was 640 across
+twenty-four. test_fk_ordering.py's 43 are restored, leaving 597 across
+twenty-three.
 
 A HOLLOW TEST FILE IS WORSE THAN A MISSING ONE. A missing file is an obvious
 gap. A file called `test_validator.py` sitting in a green suite reads as "the
@@ -49,7 +56,6 @@ KNOWN_HOLLOW = {
     "test_differ.py",
     "test_enum_abstraction.py",
     "test_enums.py",
-    "test_fk_ordering.py",
     "test_hierarchy.py",
     "test_loader.py",
     "test_maps.py",
