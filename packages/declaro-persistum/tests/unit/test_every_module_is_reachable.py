@@ -40,6 +40,22 @@ KNOWN_ORPHANS is a RATCHET, not an allowlist to grow. Adding a name to it is
 a decision to ship code no entry point reaches; removing one is either wiring
 it up or deleting it. A new orphan fails this test on the commit that creates
 it, which is the only moment anyone still remembers why.
+
+WHAT THIS GATE CANNOT SEE, measured 2026-08-14 by building the case rather
+than reasoning about it. A module counts as reached if ANY name in it is
+imported. Add a module whose only imported name is a TypedDict, with a
+function nothing calls, import that one type into `__init__.py`, and this test
+passes. The module is reachable; its behaviour is not.
+
+`instrumentation.py` is that shape today: `__init__.py` imports `LatencyRecord`
+and none of its five functions is called anywhere in src.
+
+NARROWING IT NEEDS A DECISION THIS TEST CANNOT MAKE. "At least one name
+imported AND called in src" also flags `abstractions/arrays.py`, `maps.py`,
+`ranges.py` and `hierarchy.py`, which are consumer-facing helpers that src is
+not supposed to call. Two definitions of "reached" were tried and neither
+separated the two cases. Separating them requires the package to declare which
+modules are a consumer surface, which is an API decision, not a test.
 """
 
 from __future__ import annotations
