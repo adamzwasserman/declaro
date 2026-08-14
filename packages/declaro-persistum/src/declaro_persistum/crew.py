@@ -45,11 +45,11 @@ such table"). Migration takes its own WAL connection — `turso_database
 from __future__ import annotations
 
 import asyncio
-from typing import Any, TypedDict
+from typing import TypedDict
 
 from declaro_persistum.database import Database, is_replicated
 from declaro_persistum.retry import Retry
-from declaro_persistum.write_queue import Room, drain
+from declaro_persistum.write_queue import PendingWrite, Room, drain
 
 __all__ = ["Crew", "start_crew", "stop_crew", "drainer"]
 
@@ -118,7 +118,7 @@ async def drainer(
                     task.cancel()
                 continue
 
-            async def execute(write: Any) -> None:
+            async def execute(write: PendingWrite) -> None:
                 # The engine's own way to run one write in a transaction,
                 # resolved at open from WRITERS and carried on the Database.
                 # The drainer knows a write has SQL and parameters; it does not

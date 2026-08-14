@@ -24,12 +24,14 @@ them against a real database rather than a fake.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any, Literal, TypedDict
 
 from declaro_persistum.exceptions import DatabaseClosedError
+from declaro_persistum.writers import WriteOne
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +70,24 @@ __all__ = [
 ShutdownPolicy = Literal["replicate", "exit_immediately"]
 
 
+# THE INJECTED BOUNDARY, NAMED. Every one of these was `Callable[..., Any]`,
+# which declares that a value can be called and nothing else — not the arity,
+# not the argument, not the return. A caller could hand `replicate_once` a
+# function taking two arguments and nothing would say so until a shutdown ran
+# it, which is the worst moment to find out.
+#
+# The connection itself stays `Any`, and that one is a real boundary rather than
+# a gap: three engines return three unrelated objects, and `reading` yields the
+# object straight to caller code that may call anything on it. What IS declared
+# is the shape of the call — one `Database` in, an awaitable out.
+Connect = Callable[["Database"], Awaitable[Any]]
+CloseConnection = Callable[[Any], Awaitable[None]]
+ReplicateOnce = Callable[["Database"], Awaitable[bool]]
+RefreshOnce = Callable[["Database"], Awaitable[None]]
+Release = Callable[["Database"], Awaitable[None]]
+Sleep = Callable[[float], Awaitable[None]]
+
+
 class WriteLock(TypedDict):
     """The serialise lock, and the count of writers waiting on it.
 
@@ -82,11 +102,11 @@ class WriteLock(TypedDict):
     contends with replication and must never defer it.
     """
 
-    lock: Any
+    lock: asyncio.Lock
     waiting: int
 
 
-def new_write_lock(lock: Any) -> WriteLock:
+def new_write_lock(lock: asyncio.Lock) -> WriteLock:
     return {"lock": lock, "waiting": 0}
 
 
@@ -115,16 +135,16 @@ class Database(TypedDict):
     busy_timeout_s: float
     primary: str | None
     token: str | None
-    connect: Callable[..., Any]
-    close_connection: Callable[..., Any]
+    connect: Connect
+    close_connection: CloseConnection
     serialise: WriteLock | None
     shutdown: ShutdownPolicy
-    write_one: Callable[..., Any]
+    write_one: WriteOne
     closed: bool
-    replicate_once: Callable[..., Any]
-    refresh_once: Callable[..., Any]
-    release: Callable[..., Any]
-    sleep: Callable[..., Any]
+    replicate_once: ReplicateOnce
+    refresh_once: RefreshOnce
+    release: Release
+    sleep: Sleep
     retry_delay_s: float
 
 
@@ -135,15 +155,15 @@ def new_database(
     busy_timeout_s: float,
     primary: str | None,
     token: str | None,
-    connect: Callable[..., Any],
-    close_connection: Callable[..., Any],
+    connect: Connect,
+    close_connection: CloseConnection,
     serialise: WriteLock | None,
     shutdown: ShutdownPolicy,
-    write_one: Callable[..., Any],
-    replicate_once: Callable[..., Any],
-    refresh_once: Callable[..., Any],
-    release: Callable[..., Any],
-    sleep: Callable[..., Any],
+    write_one: WriteOne,
+    replicate_once: ReplicateOnce,
+    refresh_once: RefreshOnce,
+    release: Release,
+    sleep: Sleep,
     retry_delay_s: float,
 ) -> Database:
     """Build the value. Every argument is required — see Rule 14.
@@ -302,7 +322,7 @@ async def replicate_if_idle(db: Database) -> bool:
     return await replicate(db)
 
 
-async def replication_loop(db: Database, wanted: Any) -> None:
+async def replication_loop(db: Database, wanted: asyncio.Event) -> None:
     """Replicate when work arrives and no writer waits. NOTHING IS ON A CLOCK.
 
     `wanted` is an event a commit sets, and the caller's idleness sets. A timer
