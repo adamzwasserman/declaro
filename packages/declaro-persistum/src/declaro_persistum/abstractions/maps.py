@@ -6,6 +6,7 @@ across PostgreSQL and SQLite without relying on JSONB or hstore.
 """
 
 import re
+from collections.abc import Callable
 from typing import Any
 
 
@@ -83,31 +84,44 @@ def generate_junction_table(
     }
 
 
-def map_set_sql(parent_table: str, column_name: str, dialect: str = "postgresql") -> str:
-    """
-    Generate UPSERT SQL for map entry.
-
-    Args:
-        parent_table: Name of the parent table
-        column_name: Name of the map column
-        dialect: Database dialect ("postgresql" or "sqlite")
-
-    Returns:
-        INSERT ... ON CONFLICT UPDATE SQL statement.
-    """
-    junction_name = f"{parent_table}_{column_name}"
-    fk_column = f"{parent_table[:-1] if parent_table.endswith('s') else parent_table}_id"
-
-    if dialect in ("sqlite", "turso"):
-        # SQLite/Turso use :value placeholder in UPDATE
-        return f"""INSERT INTO {junction_name} ({fk_column}, key, value)
+def _set_dbapi(junction_name: str, fk_column: str) -> str:
+    """The named placeholder is re-bound in the UPDATE."""
+    return f"""INSERT INTO {junction_name} ({fk_column}, key, value)
 VALUES (:parent_id, :key, :value)
 ON CONFLICT ({fk_column}, key) DO UPDATE SET value = :value"""
-    else:
-        # PostgreSQL uses EXCLUDED.value
-        return f"""INSERT INTO {junction_name} ({fk_column}, key, value)
+
+
+def _set_postgresql(junction_name: str, fk_column: str) -> str:
+    """PostgreSQL reads the rejected row back out of EXCLUDED."""
+    return f"""INSERT INTO {junction_name} ({fk_column}, key, value)
 VALUES (:parent_id, :key, :value)
 ON CONFLICT ({fk_column}, key) DO UPDATE SET value = EXCLUDED.value"""
+
+
+SET_SQL: dict[str, Callable[[str, str], str]] = {
+    "postgresql": _set_postgresql,
+    "sqlite": _set_dbapi,
+    "turso": _set_dbapi,
+}
+
+
+def map_set_sql(parent_table: str, column_name: str, dialect: str) -> str:
+    """Generate UPSERT SQL for one map entry.
+
+    Looked up, not branched on, for the same reason as `array_reindex_sql`:
+    the `else` here was a catch-all that handed every unknown dialect the
+    PostgreSQL form, and `dialect` defaulted to "postgresql" so forgetting it
+    looked identical to choosing it.
+    """
+    generate = SET_SQL.get(dialect)
+    if generate is None:
+        raise ValueError(
+            f"cannot generate map-set SQL for dialect {dialect!r}. "
+            f"Supported: {sorted(SET_SQL)}."
+        )
+    junction_name = f"{parent_table}_{column_name}"
+    fk_column = f"{parent_table[:-1] if parent_table.endswith('s') else parent_table}_id"
+    return generate(junction_name, fk_column)
 
 
 def map_get_sql(parent_table: str, column_name: str) -> str:

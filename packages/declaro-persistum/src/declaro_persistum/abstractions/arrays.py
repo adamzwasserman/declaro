@@ -6,6 +6,7 @@ across PostgreSQL and SQLite without relying on native array types.
 """
 
 import re
+from collections.abc import Callable
 from typing import Any
 
 
@@ -201,26 +202,9 @@ def array_move_sql(parent_table: str, column_name: str) -> str:
     return f"UPDATE {junction_name} SET position = :new_position WHERE {fk_column} = :parent_id AND position = :old_position"
 
 
-def array_reindex_sql(parent_table: str, column_name: str, dialect: str = "postgresql") -> str:
-    """
-    Generate SQL to normalize positions to 0, 1, 2, ...
-
-    This closes gaps in positions after deletions.
-
-    Args:
-        parent_table: Name of the parent table
-        column_name: Name of the array column
-        dialect: Database dialect ("postgresql" or "sqlite")
-
-    Returns:
-        UPDATE SQL statement using ROW_NUMBER().
-    """
-    junction_name = f"{parent_table}_{column_name}"
-    fk_column = f"{parent_table[:-1] if parent_table.endswith('s') else parent_table}_id"
-
-    if dialect in ("sqlite", "turso"):
-        # SQLite/Turso version
-        return f"""UPDATE {junction_name}
+def _reindex_dbapi(junction_name: str, fk_column: str) -> str:
+    """A correlated count, which every SQLite-family engine can run."""
+    return f"""UPDATE {junction_name}
 SET position = (
     SELECT COUNT(*) - 1
     FROM {junction_name} AS t2
@@ -228,9 +212,11 @@ SET position = (
     AND t2.position <= {junction_name}.position
 )
 WHERE {fk_column} = :parent_id"""
-    else:
-        # PostgreSQL version
-        return f"""UPDATE {junction_name} AS t
+
+
+def _reindex_postgresql(junction_name: str, fk_column: str) -> str:
+    """UPDATE ... FROM with a window function, which PostgreSQL has."""
+    return f"""UPDATE {junction_name} AS t
 SET position = s.new_position
 FROM (
     SELECT id, ROW_NUMBER() OVER (PARTITION BY {fk_column} ORDER BY position) - 1 AS new_position
@@ -238,3 +224,35 @@ FROM (
     WHERE {fk_column} = :parent_id
 ) AS s
 WHERE t.id = s.id"""
+
+
+REINDEX_SQL: dict[str, Callable[[str, str], str]] = {
+    "postgresql": _reindex_postgresql,
+    "sqlite": _reindex_dbapi,
+    "turso": _reindex_dbapi,
+}
+
+
+def array_reindex_sql(parent_table: str, column_name: str, dialect: str) -> str:
+    """Generate SQL to normalize positions to 0, 1, 2, ..., closing gaps.
+
+    THE DIALECT IS LOOKED UP, NOT BRANCHED ON. This was
+    `if dialect in ("sqlite", "turso"): ... else: <postgresql>`, and that
+    `else` was not a PostgreSQL branch -- it was a catch-all. Measured before
+    the change: "mysql", "libsql" and "" all returned PostgreSQL SQL. A typo
+    produced syntax for an engine the caller was not on, and the only warning
+    was whatever the database said when it rejected it.
+
+    `dialect` is also required now. It carried `= "postgresql"`, so omitting
+    it could not be told from choosing it (Rule 14), and which engine this SQL
+    is for is never something a caller can be assumed to have meant.
+    """
+    generate = REINDEX_SQL.get(dialect)
+    if generate is None:
+        raise ValueError(
+            f"cannot generate reindex SQL for dialect {dialect!r}. "
+            f"Supported: {sorted(REINDEX_SQL)}."
+        )
+    junction_name = f"{parent_table}_{column_name}"
+    fk_column = f"{parent_table[:-1] if parent_table.endswith('s') else parent_table}_id"
+    return generate(junction_name, fk_column)
