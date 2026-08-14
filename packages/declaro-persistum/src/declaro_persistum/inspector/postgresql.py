@@ -20,6 +20,23 @@ from declaro_persistum.inspector.shared import normalize_fk_action as _normalize
 from declaro_persistum.types import Column, Index, Schema, Table, View
 
 
+def _normalize_view_query(query: str) -> str:
+    """Normalize view query for consistent comparison.
+
+    RESTORED, NOT REWRITTEN. bf5f7d0 deleted this and kept both lines that call
+    it, so PostgreSQL view introspection raised NameError from that commit
+    until now. This body is the one that was deleted, recovered with
+    `git show bf5f7d0^:...`, rather than a guess at what it must have done —
+    the difference matters, because the differ compares this output against a
+    stored schema and any other whitespace rule would report every view as
+    changed.
+
+    It stays local to this module: both callers are here, and the sibling
+    inspectors do not normalise view text.
+    """
+    return " ".join(query.split())
+
+
 def get_dialect() -> str:
     """Return dialect identifier."""
     return "postgresql"

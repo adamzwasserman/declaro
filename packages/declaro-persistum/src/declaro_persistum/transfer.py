@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal, TypedDict, Union
 
 from declaro_persistum.abstractions.enums import is_enum_table
-from declaro_persistum.bulk_loader import BulkLoader, create_bulk_loader
+from declaro_persistum.bulk_loader import BULK_LOADERS, BulkLoader
 from declaro_persistum.exceptions import TransferError
 from declaro_persistum.inspector.protocol import create_inspector
 from declaro_persistum.migrations import apply_migrations_async
@@ -257,7 +257,7 @@ async def _transfer_table(
 
     Returns progress dict with final status.
     """
-    total_rows = await source_loader.count_rows(source_conn, table)
+    total_rows = await source_loader["count_rows"](source_conn, table)
     rows_transferred = 0
 
     progress: TableTransferProgress = {
@@ -275,13 +275,13 @@ async def _transfer_table(
 
     offset = 0
     while offset < total_rows:
-        batch = await source_loader.read_rows(
+        batch = await source_loader["read_rows"](
             source_conn, table, columns, offset=offset, limit=batch_size
         )
         if not batch:
             break
 
-        await target_loader.load_rows(target_conn, table, columns, batch)
+        await target_loader["load_rows"](target_conn, table, columns, batch)
 
         # Commit after each batch for resumability
         if hasattr(target_conn, "commit"):
@@ -405,8 +405,8 @@ async def bulk_transfer(
     logger.info(f"Transfer order: {sorted_tables}")
 
     # Step 5+6: Transfer tables
-    source_loader = create_bulk_loader(source_dialect)
-    target_loader = create_bulk_loader(target_dialect)
+    source_loader = BULK_LOADERS[source_dialect]
+    target_loader = BULK_LOADERS[target_dialect]
 
     tables_transferred = 0
     tables_skipped = 0
@@ -422,7 +422,7 @@ async def bulk_transfer(
             # Disable FK checks if circular refs detected
             if circular_refs:
                 try:
-                    await target_loader.disable_fk_checks(target_conn)
+                    await target_loader["disable_fk_checks"](target_conn)
                 except Exception as e:
                     logger.warning(f"Could not disable FK checks: {e}")
 
@@ -457,7 +457,7 @@ async def bulk_transfer(
                                 f"Restarting {table}: was in_progress, "
                                 f"deleting existing rows"
                             )
-                            await target_loader.delete_rows(target_conn, table)
+                            await target_loader["delete_rows"](target_conn, table)
                             if hasattr(target_conn, "commit"):
                                 await target_conn.commit()
 
@@ -500,7 +500,7 @@ async def bulk_transfer(
                 # Re-enable FK checks
                 if circular_refs:
                     try:
-                        await target_loader.enable_fk_checks(target_conn)
+                        await target_loader["enable_fk_checks"](target_conn)
                     except Exception as e:
                         logger.warning(f"Could not re-enable FK checks: {e}")
 
