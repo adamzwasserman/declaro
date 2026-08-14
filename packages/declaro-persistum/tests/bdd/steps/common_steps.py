@@ -40,13 +40,13 @@ def given_ecommerce_schema(bdd_context):
 @then(parsers.parse('I should find exactly {count:d} results'))
 def then_result_count(bdd_context, count: int):
     """Verify result count."""
-    assert len(bdd_context["results"]) == count, f"Expected {count} results, got {len(bdd_context["results"])}"
+    assert len(bdd_context["results"]) == count, f"Expected {count} results, got {len(bdd_context['results'])}"
 
 
 @then("the query should execute successfully")
 def then_query_succeeds(bdd_context):
     """Verify query executed without error."""
-    assert bdd_context["error"] is None, f"Query failed with error: {bdd_context["error"]}"
+    assert bdd_context["error"] is None, f"Query failed with error: {bdd_context['error']}"
 
 
 @then("the results should match the expected filter")
@@ -89,10 +89,10 @@ def then_table_empty(bdd_context):
 def then_error_with_message(bdd_context, message: str):
     """Verify error was raised with message."""
     assert bdd_context["error"] is not None, "Expected an error to be raised"
-    assert message in str(bdd_context["error"]), f"Expected '{message}' in error: {bdd_context["error"]}"
+    assert message in str(bdd_context["error"]), f"Expected '{message}' in error: {bdd_context['error']}"
 
 
 @then("no error should be raised")
 def then_no_error(bdd_context):
     """Verify no error was raised."""
-    assert bdd_context["error"] is None, f"Unexpected error: {bdd_context["error"]}"
+    assert bdd_context["error"] is None, f"Unexpected error: {bdd_context['error']}"

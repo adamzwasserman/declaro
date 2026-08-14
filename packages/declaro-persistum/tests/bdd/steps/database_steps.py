@@ -255,7 +255,7 @@ def when_execute_sql(bdd_context, sql: str):
 @then(parsers.parse("I should find {count:d} completed todos"))
 def then_completed_count(bdd_context, count: int):
     """Verify completed todo count."""
-    assert len(bdd_context["results"]) == count, f"Expected {count} completed todos, got {len(bdd_context["results"])}"
+    assert len(bdd_context["results"]) == count, f"Expected {count} completed todos, got {len(bdd_context['results'])}"
 
 
 @then("the results match the expected data")

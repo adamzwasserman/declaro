@@ -614,7 +614,7 @@ def when_alter_not_null_with_default(recon_context, column, default):
             _get_full_table_schema(recon_context["conn"], recon_context["table_name"])
         )
         if column not in columns:
-            raise ValueError(f"Column '{column}' not found in '{recon_context["table_name"]}'")
+            raise ValueError(f"Column '{column}' not found in '{recon_context['table_name']}'")
         columns[column]["nullable"] = False
         columns[column]["default"] = default
         recon_context["run"](
@@ -1026,7 +1026,7 @@ def then_data_preserved(recon_context):
     )
     rows = recon_context["run"](cursor.fetchall())
     assert len(rows) >= recon_context["initial_row_count"], (
-        f"Expected at least {recon_context["initial_row_count"]} rows, got {len(rows)}"
+        f"Expected at least {recon_context['initial_row_count']} rows, got {len(rows)}"
     )
 
 
@@ -1259,7 +1259,7 @@ def then_table_unchanged(recon_context):
 
     assert current == recon_context["schema_snapshot"], (
         f"Schema changed despite rollback.\n"
-        f"  before: {recon_context["schema_snapshot"]}\n"
+        f"  before: {recon_context['schema_snapshot']}\n"
         f"  after:  {current}"
     )
 
@@ -1281,7 +1281,7 @@ def then_data_intact(recon_context):
 
     assert current == recon_context["rows_snapshot"], (
         f"Data changed despite rollback.\n"
-        f"  before: {recon_context["rows_snapshot"]}\n"
+        f"  before: {recon_context['rows_snapshot']}\n"
         f"  after:  {current}"
     )
 
@@ -1311,7 +1311,7 @@ def then_table_recreated(recon_context):
     """Verify table was recreated."""
     cursor = recon_context["run"](
         recon_context["conn"].execute(
-            f"SELECT name FROM sqlite_master WHERE type='table' AND name='{recon_context["table_name"]}'"
+            f"SELECT name FROM sqlite_master WHERE type='table' AND name='{recon_context['table_name']}'"
         )
     )
     result = recon_context["run"](cursor.fetchone())
@@ -1396,7 +1396,7 @@ def then_invalid_fk_raises_error(recon_context):
     try:
         recon_context["run"](
             recon_context["conn"].execute(
-                f"INSERT INTO {recon_context["table_name"]} (id, title, author_id) VALUES (999, 'Test', 9999)"
+                f"INSERT INTO {recon_context['table_name']} (id, title, author_id) VALUES (999, 'Test', 9999)"
             )
         )
         recon_context["run"](recon_context["conn"].commit())
@@ -1413,7 +1413,7 @@ def then_invalid_fk_succeeds(recon_context):
     """Verify FK constraint is NOT enforced."""
     recon_context["run"](
         recon_context["conn"].execute(
-            f"INSERT INTO {recon_context["table_name"]} (id, title, author_id) VALUES (999, 'Test', 9999)"
+            f"INSERT INTO {recon_context['table_name']} (id, title, author_id) VALUES (999, 'Test', 9999)"
         )
     )
     recon_context["run"](recon_context["conn"].commit())
@@ -1449,7 +1449,7 @@ def then_other_data_preserved(recon_context):
     )
     result = recon_context["run"](cursor.fetchone())
     assert result[0] >= recon_context["initial_row_count"], (
-        f"Expected at least {recon_context["initial_row_count"]} rows, got {result[0]}"
+        f"Expected at least {recon_context['initial_row_count']} rows, got {result[0]}"
     )
 
 
@@ -1485,7 +1485,7 @@ def then_fk_on_column_preserved(recon_context, column):
     rows = recon_context["run"](pragma_foreign_key_list(recon_context["conn"], recon_context["table_name"]))
     fk_cols = [row[3] for row in rows]  # row[3] = "from" column
     assert column in fk_cols, (
-        f"Expected FK on column '{column}' to be preserved in '{recon_context["table_name"]}'"
+        f"Expected FK on column '{column}' to be preserved in '{recon_context['table_name']}'"
     )
 
 
@@ -1495,7 +1495,7 @@ def then_incoming_fk_preserved(recon_context, table):
     rows = recon_context["run"](pragma_foreign_key_list(recon_context["conn"], table))
     referenced_tables = [row[2] for row in rows]  # row[2] = referenced table
     assert recon_context["table_name"] in referenced_tables, (
-        f"Expected '{table}' to have FK referencing '{recon_context["table_name"]}'"
+        f"Expected '{table}' to have FK referencing '{recon_context['table_name']}'"
     )
 
 
@@ -1526,7 +1526,7 @@ def then_self_ref_fk_preserved(recon_context):
     )
     self_refs = [row for row in rows if row[2] == recon_context["table_name"]]
     assert len(self_refs) > 0, (
-        f"Expected self-referential FK on '{recon_context["table_name"]}' to be preserved"
+        f"Expected self-referential FK on '{recon_context['table_name']}' to be preserved"
     )
 
 
@@ -1538,7 +1538,7 @@ def then_hierarchical_intact(recon_context):
     )
     result = recon_context["run"](cursor.fetchone())
     assert result[0] == recon_context["initial_row_count"], (
-        f"Expected {recon_context["initial_row_count"]} hierarchical rows, got {result[0]}"
+        f"Expected {recon_context['initial_row_count']} hierarchical rows, got {result[0]}"
     )
 
 
