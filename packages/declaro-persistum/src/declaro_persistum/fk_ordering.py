@@ -18,7 +18,7 @@ from collections.abc import Callable
 from typing import Any
 
 from declaro_persistum.database import Database, writing
-from declaro_persistum.types import Schema
+from declaro_persistum.types import Column, Schema, Table
 
 logger = logging.getLogger(__name__)
 
@@ -102,13 +102,21 @@ def strip_foreign_keys(schema: Schema) -> Schema:
     """
     stripped: Schema = {}
     for table_name, table_def in schema.items():
-        new_columns = {}
+        new_columns: dict[str, Column] = {}
         for col_name, col_def in table_def.get("columns", {}).items():
-            new_col = {k: v for k, v in col_def.items()
-                       if k not in ("references", "on_delete", "on_update")}
+            # NAMED, NOT FILTERED. This was a comprehension testing each key
+            # against a tuple, which produced a plain dict[str, object] that
+            # only a `# type: ignore` would let into a Column. Naming the three
+            # FK keys says the same thing to the reader and to mypy, and the
+            # escape goes with it.
+            new_col: Column = {**col_def}
+            new_col.pop("references", None)
+            new_col.pop("on_delete", None)
+            new_col.pop("on_update", None)
             new_columns[col_name] = new_col
-        new_table = {**table_def, "columns": new_columns}
-        stripped[table_name] = new_table  # type: ignore
+        new_table: Table = {**table_def}
+        new_table["columns"] = new_columns
+        stripped[table_name] = new_table
     return stripped
 
 
