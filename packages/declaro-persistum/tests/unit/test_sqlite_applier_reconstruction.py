@@ -9,6 +9,7 @@ import pytest
 import aiosqlite
 
 from declaro_persistum.applier import apply
+from declaro_persistum.exceptions import MigrationError
 from declaro_persistum.types import Operation
 from declaro_persistum.abstractions.pragma_compat import pragma_table_info
 
@@ -168,7 +169,11 @@ async def test_applier_rollback_on_reconstruction_error():
             }
         ]
 
-        with pytest.raises(Exception):
+        # NAMED, NOT BLIND. `pytest.raises(Exception)` passes on any error at
+        # all -- a typo in the operation dict, a wrong signature, a failed
+        # import -- so it cannot fail for the right reason, and the assertion
+        # below would then be checking a table nothing had touched.
+        with pytest.raises(MigrationError, match="alter_column on posts"):
             await apply(conn, operations, [0], "sqlite")
 
         # Verify table unchanged (original schema preserved)

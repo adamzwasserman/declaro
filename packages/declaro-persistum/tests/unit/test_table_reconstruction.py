@@ -5,6 +5,8 @@ Tests the core functionality of table reconstruction for ALTER COLUMN operations
 """
 
 import pytest
+import sqlite3
+
 import aiosqlite
 
 from declaro_persistum.abstractions.table_reconstruction import (
@@ -202,7 +204,10 @@ async def test_reconstruct_preserves_foreign_keys():
 
         # Verify FK still enforced
         await conn.execute("PRAGMA foreign_keys = ON")
-        with pytest.raises(Exception):
+        # NAMED, NOT BLIND. `pytest.raises(Exception)` would pass on a typo in
+        # the SQL, which is the one thing that would make this test claim FK
+        # enforcement survived reconstruction when it had not been checked.
+        with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY constraint failed"):
             await conn.execute(
                 "INSERT INTO books (id, title, author_id) VALUES (2, 'Book 2', 999)"
             )
@@ -220,7 +225,7 @@ async def test_reconstruct_fails_with_null_in_not_null_column():
         await conn.commit()
 
         # Try to make title NOT NULL - should fail
-        with pytest.raises(Exception):
+        with pytest.raises(sqlite3.IntegrityError, match="NOT NULL constraint failed"):
             await alter_column_nullability(conn, "posts", "title", False)
             await conn.commit()
 
