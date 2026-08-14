@@ -199,27 +199,13 @@ def schema_with_composite_pk() -> Schema:
     }
 
 
-# Mock connection fixtures
-
-
-
-
-
-
-
-
-
-
-@pytest.fixture
-def mock_pg_connection() -> MockAsyncPGConnection:
-    """Mock PostgreSQL connection."""
-    return MockAsyncPGConnection()
-
-
-@pytest.fixture
-def mock_sqlite_connection() -> MockAioSQLiteConnection:
-    """Mock SQLite connection."""
-    return MockAioSQLiteConnection()
+# `mock_pg_connection` and `mock_sqlite_connection` were here. Both returned
+# classes that had already been deleted, so requesting either raised NameError,
+# and nothing requested either. Deleted rather than rebuilt: a mock connection
+# is the machinery a test needs when the code under test mixes I/O with the
+# logic being asserted (Rule 10), and both SQLite and Postgres are available to
+# these tests for real. `test_the_bulk_loaders_actually_load` and
+# `test_fk_ordering` are what that looks like instead.
 
 
 # Temporary directory fixtures
