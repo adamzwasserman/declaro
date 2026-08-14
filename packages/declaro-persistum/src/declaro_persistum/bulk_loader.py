@@ -105,18 +105,6 @@ class BulkLoader(Protocol):
 
 
 
-def _normalize_pg_value(value: Any) -> Any:
-    """
-    Normalize PostgreSQL-specific types to portable Python types.
-
-    Converts UUID objects to strings so they can be inserted into
-    SQLite/Turso targets without type errors.
-    """
-    import uuid
-
-    if isinstance(value, uuid.UUID):
-        return str(value)
-    return value
 
 
 def create_bulk_loader(dialect: str) -> BulkLoader:

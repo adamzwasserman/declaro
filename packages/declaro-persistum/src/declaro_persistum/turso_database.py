@@ -187,17 +187,6 @@ async def migrating(db: Database) -> Any:
     return conn
 
 
-def _connect_replicated(path: str, primary: str, token: str | None):
-    async def connect(db: Database) -> Any:
-        import turso.aio.sync
-
-        conn = await turso.aio.sync.connect(
-            db["path"], remote_url=db["primary"], auth_token=db["token"]
-        )
-        await _set_journal_mode(conn, "wal")
-        return conn
-
-    return connect
 
 
 async def _close_connection(conn: Any) -> None:

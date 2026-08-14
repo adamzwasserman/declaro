@@ -16,7 +16,6 @@ Usage:
 
 import logging
 import re
-import time
 from datetime import UTC, datetime
 from typing import Any, TypedDict
 
@@ -104,45 +103,10 @@ def format_jsonl(record: LatencyRecord) -> str:
     return json.dumps(record)
 
 
-def get_latency_logger() -> logging.Logger:
-    """
-    Get the dedicated latency logger.
-
-    Uses a separate logger with propagate=False so latency records
-    don't pollute application logs.
-    """
-    logger = logging.getLogger("declaro_persistum.latency")
-    logger.propagate = False
-    return logger
 
 
-def setup_jsonl_sink(logger: logging.Logger, path: str) -> None:
-    """
-    Attach a JSONL file handler to the latency logger.
-
-    Lazy: file and directory are created on first write, not at setup time.
-    """
 
 
-    handler = _LazyJSONLHandler(path)
-    handler.setFormatter(logging.Formatter("%(message)s"))
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
-
-
-def setup_callable_sink(logger: logging.Logger, fn: Any) -> None:
-    """
-    Attach a callable sink to the latency logger.
-
-    The callable receives a LatencyRecord dict on each execute().
-    Useful for Prometheus, StatsD, or custom sinks.
-    """
-    import json
-
-
-    handler = _CallableHandler()
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
 
 
 def emit_record(logger: logging.Logger, record: LatencyRecord) -> None:

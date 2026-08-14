@@ -51,14 +51,6 @@ def generate_metadata_table_schema() -> dict[str, Any]:
     }
 
 
-def generate_matview_table_name(view_name: str) -> str:
-    """
-    Generate the backing table name for an emulated matview.
-
-    We use the same name as the view - the metadata table tracks
-    which tables are matviews vs regular tables.
-    """
-    return view_name
 
 
 def create_matview_sql(
@@ -256,21 +248,3 @@ FROM {MATVIEW_METADATA_TABLE}
 ORDER BY name"""
 
 
-def infer_columns_from_query_sql(query: str) -> list[str]:
-    """
-    Generate SQL statements to infer column schema from query.
-
-    This creates a temporary table, inspects it, then drops it.
-    Must be executed as separate statements.
-
-    Args:
-        query: The SELECT query
-
-    Returns:
-        List of SQL statements
-    """
-    return [
-        f"CREATE TEMP TABLE _dp_schema_probe AS {query} LIMIT 0",
-        "PRAGMA table_info(_dp_schema_probe)",
-        "DROP TABLE _dp_schema_probe",
-    ]

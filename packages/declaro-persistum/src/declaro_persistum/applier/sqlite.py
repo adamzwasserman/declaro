@@ -20,18 +20,15 @@ from typing import Any, Literal
 
 from declaro_persistum.applier.shared import (
     apply_reconstruction_changes,
-    columns_from_pragma_rows,
     dry_run_preview,
-    enum_population_sql,
     generate_operation_sql,
-    generate_sql,
     map_type as _map_type_shared,
     requires_reconstruction,
     single_change_property,
 )
 
 from declaro_persistum.exceptions import MigrationError
-from declaro_persistum.types import ApplyResult, Column, Enum, Operation, Procedure, Trigger, View
+from declaro_persistum.types import ApplyResult, Enum, Operation, Trigger, View
 
 
 def get_dialect() -> str:
@@ -260,63 +257,10 @@ END"""
     return sql
 
 
-def generate_create_triggers_for_events(table: str, trigger: Trigger) -> list[str]:
-    """
-    Generate multiple SQLite triggers for multiple events.
-
-    SQLite requires separate triggers for each event type.
-
-    Args:
-        table: Table name
-        trigger: Trigger definition (may have multiple events)
-
-    Returns:
-        List of SQL statements
-    """
-    event = trigger.get("event", "insert")
-
-    events = [event] if isinstance(event, str) else event
-
-    sqls = []
-    for evt in events:
-        single_trigger = dict(trigger)
-        single_trigger["event"] = evt
-        single_trigger["name"] = f"{trigger['name']}_{evt}"
-        sqls.append(generate_create_trigger(table, single_trigger))  # type: ignore
-
-    return sqls
 
 
-def generate_drop_trigger(table: str, trigger_name: str) -> str:
-    """
-    Generate SQLite DROP TRIGGER SQL.
-
-    Args:
-        table: Table name
-        trigger_name: Trigger name
-
-    Returns:
-        SQL statement
-    """
-    return f"DROP TRIGGER IF EXISTS {table}_{trigger_name}"
 
 
-def generate_create_function(procedure: Procedure) -> str:
-    """
-    SQLite does not support stored procedures.
-
-    Raises:
-        NotSupportedError: Always, with helpful alternatives
-    """
-    raise NotSupportedError(
-        f"SQLite does not support stored procedures. "
-        f"Function '{procedure.get('name', 'unknown')}' cannot be created.",
-        alternatives=[
-            "Move the logic to the application layer (Python function)",
-            "Use SQLite user-defined functions via connection.create_function()",
-            "Switch to PostgreSQL for stored procedure support",
-        ],
-    )
 
 
 def generate_create_view(view: View) -> str:

@@ -399,19 +399,6 @@ async def table_exists(
     return bool(result)
 
 
-async def get_table_columns(
-    connection: Any,
-    table_name: str,
-    *,
-    schema_name: str = "public",
-) -> dict[str, Any]:
-    """Get column definitions for a specific table."""
-    if not await table_exists(connection, table_name, schema_name=schema_name):
-        from declaro_persistum.exceptions import DeclaroError
-
-        raise DeclaroError(f"Table '{table_name}' does not exist in schema '{schema_name}'")
-
-    return await _get_columns(connection, table_name, schema_name)
 
 
 async def introspect_views(
@@ -468,66 +455,5 @@ async def introspect_views(
     return views
 
 
-async def get_materialized_view_indexes(
-    connection: Any,
-    view_name: str,
-    *,
-    schema_name: str = "public",
-) -> list[dict[str, Any]]:
-    """
-    Get indexes on a materialized view.
-
-    Args:
-        connection: asyncpg connection object
-        view_name: Name of the materialized view
-        schema_name: PostgreSQL schema (default: "public")
-
-    Returns:
-        List of index info dicts with keys: index_name, is_unique, columns
-    """
-    rows = await connection.fetch(
-        """
-        SELECT
-            i.relname as index_name,
-            ix.indisunique as is_unique,
-            array_agg(a.attname ORDER BY k.n) as columns
-        FROM pg_index ix
-        JOIN pg_class i ON i.oid = ix.indexrelid
-        JOIN pg_class m ON m.oid = ix.indrelid
-        JOIN pg_namespace n ON n.oid = m.relnamespace
-        CROSS JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, n)
-        JOIN pg_attribute a ON a.attrelid = m.oid AND a.attnum = k.attnum
-        WHERE m.relkind = 'm'
-          AND n.nspname = $1
-          AND m.relname = $2
-        GROUP BY i.relname, ix.indisunique
-        """,
-        schema_name,
-        view_name,
-    )
-    return [dict(row) for row in rows]
 
 
-async def has_unique_index(
-    connection: Any,
-    view_name: str,
-    *,
-    schema_name: str = "public",
-) -> bool:
-    """
-    Check if a materialized view has a unique index.
-
-    Required for REFRESH MATERIALIZED VIEW CONCURRENTLY.
-
-    Args:
-        connection: asyncpg connection object
-        view_name: Name of the materialized view
-        schema_name: PostgreSQL schema (default: "public")
-
-    Returns:
-        True if view has at least one unique index
-    """
-    indexes = await get_materialized_view_indexes(
-        connection, view_name, schema_name=schema_name
-    )
-    return any(idx.get("is_unique") for idx in indexes)

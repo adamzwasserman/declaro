@@ -16,12 +16,8 @@ from declaro_persistum.exceptions import LoaderError
 from declaro_persistum.types import (
     Column,
     Decision,
-    Enum,
-    Parameter,
-    Procedure,
     Schema,
     Table,
-    Trigger,
     View,
 )
 
@@ -335,17 +331,6 @@ def save_decisions(schema_dir: str | Path, decisions: dict[str, Any]) -> None:
     pending_path.write_text(content)
 
 
-def clear_decisions(schema_dir: str | Path) -> None:
-    """
-    Clear pending decisions after successful migration.
-
-    Args:
-        schema_dir: Path to schema directory
-    """
-    pending_path = Path(schema_dir) / "migrations" / "pending.toml"
-
-    if pending_path.exists():
-        pending_path.unlink()
 
 
 # =============================================================================
@@ -360,252 +345,22 @@ def _is_valid_identifier(name: str) -> bool:
     return bool(_VALID_IDENTIFIER.match(name))
 
 
-def parse_enum(data: dict[str, Any]) -> Enum:
-    """
-    Parse enum definition from TOML data.
-
-    Args:
-        data: Dict with name and values
-
-    Returns:
-        Enum TypedDict
-    """
-    enum: Enum = {
-        "name": data["name"],
-        "values": list(data["values"]),
-    }
-    if "description" in data:
-        enum["description"] = data["description"]
-    return enum
 
 
-def validate_enum(enum: Enum) -> None:
-    """
-    Validate enum definition.
-
-    Args:
-        enum: Enum to validate
-
-    Raises:
-        ValueError: If validation fails
-    """
-    if not enum.get("values"):
-        raise ValueError(f"Enum '{enum.get('name', 'unknown')}' must have at least one value")
-
-    values = enum["values"]
-    if len(values) != len(set(values)):
-        raise ValueError(f"Enum '{enum.get('name', 'unknown')}' has duplicate values")
-
-    name = enum.get("name", "")
-    if not _is_valid_identifier(name):
-        raise ValueError(f"Enum name '{name}' is not a valid identifier")
 
 
-def load_enums(enums_dir: str | Path) -> dict[str, Enum]:
-    """
-    Load enums from schema/types/enums.toml or types/ directory.
-
-    Args:
-        enums_dir: Path to types directory
-
-    Returns:
-        Dict of enum_name -> Enum
-    """
-    enums_path = Path(enums_dir)
-    enums: dict[str, Enum] = {}
-
-    # Check for enums.toml
-    enums_file = enums_path / "enums.toml"
-    if enums_file.exists():
-        try:
-            content = enums_file.read_text()
-            data = tomllib.loads(content)
-            for name, enum_data in data.items():
-                if name.startswith("_"):
-                    continue
-                if isinstance(enum_data, dict) and "values" in enum_data:
-                    enum_data["name"] = name
-                    enum = parse_enum(enum_data)
-                    validate_enum(enum)
-                    enums[name] = enum
-        except tomllib.TOMLDecodeError as e:
-            raise LoaderError(f"Invalid enums TOML: {e}", path=str(enums_file)) from e
-
-    return enums
 
 
-def parse_trigger(name: str, data: dict[str, Any]) -> Trigger:
-    """
-    Parse trigger definition from TOML data.
-
-    Args:
-        name: Trigger name
-        data: Trigger definition
-
-    Returns:
-        Trigger TypedDict
-    """
-    trigger: Trigger = {
-        "name": name,
-        "timing": data.get("timing", "before"),
-        "event": data.get("event", "insert"),
-        "for_each": data.get("for_each", "row"),
-    }
-
-    if "when" in data:
-        trigger["when"] = data["when"]
-    if "body" in data:
-        trigger["body"] = data["body"]
-    if "execute" in data:
-        trigger["execute"] = data["execute"]
-
-    return trigger
 
 
-def validate_trigger(trigger: Trigger) -> None:
-    """
-    Validate trigger definition.
-
-    Args:
-        trigger: Trigger to validate
-
-    Raises:
-        ValueError: If validation fails
-    """
-    valid_timings = {"before", "after", "instead_of"}
-    timing = trigger.get("timing", "")
-    if timing not in valid_timings:
-        raise ValueError(f"Trigger timing must be one of {valid_timings}, got '{timing}'")
-
-    valid_events = {"insert", "update", "delete"}
-    event = trigger.get("event", "")
-    if isinstance(event, str):
-        if event not in valid_events:
-            raise ValueError(f"Trigger event must be one of {valid_events}, got '{event}'")
-    elif isinstance(event, list):
-        for e in event:
-            if e not in valid_events:
-                raise ValueError(f"Trigger event must be one of {valid_events}, got '{e}'")
-
-    if not trigger.get("body") and not trigger.get("execute"):
-        raise ValueError("Trigger must have either 'body' or 'execute'")
 
 
-def parse_procedure(name: str, data: dict[str, Any]) -> Procedure:
-    """
-    Parse procedure definition from TOML data.
-
-    Args:
-        name: Procedure name
-        data: Procedure definition
-
-    Returns:
-        Procedure TypedDict
-    """
-    procedure: Procedure = {
-        "name": name,
-        "language": data.get("language", "sql"),
-        "returns": data.get("returns", "void"),
-        "body": data.get("body", ""),
-    }
-
-    if "parameters" in data:
-        params: list[Parameter] = []
-        for p in data["parameters"]:
-            param: Parameter = {
-                "name": p["name"],
-                "type": p["type"],
-            }
-            if "default" in p:
-                param["default"] = p["default"]
-            params.append(param)
-        procedure["parameters"] = params
-
-    return procedure
 
 
-def validate_procedure(procedure: Procedure) -> None:
-    """
-    Validate procedure definition.
-
-    Args:
-        procedure: Procedure to validate
-
-    Raises:
-        ValueError: If validation fails
-    """
-    valid_languages = {"sql", "plpgsql"}
-    language = procedure.get("language", "")
-    if language not in valid_languages:
-        raise ValueError(f"Procedure language must be one of {valid_languages}, got '{language}'")
-
-    if not procedure.get("body"):
-        raise ValueError("Procedure must have a 'body'")
-
-    if not procedure.get("returns"):
-        raise ValueError("Procedure must have 'returns' type")
-
-    for param in procedure.get("parameters", []):
-        if not param.get("name"):
-            raise ValueError("Parameter must have a 'name'")
-        if not param.get("type"):
-            raise ValueError(f"Parameter '{param.get('name')}' must have a 'type'")
 
 
-def load_procedures(procedures_dir: str | Path) -> dict[str, Procedure]:
-    """
-    Load procedures from schema/procedures/ directory.
-
-    Args:
-        procedures_dir: Path to procedures directory
-
-    Returns:
-        Dict of procedure_name -> Procedure
-    """
-    proc_path = Path(procedures_dir)
-    procedures: dict[str, Procedure] = {}
-
-    if not proc_path.exists():
-        return procedures
-
-    for toml_file in proc_path.glob("*.toml"):
-        try:
-            content = toml_file.read_text()
-            data = tomllib.loads(content)
-            name = toml_file.stem
-            procedure = parse_procedure(name, data)
-            validate_procedure(procedure)
-            procedures[name] = procedure
-        except tomllib.TOMLDecodeError as e:
-            raise LoaderError(f"Invalid procedure TOML: {e}", path=str(toml_file)) from e
-
-    return procedures
 
 
-def parse_view(name: str, data: dict[str, Any]) -> View:
-    """
-    Parse view definition from TOML data.
-
-    Args:
-        name: View name
-        data: View definition
-
-    Returns:
-        View TypedDict
-    """
-    view: View = {
-        "name": name,
-        "query": data.get("query", ""),
-    }
-
-    if "materialized" in data:
-        view["materialized"] = data["materialized"]
-    if "refresh" in data:
-        view["refresh"] = data["refresh"]
-    if "depends_on" in data:
-        view["depends_on"] = list(data["depends_on"])
-
-    return view
 
 
 def validate_view(view: View) -> None:
@@ -643,31 +398,3 @@ def validate_view(view: View) -> None:
         )
 
 
-def load_views(views_dir: str | Path) -> dict[str, View]:
-    """
-    Load views from schema/views/ directory.
-
-    Args:
-        views_dir: Path to views directory
-
-    Returns:
-        Dict of view_name -> View
-    """
-    views_path = Path(views_dir)
-    views: dict[str, View] = {}
-
-    if not views_path.exists():
-        return views
-
-    for toml_file in views_path.glob("*.toml"):
-        try:
-            content = toml_file.read_text()
-            data = tomllib.loads(content)
-            name = toml_file.stem
-            view = parse_view(name, data)
-            validate_view(view)
-            views[name] = view
-        except tomllib.TOMLDecodeError as e:
-            raise LoaderError(f"Invalid view TOML: {e}", path=str(toml_file)) from e
-
-    return views

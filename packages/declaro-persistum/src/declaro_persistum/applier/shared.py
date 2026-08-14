@@ -7,7 +7,7 @@ Both SQLiteApplier and TursoApplier delegate SQL generation here.
 
 from typing import Any
 
-from declaro_persistum.types import ApplyResult, Column, Operation, View
+from declaro_persistum.types import ApplyResult, Column, Operation
 
 
 # =============================================================================

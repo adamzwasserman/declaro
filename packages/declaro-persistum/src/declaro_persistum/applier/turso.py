@@ -27,7 +27,6 @@ from declaro_persistum.applier.shared import (
     dry_run_preview,
     enum_population_sql,
     generate_operation_sql,
-    generate_sql,
     requires_reconstruction,
 )
 from declaro_persistum.exceptions import MigrationError

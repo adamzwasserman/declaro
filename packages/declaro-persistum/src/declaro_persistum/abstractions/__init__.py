@@ -175,7 +175,6 @@ __all__ = [
     "pragma_index_info",
     "pragma_foreign_key_list",
     # CHECK Constraint Emulation (Turso Database Rust)
-    "get_check_affected_tables",
     # Table Reconstruction (SQLite/Turso ALTER COLUMN workaround)
     "generate_create_table_sql",
     "generate_data_copy_sql",
