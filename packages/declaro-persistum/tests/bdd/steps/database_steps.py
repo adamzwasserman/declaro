@@ -180,9 +180,16 @@ def when_query_completed(bdd_context):
                     (1,)
                 )
                 rows = cursor.fetchall()
-                # turso returns tuples, need to convert to dicts
-                columns = ["id", "title", "completed"]
-                bdd_context["results"] = [dict(zip(columns, row)) for row in rows]
+                # Turso returns tuples, so the names come from the cursor.
+                # They used to be the literal ["id", "title", "completed"],
+                # which is three of the four columns simple_todos_schema
+                # defines. `SELECT *` returns four, and zip without strict=
+                # dropped `created_at` from every row in silence. Two sources
+                # of truth for one list, and the wrong one was in the test.
+                columns = [d[0] for d in cursor.description]
+                bdd_context["results"] = [
+                    dict(zip(columns, row, strict=True)) for row in rows
+                ]
 
     asyncio.run(_query())
 

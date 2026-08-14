@@ -662,10 +662,10 @@ def when_alter_column_type(recon_context, column, new_type):
                 if val is not None:
                     try:
                         int(str(val))
-                    except (ValueError, TypeError):
+                    except (ValueError, TypeError) as err:
                         raise ValueError(
                             f"Cannot convert value '{val}' in column '{column}' to INTEGER"
-                        )
+                        ) from err
 
         recon_context["run"](
             alter_column_type(recon_context["conn"], recon_context["table_name"], column, new_type)

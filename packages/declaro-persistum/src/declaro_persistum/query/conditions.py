@@ -101,7 +101,12 @@ def _in(negated: bool):
         names = [_name(path, column, f"_{i}") for i in range(len(values))]
         placeholders = ", ".join(f":{n}" for n in names)
         keyword = "NOT IN" if negated else "IN"
-        return f"{column} {keyword} ({placeholders})", dict(zip(names, values))
+        # strict: `names` is built from `len(values)` three lines up, so a length
+        # mismatch is impossible unless that changes -- at which point this
+        # raises instead of silently dropping the tail of the IN list.
+        return f"{column} {keyword} ({placeholders})", dict(
+            zip(names, values, strict=True)
+        )
 
     return render_in
 
