@@ -45,7 +45,7 @@ such table"). Migration takes its own WAL connection — `turso_database
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, TypedDict
 
 from declaro_persistum.database import Database, is_replicated
 from declaro_persistum.retry import Retry
@@ -54,13 +54,17 @@ from declaro_persistum.write_queue import Room, drain
 __all__ = ["Crew", "start_crew", "stop_crew", "drainer"]
 
 
-class Crew(dict):
+class Crew(TypedDict):
     """A running crew. Data plus the handles needed to stop it.
 
-    A dict rather than an object because there is no behaviour here: the
-    tasks and the stop signal are facts about a running crew, and
-    `stop_crew` is a function that takes them.
+    There is no behaviour here: the tasks and the stop signal are facts about
+    a running crew, and `stop_crew` is a function that takes them.
     """
+
+    room: Room
+    stop: asyncio.Event
+    tasks: list[asyncio.Task[None]]
+    size: int
 
 
 async def drainer(
@@ -72,12 +76,16 @@ async def drainer(
 ) -> None:
     """One drainer, one connection, held for the drainer's whole life.
 
+    It does not know which engine it is on. `db["write_one"]` came from the
+    WRITERS table at open; see writers.py.
+
     The connection is opened once and used for writes ONLY. It never reads,
     because a partially-consumed cursor alive on an MVCC connection when a
     write commits is the documented silent-rollback window, and on pyturso
     0.7.2 it panics the engine outright (core/mvcc/database/mod.rs:5424,
     reproducible 3 of 3). One connection, one job.
     """
+    write_one = db["write_one"]
     conn = await db["connect"](db)
     try:
         while not stop.is_set():
@@ -111,12 +119,12 @@ async def drainer(
                 continue
 
             async def execute(write: Any) -> None:
-                # `drain` hands over the PendingWrite itself, so the drainer
-                # never has to know how a write is spelled — only how to run
-                # one on its own connection.
-                await conn.execute("BEGIN CONCURRENT")
-                await conn.execute(write["sql"], write["params"])
-                await conn.commit()
+                # The engine's own way to run one write in a transaction,
+                # resolved at open from WRITERS and carried on the Database.
+                # The drainer knows a write has SQL and parameters; it does not
+                # know which statement opens a transaction, whether parameters
+                # go as a tuple or positionally, or whether there is a commit.
+                await write_one(conn, write["sql"], write["params"])
 
             await drain(room, execute, retry)
     finally:
@@ -151,7 +159,7 @@ async def start_crew(
         asyncio.create_task(drainer(room, db, stop, retry, idle_s))
         for _ in range(size)
     ]
-    return Crew({"room": room, "stop": stop, "tasks": tasks, "size": size})
+    return {"room": room, "stop": stop, "tasks": tasks, "size": size}
 
 
 async def stop_crew(crew: Crew) -> None:

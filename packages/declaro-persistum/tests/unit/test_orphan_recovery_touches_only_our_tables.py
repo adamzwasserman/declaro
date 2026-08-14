@@ -49,6 +49,12 @@ class _Conn:
         }
 
 
+async def _write_one(conn, sql, params):
+    await conn.execute(sql, params)
+    if hasattr(conn, "commit"):
+        await conn.commit()
+
+
 def _database(conn: _Conn):
     """A Database whose connect hands back the real sqlite3 connection.
 
@@ -78,12 +84,14 @@ def _database(conn: _Conn):
 
     return new_database(
         path=":memory:",
+        dialect="sqlite",
         primary=None,
         token=None,
         connect=connect,
         close_connection=close_connection,
         serialise=None,
         shutdown="exit_immediately",
+        write_one=_write_one,
         replicate_once=nothing,
         refresh_once=nothing_down,
         release=release,

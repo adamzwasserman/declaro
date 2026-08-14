@@ -111,6 +111,7 @@ from declaro_persistum.pydantic_loader import (
     extract_literal_values,
     get_literal_columns,
 )
+from declaro_persistum.writers import WRITERS
 from declaro_persistum.migrations import (
     apply_migrations_async,
 )
@@ -124,6 +125,7 @@ from declaro_persistum.cutover import begin_cutover
 # query builder classes and return with Group A of the map.
 
 __all__ = [
+    "WRITERS",
     # databases, the crew, the cutover mirror
     "Mirror",
     "Divergence",

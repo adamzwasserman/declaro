@@ -44,6 +44,12 @@ CREW = 1   # machinery, not concurrency — see the module docstring
 WRITES = 12
 
 
+
+async def _write_one(conn, sql, params):
+    """A writer for a test double: no engine, no transaction statement."""
+    await conn.execute(sql, params)
+
+
 async def _database_with_table(tmp_path):
     db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
     conn = await migrating(db)
@@ -123,6 +129,7 @@ async def test_a_crew_refuses_a_replicated_database(tmp_path):
 
     replicated = new_database(
         path=str(tmp_path / "r.db"),
+        dialect="sqlite",
         primary="https://example.turso.io",
         token="t",
         connect=unused,
@@ -134,6 +141,7 @@ async def test_a_crew_refuses_a_replicated_database(tmp_path):
         sleep=asyncio.sleep,
         retry_delay_s=0.1,
         shutdown="exit_immediately",
+        write_one=_write_one,
     )
 
     with pytest.raises(ValueError, match="local databases only"):

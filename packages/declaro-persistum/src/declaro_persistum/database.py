@@ -110,12 +110,14 @@ class Database(TypedDict):
     """
 
     path: str
+    dialect: str
     primary: str | None
     token: str | None
     connect: Callable[..., Any]
     close_connection: Callable[..., Any]
     serialise: WriteLock | None
     shutdown: ShutdownPolicy
+    write_one: Callable[..., Any]
     closed: bool
     replicate_once: Callable[..., Any]
     refresh_once: Callable[..., Any]
@@ -126,12 +128,14 @@ class Database(TypedDict):
 
 def new_database(
     path: str,
+    dialect: str,
     primary: str | None,
     token: str | None,
     connect: Callable[..., Any],
     close_connection: Callable[..., Any],
     serialise: WriteLock | None,
     shutdown: ShutdownPolicy,
+    write_one: Callable[..., Any],
     replicate_once: Callable[..., Any],
     refresh_once: Callable[..., Any],
     release: Callable[..., Any],
@@ -147,12 +151,14 @@ def new_database(
     """
     return {
         "path": path,
+        "dialect": dialect,
         "primary": primary,
         "token": token,
         "connect": connect,
         "close_connection": close_connection,
         "serialise": serialise,
         "shutdown": shutdown,
+        "write_one": write_one,
         "closed": False,
         "replicate_once": replicate_once,
         "refresh_once": refresh_once,

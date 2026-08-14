@@ -188,7 +188,7 @@ async def drain(
     stop the queue.
 
     Retrying is only possible because a deposited write holds its own SQL
-    and parameters. `acquire_write` cannot do this -- it never sees the
+    and parameters. `writing(db)` cannot do this -- it never sees the
     statements -- which is the whole reason this module exists.
     """
     appended = 0

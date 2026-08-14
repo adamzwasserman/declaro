@@ -11,7 +11,7 @@ table under MVCC raise `turso.Error: Write-write conflict` **even for
 distinct rows**. So this is not a rare case reachable only by contending
 callers; it is the ordinary cost of writing concurrently.
 
-Retry is only possible where the write is held as data. `acquire_write`
+Retry is only possible where the write is held as data. `writing(db)`
 cannot retry, because it never sees the caller's statements -- it yields a
 connection and the caller runs whatever it likes on it. A deposited write
 carries its own SQL and parameters, so `drain` can run it again. That is

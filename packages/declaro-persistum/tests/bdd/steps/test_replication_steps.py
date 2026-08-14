@@ -78,6 +78,10 @@ class _Recorder:
         self.closed = True
 
 
+async def _write_one(conn, sql, params):
+    await conn.execute(sql, params)
+
+
 def _make(tmp_path, *, replicated=True, recorder=None, shutdown="exit_immediately"):
     """A Database whose replication callables are the recorder, and nothing else."""
     rec = recorder or _Recorder()
@@ -107,12 +111,14 @@ def _make(tmp_path, *, replicated=True, recorder=None, shutdown="exit_immediatel
 
     db = new_database(
         path=str(tmp_path / "copy.db"),
+        dialect="sqlite",
         primary="https://example.turso.io" if replicated else None,
         token="t" if replicated else None,
         connect=connect,
         close_connection=close_connection,
         serialise=new_write_lock(asyncio.Lock()) if replicated else None,
         shutdown=shutdown,
+        write_one=_write_one,
         replicate_once=replicate_once,
         refresh_once=refresh_once,
         release=release,

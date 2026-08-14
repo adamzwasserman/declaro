@@ -57,6 +57,7 @@ import contextlib
 import logging
 from typing import Any
 
+from declaro_persistum.writers import WRITERS
 from declaro_persistum.database import (
     Database,
     ShutdownPolicy,
@@ -72,6 +73,10 @@ logger = logging.getLogger(__name__)
 # Reaching this bound means the copy is not converging, which is worth saying
 # out loud rather than looping in silence.
 _MAX_PULL_BATCHES = 64
+
+# Bound once so the field and the writer cannot disagree. Two literals is two
+# chances for a Database to say it is one engine and write like another.
+DIALECT = "turso"
 
 
 async def _pull_until_level(conn: Any) -> bool:
@@ -267,12 +272,14 @@ def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
 
     return new_database(
         path=path,
+        dialect=DIALECT,
         primary=None,
         token=None,
         connect=_connect_local(path, "mvcc"),
         close_connection=_close_connection,
         serialise=None,  # MVCC: writers run concurrently, which is the point
         shutdown=shutdown,
+        write_one=WRITERS[DIALECT],
         replicate_once=nothing_to_replicate,
         refresh_once=nothing_to_refresh,
         release=release,
@@ -324,12 +331,14 @@ async def _open_replicated(
 
     return new_database(
         path=path,
+        dialect=DIALECT,
         primary=primary,
         token=token,
         connect=connect,
         close_connection=close_connection,
         serialise=new_write_lock(asyncio.Lock()),  # WAL: one writer
         shutdown=shutdown,
+        write_one=WRITERS[DIALECT],
         replicate_once=replicate_once,
         refresh_once=refresh_once,
         release=release,
