@@ -1,7 +1,6 @@
 Feature: Replication — one function, both directions, out of the way of real work
   A local copy and its cloud primary are brought into conformity. That is replication.
-  "Sync" in this package means synchronous and nothing else, and "pool" is abolished
-  because nothing was ever pooled.
+  "Sync" in this package means synchronous and nothing else.
 
   THE WORD WAS ATTACHED TO HALF THE JOB, ON BOTH BRANCHES.
 

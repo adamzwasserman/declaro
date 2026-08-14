@@ -1,6 +1,6 @@
 """The mirror: two databases kept in step during a cutover, as data.
 
-`MirrorPool`, `MirrorConnection` and `MirrorCursor` were three classes
+Three classes used to wrap
 wrapping two connections and two booleans. A mirror is two databases and two
 policies; what is done with it is functions.
 

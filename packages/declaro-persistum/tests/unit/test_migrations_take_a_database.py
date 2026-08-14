@@ -1,13 +1,12 @@
 """The migration entry point must work with the only object this package builds.
 
 `apply_migrations_async` is exported from `__init__.py` and is the package's
-headline function. It called `pool.acquire()`, `pool.acquire_write()`,
-`pool.pause_push()` and `pool.initial_pull_complete()` on an object deleted with
-the classes. `open_turso` returns a `Database`, which has none of them, so the
-call failed with `AttributeError: 'dict' object has no attribute 'acquire'`.
+headline function. It spoke to an object that had been deleted, and nothing
+caught it because the first parameter was annotated `Any`. 221 tests passed
+over a feature that could not run.
 
-Nothing caught it because the parameter was annotated `Any`. 221 tests passed
-over a headline feature that could not run.
+The last assertion in this file names the old parameter deliberately: it is the
+guard that fails if it comes back.
 
 REPLACING THE TWO CALLS THAT HAVE NO DIRECT EQUIVALENT:
 

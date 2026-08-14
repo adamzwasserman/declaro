@@ -13,20 +13,10 @@ because the verification window has indeterminate duration — the caller
 decides when confidence is sufficient.
 
 Usage:
-    mirror_pool = await begin_cutover(
-        source_pool, target_pool,
-        "sqlite", "turso",
-        schema_path="/path/to/models.py",
-    )
-
-    # Phase 2: dual-write verification (use mirror_pool for all operations)
-    # ... run your app, verify reads match ...
-
-    # Phase 3: promote remote to primary
-    mirror_pool.promote_mirror()
-
-    # Phase 4: detach local, run on remote alone
-    old_local = mirror_pool.detach_mirror()
+    m = await begin_cutover(source, target, ...)
+    # verify through the mirror, then:
+    m = promote(m)
+    old_local = detach(m)
     await old_local.close()
 """
 
@@ -43,12 +33,14 @@ from declaro_persistum.transfer import (
     bulk_transfer,
 )
 
+from declaro_persistum.database import Database
+
 logger = logging.getLogger(__name__)
 
 
 async def begin_cutover(
-    source_pool: Any,
-    target_pool: Any,
+    source: Database,
+    target: Database,
     source_dialect: str,
     target_dialect: str,
     schema_path: Union[str, Path],
@@ -68,8 +60,8 @@ async def begin_cutover(
     verification via the mirror).
 
     Args:
-        source_pool: Source (local) database — becomes the mirror's primary
-        target_pool: Target (remote) database — becomes the mirror's replica
+        source: Source (local) database — becomes the mirror's primary
+        target: Target (remote) database — becomes the mirror's replica
         source_dialect: Source database dialect
         target_dialect: Target database dialect
         schema_path: Path to Python module with Pydantic models
@@ -92,8 +84,8 @@ async def begin_cutover(
     # Phase 1: Bulk transfer
     logger.info("Phase 1: Starting bulk data transfer")
     result = await bulk_transfer(
-        source_pool,
-        target_pool,
+        source,
+        target,
         source_dialect,
         target_dialect,
         schema_path,
@@ -112,8 +104,8 @@ async def begin_cutover(
     # two policies — and the phases are functions over it.
     logger.info("Phase 2: setting up the mirror for dual-write verification")
     m = mirror(
-        primary=source_pool,
-        replica=target_pool,
+        primary=source,
+        replica=target,
         fail_open=fail_open,
         compare_on_read=compare_on_read,
     )

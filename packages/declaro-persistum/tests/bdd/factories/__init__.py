@@ -16,7 +16,7 @@ What replaces them:
     SchemaFactory                 ->  simple_todos_schema() and friends
 
 A `Backend` carries the three callables a scenario needs — connect, setup,
-teardown — as data, following honest-persist's `open_pool(db_id, connect,
+teardown — as data, following honest-persist's opener: (db_id, connect,
 classify, close, size)`: the dependency is injected, and what the scenario
 holds is a value it can print, compare and pass on.
 """

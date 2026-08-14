@@ -3,7 +3,7 @@ Regression tests: orphaned-tmp-table recovery dispatches by dialect.
 
 Bug fixed in 0.1.2:
     In 0.1.0 and 0.1.1, ``apply_migrations_async`` called
-    ``_recover_orphaned_tmp_tables(pool)`` unconditionally as a pre-flight.
+    ``_recover_orphaned_tmp_tables(db)`` unconditionally as a pre-flight.
     That function queries ``sqlite_master`` directly, which does not exist
     on Postgres, so every Postgres-backed app crashed at startup with
     ``asyncpg.exceptions.UndefinedTableError: relation "sqlite_master"
@@ -13,7 +13,7 @@ Honest-test refactor in 0.1.6:
     The dispatch decision was extracted from ``apply_migrations_async``
     into a pure helper, ``_dialect_needs_orphan_recovery(dialect)``. These
     tests now assert that pure function directly — no monkeypatching of
-    internal symbols, no fake pools, no sentinel exceptions used to
+    internal symbols, no fakes, no sentinel exceptions used to
     short-circuit the function being tested. The previous test shape was
     a smell pointing at this missing extraction.
 """

@@ -335,74 +335,10 @@ def _drop_view_sql(_table: str, details: dict[str, Any]) -> str:
 
 
 
-def generate_column_sql(
-    col_name: str, col_def: dict[str, Any], enums: set[str] | None = None
-) -> str:
-    """
-    Generate column definition, handling enum types.
-
-    Args:
-        col_name: Column name
-        col_def: Column definition
-        enums: Set of known enum type names
-
-    Returns:
-        Column SQL definition
-    """
-    enums = enums or set()
-    col_type = col_def.get("type", "text")
-
-    # Handle enum type reference
-    if col_type.startswith("enum:"):
-        enum_name = col_type[5:]  # Remove "enum:" prefix
-        col_type = enum_name if enum_name in enums else "text"  # Fallback
-
-    parts = [f'"{col_name}"', col_type]
-
-    if col_def.get("nullable") is False:
-        parts.append("NOT NULL")
-
-    if "default" in col_def:
-        parts.append(f"DEFAULT {col_def['default']}")
-
-    return " ".join(parts)
 
 
 
 
-def generate_create_trigger(table: str, trigger: Trigger) -> str:
-    """
-    Generate CREATE TRIGGER SQL.
-
-    Args:
-        table: Table name
-        trigger: Trigger definition
-
-    Returns:
-        SQL statement
-    """
-    name = trigger["name"]
-    timing = trigger.get("timing", "before").upper()
-    event = trigger.get("event", "insert")
-    for_each = trigger.get("for_each", "row").upper()
-    func_name = f"{table}_{name}"
-
-    # Handle multiple events
-    event_sql = " OR ".join(e.upper() for e in event) if isinstance(event, list) else event.upper()
-
-    sql = f"CREATE TRIGGER {name}\n{timing} {event_sql}\nON {table}\nFOR EACH {for_each}"
-
-    # Add WHEN clause if present
-    if trigger.get("when"):
-        sql += f"\nWHEN ({trigger['when']})"
-
-    # Execute function
-    if trigger.get("execute"):
-        sql += f"\nEXECUTE FUNCTION {trigger['execute']}()"
-    else:
-        sql += f"\nEXECUTE FUNCTION {func_name}()"
-
-    return sql
 
 
 

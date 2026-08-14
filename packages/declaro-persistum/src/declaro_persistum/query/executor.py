@@ -24,7 +24,7 @@ _DIALECT_MAP = {
 def _conn_module(conn: Any) -> str:
     """Return the connection's dialect identifier.
 
-    Checks for a ``_declaro_dialect`` class attribute first (set on pool-owned
+    Checks for a ``_declaro_dialect`` class attribute first (set on driver-owned
     async wrappers like TursoAsyncConnection).
     Falls back to ``type(conn).__module__`` for raw driver connections.
     """
@@ -365,107 +365,3 @@ def _dict_factory(cursor: Any, row: tuple[Any, ...]) -> dict[str, Any]:
     return dict(zip(columns, row, strict=True))
 
 
-async def execute_with_pool(
-    pool: Any,
-    to_query: Callable[..., Query],
-    mode: str = "all",
-) -> Any:
-    """
-    Acquire a connection from pool, detect dialect, build query, execute.
-
-    Times the execution and records latency if the pool has instrumentation
-    enabled (pool._latency_logger is set).
-
-    For pools with a ``dialect`` property, the dialect is read directly —
-    no connection is acquired just for detection.  Write operations are
-    dispatched to ``pool.acquire_write()`` when available (e.g. TursoPool
-    with MVCC ``BEGIN CONCURRENT``).
-
-    Args:
-        pool: Connection pool with acquire() context manager
-        to_query: Callable that takes (dialect: str) and returns a Query dict
-        mode: "all" | "one" | "scalar"
-    """
-    from declaro_persistum.instrumentation import (
-        classify_sql,
-        has_returning_clause,
-        is_write_op,
-        record_execution,
-    )
-
-    _MODE_DISPATCH: dict[str, Callable[..., Any]] = {
-        "all": execute,
-        "one": execute_one,
-        "scalar": execute_scalar,
-    }
-    executor_fn = _MODE_DISPATCH[mode]
-
-    # Fast path: pool knows its dialect — skip read-connection for detection
-    pool_dialect = getattr(pool, "dialect", None)
-    if pool_dialect:
-        query = to_query(pool_dialect)
-        sql = query.get("sql", "")
-        op = classify_sql(sql)
-
-        # Write via acquire_write when pool supports it (e.g. MVCC).
-        # Two sub-cases:
-        #   - SQL has RETURNING → use the fetch path on the write conn so
-        #     the caller gets the returned rows (the documented contract
-        #     for prisma create / update / update_many / delete).
-        #   - SQL has no RETURNING → use the count path; result is rowcount.
-        # Without this split, every write op on an acquire_write pool went
-        # through the count path and silently returned int instead of rows,
-        # crashing prisma update_many's len() and breaking the documented
-        # dict return type of update_one / create / delete.
-        if is_write_op(op) and hasattr(pool, "acquire_write"):
-            t0 = time.monotonic()
-            try:
-                async with pool.acquire_write() as wconn:
-                    if has_returning_clause(sql):
-                        result = await executor_fn(query, wconn)
-                    else:
-                        prepared_sql, prepared_params = _prepare_query(query, wconn)
-                        result = await _execute_update(
-                            wconn, prepared_sql, prepared_params
-                        )
-                duration_ms = (time.monotonic() - t0) * 1000
-                record_execution(pool, sql, duration_ms, success=True)
-                return result
-            except Exception as exc:
-                duration_ms = (time.monotonic() - t0) * 1000
-                record_execution(pool, sql, duration_ms, success=False, error=str(exc))
-                raise
-
-    # Standard path: acquire connection, detect dialect if needed
-    async with pool.acquire() as conn:
-        if pool_dialect is None:
-            dialect = detect_dialect(conn)
-            query = to_query(dialect)
-            sql = query.get("sql", "")
-            op = classify_sql(sql)
-
-        t0 = time.monotonic()
-        try:
-            if is_write_op(op) and hasattr(pool, "acquire_write"):
-                # Same split as the fast path above: RETURNING -> fetch, else -> count.
-                async with pool.acquire_write() as wconn:
-                    if has_returning_clause(sql):
-                        result = await executor_fn(query, wconn)
-                    else:
-                        prepared_sql, prepared_params = _prepare_query(query, wconn)
-                        result = await _execute_update(
-                            wconn, prepared_sql, prepared_params
-                        )
-            else:
-                result = await executor_fn(query, conn)
-                # aiosqlite and turso require explicit commit after DML.
-                _cm = _conn_module(conn)
-                if is_write_op(op) and ("aiosqlite" in _cm or "turso" in _cm):
-                    await conn.commit()
-            duration_ms = (time.monotonic() - t0) * 1000
-            record_execution(pool, sql, duration_ms, success=True)
-            return result
-        except Exception as exc:
-            duration_ms = (time.monotonic() - t0) * 1000
-            record_execution(pool, sql, duration_ms, success=False, error=str(exc))
-            raise

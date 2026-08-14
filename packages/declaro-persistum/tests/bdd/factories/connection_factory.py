@@ -258,7 +258,7 @@ async def teardown_postgresql_schema(conn: Any, schema: Schema) -> None:
 # constructors and three methods did nothing but choose between the
 # module-level functions above and then forward to them.
 #
-# The shape follows honest-persist's `open_pool(db_id, connect, classify,
+# The shape follows honest-persist's opener: (db_id, connect, classify,
 # close, size)` — the dependency is injected as a callable, and what the
 # scenario holds is a value it can print, compare and pass on.
 

@@ -1,17 +1,10 @@
 """
 Connection-level latency instrumentation for declaro_persistum.
 
-Records timing data for every execute() call through the pool.
+Records timing data for a query execution.
 Zero overhead when disabled — no proxy wrapping, no timing, no logging.
 
 Usage:
-    pool = await ConnectionPool.turso(
-        url, auth_token=token,
-        instrumentation=True,
-        tier_label="project",
-        latency_sink="jsonl",
-        latency_path="./data/db_latency.jsonl",
-    )
 """
 
 import logging
@@ -114,30 +107,3 @@ def emit_record(logger: logging.Logger, record: LatencyRecord) -> None:
     logger.info(format_jsonl(record))
 
 
-def record_execution(
-    pool: Any,
-    sql: str,
-    duration_ms: float,
-    success: bool,
-    error: str = "",
-) -> None:
-    """
-    Record one execute() call if the pool has instrumentation enabled.
-
-    Called from execute_with_pool() after every execute. No-op if pool
-    has no _latency_logger attribute (instrumentation disabled).
-    """
-    logger = getattr(pool, "_latency_logger", None)
-    if logger is None:
-        return
-    tier = getattr(pool, "_tier", "")
-    op = classify_sql(sql)
-    record = build_record(
-        tier=tier,
-        op=op,
-        duration_ms=duration_ms,
-        success=success,
-        sql=sql,
-        error=error,
-    )
-    emit_record(logger, record)

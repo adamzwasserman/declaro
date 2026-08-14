@@ -6,7 +6,7 @@ one of six holding the gap (declaro-xu0).
 
 Everything here except `execute_fk_ordered` is a pure function over a
 schema dict, so every test is `assert f(input) == expected` with no mock
-anywhere. The one I/O function takes a pool, so it gets a recording fake
+anywhere. The one I/O function takes a database, so it gets a recording fake
 that asserts on the SQL actually issued.
 
 Ordering is deterministic by construction: `_toposort` sorts the ready

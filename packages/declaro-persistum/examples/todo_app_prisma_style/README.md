@@ -17,15 +17,13 @@ A simple todo application demonstrating declaro_persistum with **Prisma-style qu
 This demo uses **Prisma-style** queries:
 
 ```python
-from declaro_persistum import ConnectionPool
 from declaro_persistum.query.table import table
 from declaro_persistum.loader import load_schema
 
 schema = load_schema("./schema")
-pool = await ConnectionPool.sqlite("./todos.db")
 
-# Pool bound at table creation — no connection on the caller surface
-todos = table("todos", schema, pool)
+# A table is a value built from the schema. No connection on the caller surface.
+todos = table("todos", schema=schema)
 
 # Find many with where, order, pagination — no conn parameter
 active = await todos.prisma.find_many(

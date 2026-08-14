@@ -22,7 +22,7 @@ It has now happened four times in this package:
                                    own package __init__.
   observability/                   QueryObserver, Timer, fingerprint_query —
                                    duplicating instrumentation.py, which IS
-                                   reachable and is what the pool actually uses.
+                                   reachable and is what the database actually uses.
 
 Four instances of one class of failure means the architecture is the bug, not
 the modules. The missing structure is this test: nothing anywhere asserted that

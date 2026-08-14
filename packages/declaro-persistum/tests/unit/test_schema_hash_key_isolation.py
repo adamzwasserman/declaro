@@ -15,7 +15,7 @@ Neither is wrong and neither can win. The result is a permanent
 never-clean state with operations re-proposed on every boot, which is also
 the symptom of a genuine schema drift — so it is easy to misdiagnose.
 
-Reported by a consumer whose stage service pointed its central pool at the
+Reported by a consumer whose stage service pointed its central database at the
 production central database.
 """
 

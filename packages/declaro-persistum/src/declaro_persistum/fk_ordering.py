@@ -18,6 +18,8 @@ from typing import Any
 
 from declaro_persistum.types import Schema
 
+from declaro_persistum.database import Database, writing
+
 logger = logging.getLogger(__name__)
 
 
@@ -147,17 +149,17 @@ def sort_operations(schema: Schema, ops: list[DMLOp]) -> list[DMLOp]:
 
 
 async def execute_fk_ordered(
-    pool: Any,
+    db: Database,
     schema: Schema,
     ops: list[DMLOp],
 ) -> list[int]:
     """Execute DML operations in FK-safe order with push after each.
 
-    Sorts ops by FK dependencies, executes each via the pool's write
+    Sorts ops by FK dependencies, executes each through the write
     connection, and pushes to cloud after each operation.
 
     Args:
-        pool: TursoPool (or any pool with acquire_write)
+        db: The database
         schema: Schema with FK relationships
         ops: List of (table_name, "insert"|"delete"|"update", data) tuples
 
@@ -168,7 +170,7 @@ async def execute_fk_ordered(
     rowcounts: list[int] = []
 
     for table_name, op_type, data in sorted_ops:
-        async with pool.acquire_write() as conn:
+        async with writing(db) as conn:
             if op_type == "insert":
                 cols = ", ".join(f'"{k}"' for k in data)
                 placeholders = ", ".join("?" for _ in data)

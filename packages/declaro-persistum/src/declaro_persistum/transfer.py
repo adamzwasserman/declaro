@@ -6,7 +6,7 @@ handling FK ordering, progress tracking, and resumability.
 
 Usage:
     result = await bulk_transfer(
-        source_pool, target_pool,
+        source, target,
         "sqlite", "turso",
         schema_path="/path/to/models.py",
     )
@@ -25,6 +25,8 @@ from declaro_persistum.bulk_loader import BulkLoader, create_bulk_loader
 from declaro_persistum.exceptions import TransferError
 from declaro_persistum.inspector.protocol import create_inspector
 from declaro_persistum.migrations import apply_migrations_async
+
+from declaro_persistum.database import Database, reading, writing
 
 logger = logging.getLogger(__name__)
 
@@ -314,8 +316,8 @@ async def _transfer_table(
 
 
 async def bulk_transfer(
-    source_pool: Any,
-    target_pool: Any,
+    source: Database,
+    target: Database,
     source_dialect: str,
     target_dialect: str,
     schema_path: Union[str, Path],
@@ -338,8 +340,8 @@ async def bulk_transfer(
         6. Stream each table in FK order with batch commits
 
     Args:
-        source_pool: Source database connection pool
-        target_pool: Target database connection pool
+        source: Source database
+        target: Target database
         source_dialect: Source database dialect
         target_dialect: Target database dialect
         schema_path: Path to Python module with Pydantic models
@@ -360,7 +362,7 @@ async def bulk_transfer(
     # Step 1: Schema migration on target
     logger.info("Applying schema migrations to target database")
     migration_result = await apply_migrations_async(
-        target_pool, target_dialect, schema_path, expand_enums=expand_enums
+        target, target_dialect, schema_path, expand_enums=expand_enums
     )
     if not migration_result["success"]:
         raise TransferError(
@@ -373,7 +375,7 @@ async def bulk_transfer(
 
     # Step 2: Introspect source
     inspector = create_inspector(source_dialect)
-    async with source_pool.acquire() as source_conn:
+    async with reading(source) as source_conn:
         source_schema = await inspector.introspect(source_conn)
 
     all_tables = list(source_schema.keys())
@@ -412,8 +414,8 @@ async def bulk_transfer(
     total_rows = 0
     errors: dict[str, str] = {}
 
-    async with source_pool.acquire() as source_conn:
-        async with target_pool.acquire() as target_conn:
+    async with reading(source) as source_conn:
+        async with reading(target) as target_conn:
             # Create progress table
             await _ensure_progress_table(target_conn, target_loader)
 

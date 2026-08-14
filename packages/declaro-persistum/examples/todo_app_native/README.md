@@ -17,15 +17,13 @@ A simple todo application demonstrating declaro_persistum with **native fluent S
 This demo uses the **native fluent SQL** API - declaro_persistum's built-in query builder:
 
 ```python
-from declaro_persistum import ConnectionPool
 from declaro_persistum.query import table, count_
 from declaro_persistum.loader import load_schema
 
 schema = load_schema("./schema")
-pool = await ConnectionPool.sqlite("./todos.db")
 
-# Pool bound at table creation — no connection on the caller surface
-todos = table("todos", schema, pool)
+# A table is a value built from the schema. No connection on the caller surface.
+todos = table("todos", schema=schema)
 
 # Select with where and order — no conn parameter
 results = await (

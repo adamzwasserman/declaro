@@ -134,13 +134,13 @@ class TestALocalDatabase:
 
 class TestTheEngineChoiceIsNotTheCallers:
     def test_open_turso_takes_no_engine_argument(self):
-        """`mvcc` and `pooled_writes` were caller parameters, and `mvcc`
+        """`mvcc` and `journal_mode` were caller parameters, and `mvcc`
         defaulted to True — so omitting it on a replicated database selected
         the configuration that strands writes. 0.1.29 was yanked for it."""
         import inspect
 
         params = set(inspect.signature(open_turso).parameters)
-        assert not params & {"mvcc", "pooled_writes", "journal_mode"}, params
+        assert not params & {"mvcc", "journal_mode"}, params
 
     @pytest.mark.asyncio
     async def test_a_local_database_gets_no_serialisation(self, tmp_path):
