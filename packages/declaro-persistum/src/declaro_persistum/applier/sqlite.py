@@ -204,7 +204,7 @@ def generate_column_sql(
             check_sql = generate_enum_check(col_name, enums[enum_name])
             parts.append(check_sql)
     else:
-        parts.append(_map_type(col_type))
+        parts.append(_map_type(col_type, "sqlite"))
 
     if col_def.get("nullable") is False:
         parts.append("NOT NULL")

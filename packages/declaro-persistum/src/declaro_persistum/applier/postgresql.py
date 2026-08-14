@@ -11,6 +11,7 @@ can promise which the SQLite and Turso ones cannot.
 from collections.abc import Callable
 from typing import Any
 
+from declaro_persistum.applier.shared import column_definition
 from declaro_persistum.exceptions import MigrationError
 from declaro_persistum.types import ApplyResult, Column, Operation, View
 
@@ -145,38 +146,15 @@ def _create_table_sql(table: str, details: dict[str, Any]) -> str:
 
 
 def _column_definition(name: str, col: Column) -> str:
-    """Generate column definition for CREATE TABLE."""
-    parts = [f'"{name}"', col.get("type", "text")]
+    """One line thick, because the rest is shared.
 
-    if col.get("primary_key"):
-        parts.append("PRIMARY KEY")
-
-    if col.get("nullable") is False:
-        parts.append("NOT NULL")
-
-    if col.get("unique"):
-        parts.append("UNIQUE")
-
-    if "default" in col:
-        parts.append(f"DEFAULT {col['default']}")
-
-    if "check" in col:
-        parts.append(f"CHECK ({col['check']})")
-
-    if "references" in col:
-        ref = col["references"]
-        ref_table, ref_col = ref.split(".")
-        fk_sql = f'REFERENCES "{ref_table}"("{ref_col}")'
-
-        if col.get("on_delete"):
-            fk_sql += f" ON DELETE {col['on_delete'].upper().replace('_', ' ')}"
-        if col.get("on_update"):
-            fk_sql += f" ON UPDATE {col['on_update'].upper().replace('_', ' ')}"
-
-        parts.append(fk_sql)
-
-    return " ".join(parts)
-
+    This was a near-copy of `applier.shared.column_definition` that differed in
+    two places: it used the declared type verbatim while the shared one applied
+    SQLite affinity, and it did not double-wrap an expression default. Both are
+    now looked up by dialect, so PRIMARY KEY, NOT NULL, UNIQUE, CHECK and
+    REFERENCES with its cascade are written once for every engine.
+    """
+    return column_definition(name, col, "postgresql")
 
 def _drop_table_sql(table: str, details: dict[str, Any]) -> str:
     """Generate DROP TABLE statement."""

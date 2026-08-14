@@ -1,10 +1,18 @@
-"""
-Shared pure SQL generation for SQLite-compatible backends (SQLite, Turso/libSQL).
+"""Shared pure SQL generation. No I/O, no side effects, no state.
 
-All functions are pure: no I/O, no side effects, no state.
-Both SQLiteApplier and TursoApplier delegate SQL generation here.
+ONE COLUMN VOCABULARY, ONE SPELLING PER ENGINE. A schema declares what a column
+means -- `uuid`, `timestamptz`, `numeric(10,2)`, a reference with a cascade --
+and each dialect decides how to write it. That translation is `TYPE_MAPS` and
+it is the whole multi-dialect surface.
+
+It used to be half a surface. `map_type` took no dialect: it was the SQLite
+affinity mapper wearing a neutral name, and `applier/postgresql.py` did not
+import it, keeping a second column renderer that differed in exactly one line.
+Three byte-identical copies of the SQLite mapper also existed, in
+`abstractions/reconstruction.py` and `abstractions/table_reconstruction.py`.
 """
 
+from collections.abc import Callable
 from typing import Any
 
 # Re-exported: inspector.shared is the single source of truth for PRAGMA parsing.
@@ -18,8 +26,16 @@ from declaro_persistum.types import ApplyResult, Column, Operation
 # =============================================================================
 
 
-def map_type(type_str: str) -> str:
-    """Map generic types to SQLite type affinity."""
+TypeMap = Callable[[str], str]
+
+
+def sqlite_type(type_str: str) -> str:
+    """SQLite storage classes. Turso shares them.
+
+    Five classes, so uuid, every timestamp and every json flavour all land in
+    TEXT. A type the mapper does not recognise is passed through upper-cased
+    rather than guessed at.
+    """
     type_lower = type_str.lower()
 
     if "int" in type_lower:
@@ -48,15 +64,87 @@ def map_type(type_str: str) -> str:
         return type_str.upper()
 
 
+def postgresql_type(type_str: str) -> str:
+    """PostgreSQL has a real type for everything the vocabulary declares.
+
+    uuid is uuid, timestamptz is timestamptz, numeric(10,2) keeps its precision.
+    Nothing to translate, which is exactly why this being missing was invisible:
+    the identity function and no function look the same until another engine
+    asks.
+    """
+    return type_str
+
+
+TYPE_MAPS: dict[str, TypeMap] = {
+    "sqlite": sqlite_type,
+    "turso": sqlite_type,
+    "postgresql": postgresql_type,
+}
+
+
+def map_type(type_str: str, dialect: str) -> str:
+    """Spell a declared type for one engine.
+
+    `dialect` is required (Rule 14). A default would have meant PostgreSQL
+    silently receiving SQLite affinity, which is the defect this replaced.
+    """
+    mapper = TYPE_MAPS.get(dialect)
+    if mapper is None:
+        raise ValueError(
+            f"cannot spell types for dialect {dialect!r}. "
+            f"Supported: {sorted(TYPE_MAPS)}."
+        )
+    return mapper(type_str)
+
+
 # =============================================================================
 # Column definition
 # =============================================================================
 
 
-def column_definition(name: str, col: Column) -> str:
-    """Generate column definition for CREATE TABLE."""
-    sql_type = map_type(col.get("type", "text"))
-    parts = [f'"{name}"', sql_type]
+def sqlite_default(value: Any) -> str:
+    """SQLite strips one layer of parens from an expression default.
+
+    PRAGMA table_info returns `now()` for a column declared `DEFAULT (now())`,
+    so the round trip loses them and the differ then sees a change that is not
+    one. Double-wrapping is what makes introspection agree with the schema.
+    """
+    if value is None:
+        return "DEFAULT NULL"
+    if isinstance(value, str) and value.startswith("("):
+        return f"DEFAULT ({value})"
+    return f"DEFAULT {value}"
+
+
+def postgresql_default(value: Any) -> str:
+    """PostgreSQL returns an expression default as it was written."""
+    return "DEFAULT NULL" if value is None else f"DEFAULT {value}"
+
+
+RenderDefault = Callable[[Any], str]
+
+DEFAULTS: dict[str, RenderDefault] = {
+    "sqlite": sqlite_default,
+    "turso": sqlite_default,
+    "postgresql": postgresql_default,
+}
+
+
+def column_definition(name: str, col: Column, dialect: str) -> str:
+    """One column, spelled for one engine.
+
+    There used to be two of these, here and in `applier/postgresql.py`, and
+    they differed in two lines: the type and the expression default. Both are
+    now looked up by dialect, so the rest -- PRIMARY KEY, NOT NULL, UNIQUE,
+    CHECK, REFERENCES with its cascade -- is written once.
+    """
+    render_default = DEFAULTS.get(dialect)
+    if render_default is None:
+        raise ValueError(
+            f"cannot render a column for dialect {dialect!r}. "
+            f"Supported: {sorted(DEFAULTS)}."
+        )
+    parts = [f'"{name}"', map_type(col.get("type", "text"), dialect)]
 
     if col.get("primary_key"):
         parts.append("PRIMARY KEY")
@@ -68,15 +156,7 @@ def column_definition(name: str, col: Column) -> str:
         parts.append("UNIQUE")
 
     if "default" in col:
-        default_val = col["default"]
-        if default_val is None:
-            parts.append("DEFAULT NULL")
-        elif isinstance(default_val, str) and default_val.startswith("("):
-            # SQLite strips one layer of outer parens from expression defaults
-            # in PRAGMA table_info. Double-wrap so the round-trip preserves them.
-            parts.append(f"DEFAULT ({default_val})")
-        else:
-            parts.append(f"DEFAULT {default_val}")
+        parts.append(render_default(col["default"]))
 
     if "check" in col:
         parts.append(f"CHECK ({col['check']})")
@@ -109,7 +189,7 @@ def create_table_sql(table: str, details: dict[str, Any]) -> str:
     col_defs: list[str] = []
 
     for col_name, col_def in columns.items():
-        col_sql = column_definition(col_name, col_def)
+        col_sql = column_definition(col_name, col_def, "sqlite")
         col_defs.append(col_sql)
 
     if primary_key and len(primary_key) > 1:
@@ -135,7 +215,7 @@ def add_column_sql(table: str, details: dict[str, Any]) -> str:
     """Generate ALTER TABLE ADD COLUMN statement."""
     col_name = details["column"]
     col_def = details["definition"]
-    col_sql = column_definition(col_name, col_def)
+    col_sql = column_definition(col_name, col_def, "sqlite")
     return f'ALTER TABLE "{table}" ADD COLUMN {col_sql}'
 
 

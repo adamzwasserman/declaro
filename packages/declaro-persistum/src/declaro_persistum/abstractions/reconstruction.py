@@ -22,6 +22,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from declaro_persistum.applier.shared import sqlite_type
 from declaro_persistum.types import Column, Operation
 
 logger = logging.getLogger(__name__)
@@ -477,27 +478,22 @@ async def _get_table_indexes_async(connection: Any, table_name: str) -> list[str
 
 
 def _map_type(type_str: str) -> str:
-    """Map generic types to SQLite types."""
+    """SQLite spelling, with the non-string fallback this path is tested for.
+
+    The mapping itself now lives once, in `applier.shared.sqlite_type`. This
+    was a byte-for-byte copy of it plus the isinstance guard below.
+
+    THE GUARD IS KEPT AND IT IS A SMELL. `_validate_columns` raises on a dict
+    type before reconstruction touches the database, so on that path this is
+    unreachable. `generate_create_table_sql` is also public and callable
+    directly, and `test_generate_create_table_sql_non_string_type_fallback`
+    asserts a dict yields TEXT rather than AttributeError. Removing it decides
+    what that public function promises, which is not a side effect of
+    consolidating a type map.
+
+    `table_reconstruction._map_type` has no such guard and raises on the same
+    input. The two disagree, and that is recorded rather than resolved here.
+    """
     if not isinstance(type_str, str):
         return "TEXT"
-    type_lower = type_str.lower()
-
-    # SQLite type affinity mapping
-    if "int" in type_lower:
-        return "INTEGER"
-    elif type_lower in ("text", "varchar", "char", "string") or type_lower.startswith("varchar("):
-        return "TEXT"
-    elif type_lower in ("boolean", "bool"):
-        return "INTEGER"
-    elif type_lower in ("uuid", "timestamptz", "timestamp", "date", "datetime"):
-        return "TEXT"
-    elif type_lower in ("jsonb", "json"):
-        return "TEXT"
-    elif type_lower in ("float", "double", "real", "float4", "float8") or type_lower.startswith(
-        "numeric"
-    ):
-        return "REAL"
-    elif type_lower in ("blob", "bytea"):
-        return "BLOB"
-    else:
-        return type_str.upper()
+    return sqlite_type(type_str)

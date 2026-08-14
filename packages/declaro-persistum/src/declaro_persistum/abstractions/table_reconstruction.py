@@ -20,6 +20,7 @@ Reference: https://www.sqlite.org/lang_altertable.html#making_other_kinds_of_tab
 import logging
 from typing import Any
 
+from declaro_persistum.applier.shared import sqlite_type
 from declaro_persistum.types import Column
 
 logger = logging.getLogger(__name__)
@@ -433,26 +434,8 @@ def _generate_create_table_sql(table_name: str, columns: dict[str, Column]) -> s
     return f'CREATE TABLE "{table_name}" (\n    {columns_sql}\n)'
 
 
-def _map_type(type_str: str) -> str:
-    """Map generic types to SQLite types."""
-    type_lower = type_str.lower()
-
-    # SQLite type affinity mapping
-    if "int" in type_lower:
-        return "INTEGER"
-    elif type_lower in ("text", "varchar", "char", "string") or type_lower.startswith("varchar("):
-        return "TEXT"
-    elif type_lower in ("boolean", "bool"):
-        return "INTEGER"
-    elif type_lower in ("uuid", "timestamptz", "timestamp", "date", "datetime"):
-        return "TEXT"
-    elif type_lower in ("jsonb", "json"):
-        return "TEXT"
-    elif type_lower in ("float", "double", "real", "float4", "float8") or type_lower.startswith(
-        "numeric"
-    ):
-        return "REAL"
-    elif type_lower in ("blob", "bytea"):
-        return "BLOB"
-    else:
-        return type_str.upper()
+# SQLite spelling. This was a byte-for-byte copy of `applier.shared.sqlite_type`.
+# It carries no non-string guard and raises AttributeError on a dict, which is
+# how it has always behaved; `abstractions/reconstruction._map_type` returns
+# TEXT for that input. The divergence is recorded, not resolved here.
+_map_type = sqlite_type
