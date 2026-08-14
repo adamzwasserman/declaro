@@ -1,26 +1,29 @@
 r"""A file named `test_*.py` must contain a test.
 
-EIGHT STILL DO NOT. Twenty-four did. Each was a docstring, its imports,
+SIX STILL DO NOT. Twenty-four did. Each was a docstring, its imports,
 sometimes a helper, and then blank space where the tests had been, and the
 suite total said nothing about the gap.
 
 Sixteen of the twenty-four came back by copying the last revision that held
 tests and running it unchanged. Nothing was rewritten and nothing was adapted:
 they pass because the modules they test still behave the way they did, which is
-also the evidence that restoring them was safe. The suite went from 299 to 712.
+also the evidence that restoring them was safe. The suite went from 299 to 774.
 
 WHAT IS LEFT, AND WHY EACH IS LEFT. Measured by restoring it and running it:
 
     test_views.py             48 tests   24 pass, 24 fail
     test_query_expressions.py 30 tests    0 pass, 30 fail
     test_write_queue.py       25 tests   import error: `pool` is abolished
-    test_arrays.py            23 tests   21 pass,  2 fail
-    test_maps.py              22 tests   20 pass,  2 fail
     test_procedures.py        20 tests    9 pass, 11 fail
     test_triggers.py          20 tests    8 pass, 12 fail
     test_enums.py             17 tests    8 pass,  9 fail
 
-205 tests. None is a copy job. Every failure is a real question about what the
+160 tests. test_arrays.py and test_maps.py are no longer among them: their
+four failures all passed the abolished dialect "libsql" and were right that it
+must not yield PostgreSQL SQL. Fixing that in src (cfc0b1c) brought both files
+back, 43 tests.
+
+None of what is left is a copy job. Every failure is a real question about what the
 rewritten module should now promise, and answering it by editing the test until
 it passes is how a suite becomes decoration.
 
@@ -36,7 +39,7 @@ dialect it supported, and how `_normalize_view_query` shipped deleted with both
 its callers intact: the modules had test files.
 
 THIS RATCHETS, IT DOES NOT DEMAND. Pinned at zero it would fail the suite until
-all 205 are answered, and a gate nobody can satisfy gets deleted. So it freezes
+all 160 are answered, and a gate nobody can satisfy gets deleted. So it freezes
 the list instead. A NEW hollow file fails. Filling or deleting one of these also
 fails, so the list cannot quietly rot into a permanent excuse — every change to
 it is a decision someone made on purpose.
@@ -60,9 +63,7 @@ UNIT = pathlib.Path(__file__).resolve().parent
 # Verified 2026-08-13 against `pytest --co`: this AST count and pytest's
 # collection agree on zero versus non-zero for every file in this directory.
 KNOWN_HOLLOW = {
-    "test_arrays.py",
     "test_enums.py",
-    "test_maps.py",
     "test_procedures.py",
     "test_query_expressions.py",
     "test_triggers.py",
