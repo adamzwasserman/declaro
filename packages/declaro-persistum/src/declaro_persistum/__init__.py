@@ -68,9 +68,14 @@ from declaro_persistum.query import (
     render_condition,
     select,
     subquery,
-    table,
     update,
 )
+# `table` is NOT re-exported from query. The root name is the schema decorator,
+# which is what the documentation has meant since c1e6ce2 and what every doc
+# example imports. The query-side lookup is `table(name, schema)` and is
+# unchanged at `declaro_persistum.query.table.table`, which is how all four of
+# its callers already import it -- three example apps and one test. Nothing
+# in-repo imported it from the root.
 # Opening a Turso database, and the crew that writes to a local one
 # concurrently. The reachability ratchet caught both of these unexported.
 from declaro_persistum.crew import Crew, start_crew, stop_crew
@@ -105,6 +110,8 @@ from declaro_persistum.types import (
     Table,
 )
 from declaro_persistum.pydantic_loader import (
+    field,
+    table,
     load_schema_from_models,
     load_models_from_module,
     is_literal_type,
@@ -168,6 +175,7 @@ __all__ = [
     "render_condition",
     "OPERATORS",
     "table",
+    "field",
     "count_",
     "case_",
     "subquery",

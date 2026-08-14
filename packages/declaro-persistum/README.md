@@ -80,7 +80,7 @@ from declaro_persistum import table, field
 
 @table("users")
 class User(BaseModel):
-    id: UUID = field(primary=True, default="gen_random_uuid()")
+    id: UUID = field(primary_key=True, default="gen_random_uuid()")
     email: str = field(unique=True)
 ```
 
@@ -299,7 +299,7 @@ OrderStatus = Literal["pending", "confirmed", "shipped", "delivered"]
 
 @table("orders")
 class Order(BaseModel):
-    id: UUID = field(primary=True)
+    id: UUID = field(primary_key=True)
     status: OrderStatus = "pending"
 ```
 

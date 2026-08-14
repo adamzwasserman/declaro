@@ -73,7 +73,7 @@ from declaro_persistum import table, field
 
 @table("users")
 class User(BaseModel):
-    id: UUID = field(primary=True)
+    id: UUID = field(primary_key=True)
     email: str = field(unique=True)
     name: str | None = None
     created_at: datetime = field(default="now()")
@@ -90,7 +90,7 @@ from declaro_persistum import table, field
 
 @table("orders")
 class Order(BaseModel):
-    id: UUID = field(primary=True)
+    id: UUID = field(primary_key=True)
     user_id: UUID = field(references="users.id", on_delete="cascade")
     total: Decimal
     status: str = field(default="'pending'")
@@ -125,7 +125,7 @@ from declaro_persistum import table, field
 
 @table("users")
 class User(BaseModel):
-    id: UUID = field(primary=True)
+    id: UUID = field(primary_key=True)
     email: str
     status: str | None = None
     deleted_at: datetime | None = None

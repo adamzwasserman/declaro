@@ -9,8 +9,12 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, get_args, get_origin, get_type_hints
+
+from pydantic import BaseModel
+from pydantic import Field as PydanticField
 
 from declaro_persistum.exceptions import LoaderError
 from declaro_persistum.types import Column, Index, Schema, Table
@@ -127,11 +131,109 @@ def python_type_to_sql(annotation: Any) -> str:
     return "text"
 
 
+OnAction = Literal["cascade", "set null", "restrict", "no action"]
+
+
+def table(name: str) -> Callable[[type], type]:
+    """Declare a Pydantic model as a table.
+
+        @table("users")
+        class User(BaseModel):
+            id: str = field(primary_key=True)
+
+    Sets `__tablename__`, which is the only thing the loader looks for. The
+    decorator existed in the documentation from c1e6ce2 onward and was never
+    written; `from declaro_persistum import table, field` raised ImportError
+    the whole time.
+
+    It refuses a class the loader cannot read. `pydantic_model_to_table` uses
+    `model_fields`, which only a Pydantic model has, so a plain class would
+    produce a table with zero columns and no complaint -- a schema that
+    silently describes nothing.
+    """
+
+    def declare(cls: type) -> type:
+        if not (isinstance(cls, type) and issubclass(cls, BaseModel)):
+            raise TypeError(
+                f"@table('{name}') expects a Pydantic BaseModel subclass; "
+                f"{cls.__name__} is not one. The loader reads `model_fields`, "
+                f"so any other class yields a table with no columns."
+            )
+        cls.__tablename__ = name  # type: ignore[attr-defined]
+        return cls
+
+    return declare
+
+
+def field(
+    *,
+    primary_key: bool | None = None,
+    unique: bool | None = None,
+    nullable: bool | None = None,
+    references: str | None = None,
+    on_delete: OnAction | None = None,
+    on_update: OnAction | None = None,
+    check: str | None = None,
+    default: str | None = None,
+    db_type: str | None = None,
+    renamed_from: str | None = None,
+    is_new: bool | None = None,
+) -> Any:
+    """Declare what a column MEANS. The applier decides how it is spelled.
+
+        total: Decimal = field(db_type="numeric(10,2)", check="total >= 0")
+
+    renders `REAL CHECK (total >= 0)` on SQLite and Turso, and
+    `numeric(10,2) CHECK (total >= 0)` on PostgreSQL. No engine word appears in
+    the model, which is the point: `map_type` owns the spelling and this owns
+    the meaning.
+
+    WHY THIS EXISTS RATHER THAN A BARE DICT. The loader reads
+    `json_schema_extra`, an untyped dict, so
+
+        Field(json_schema_extra={"primry_key": True})
+
+    is a typo that reaches the schema as a key nothing reads, and the column is
+    quietly not a primary key. Named keyword arguments make it a TypeError at
+    import. Same defect as `index_from_meta`, on the other side of this loader.
+
+    `default` IS A SQL EXPRESSION, NOT A PYTHON VALUE. `default="now()"` means
+    DEFAULT now(); it is not Pydantic's default and does not become the string
+    "now()". Pydantic's own default is read separately and quoted as a literal,
+    which is why the two cannot share one argument.
+
+    `primary_key`, not `primary`. The documentation wrote `primary=` and the
+    loader accepts either, but the schema key, introspection and the SQL all
+    say `primary_key`. Nothing can depend on the old spelling, because nothing
+    could ever call this.
+
+    Every argument is keyword-only and defaults to None, which here means
+    "not declared" rather than a value: a None is dropped, so the schema
+    carries only what the model actually said.
+    """
+    declared = {
+        "primary_key": primary_key,
+        "unique": unique,
+        "nullable": nullable,
+        "references": references,
+        "on_delete": on_delete,
+        "on_update": on_update,
+        "check": check,
+        "default": default,
+        "db_type": db_type,
+        "renamed_from": renamed_from,
+        "is_new": is_new,
+    }
+    return PydanticField(
+        json_schema_extra={k: v for k, v in declared.items() if v is not None}
+    )
+
+
 def extract_field_metadata(field_info: Any) -> dict[str, Any]:
     """Extract declaro-specific metadata from Pydantic field.
 
     Looks for metadata set via field() function like:
-        field(primary=True, unique=True, references="users.id")
+        field(primary_key=True, unique=True, references="users.id")
     """
     meta: dict[str, Any] = {}
 
@@ -279,7 +381,12 @@ def pydantic_model_to_table(model_cls: type) -> tuple[str, Table] | None:
                 col["literal_values"] = literal_values
 
         # Apply metadata
-        if meta.get("primary") or meta.get("primary_key"):
+        # One spelling. This accepted `primary` as well, which no caller
+        # writes: `field()` emits `primary_key`, the Column key is
+        # `primary_key`, introspection returns `primary_key`, and the six
+        # documented `field(primary=...)` examples never ran because `field`
+        # did not exist. Two names for one property is where the drift starts.
+        if meta.get("primary_key"):
             col["primary_key"] = True
 
         if meta.get("unique"):

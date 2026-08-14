@@ -24,7 +24,7 @@ It asks the one question that needs no context: is this called name defined
 anywhere in the package, imported in this block, defined in this block, or a
 builtin? A name that is none of those cannot work for any reader.
 
-FROZEN, NOT PINNED AT ZERO. Forty-one names fail today, across usage.md,
+FROZEN, NOT PINNED AT ZERO. Forty names fail today, across usage.md,
 README.md, hooks.md, two architecture records and two bug records and fixing them is not a docs
 edit: either `field()` and `@table` get written to match the documentation, or
 the documentation is rewritten around `__tablename__` and
@@ -63,9 +63,9 @@ DOCS = ROOT / "docs"
 # Verified 2026-08-13 by running the first example: the import line itself
 # raises. Each entry is a name a sample calls that the package does not define.
 KNOWN_ABSENT = {
-    # Never implemented. `git log -S"def field("` over the whole history of the
-    # package returns nothing, and both usage.md and README.md open with them.
-    "field",
+    # `field` and `@table` were here and are now implemented, so the docs'
+    # opening example works. `view` is still absent: the docs show a `@view`
+    # decorator for declaring a view, and nothing reads one.
     "view",
     # Deleted with the classes. usage.md, hooks.md and the architecture records
     # still import them by name.
