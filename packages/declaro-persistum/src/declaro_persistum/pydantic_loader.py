@@ -13,8 +13,7 @@ from pathlib import Path
 from typing import Any, Literal, get_args, get_origin, get_type_hints
 
 from declaro_persistum.exceptions import LoaderError
-from declaro_persistum.types import Column, Schema, Table
-
+from declaro_persistum.types import Column, Index, Schema, Table
 
 # Python type to SQL type mapping
 PYTHON_TO_SQL_TYPE: dict[type | str, str] = {
@@ -157,6 +156,62 @@ def extract_field_metadata(field_info: Any) -> dict[str, Any]:
     return meta
 
 
+INDEX_FIELDS = ("columns", "unique", "where", "using")
+
+
+def index_from_meta(declared: dict[str, Any]) -> tuple[str, Index]:
+    """One Meta index entry, checked against what an Index actually is.
+
+    Returns the name and the index, because the name is the key in the schema
+    and never a field inside it — introspection does not report it there, so
+    keeping it would make the differ see a mismatch on every run.
+
+    THIS USED TO COPY WHATEVER IT WAS GIVEN. Every key but `name` went straight
+    into the schema, so `uniqe=True` became a schema field: the index is not
+    unique, nothing says so at load time, and the differ then compares a table
+    carrying `uniqe` against a database that never reports it and can never
+    reconcile them. The comprehension that did it also produced
+    `dict[Any, Any]` where `Index` is required, which is why mypy could not
+    see the shape either.
+
+    An unknown key is refused rather than dropped. Dropping it silently trades
+    a permanent diff for an index that is quietly missing a property the author
+    asked for, and load time is the only moment anyone can act on the typo.
+    """
+    name = declared.get("name")
+    if not name:
+        raise ValueError(
+            f"index {declared!r} has no 'name'. The name is the key this index "
+            f"is stored under, so there is nothing to store it as."
+        )
+
+    unknown = sorted(set(declared) - {"name", *INDEX_FIELDS})
+    if unknown:
+        raise ValueError(
+            f"index {name!r} declares {unknown}, which an index has no such "
+            f"field for. An index takes {list(INDEX_FIELDS)}. A key that is "
+            f"not one of those reaches the schema, never comes back from "
+            f"introspection, and leaves the differ reporting this table as "
+            f"changed on every run."
+        )
+
+    columns = declared.get("columns")
+    if not columns:
+        raise ValueError(
+            f"index {name!r} has no 'columns'. An index over no columns "
+            f"cannot be created, so this fails at DDL instead of here."
+        )
+
+    index: Index = {"columns": list(columns)}
+    if "unique" in declared:
+        index["unique"] = declared["unique"]
+    if "where" in declared:
+        index["where"] = declared["where"]
+    if "using" in declared:
+        index["using"] = declared["using"]
+    return name, index
+
+
 def pydantic_model_to_table(model_cls: type) -> tuple[str, Table] | None:
     """Convert a Pydantic model to a Table definition.
 
@@ -279,14 +334,9 @@ def pydantic_model_to_table(model_cls: type) -> tuple[str, Table] | None:
 
         indexes = getattr(meta_cls, "indexes", None)
         if indexes:
-            # Strip "name" from value — it's already the dict key.
-            # Introspection doesn't include "name" in index dicts, so keeping
-            # it here causes the differ to see a structural mismatch.
-            table["indexes"] = {
-                idx["name"]: {k: v for k, v in idx.items() if k != "name"}
-                for idx in indexes
-                if isinstance(idx, dict)
-            }
+            table["indexes"] = dict(
+                index_from_meta(idx) for idx in indexes if isinstance(idx, dict)
+            )
 
         constraints = getattr(meta_cls, "constraints", None)
         if constraints:
@@ -379,7 +429,7 @@ def load_schema_from_models(models_dir: str | Path) -> Schema:
         except LoaderError:
             # Re-raise loader errors
             raise
-        except Exception as e:
+        except Exception:
             # Skip files that can't be imported (might not be model files)
             continue
 
