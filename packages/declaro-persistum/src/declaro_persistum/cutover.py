@@ -23,17 +23,17 @@ Usage:
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Union
+from typing import Union
 
+from declaro_persistum.database import Database
 from declaro_persistum.mirror import Mirror, mirror
 from declaro_persistum.transfer import (
     BulkTransferResult,
     TableTransferProgress,
     bulk_transfer,
 )
-
-from declaro_persistum.database import Database
 
 logger = logging.getLogger(__name__)
 

@@ -17,9 +17,7 @@ Bug fixed in 0.1.3:
     actual types regardless of whether PEP 563 is in effect.
 """
 
-from datetime import datetime
 from pathlib import Path
-from uuid import UUID
 
 import pytest
 

@@ -15,7 +15,7 @@ from collections.abc import Callable
 from typing import Any
 
 from declaro_persistum.exceptions import MigrationError
-from declaro_persistum.types import ApplyResult, Column, Operation, Trigger, View
+from declaro_persistum.types import ApplyResult, Column, Operation, View
 
 # Type for SQL generator functions
 SQLGenerator = Callable[..., str]

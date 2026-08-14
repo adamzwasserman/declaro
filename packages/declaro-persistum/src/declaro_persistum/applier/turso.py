@@ -94,7 +94,6 @@ async def apply(
 
     for table_or_empty, is_reconstruction, ops in coalesced_ops:
         if is_reconstruction:
-            op_descs = [f"{o['op']} on {o.get('table', 'N/A')}" for o in ops]
             op_desc = f"reconstruct {table_or_empty} ({len(ops)} ops)"
         else:
             op_desc = f"{ops[0]['op']} on {ops[0].get('table', 'N/A')}"
@@ -214,4 +213,7 @@ async def _execute_coalesced_reconstruction(
 # Turso uses identical view generation to SQLite
 from declaro_persistum.applier.sqlite import generate_create_view, generate_drop_view
 
-__all__ = ["TursoApplier", "generate_create_view", "generate_drop_view"]
+# "TursoApplier" was listed here long after the class was deleted, so a star
+# import raised AttributeError while every other check stayed green. mypy's
+# name-defined does not read __all__; ruff's F822 does, and now gates it.
+__all__ = ["generate_create_view", "generate_drop_view"]

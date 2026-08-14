@@ -5,7 +5,7 @@ Uses Faker for realistic data and Hypothesis for property-based testing.
 """
 
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from faker import Faker
@@ -54,13 +54,13 @@ EDGE_CASE_INTEGERS = [
 ]
 
 EDGE_CASE_DATES = [
-    datetime(1970, 1, 1, tzinfo=timezone.utc),  # Unix epoch
-    datetime(2000, 1, 1, tzinfo=timezone.utc),  # Y2K
-    datetime(2038, 1, 19, 3, 14, 7, tzinfo=timezone.utc),  # 32-bit timestamp overflow
-    datetime(2099, 12, 31, 23, 59, 59, tzinfo=timezone.utc),  # Far future
-    datetime(1900, 1, 1, tzinfo=timezone.utc),  # Very old date
-    datetime.now(timezone.utc),  # Current time
-    datetime.now(timezone.utc) - timedelta(microseconds=1),  # Microsecond precision
+    datetime(1970, 1, 1, tzinfo=UTC),  # Unix epoch
+    datetime(2000, 1, 1, tzinfo=UTC),  # Y2K
+    datetime(2038, 1, 19, 3, 14, 7, tzinfo=UTC),  # 32-bit timestamp overflow
+    datetime(2099, 12, 31, 23, 59, 59, tzinfo=UTC),  # Far future
+    datetime(1900, 1, 1, tzinfo=UTC),  # Very old date
+    datetime.now(UTC),  # Current time
+    datetime.now(UTC) - timedelta(microseconds=1),  # Microsecond precision
 ]
 
 
@@ -150,7 +150,7 @@ def todo(**overrides: Any) -> dict[str, Any]:
         "title": overrides.get("title", fake.sentence(nb_words=5)),
         "completed": overrides.get("completed", fake.boolean()),
         "created_at": overrides.get(
-            "created_at", fake.date_time_this_year(tzinfo=timezone.utc)
+            "created_at", fake.date_time_this_year(tzinfo=UTC)
         ),
     }
 
@@ -192,7 +192,7 @@ def user(**overrides: Any) -> dict[str, Any]:
         ),
         "age": overrides.get("age", fake.random_int(min=18, max=100)),
         "created_at": overrides.get(
-            "created_at", fake.date_time_this_year(tzinfo=timezone.utc)
+            "created_at", fake.date_time_this_year(tzinfo=UTC)
         ),
     }
 
@@ -225,7 +225,7 @@ def order(**overrides: Any) -> dict[str, Any]:
             fake.random_element(["pending", "confirmed", "shipped", "delivered"]),
         ),
         "created_at": overrides.get(
-            "created_at", fake.date_time_this_year(tzinfo=timezone.utc)
+            "created_at", fake.date_time_this_year(tzinfo=UTC)
         ),
     }
 

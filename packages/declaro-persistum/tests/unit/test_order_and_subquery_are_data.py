@@ -32,8 +32,6 @@ from declaro_persistum.query.table import (
     CaseOrderBy,
     OrderBy,
     SubqueryExpr,
-    case_,
-    subquery,
     table,
 )
 

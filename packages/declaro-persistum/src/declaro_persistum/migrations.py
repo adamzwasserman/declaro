@@ -20,12 +20,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Union
 
-from declaro_persistum.applier.protocol import create_applier
-from declaro_persistum.differ import diff
-from declaro_persistum.inspector.protocol import create_inspector
-from declaro_persistum.pydantic_loader import load_models_from_module
 from declaro_persistum.abstractions.enums import expand_schema_enums
-
+from declaro_persistum.applier.protocol import create_applier
 from declaro_persistum.database import (
     Database,
     is_replicated,
@@ -33,6 +29,9 @@ from declaro_persistum.database import (
     refresh,
     writing,
 )
+from declaro_persistum.differ import diff
+from declaro_persistum.inspector.protocol import create_inspector
+from declaro_persistum.pydantic_loader import load_models_from_module
 
 META_TABLE = "_declaro_meta"
 

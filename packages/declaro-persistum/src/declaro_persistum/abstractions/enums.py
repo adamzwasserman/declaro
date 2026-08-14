@@ -14,7 +14,6 @@ Pattern:
 
 from typing import Any
 
-
 # Prefix for auto-generated enum lookup tables
 ENUM_TABLE_PREFIX = "_dp_enum_"
 

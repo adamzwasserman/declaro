@@ -4,18 +4,18 @@ Unit tests for table_reconstruction abstraction.
 Tests the core functionality of table reconstruction for ALTER COLUMN operations.
 """
 
-import pytest
 import sqlite3
 
 import aiosqlite
+import pytest
 
+from declaro_persistum.abstractions.pragma_compat import pragma_table_info
 from declaro_persistum.abstractions.table_reconstruction import (
-    reconstruct_table,
+    alter_column_default,
     alter_column_nullability,
     alter_column_type,
-    alter_column_default,
+    reconstruct_table,
 )
-from declaro_persistum.abstractions.pragma_compat import pragma_table_info
 
 
 @pytest.mark.asyncio

@@ -14,10 +14,8 @@ from dotenv import load_dotenv
 
 # Load .env file for test credentials
 load_dotenv()
-from typing import Any
 
-from declaro_persistum.types import Schema, Table, Column
-
+from declaro_persistum.types import Schema
 
 # =============================================================================
 # Test Level Configuration

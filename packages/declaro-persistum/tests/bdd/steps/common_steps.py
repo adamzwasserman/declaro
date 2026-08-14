@@ -2,17 +2,11 @@
 Common BDD step definitions used across features.
 """
 
-import pytest
-from pytest_bdd import given, when, then, parsers
-
-from declaro_persistum.types import Schema
+from pytest_bdd import given, parsers, then
 
 from tests.bdd.factories.schema_factory import (
-    simple_todos_schema,
-    simple_users_schema,
     complex_ecommerce_schema,
 )
-
 
 # =============================================================================
 # Schema Setup Steps

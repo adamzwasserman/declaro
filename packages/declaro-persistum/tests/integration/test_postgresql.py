@@ -5,6 +5,7 @@ Set TEST_POSTGRESQL_URL environment variable to run.
 """
 
 import os
+
 import pytest
 
 # Skip all tests in this module if no PostgreSQL URL is set

@@ -2,8 +2,9 @@
 BDD test fixtures and configuration.
 """
 
-import pytest
 from typing import Any, TypedDict
+
+import pytest
 
 from declaro_persistum.types import Schema
 
@@ -62,13 +63,12 @@ from tests.bdd.factories.connection_factory import (
     postgresql_backend,
     sqlite_backend,
 )
-from tests.bdd.factories.data_factory import todo, todos, user, users
+from tests.bdd.factories.data_factory import todos, users
 from tests.bdd.factories.schema_factory import (
     complex_ecommerce_schema,
     simple_todos_schema,
     simple_users_schema,
 )
-
 
 # =============================================================================
 # Schema Fixtures

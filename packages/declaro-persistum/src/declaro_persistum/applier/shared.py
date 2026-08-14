@@ -9,7 +9,6 @@ from typing import Any
 
 from declaro_persistum.types import ApplyResult, Column, Operation
 
-
 # =============================================================================
 # Type mapping
 # =============================================================================

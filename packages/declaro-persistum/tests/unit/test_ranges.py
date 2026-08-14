@@ -4,8 +4,6 @@ Unit tests for Range abstraction.
 Tests portable range patterns using start/end columns with CHECK constraints.
 """
 
-import pytest
-from typing import Any
 
 
 class TestRangeTypeParsing:
@@ -141,8 +139,9 @@ class TestRangeConversion:
 
     def test_range_to_dict(self):
         """Convert range to dict."""
-        from declaro_persistum.abstractions.ranges import range_to_dict
         from datetime import date
+
+        from declaro_persistum.abstractions.ranges import range_to_dict
 
         result = range_to_dict(
             date(2024, 1, 1),
@@ -154,8 +153,9 @@ class TestRangeConversion:
 
     def test_range_from_dict(self):
         """Convert dict to range tuple."""
-        from declaro_persistum.abstractions.ranges import range_from_dict
         from datetime import date
+
+        from declaro_persistum.abstractions.ranges import range_from_dict
 
         data = {
             "valid_period_start": date(2024, 1, 1),
@@ -167,8 +167,9 @@ class TestRangeConversion:
 
     def test_range_from_dict_unbounded(self):
         """Convert dict with NULL bounds."""
-        from declaro_persistum.abstractions.ranges import range_from_dict
         from datetime import date
+
+        from declaro_persistum.abstractions.ranges import range_from_dict
 
         data = {
             "valid_period_start": None,

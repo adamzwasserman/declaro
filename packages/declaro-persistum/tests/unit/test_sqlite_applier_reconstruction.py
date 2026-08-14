@@ -5,13 +5,13 @@ Verifies that the SQLite applier correctly handles ALTER COLUMN operations
 by calling the table_reconstruction abstraction.
 """
 
-import pytest
 import aiosqlite
+import pytest
 
+from declaro_persistum.abstractions.pragma_compat import pragma_table_info
 from declaro_persistum.applier import apply
 from declaro_persistum.exceptions import MigrationError
 from declaro_persistum.types import Operation
-from declaro_persistum.abstractions.pragma_compat import pragma_table_info
 
 
 @pytest.mark.asyncio

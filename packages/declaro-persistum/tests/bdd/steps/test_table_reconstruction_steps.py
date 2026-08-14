@@ -7,25 +7,25 @@ This tests the table_reconstruction abstraction for SQLite/Turso ALTER COLUMN.
 import asyncio
 import contextlib
 from typing import Any, TypedDict
-import logging
-import pytest
-from pytest_bdd import given, when, then, parsers, scenarios
 
-from declaro_persistum.abstractions.table_reconstruction import (
-    reconstruct_table,
-    alter_column_nullability,
-    alter_column_type,
-    alter_column_default,
-    _get_full_table_schema,
+import pytest
+from pytest_bdd import given, parsers, scenarios, then, when
+
+from declaro_persistum.abstractions.pragma_compat import (
+    pragma_foreign_key_list,
+    pragma_index_list,
+    pragma_table_info,
 )
 from declaro_persistum.abstractions.reconstruction import (
     execute_reconstruction_async,
     get_reconstruction_columns,
 )
-from declaro_persistum.abstractions.pragma_compat import (
-    pragma_table_info,
-    pragma_index_list,
-    pragma_foreign_key_list,
+from declaro_persistum.abstractions.table_reconstruction import (
+    _get_full_table_schema,
+    alter_column_default,
+    alter_column_nullability,
+    alter_column_type,
+    reconstruct_table,
 )
 from declaro_persistum.types import Column
 
@@ -396,7 +396,7 @@ def given_related_data_table(recon_context, datatable):
         if not non_empty:
             continue
 
-        cols = ", ".join(f'"{k}"' for k in non_empty.keys())
+        cols = ", ".join(f'"{k}"' for k in non_empty)
         placeholders = ", ".join("?" for _ in non_empty)
         values = [int(v) if v.isdigit() else v for v in non_empty.values()]
 
@@ -418,7 +418,7 @@ def given_books_invalid_fk_data(recon_context, datatable):
 
     for row in datatable[1:]:
         d = {headers[i]: row[i].strip() for i in range(len(headers))}
-        cols = ", ".join(f'"{k}"' for k in d.keys())
+        cols = ", ".join(f'"{k}"' for k in d)
         placeholders = ", ".join("?" for _ in d)
         values = [int(v) if v.isdigit() else v for v in d.values()]
 
@@ -443,7 +443,7 @@ def given_hierarchical_data(recon_context, datatable):
         # Convert numeric strings
         values = [int(v) if isinstance(v, str) and v.isdigit() else v for v in values]
 
-        cols = ", ".join(f'"{k}"' for k in d.keys())
+        cols = ", ".join(f'"{k}"' for k in d)
         placeholders = ", ".join("?" for _ in d)
 
         recon_context["run"](
@@ -464,7 +464,7 @@ def given_incompatible_types_data(recon_context, datatable):
 
     for row in datatable[1:]:
         d = {headers[i]: row[i].strip() for i in range(len(headers))}
-        cols = ", ".join(f'"{k}"' for k in d.keys())
+        cols = ", ".join(f'"{k}"' for k in d)
         placeholders = ", ".join("?" for _ in d)
         values = [int(v) if v.isdigit() else v for v in d.values()]
 
@@ -489,7 +489,7 @@ def given_books_orphaned_fk_data(recon_context, datatable):
 
     for row in datatable[1:]:
         d = {headers[i]: row[i].strip() for i in range(len(headers))}
-        cols = ", ".join(f'"{k}"' for k in d.keys())
+        cols = ", ".join(f'"{k}"' for k in d)
         placeholders = ", ".join("?" for _ in d)
         values = [int(v) if v.isdigit() else v for v in d.values()]
 

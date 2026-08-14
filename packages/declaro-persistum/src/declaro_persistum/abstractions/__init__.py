@@ -21,6 +21,20 @@ from .arrays import (
     generate_junction_table,
     parse_array_type,
 )
+from .enums import (
+    ENUM_TABLE_PREFIX,
+    add_enum_value_sql,
+    create_enum_table_sql,
+    diff_enum_values,
+    drop_enum_table_sql,
+    enum_table_name,
+    expand_schema_enums,
+    generate_enum_table_schema,
+    get_enum_fk_reference,
+    is_enum_table,
+    remove_enum_value_sql,
+    transform_column_for_enum,
+)
 from .hierarchy import (
     ancestors_query_sql,
     build_tree,
@@ -62,6 +76,12 @@ from .materialized_views import (
     list_matviews_sql,
     refresh_matview_sql,
 )
+from .pragma_compat import (
+    pragma_foreign_key_list,
+    pragma_index_info,
+    pragma_index_list,
+    pragma_table_info,
+)
 from .ranges import (
     generate_range_columns,
     parse_range_type,
@@ -72,31 +92,11 @@ from .ranges import (
     range_overlaps_sql,
     range_to_dict,
 )
-from .enums import (
-    ENUM_TABLE_PREFIX,
-    add_enum_value_sql,
-    create_enum_table_sql,
-    diff_enum_values,
-    drop_enum_table_sql,
-    enum_table_name,
-    expand_schema_enums,
-    generate_enum_table_schema,
-    get_enum_fk_reference,
-    is_enum_table,
-    remove_enum_value_sql,
-    transform_column_for_enum,
-)
-from .pragma_compat import (
-    pragma_table_info,
-    pragma_index_list,
-    pragma_index_info,
-    pragma_foreign_key_list,
-)
 from .reconstruction import (
+    execute_reconstruction_async,
     generate_create_table_sql,
     generate_data_copy_sql,
     get_reconstruction_columns,
-    execute_reconstruction_async,
 )
 
 __all__ = [

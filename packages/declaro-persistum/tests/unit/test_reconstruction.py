@@ -4,8 +4,8 @@ Unit tests for abstractions/reconstruction.py
 Tests the table reconstruction abstraction for SQLite/Turso ALTER operations.
 """
 
-import pytest
 import aiosqlite
+import pytest
 
 from declaro_persistum.abstractions.reconstruction import (
     execute_reconstruction_async,
@@ -14,7 +14,6 @@ from declaro_persistum.abstractions.reconstruction import (
     get_reconstruction_columns,
 )
 from declaro_persistum.types import Column, Operation
-
 
 # =============================================================================
 # Pure Function Tests (No DB)
@@ -528,9 +527,14 @@ class TestReconstructionAsync:
 
             await execute_reconstruction_async(conn, "profiles", new_columns)
 
-            # Verify schema
+            # Verify schema. This fetched the columns and asserted nothing --
+            # the comment promised a check the test did not make, and ruff
+            # found it as an unused variable.
             cursor = await conn.execute("PRAGMA table_info(profiles)")
             cols = await cursor.fetchall()
+            assert [c[1] for c in cols] == ["id", "user_id", "bio"], (
+                f"reconstruction should have added `bio`: {[c[1] for c in cols]}"
+            )
 
             # Verify data
             cursor = await conn.execute("SELECT * FROM profiles")

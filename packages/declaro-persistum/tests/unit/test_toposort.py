@@ -3,9 +3,9 @@
 import pytest
 
 from declaro_persistum.differ.toposort import (
-    topological_sort,
-    build_dependency_graph,
     _operation_priority,
+    build_dependency_graph,
+    topological_sort,
 )
 from declaro_persistum.exceptions import CycleError
 

@@ -10,7 +10,7 @@ Usage:
 import logging
 import re
 from datetime import UTC, datetime
-from typing import Any, TypedDict
+from typing import TypedDict
 
 
 class LatencyRecord(TypedDict):

@@ -6,15 +6,14 @@ so we use asyncio.run() to execute async code within sync steps.
 """
 
 import asyncio
-import pytest
-from pytest_bdd import given, when, then, parsers
+
+from pytest_bdd import given, parsers, then, when
 
 from tests.bdd.factories.connection_factory import (
     BACKENDS,
     apply_step,
 )
 from tests.bdd.factories.schema_factory import simple_todos_schema
-
 
 # =============================================================================
 # Connection Setup Steps

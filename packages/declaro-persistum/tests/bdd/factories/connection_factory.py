@@ -4,11 +4,11 @@ Connection factories for managing database connections in tests.
 
 import os
 import tempfile
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator, TypedDict
+from typing import Any, TypedDict
 
 from declaro_persistum.types import Schema
-
 
 # =============================================================================
 # Connection URLs

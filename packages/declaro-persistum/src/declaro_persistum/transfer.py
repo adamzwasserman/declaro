@@ -16,17 +16,17 @@ from __future__ import annotations
 
 import logging
 from collections import deque
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Literal, TypedDict, Union
+from typing import Any, Literal, TypedDict, Union
 
 from declaro_persistum.abstractions.enums import is_enum_table
 from declaro_persistum.bulk_loader import BULK_LOADERS, BulkLoader
+from declaro_persistum.database import Database, reading
 from declaro_persistum.exceptions import TransferError
 from declaro_persistum.inspector.protocol import create_inspector
 from declaro_persistum.migrations import apply_migrations_async
-
-from declaro_persistum.database import Database, reading, writing
 
 logger = logging.getLogger(__name__)
 

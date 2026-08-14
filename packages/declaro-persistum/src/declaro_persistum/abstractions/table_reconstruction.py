@@ -273,9 +273,9 @@ async def _get_full_table_schema(connection: Any, table_name: str) -> dict[str, 
     UNIQUE constraints and foreign key references.
     """
     from declaro_persistum.abstractions.pragma_compat import (
-        pragma_table_info,
-        pragma_index_list,
         pragma_foreign_key_list,
+        pragma_index_list,
+        pragma_table_info,
     )
 
     rows = await pragma_table_info(connection, table_name)

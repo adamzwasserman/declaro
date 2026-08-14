@@ -5,8 +5,8 @@ Tests portable materialized view patterns using tables for SQLite/Turso.
 These tests should FAIL initially (RED) until implementation is complete.
 """
 
+
 import pytest
-from typing import Any
 
 
 class TestCreateMatviewSQL:
@@ -339,6 +339,7 @@ class TestSQLiteApplierIntegration:
     def test_sqlite_no_warning_for_emulated_matview(self):
         """SQLite should NOT emit warning when using emulation."""
         import warnings
+
         from declaro_persistum.applier.sqlite import generate_create_view
         from declaro_persistum.types import View
 

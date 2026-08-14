@@ -2,10 +2,8 @@
 Schema factories for generating test schemas.
 """
 
-from typing import Any
 
-from declaro_persistum.types import Schema, Table, Column
-
+from declaro_persistum.types import Schema
 
 # =============================================================================
 # Pre-built Schemas

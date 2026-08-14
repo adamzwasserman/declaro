@@ -139,6 +139,18 @@ __all__ = [
     "parallel_write",
     "open_turso",
     "migrating",
+    # Working with an opened database. These were importable but absent from
+    # __all__, so the declared contract let a caller open a database and not
+    # read or write it.
+    "Database",
+    "reading",
+    "writing",
+    "close",
+    "flush",
+    "replicate",
+    "refresh",
+    "is_replicated",
+    "new_database",
     "start_crew",
     "stop_crew",
     "Crew",

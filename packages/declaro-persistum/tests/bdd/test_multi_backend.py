@@ -2,7 +2,6 @@
 BDD test runner for multi-database backend features.
 """
 
-import pytest
 from pytest_bdd import scenarios
 
 # Import all step definitions

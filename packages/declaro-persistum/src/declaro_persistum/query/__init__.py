@@ -32,6 +32,7 @@ from declaro_persistum.query.builder import (
     with_params,
 )
 from declaro_persistum.query.conditions import COMBINATORS, OPERATORS
+from declaro_persistum.query.conditions import render as render_condition
 from declaro_persistum.query.executor import (
     detect_dialect,
     execute,
@@ -39,7 +40,6 @@ from declaro_persistum.query.executor import (
     execute_one,
     execute_scalar,
 )
-from declaro_persistum.query.conditions import render as render_condition
 from declaro_persistum.query.expressions import (
     CaseOrderBy,
     JoinClause,

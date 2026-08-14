@@ -6,7 +6,6 @@ Handles parameter binding for different dialects.
 """
 
 import re
-import time
 from collections.abc import Callable
 from typing import Any, TypeVar
 

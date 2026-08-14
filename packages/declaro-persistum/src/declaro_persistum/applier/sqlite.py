@@ -22,11 +22,12 @@ from declaro_persistum.applier.shared import (
     apply_reconstruction_changes,
     dry_run_preview,
     generate_operation_sql,
-    map_type as _map_type_shared,
     requires_reconstruction,
     single_change_property,
 )
-
+from declaro_persistum.applier.shared import (
+    map_type as _map_type_shared,
+)
 from declaro_persistum.exceptions import MigrationError
 from declaro_persistum.types import ApplyResult, Enum, Operation, Trigger, View
 
