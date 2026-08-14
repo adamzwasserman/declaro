@@ -5,14 +5,13 @@ compatibility but is a separate Rust engine, so every PRAGMA goes through
 `abstractions/pragma_compat.py`, which emulates the ones the engine does not
 implement natively. That indirection is the whole reason this is not simply
 the SQLite inspector pointed at a different connection.
-"""
 
-"""
-Turso (libSQL) database inspector implementation.
+Logic that does not depend on the PRAGMA layer is shared with SQLite through
+`inspector.shared`.
 
-Turso is SQLite-compatible, so this shares logic with SQLite via
-inspector.shared module. Uses pragma_compat abstraction for PRAGMA
-calls that may not be natively supported by Turso Database (Rust).
+THIS FILE USED TO SAY "Turso (libSQL)". Turso Database is a Rust rewrite, not
+libSQL and not a libSQL fork, and the difference is the reason pragma_compat
+exists: SQLite compatibility is the aim, not a guarantee.
 """
 
 from typing import Any

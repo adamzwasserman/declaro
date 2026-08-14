@@ -5,15 +5,12 @@ GENERATORS beside it — generate_column_sql, generate_create_view,
 generate_create_trigger and the rest — were already module-level functions.
 So the pure/impure split was already drawn, and drawn in the right place; the
 class simply sat around the impure half for no reason.
-"""
 
-"""
-SQLite migration applier implementation.
+SQLite has limited ALTER TABLE support, so some operations cannot be expressed
+as an ALTER at all and go through table reconstruction instead: create the new
+shape, copy the data across, drop the old, rename the new.
 
-SQLite has limited ALTER TABLE support, so some operations require
-table reconstruction (create new, copy data, drop old, rename new).
-
-SQL generation is shared with Turso via applier.shared module.
+SQL generation is shared with Turso through `applier.shared`.
 """
 
 from typing import Any, Literal

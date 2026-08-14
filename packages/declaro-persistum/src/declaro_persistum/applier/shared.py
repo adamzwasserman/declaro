@@ -7,6 +7,10 @@ Both SQLiteApplier and TursoApplier delegate SQL generation here.
 
 from typing import Any
 
+# Re-exported: inspector.shared is the single source of truth for PRAGMA parsing.
+from declaro_persistum.inspector.shared import (
+    columns_from_pragma_rows as columns_from_pragma_rows,
+)
 from declaro_persistum.types import ApplyResult, Column, Operation
 
 # =============================================================================
@@ -298,8 +302,6 @@ def dry_run_preview(
     }
 
 
-# Re-export from inspector.shared — single source of truth for PRAGMA parsing
-from declaro_persistum.inspector.shared import columns_from_pragma_rows as columns_from_pragma_rows
 
 
 def apply_reconstruction_changes(

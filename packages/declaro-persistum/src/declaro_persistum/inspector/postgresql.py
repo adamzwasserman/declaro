@@ -7,12 +7,6 @@ queries are byte-for-byte the ones that were there: this was a de-classing, not
 a rewrite, so nothing about what PostgreSQL is asked has changed.
 """
 
-"""
-PostgreSQL database inspector implementation.
-
-Uses information_schema and pg_catalog for complete metadata extraction.
-"""
-
 from typing import Any
 
 from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionError

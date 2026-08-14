@@ -2,13 +2,10 @@
 
 De-classed mechanically: methods lifted out, dedented, `self` removed. Every
 statement PostgreSQL is asked to run is byte-for-byte what it was.
-"""
 
-"""
-PostgreSQL migration applier implementation.
-
-PostgreSQL supports transactional DDL, so all operations are wrapped
-in a single transaction for atomic all-or-nothing behavior.
+PostgreSQL supports transactional DDL, so every operation is wrapped in a
+single transaction and the batch is atomic. That is the one thing this applier
+can promise which the SQLite and Turso ones cannot.
 """
 
 from collections.abc import Callable

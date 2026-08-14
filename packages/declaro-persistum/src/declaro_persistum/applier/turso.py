@@ -4,18 +4,15 @@ Turso aims at SQLite compatibility but is a separate Rust engine, so this is
 not the SQLite applier pointed elsewhere: unsupported operations are skipped
 rather than attempted, reconstruction uses temporary names that cannot collide
 with sqlite_autoindex, and each operation runs in its own transaction.
-"""
 
-"""
-Turso migration applier implementation.
+SQL generation is shared with SQLite through `applier.shared`; only the
+execution differs.
 
-Turso is SQLite-compatible, so the SQL generation is shared with SQLite
-via applier.shared module.
-Connection handling uses TursoAsyncConnection (async wrapper over pyturso).
-
-Uses per-operation transactions: each operation gets its own BEGIN/COMMIT.
-Failed operations are logged and skipped so that one unsupported operation
-(e.g. ADD FOREIGN KEY) does not block valid ones (e.g. ADD COLUMN).
+PER-OPERATION TRANSACTIONS, and that is a deliberate trade. Each operation gets
+its own BEGIN/COMMIT, and a failure is logged and skipped rather than aborting
+the batch, so one unsupported operation such as ADD FOREIGN KEY does not block
+a valid one such as ADD COLUMN. The cost is that a partly-applied batch is a
+real outcome here, which it is not on PostgreSQL.
 """
 
 import logging
@@ -29,6 +26,9 @@ from declaro_persistum.applier.shared import (
     generate_operation_sql,
     requires_reconstruction,
 )
+
+# Turso uses identical view generation to SQLite.
+from declaro_persistum.applier.sqlite import generate_create_view, generate_drop_view
 from declaro_persistum.exceptions import MigrationError
 from declaro_persistum.types import ApplyResult, Operation
 
@@ -210,8 +210,6 @@ async def _execute_coalesced_reconstruction(
 
 
 
-# Turso uses identical view generation to SQLite
-from declaro_persistum.applier.sqlite import generate_create_view, generate_drop_view
 
 # "TursoApplier" was listed here long after the class was deleted, so a star
 # import raised AttributeError while every other check stayed green. mypy's
