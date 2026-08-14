@@ -11,6 +11,17 @@ Tests SQL generation for:
 """
 
 
+from declaro_persistum.query.table import (
+    SubqueryExpr,
+    case_,
+    count_,
+    is_subquery,
+    render_order_term,
+    render_subquery,
+    subquery,
+    sum_,
+    table,
+)
 from declaro_persistum.types import Schema
 
 # ---------------------------------------------------------------------------

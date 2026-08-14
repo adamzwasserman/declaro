@@ -2,6 +2,27 @@
 
 **2026-08-12. A complete inventory of declaro-persistum against the Honest four-column model.** Machine-checkable core in [`persistum.hd`](persistum.hd); this is the whole picture, including the parts `.hd` cannot express.
 
+## Correction, 2026-08-13. The measurements below are one day out of date and badly so.
+
+Everything from "The headline" down was measured on 2026-08-12, before the de-classing. Re-measured today against the same tree, the central numbers have moved far enough that planning from them would point you at work that is already done.
+
+| the map said | measured today |
+|---|---|
+| 97 classes, 52 of them stateful objects | 66 classes, 64 of them TypedDict / Protocol / Exception |
+| `TursoPool` at 28 fields and 35 methods | gone; `Database` is a TypedDict and `pool` is an abolished word |
+| Group A: 8 query-builder classes are what runs | 7 of the 8 are deleted; `CaseExpression` is now a TypedDict |
+| Group A: the pure builder functions are "called by nothing" | `query/executor.py` imports `Query` from them, and 58 tests exercise all eight |
+
+Only two classes in `src` are not data: `_Inspectors` and `_Appliers`, each a `dict` subclass with one method, holding a dispatch registry.
+
+**Group A is no longer an open decision.** The map calls it "the one still open" and says "nothing else in the query layer moves until it is made". It was made, by deleting the classes. What that leaves is not a decision but a consequence: `tests/unit/test_query_expressions.py` holds 30 tests written against `t.status`, `t.select` and `t.alias`, and `table()` now returns `{"columns": {...}}`. Those 30 cannot be restored and are the last thing in the query layer still waiting.
+
+**Group B is done too.** "Pools and connections, legitimately stateful, wrongly sized" describes objects that no longer exist. `TursoPool`'s 28 fields are a `Database` TypedDict; the replication loop, the retry policy and the serialiser are functions over it, which is exactly what the map proposed.
+
+**The crew is wired.** The map says "`drain` is declared an orchestrator and nothing calls it". `crew.drainer` calls it, and `writers.py` supplies the per-engine write. The order the map sets out — Group B, then wire the crew, then Group A — has been walked in that order.
+
+This note is a correction to the numbers, not to the diagnosis. The diagnosis was right, which is why the work followed it.
+
 ## The headline
 
 persistum is **two complete architectures occupying the same package**. One is functional and honest. The other is object-oriented, wraps the first, and is what actually runs.
