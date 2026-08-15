@@ -61,6 +61,17 @@ class _Recorder:
         self.failures = failures
         self.closed = False
 
+    async def commit(self) -> None:
+        # `writing(db)` finishes a block by committing, so a stand-in for a
+        # connection has to be able to. Deliberately NOT recorded: `calls` is
+        # what these scenarios read to detect REMOTE I/O on a caller path, and
+        # a commit is local. Recording it here made "no read or write waits
+        # for replication" fail on a local commit.
+        return None
+
+    async def rollback(self) -> None:
+        return None
+
     async def push(self) -> None:
         if self.failures > 0:
             self.failures -= 1
@@ -118,6 +129,7 @@ def _make(tmp_path, *, replicated=True, recorder=None, shutdown="exit_immediatel
         token="t" if replicated else None,
         connect=connect,
         close_connection=close_connection,
+        for_ddl=writing,
         serialise=new_write_lock(asyncio.Lock()) if replicated else None,
         shutdown=shutdown,
         write_one=_write_one,

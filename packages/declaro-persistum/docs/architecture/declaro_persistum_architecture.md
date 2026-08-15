@@ -424,7 +424,7 @@ erDiagram
 from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel
-from declaro_persistum import table, field, index
+from declaro_persistum import table, field
 
 @table("users")
 class User(BaseModel):
@@ -435,10 +435,12 @@ class User(BaseModel):
 
     class Meta:
         indexes = [
-            index("users_email_idx", columns=["email"], unique=True),
-            index("users_created_at_idx", columns=["created_at"]),
+            {"name": "users_email_idx", "columns": ["email"], "unique": True},
+            {"name": "users_created_at_idx", "columns": ["created_at"]},
         ]
 ```
+
+There is no `index()` helper. An index is a dict, and `index_from_meta` validates its keys against `("columns", "unique", "where", "using")` at load time, so a misspelling is a `ValueError` rather than an index that never gets created.
 
 ```python
 # models/order.py
@@ -1295,17 +1297,20 @@ def select_by_id_unsafe(table: str, id_value: Any) -> str:
 ### 6.3 Audit Logging
 
 ```python
-@dataclass(frozen=True)
-class MigrationAudit:
-    """Immutable audit record for migration operations."""
+from typing import TypedDict
+
+class MigrationAudit(TypedDict):
+    """An audit record for migration operations. Data, not an object."""
     timestamp: datetime
     user: str
     operations: tuple[Operation, ...]
-    before_snapshot: str  # Hash of before state
-    after_snapshot: str   # Hash of after state
+    before_snapshot: str   # Hash of before state
+    after_snapshot: str    # Hash of after state
     success: bool
-    error_message: str | None = None
+    error_message: str | None
 ```
+
+This was written as a frozen `@dataclass`, which this document's own section 4 forbids: the allowed classes are `TypedDict`, `Protocol` and `Exception`. `error_message` also carried `= None`, an implicit default that cannot tell "no error" from "nobody set it".
 
 ---
 
@@ -1375,14 +1380,14 @@ from hypothesis import given, strategies as st
 @given(st.dictionaries(st.text(), st.text()))
 def test_diff_empty_to_schema_creates_all_tables(target):
     """Diffing empty schema to any target creates tables for all keys."""
-    result = diff(current={}, target=target)
+    result = diff(current={}, target=target, dialect="postgresql")
     created_tables = {op["table"] for op in result["operations"] if op["op"] == "create_table"}
     assert created_tables == set(target.keys())
 
 @given(st.dictionaries(st.text(), st.text()))
 def test_diff_schema_to_empty_drops_all_tables(current):
     """Diffing any schema to empty drops all tables."""
-    result = diff(current=current, target={})
+    result = diff(current=current, target={}, dialect="postgresql")
     dropped_tables = {op["table"] for op in result["operations"] if op["op"] == "drop_table"}
     assert dropped_tables == set(current.keys())
 
@@ -1424,8 +1429,13 @@ async def test_full_migration_cycle(pg_connection):
     }
     
     # Diff and apply
-    diff_result = diff(current=initial, target=target)
-    await apply(pg_connection, diff_result)
+    diff_result = diff(current=initial, target=target, dialect="postgresql")
+    await apply(
+        pg_connection,
+        diff_result["operations"],
+        diff_result["execution_order"],
+        "postgresql",
+    )
     
     # Verify
     final = await introspect(pg_connection)

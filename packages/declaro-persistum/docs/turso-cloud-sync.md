@@ -9,7 +9,7 @@
 >
 > A pool exposed as a surface is promiscuous mutable state with no determinable owner — measured directly on this codebase 2026-08-11, where L1.18b reported the pool's holder fields as `unresolved, drives a decision`. It is the reason every conditional about MVCC kept ending up inside the pool: with no single owner, a branch had no outside to live in.
 >
-> Binding constraint: **[docs/design/state-ownership-and-the-pool-boundary.md](design/state-ownership-and-the-pool-boundary.md)**
+> Binding constraint: the pool is never a surface. That constraint document was deleted in `07fc023` with ten other superseded planning documents, once the pool was gone from the code.
 >
 > This document is retained as a record. It is not guidance.
 

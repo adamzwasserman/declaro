@@ -55,6 +55,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from declaro_persistum.database import (
@@ -62,10 +64,12 @@ from declaro_persistum.database import (
     ShutdownPolicy,
     new_database,
     new_write_lock,
+    writing,
 )
+from declaro_persistum.types import Dialect
 from declaro_persistum.writers import WRITERS
 
-__all__ = ["open_turso", "migrating", "replicate_path"]
+__all__ = ["open_turso", "migrating", "negotiate_journal_mode", "replicate_path"]
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +80,7 @@ _MAX_PULL_BATCHES = 64
 
 # Bound once so the field and the writer cannot disagree. Two literals is two
 # chances for a Database to say it is one engine and write like another.
-DIALECT = "turso"
+DIALECT: Dialect = "turso"
 
 # How long a writer waits for the replica lock before failing. A property of
 # the engine's own retry behaviour, not of any caller.
@@ -157,20 +161,57 @@ async def _set_journal_mode(conn: Any, mode: str) -> str:
     return row[0] if row else "unknown"
 
 
-async def connect_local(db: Database) -> Any:
-    """Open a connection to a local database in the journal mode it declares.
+async def negotiate_journal_mode(path: str, mode: str) -> str:
+    """Ask the file for a journal mode, once, and report what was granted.
 
-    The mode is requested, not assumed. The engine has the last word, and a
-    refusal is not an error — it means WAL, and the writers still work.
+    THE MODE IS A PROPERTY OF THE FILE, NOT OF A CONNECTION. It persists: set
+    a database to mvcc and a later connection that asks for nothing gets mvcc.
+    So this is boundary work, done once at open, and every connection after it
+    simply opens.
+
+    IT USED TO RUN ON EVERY CONNECT, AND THAT WAS A RACE. The first connection
+    to request MVCC has to bootstrap the MV store, and that bootstrap is not
+    concurrency-safe. `start_crew` opened its drainers' connections at the same
+    instant, so they raced to bootstrap and most of them lost. Measured
+    2026-08-14, pyturso 0.7.2, one fresh database per row:
+
+        nothing prepared                file=wal   4 concurrent: 3 failed
+        migrating + DDL                 file=wal   4 concurrent: 4 failed
+        DDL on a normal connection      file=mvcc  4 concurrent: 0 failed
+
+    The third row is the whole diagnosis: its DDL had already bootstrapped
+    MVCC, so there was nothing left to race. With the negotiation moved here,
+    plain connections open clean at 4, 8 and 16 at once, all reporting mvcc.
+
+    THE ENGINE HAS THE LAST WORD, so the granted mode is returned rather than
+    assumed. A refusal is not an error — it means WAL, and the writers still
+    work. What matters is that the Database records what the file GRANTED, not
+    what the opener wanted; a field that says mvcc over a wal file is a lie the
+    code goes on to tell itself.
     """
     import turso.aio
 
-    conn = await turso.aio.connect(db["path"])
-    await _set_journal_mode(conn, db["journal_mode"])
-    return conn
+    conn = await turso.aio.connect(path)
+    try:
+        return await _set_journal_mode(conn, mode)
+    finally:
+        await conn.close()
 
 
-async def migrating(db: Database) -> Any:
+async def connect_local(db: Database) -> Any:
+    """Open a connection to a local database. Nothing else.
+
+    The journal mode was settled once, at open, by `negotiate_journal_mode`.
+    This function acquires a connection and does no setup, which is what lets
+    a crew open its drainers' connections at the same time.
+    """
+    import turso.aio
+
+    return await turso.aio.connect(db["path"])
+
+
+@asynccontextmanager
+async def migrating(db: Database) -> AsyncIterator[Any]:
     """Open a connection for DDL. ALWAYS WAL, even on a local database.
 
     MVCC IS BLIND TO ANOTHER CONNECTION'S DDL. Measured 2026-08-12, pyturso
@@ -188,12 +229,25 @@ async def migrating(db: Database) -> Any:
     write would get. A table created on an MVCC connection is invisible to
     every later writer, which presents as "no such table" on a database whose
     migration just reported success.
+
+    IT BORROWS THE MODE AND PUTS IT BACK, which is why this is a context
+    manager and not a bare `await`. The journal mode is a property of the FILE
+    (see `negotiate_journal_mode`), so forcing WAL here changes the database
+    for everyone, not for this connection. Leaving it that way silently undid
+    the negotiation done at open: `db["journal_mode"]` still said mvcc, every
+    later connection got wal, and a crew started after a migration went back
+    to racing for the MV store bootstrap. Restoring on exit is serial and
+    happens once, so it cannot race.
     """
     import turso.aio
 
     conn = await turso.aio.connect(db["path"])
     await _set_journal_mode(conn, "wal")
-    return conn
+    try:
+        yield conn
+    finally:
+        await conn.close()
+        await negotiate_journal_mode(db["path"], db["journal_mode"])
 
 
 
@@ -232,7 +286,7 @@ async def open_turso(
     serialize.
     """
     db = (
-        _open_local(path, shutdown)
+        await _open_local(path, shutdown)
         if primary is None
         else await _open_replicated(path, primary, token, shutdown)
     )
@@ -247,7 +301,7 @@ async def open_turso(
     return db
 
 
-def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
+async def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
     """A local database: MVCC, no lock, a connection per `writing` block.
 
     `writing(db)` is the SINGLE-WRITER door and opening a connection per call
@@ -265,24 +319,33 @@ def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
     None someone has to check for.
     """
 
-    async def nothing_to_replicate(db: Database) -> bool:
+    async def nothing_to_replicate(_db: Database) -> bool:
         return True
 
-    async def nothing_to_refresh(db: Database) -> None:
+    async def nothing_to_refresh(_db: Database) -> None:
         return None
 
-    async def release(db: Database) -> None:
+    async def release(_db: Database) -> None:
         return None
+
+    # ONCE, HERE, SERIALLY. See `negotiate_journal_mode`: this is the whole of
+    # the fix for the crew race, and the recorded mode is what the engine
+    # granted rather than what was asked for.
+    granted = await negotiate_journal_mode(path, "mvcc")
 
     return new_database(
         path=path,
         dialect=DIALECT,
-        journal_mode="mvcc",
+        journal_mode=granted,
         busy_timeout_s=_BUSY_TIMEOUT_S,
         primary=None,
         token=None,
         connect=connect_local,
         close_connection=_close_connection,
+        # DDL DOES NOT GO THROUGH `writing` HERE. A local database writes on
+        # MVCC, and a table created on an MVCC connection is invisible to any
+        # other connection that has already read. `migrating` is the WAL door.
+        for_ddl=migrating,
         serialise=None,  # MVCC: writers run concurrently, which is the point
         shutdown=shutdown,
         write_one=WRITERS[DIALECT],
@@ -308,14 +371,14 @@ async def _open_replicated(
     held = await turso.aio.sync.connect(path, remote_url=primary, auth_token=token)
     await _set_journal_mode(held, "wal")
 
-    async def connect(db: Database) -> Any:
+    async def connect(_db: Database) -> Any:
         return held
 
-    async def close_connection(conn: Any) -> None:
+    async def close_connection(_conn: Any) -> None:
         # The held connection outlives every write. `close(db)` releases it.
         return None
 
-    async def replicate_once(db: Database) -> bool:
+    async def replicate_once(_db: Database) -> bool:
         try:
             await held.push()
             return True
@@ -323,16 +386,29 @@ async def _open_replicated(
             # A failed push is ordinary — the network is not always there. The
             # caller decides how long to keep trying; `flush` retries until it
             # lands, and the return value is what it loops on.
+            #
+            # THE REASON IS LOGGED, NOT DISCARDED. This was a bare
+            # `except Exception: return False`, which destroyed the exception
+            # object entirely. `replicate_on_shutdown` loops on the bool and
+            # logs "attempt 1247 failed after 3021s" without ever being able
+            # to say why, because by then the only thing that knew was gone.
+            # `exc_info=True` keeps the type and the traceback.
+            logger.warning(
+                "Push to the primary for %s failed. Returning False so the "
+                "caller's retry loop decides what to do next.",
+                path,
+                exc_info=True,
+            )
             return False
 
-    async def refresh_once(db: Database) -> None:
+    async def refresh_once(_db: Database) -> None:
         # KEEPS ASKING UNTIL THE PRIMARY REPORTS NOTHING FURTHER. This called
         # `pull()` exactly once. pyturso's pull fetches ONE batch and returns
         # "there may be more", so a copy more than one batch behind was left
         # part-way and reported current.
         await _pull_until_level(held)
 
-    async def release(db: Database) -> None:
+    async def release(_db: Database) -> None:
         await held.close()
 
     return new_database(
@@ -344,6 +420,11 @@ async def _open_replicated(
         token=token,
         connect=connect,
         close_connection=close_connection,
+        # `writing`, NOT `migrating`. The held connection is the one bound to
+        # the primary; `migrating` would open a fresh non-sync connection and
+        # the schema change would never leave this machine. A replica is on
+        # WAL already, so there is no MVCC blind spot to avoid.
+        for_ddl=writing,
         serialise=new_write_lock(asyncio.Lock()),  # WAL: one writer
         shutdown=shutdown,
         write_one=WRITERS[DIALECT],

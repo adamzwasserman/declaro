@@ -14,12 +14,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from declaro_persistum.database import Database, ShutdownPolicy, new_database
+from declaro_persistum.database import (
+    Database,
+    ShutdownPolicy,
+    new_database,
+    writing,
+)
+from declaro_persistum.types import Dialect
 from declaro_persistum.writers import WRITERS
 
 __all__ = ["open_sqlite", "connect_sqlite"]
 
-DIALECT = "sqlite"
+DIALECT: Dialect = "sqlite"
 
 
 async def connect_sqlite(db: Database) -> Any:
@@ -36,15 +42,15 @@ async def _close_connection(conn: Any) -> None:
     await conn.close()
 
 
-async def _nothing_to_replicate(db: Database) -> bool:
+async def _nothing_to_replicate(_db: Database) -> bool:
     return True
 
 
-async def _nothing_to_refresh(db: Database) -> None:
+async def _nothing_to_refresh(_db: Database) -> None:
     return None
 
 
-async def _release(db: Database) -> None:
+async def _release(_db: Database) -> None:
     return None
 
 
@@ -80,6 +86,7 @@ async def open_sqlite(
         primary=None,
         token=None,
         connect=connect_sqlite,
+        for_ddl=writing,  # DDL and writes take the same door here
         close_connection=_close_connection,
         serialise=None,
         shutdown=shutdown,

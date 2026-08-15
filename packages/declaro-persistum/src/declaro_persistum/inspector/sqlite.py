@@ -15,6 +15,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from declaro_persistum.abstractions.materialized_views import (
+    MATVIEW_METADATA_TABLE,
+)
 from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionError
 from declaro_persistum.inspector.shared import (
     assemble_table,
@@ -34,6 +37,7 @@ _USER_TABLES = """
     WHERE type = 'table'
       AND name NOT LIKE 'sqlite_%'
       AND name NOT LIKE '_declaro_%'
+      AND name NOT LIKE '_dp_materialized_views'
       AND name NOT LIKE '__turso_%'
       AND name NOT LIKE 'turso_%'
     ORDER BY name
@@ -115,12 +119,44 @@ async def table_of(connection: Any, table: str) -> Table:
     )
 
 
+async def matviews_of(connection: Any) -> dict[str, tuple[str, str]]:
+    """The emulated materialized views, from the metadata table.
+
+    Absent table means none have been created, which is not an error. This is
+    the I/O half of the split described in `views_from_rows`.
+
+    ABSENCE IS ASKED, NOT CAUGHT. This was `except Exception: return {}`
+    around the SELECT, so a table that had never been created and a table
+    that could not be read produced the identical empty answer, and the
+    caller went on to report a schema with no materialized views in it. On
+    the migration path that reads as "the user declared none" and every
+    matview in the database becomes a drop.
+
+    "Has the table been created?" is a question sqlite_master answers
+    directly, so it is asked directly. Anything that goes wrong AFTER the
+    table is known to exist is a real failure and now raises.
+    """
+    present = await _rows(
+        connection,
+        "SELECT name FROM sqlite_master WHERE type = 'table' "
+        f"AND name = '{MATVIEW_METADATA_TABLE}'",
+    )
+    if not present:
+        return {}
+    rows = await _rows(
+        connection,
+        "SELECT name, query, refresh_strategy "
+        f"FROM {MATVIEW_METADATA_TABLE} ORDER BY name",
+    )
+    return {name: (query, refresh) for name, query, refresh in rows}
+
+
 async def views_of(connection: Any) -> dict[str, View]:
     rows = await _rows(
         connection,
         "SELECT name, sql FROM sqlite_master WHERE type = 'view' ORDER BY name",
     )
-    return views_from_rows(rows)
+    return views_from_rows(rows, await matviews_of(connection))
 
 
 async def introspect(
@@ -136,9 +172,20 @@ async def introspect(
     database says no" without reading the message (Rule 8).
     """
     try:
+        # A MATERIALIZED VIEW IS A REAL TABLE HERE, and it must not be
+        # reported as one. SQLite has no materialized views, so the emulation
+        # creates a table plus a metadata row. Introspection returned that
+        # table like any other, the models file never declares it, and the
+        # differ proposed dropping it on every migration — which would have
+        # taken the view's contents with it. Measured 2026-08-14: a schema
+        # with one materialized view re-applied 3 operations on an unchanged
+        # re-run, where the answer is 0.
+        backing = await matviews_of(connection)
         tables = await _rows(connection, _USER_TABLES)
         schema: Schema = {
-            name: await table_of(connection, name) for (name,) in tables
+            name: await table_of(connection, name)
+            for (name,) in tables
+            if name not in backing
         }
         if include_views:
             return schema, await views_of(connection)

@@ -16,6 +16,9 @@ exists: SQLite compatibility is the aim, not a guarantee.
 
 from typing import Any
 
+from declaro_persistum.abstractions.materialized_views import (
+    MATVIEW_METADATA_TABLE,
+)
 from declaro_persistum.abstractions.pragma_compat import (
     _maybe_await,
     pragma_foreign_key_list,
@@ -60,6 +63,7 @@ async def introspect(
               AND name NOT LIKE 'sqlite_%'
               AND name NOT LIKE '_litestream_%'
               AND name NOT LIKE '_declaro_%'
+              AND name NOT LIKE '_dp_materialized_views'
               AND name NOT LIKE '__turso_%'
               AND name NOT LIKE 'turso_%'
             ORDER BY name
@@ -67,15 +71,21 @@ async def introspect(
         ))
         tables = await _maybe_await(cursor.fetchall())
 
+        # A materialized view is a real TABLE on this engine too, and must
+        # not be reported as one. See the same guard in inspector/sqlite.py.
+        views_ = await introspect_views(connection)
+        backing = {n for n, v in views_.items() if v.get("materialized")}
+
         schema: Schema = {}
 
         for row in tables:
             table_name = row[0]
+            if table_name in backing:
+                continue
             schema[table_name] = await _introspect_table(connection, table_name)
 
         if include_views:
-            views = await introspect_views(connection)
-            return schema, views
+            return schema, views_
 
         return schema
 
@@ -214,4 +224,32 @@ async def introspect_views(
     ))
     rows = await _maybe_await(cursor.fetchall())
 
-    return views_from_rows(rows)
+    # The emulated materialized views live in a metadata table, not in
+    # sqlite_master. See `views_from_rows`.
+    #
+    # ABSENCE IS ASKED, NOT CAUGHT — the same fix as `sqlite.matviews_of`,
+    # and for the same reason. `except Exception: matviews = {}` gave one
+    # answer to two questions: "none have been created" and "this database
+    # would not answer me". The second one, reported as the first, tells the
+    # differ the user declared no materialized views and every one in the
+    # database becomes a drop.
+    cursor = await _maybe_await(
+        connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            f"AND name = '{MATVIEW_METADATA_TABLE}'"
+        )
+    )
+    matviews: dict[str, tuple[str, str]] = {}
+    if await _maybe_await(cursor.fetchall()):
+        cursor = await _maybe_await(
+            connection.execute(
+                "SELECT name, query, refresh_strategy "
+                f"FROM {MATVIEW_METADATA_TABLE} ORDER BY name"
+            )
+        )
+        matviews = {
+            name: (query, refresh)
+            for name, query, refresh in await _maybe_await(cursor.fetchall())
+        }
+
+    return views_from_rows(rows, matviews)

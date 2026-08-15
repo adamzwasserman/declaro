@@ -40,7 +40,7 @@ from declaro_persistum.query.expressions import (  # noqa: F401
     render_order_term,
     render_subquery,
 )
-from declaro_persistum.types import Schema
+from declaro_persistum.types import Dialect, Schema
 
 __all__ = [
     "SQLFunction",
@@ -144,9 +144,15 @@ def subquery(query: Any) -> SubqueryExpr:
 
 
 def render_case(
-    expr: CaseExpression, dialect: str, path: str, *, with_alias: bool
+    expr: CaseExpression, path: str, *, with_alias: bool
 ) -> tuple[str, dict[str, Any]]:
     """Render CASE WHEN ... THEN ... ELSE ... END.
+
+    NO DIALECT. It took one and read it zero times. The argument existed only
+    to be handed to `render_condition`, and that function no longer takes one
+    either, for the same reason: a condition renders the same on every engine.
+    Threading a value nobody reads is how `builder.py` came to pass the
+    literal "sql" as a dialect without anything noticing.
 
     `with_alias` is REQUIRED, not defaulted, because the two callers want
     opposite things and neither is the obvious one: a SELECT column wants the
@@ -159,7 +165,7 @@ def render_case(
     parts = ["CASE"]
 
     for i, (condition, result) in enumerate(expr["whens"]):
-        cond_sql, cond_params = render_condition(condition, dialect, f"{path}_w{i}")
+        cond_sql, cond_params = render_condition(condition, f"{path}_w{i}")
         params.update(cond_params)
         name = f"{path}_t{i}"
         params[name] = result
@@ -178,7 +184,7 @@ def render_case(
 
 
 def render_function(
-    fn: SQLFunction, dialect: str, path: str
+    fn: SQLFunction, dialect: Dialect, path: str
 ) -> tuple[str, dict[str, Any]]:
     """Render a function call, and any expression nested inside it.
 
@@ -190,7 +196,7 @@ def render_function(
 
     for i, arg in enumerate(fn["args"]):
         if isinstance(arg, dict) and arg.get("kind") == "case":
-            sql, p = render_case(arg, dialect, f"{path}_a{i}", with_alias=False)
+            sql, p = render_case(arg, f"{path}_a{i}", with_alias=False)
             parts.append(sql)
             params.update(p)
         elif isinstance(arg, dict) and arg.get("kind") == "subquery":

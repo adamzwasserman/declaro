@@ -13,12 +13,18 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from declaro_persistum.database import Database, ShutdownPolicy, new_database
+from declaro_persistum.database import (
+    Database,
+    ShutdownPolicy,
+    new_database,
+    writing,
+)
+from declaro_persistum.types import Dialect
 from declaro_persistum.writers import WRITERS
 
 __all__ = ["open_postgresql", "connect_postgresql"]
 
-DIALECT = "postgresql"
+DIALECT: Dialect = "postgresql"
 
 
 async def connect_postgresql(db: Database) -> Any:
@@ -32,15 +38,15 @@ async def _close_connection(conn: Any) -> None:
     await conn.close()
 
 
-async def _nothing_to_replicate(db: Database) -> bool:
+async def _nothing_to_replicate(_db: Database) -> bool:
     return True
 
 
-async def _nothing_to_refresh(db: Database) -> None:
+async def _nothing_to_refresh(_db: Database) -> None:
     return None
 
 
-async def _release(db: Database) -> None:
+async def _release(_db: Database) -> None:
     return None
 
 
@@ -73,6 +79,7 @@ async def open_postgresql(
         primary=None,
         token=None,
         connect=connect_postgresql,
+        for_ddl=writing,  # DDL and writes take the same door here
         close_connection=_close_connection,
         serialise=None,
         shutdown=shutdown,

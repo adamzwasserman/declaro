@@ -52,7 +52,7 @@ def _clause(
 
     from declaro_persistum.query.conditions import render
 
-    sql, built = render(where, "sql", path)
+    sql, built = render(where, path)
     # The caller's params win. A dict-built name is derived from the path and
     # cannot collide with one a caller chose, so an overlap means the caller
     # meant it.

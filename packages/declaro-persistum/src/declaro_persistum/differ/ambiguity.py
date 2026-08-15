@@ -6,12 +6,14 @@ Detects changes that could be interpreted multiple ways:
 - Type changes that might lose data
 """
 
-from declaro_persistum.types import Ambiguity, Column, Decision, Schema, Table
+from declaro_persistum.applier.shared import same_type
+from declaro_persistum.types import Ambiguity, Column, Decision, Dialect, Schema, Table
 
 
 def detect_ambiguities(
     current: Schema,
     target: Schema,
+    dialect: Dialect,
     decisions: dict[str, Decision] | None = None,
 ) -> list[Ambiguity]:
     """
@@ -55,7 +57,7 @@ def detect_ambiguities(
         target_table = target[table_name]
 
         column_ambiguities = _detect_column_ambiguities(
-            table_name, current_table, target_table, decisions
+            table_name, current_table, target_table, decisions, dialect
         )
         ambiguities.extend(column_ambiguities)
 
@@ -129,6 +131,7 @@ def _detect_column_ambiguities(
     current: Table,
     target: Table,
     decisions: dict[str, Decision],
+    dialect: Dialect,
 ) -> list[Ambiguity]:
     """Detect possible column renames and destructive changes."""
     ambiguities: list[Ambiguity] = []
@@ -158,7 +161,7 @@ def _detect_column_ambiguities(
 
     # Detect destructive type changes
     type_ambiguities = _detect_type_change_ambiguities(
-        table_name, current_columns, target_columns, decisions
+        table_name, current_columns, target_columns, decisions, dialect
     )
     ambiguities.extend(type_ambiguities)
 
@@ -230,8 +233,16 @@ def _detect_type_change_ambiguities(
     current_columns: dict[str, Column],
     target_columns: dict[str, Column],
     decisions: dict[str, Decision],
+    dialect: Dialect,
 ) -> list[Ambiguity]:
-    """Detect potentially destructive type changes."""
+    """Detect potentially destructive type changes.
+
+    THE COMPARISON IS PER ENGINE. `uuid` and `text` are one column on SQLite,
+    so "text -> uuid" there is not a change at all, let alone a risky one.
+    Reading it as one blocked every migration after the first with an
+    ambiguity about a column nobody had touched, and an ambiguity stops the
+    run. On PostgreSQL the two are genuinely different and still trip.
+    """
     ambiguities: list[Ambiguity] = []
 
     # Types that might lose data when changed
@@ -255,7 +266,7 @@ def _detect_type_change_ambiguities(
         current_type = current_columns[col_name].get("type", "").lower()
         target_type = target_columns[col_name].get("type", "").lower()
 
-        if current_type != target_type:
+        if not same_type(current_type, target_type, dialect):
             # Normalize types for comparison
             current_base = current_type.split("(")[0]
             target_base = target_type.split("(")[0]

@@ -17,12 +17,13 @@ from __future__ import annotations
 from typing import Any
 
 from declaro_persistum.applier import postgresql, sqlite, turso
+from declaro_persistum.types import Dialect
 
 
 class _Appliers(dict):
     """A dispatch table that explains itself when asked for something absent."""
 
-    def __missing__(self, dialect: str) -> Any:
+    def __missing__(self, dialect: Dialect) -> Any:
         raise ValueError(
             f"Unsupported dialect: {dialect}. "
             f"Supported dialects: {', '.join(sorted(self))}"
@@ -42,7 +43,7 @@ async def apply(
     connection: Any,
     operations: list[dict[str, Any]],
     execution_order: list[int],
-    dialect: str,
+    dialect: Dialect,
     **kwargs: Any,
 ) -> Any:
     """Run migration operations against a database, in the given order.

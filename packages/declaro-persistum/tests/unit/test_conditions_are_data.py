@@ -48,7 +48,7 @@ CASES = [
 
 @pytest.mark.parametrize("name,condition,fragment", CASES, ids=[c[0] for c in CASES])
 def test_each_operator_renders(name, condition, fragment):
-    sql, params = render(condition, "postgresql", "w")
+    sql, params = render(condition, "w")
     assert fragment in sql, f"{name}: {sql}"
     assert len(params) == 1, params
 
@@ -73,27 +73,27 @@ class TestOperatorsThatAreNotOneParameter:
     """The members whose shape differs from `col OP :param`."""
 
     def test_in_expands_to_one_placeholder_per_value(self):
-        sql, params = render({"id": {"in": [1, 2, 3]}}, "postgresql", "w")
+        sql, params = render({"id": {"in": [1, 2, 3]}}, "w")
         assert "id IN (" in sql
         assert len(params) == 3, params
 
     def test_not_in_expands_the_same_way(self):
-        sql, params = render({"id": {"not_in": [1, 2]}}, "postgresql", "w")
+        sql, params = render({"id": {"not_in": [1, 2]}}, "w")
         assert "id NOT IN (" in sql
         assert len(params) == 2, params
 
     def test_between_binds_two(self):
-        sql, params = render({"age": {"between": [18, 65]}}, "postgresql", "w")
+        sql, params = render({"age": {"between": [18, 65]}}, "w")
         assert "age BETWEEN" in sql
         assert sorted(params.values()) == [18, 65]
 
     def test_is_null_binds_nothing(self):
-        sql, params = render({"deleted_at": {"is_null": True}}, "postgresql", "w")
+        sql, params = render({"deleted_at": {"is_null": True}}, "w")
         assert sql.strip() == "deleted_at IS NULL"
         assert params == {}
 
     def test_is_not_null_binds_nothing(self):
-        sql, params = render({"deleted_at": {"is_not_null": True}}, "postgresql", "w")
+        sql, params = render({"deleted_at": {"is_not_null": True}}, "w")
         assert sql.strip() == "deleted_at IS NOT NULL"
         assert params == {}
 
@@ -103,13 +103,13 @@ class TestComposition:
 
     def test_several_keys_are_anded(self):
         """The common case needs no combinator at all."""
-        sql, params = render({"age": {"gt": 18}, "status": "active"}, "postgresql", "w")
+        sql, params = render({"age": {"gt": 18}, "status": "active"}, "w")
         assert " AND " in sql
         assert len(params) == 2
 
     def test_explicit_or(self):
         sql, params = render(
-            {"or": [{"status": "active"}, {"status": "pending"}]}, "postgresql", "w"
+            {"or": [{"status": "active"}, {"status": "pending"}]}, "w"
         )
         assert " OR " in sql
         assert len(params) == 2
@@ -123,7 +123,6 @@ class TestComposition:
                     {"and": [{"status": "pending"}, {"age": {"lt": 65}}]},
                 ]
             },
-            "postgresql",
             "w",
         )
         assert " OR " in sql and " AND " in sql
@@ -131,7 +130,7 @@ class TestComposition:
 
     def test_an_empty_condition_renders_nothing(self):
         """The boundary. No WHERE clause is not an error."""
-        assert render({}, "postgresql", "w") == ("", {})
+        assert render({}, "w") == ("", {})
 
 
 class TestItIsDeterministic:
@@ -139,11 +138,11 @@ class TestItIsDeterministic:
 
     def test_the_same_condition_renders_identically_twice(self):
         c = {"age": {"gt": 18}, "status": "active"}
-        assert render(c, "postgresql", "w") == render(c, "postgresql", "w")
+        assert render(c, "w") == render(c, "w")
 
     def test_two_conditions_on_one_column_do_not_collide(self):
         sql, params = render(
-            {"and": [{"age": {"gt": 18}}, {"age": {"lt": 65}}]}, "postgresql", "w"
+            {"and": [{"age": {"gt": 18}}, {"age": {"lt": 65}}]}, "w"
         )
         assert len(params) == 2, (sql, params)
 
@@ -151,4 +150,4 @@ class TestItIsDeterministic:
 def test_an_unknown_operator_fails_loudly():
     """A bounded vocabulary must not silently accept a member outside it."""
     with pytest.raises(ValueError, match="frobnicate"):
-        render({"age": {"frobnicate": 1}}, "postgresql", "w")
+        render({"age": {"frobnicate": 1}}, "w")

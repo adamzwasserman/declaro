@@ -288,7 +288,7 @@ requires-dist = [
     { name = "pytest-timeout", marker = "extra == 'dev'", specifier = ">=2.2.0" },
     { name = "python-dotenv", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "python-multipart", marker = "extra == 'examples'", specifier = ">=0.0.6" },
-    { name = "pyturso", marker = "extra == 'turso'", specifier = ">=0.7.0" },
+    { name = "pyturso", marker = "extra == 'turso'", specifier = ">=0.7.2" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "tomli-w", specifier = ">=1.0.0" },
     { name = "uvicorn", marker = "extra == 'examples'", specifier = ">=0.27.0" },

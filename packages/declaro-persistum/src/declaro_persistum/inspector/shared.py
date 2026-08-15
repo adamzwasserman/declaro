@@ -200,14 +200,42 @@ def assemble_table(
     return table
 
 
-def views_from_rows(rows: list[tuple]) -> dict[str, View]:
-    """Convert sqlite_master view rows to View dict (pure)."""
+def views_from_rows(
+    rows: list[tuple], matviews: dict[str, tuple[str, str]]
+) -> dict[str, View]:
+    """Convert sqlite_master view rows and matview metadata to `View` values.
+
+    MATERIALIZED VIEWS ARE NOT IN `sqlite_master` AS VIEWS. SQLite has none,
+    so the emulation makes a real TABLE plus a row in
+    `_dp_materialized_views`. Reading only `sqlite_master` therefore reported
+    `materialized: False` for every view, including the materialized ones.
+
+    That broke idempotence: the declaration says True, introspection said
+    False, so the differ saw a change and dropped and recreated the view on
+    every migration. Measured 2026-08-14 with one materialized view declared:
+
+        first : 2 operations
+        re-run: 3 operations   (want 0)
+
+    Recreating a materialized view discards its contents, so this was not
+    merely noisy — it emptied the cache the view exists to be, on every
+    deploy.
+
+    `matviews` maps name to (query, refresh_strategy), read from the metadata
+    table by the caller. I/O stays with the caller; this stays pure.
+    """
     views: dict[str, View] = {}
     for name, sql in rows:
-        query = extract_view_query(sql)
+        views[name] = {
+            "name": name,
+            "query": extract_view_query(sql),
+            "materialized": False,
+        }
+    for name, (query, refresh) in matviews.items():
         views[name] = {
             "name": name,
             "query": query,
-            "materialized": False,
+            "materialized": True,
+            "refresh": refresh,
         }
     return views

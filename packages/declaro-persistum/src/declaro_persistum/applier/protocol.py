@@ -6,7 +6,7 @@ Defines the interface that all dialect-specific appliers must implement.
 
 from typing import Any, Literal, Protocol
 
-from declaro_persistum.types import ApplyResult, Operation
+from declaro_persistum.types import ApplyResult, Dialect, Operation
 
 
 class MigrationApplier(Protocol):
@@ -108,7 +108,7 @@ class MigrationApplier(Protocol):
         ...
 
 
-def create_applier(dialect: str) -> MigrationApplier:
+def create_applier(dialect: Dialect) -> MigrationApplier:
     """
     Factory function to create the appropriate applier for a dialect.
 

@@ -16,6 +16,7 @@ from declaro_persistum.exceptions import LoaderError
 from declaro_persistum.types import (
     Column,
     Decision,
+    Dialect,
     Schema,
     Table,
     View,
@@ -226,7 +227,7 @@ def load_snapshot(schema_dir: str | Path) -> Schema:
 def save_snapshot(
     schema_dir: str | Path,
     schema: Schema,
-    dialect: str,
+    dialect: Dialect,
     *,
     applied_by: str | None = None,
 ) -> None:
@@ -302,6 +303,23 @@ def load_decisions(schema_dir: str | Path) -> dict[str, Decision]:
             }
 
     return decisions
+
+
+def clear_decisions(schema_dir: str | Path) -> None:
+    """Delete the pending decisions, because they have been applied.
+
+    THIS EXISTED, WAS DELETED IN `162d967` FOR HAVING NO CALLER, AND NOTHING
+    TOOK THE JOB OVER. `migrations/pending.toml` survived a successful apply
+    and `load_decisions` read it again on the next diff, so a decision made
+    once about one rename went on answering for every later rename with the
+    same key. A decision is an answer to a question that was asked; keeping it
+    after the answer is spent means the next question is not asked at all.
+
+    Deleting a file that is not there is not an error. The caller's intent is
+    "there should be no pending decisions", and that is already true.
+    """
+    pending_path = Path(schema_dir) / "migrations" / "pending.toml"
+    pending_path.unlink(missing_ok=True)
 
 
 def save_decisions(schema_dir: str | Path, decisions: dict[str, Any]) -> None:

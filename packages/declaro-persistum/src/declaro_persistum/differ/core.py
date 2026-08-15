@@ -7,11 +7,13 @@ to transform current schema to target schema.
 
 from typing import Any
 
+from declaro_persistum.applier.shared import same_type
 from declaro_persistum.differ.ambiguity import detect_ambiguities
 from declaro_persistum.differ.toposort import build_dependency_graph, topological_sort
 from declaro_persistum.types import (
     Column,
     Decision,
+    Dialect,
     DiffResult,
     Operation,
     Schema,
@@ -23,6 +25,7 @@ def diff(
     current: Schema,
     target: Schema,
     *,
+    dialect: Dialect,
     decisions: dict[str, Decision] | None = None,
 ) -> DiffResult:
     """
@@ -39,9 +42,26 @@ def diff(
         added = T - C (tables to create)
         modified = C ∩ T (tables to compare for changes)
 
+    THE DIALECT IS REQUIRED, AND WITHOUT IT THIS WAS NOT IDEMPOTENT.
+    A declared type and an introspected type are the same fact in two
+    spellings: `uuid` is stored as TEXT on SQLite and Turso, so introspection
+    returns "text" and a plain string comparison saw text -> uuid on every
+    run. Measured 2026-08-14, same models file, nothing edited:
+
+        first : True, 1 operation
+        second: False, "Column 'id' type change from text to uuid may cause
+                data loss. Confirm this change?"
+
+    Every uuid, timestamptz, jsonb, numeric and boolean column did it. Both
+    sides are now put through `map_type` before being compared, so they are
+    compared as the engine spells them. On PostgreSQL that changes nothing and
+    a real text -> uuid change still trips, which is the point.
+
     Args:
         current: Current database schema state
         target: Desired schema state
+        dialect: The engine, because a type comparison is meaningless without
+            one. Required for the same reason `map_type` requires it (Rule 14)
         decisions: Pre-made decisions for ambiguous changes (from pending.toml)
 
     Returns:
@@ -140,11 +160,12 @@ def diff(
             effective_table_name,
             current_table,
             target_table,
+            dialect,
         )
         operations.extend(table_ops)
 
     # Detect ambiguities
-    ambiguities = detect_ambiguities(current, target, decisions)
+    ambiguities = detect_ambiguities(current, target, dialect, decisions)
 
     # Build dependency graph and sort
     dependencies = build_dependency_graph(operations)
@@ -162,6 +183,7 @@ def _diff_table(
     table_name: str,
     current: Table,
     target: Table,
+    dialect: Dialect,
 ) -> list[Operation]:
     """
     Compute operations to transform a single table.
@@ -178,7 +200,7 @@ def _diff_table(
     operations: list[Operation] = []
 
     # Diff columns
-    column_ops = _diff_columns(table_name, current, target)
+    column_ops = _diff_columns(table_name, current, target, dialect)
     operations.extend(column_ops)
 
     # Diff indexes
@@ -196,6 +218,7 @@ def _diff_columns(
     table_name: str,
     current: Table,
     target: Table,
+    dialect: Dialect,
 ) -> list[Operation]:
     """
     Compute column-level operations.
@@ -274,7 +297,7 @@ def _diff_columns(
         current_col = current_columns[col_name]
         target_col = target_columns[col_name]
 
-        alter_details = _compute_column_alterations(current_col, target_col)
+        alter_details = _compute_column_alterations(current_col, target_col, dialect)
         if alter_details:
             operations.append(
                 {
@@ -294,6 +317,7 @@ def _diff_columns(
 def _compute_column_alterations(
     current: Column,
     target: Column,
+    dialect: Dialect,
 ) -> dict[str, Any] | None:
     """
     Compute what alterations are needed for a column.
@@ -302,8 +326,10 @@ def _compute_column_alterations(
     """
     changes: dict[str, Any] = {}
 
-    # Type change
-    if current.get("type") != target.get("type"):
+    # Type change, compared AS THE ENGINE SPELLS IT. "uuid" and "text" are the
+    # same column on SQLite, and comparing the two strings made every
+    # migration after the first one propose a type change nobody asked for.
+    if not same_type(current.get("type"), target.get("type"), dialect):
         changes["type"] = {"from": current.get("type"), "to": target.get("type")}
 
     # Nullability change

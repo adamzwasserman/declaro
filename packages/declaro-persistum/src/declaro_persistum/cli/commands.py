@@ -10,14 +10,14 @@ from pathlib import Path
 from typing import Any
 
 from declaro_persistum.exceptions import AmbiguityError
-from declaro_persistum.types import Ambiguity, Decision, DiffResult, Schema
+from declaro_persistum.types import Ambiguity, Decision, Dialect, DiffResult, Schema
 
 
 async def cmd_diff(
     *,
     connection_string: str,
     schema_dir: str,
-    dialect: str,
+    dialect: Dialect,
     interactive: bool,
     unattended: bool,
     force: bool,
@@ -72,7 +72,7 @@ async def cmd_diff(
         decisions = load_decisions(schema_dir)
 
         # Compute diff
-        result = diff(actual, target, decisions=decisions)
+        result = diff(actual, target, dialect=dialect, decisions=decisions)
 
         # Handle ambiguities
         if result["ambiguities"]:
@@ -84,7 +84,7 @@ async def cmd_diff(
                     result["ambiguities"], schema_dir
                 )
                 # Re-run diff with decisions
-                result = diff(actual, target, decisions=decisions)
+                result = diff(actual, target, dialect=dialect, decisions=decisions)
 
         # Display results
         _print_diff_result(result, verbose)
@@ -99,7 +99,7 @@ async def cmd_apply(
     *,
     connection_string: str,
     schema_dir: str,
-    dialect: str,
+    dialect: Dialect,
     interactive: bool,
     unattended: bool,
     dry_run: bool,
@@ -116,7 +116,13 @@ async def cmd_apply(
     from declaro_persistum.applier.protocol import create_applier
     from declaro_persistum.differ import diff
     from declaro_persistum.inspector.protocol import create_inspector
-    from declaro_persistum.loader import load_decisions, load_schema, load_snapshot, save_snapshot
+    from declaro_persistum.loader import (
+        clear_decisions,
+        load_decisions,
+        load_schema,
+        load_snapshot,
+        save_snapshot,
+    )
 
     # Determine interactive mode
     is_tty = sys.stdin.isatty() and sys.stdout.isatty()
@@ -143,7 +149,7 @@ async def cmd_apply(
 
         # Compute diff
         decisions = load_decisions(schema_dir)
-        result = diff(actual, target, decisions=decisions)
+        result = diff(actual, target, dialect=dialect, decisions=decisions)
 
         # Handle ambiguities
         if result["ambiguities"]:
@@ -153,7 +159,7 @@ async def cmd_apply(
                 decisions = await _resolve_ambiguities_interactive(
                     result["ambiguities"], schema_dir
                 )
-                result = diff(actual, target, decisions=decisions)
+                result = diff(actual, target, dialect=dialect, decisions=decisions)
 
         if not result["operations"]:
             print("No changes to apply.")
@@ -189,6 +195,15 @@ async def cmd_apply(
             if verbose:
                 print(f"Updated snapshot at {schema_dir}/snapshot.toml")
 
+            # SPEND THE DECISIONS. They answered questions this apply asked,
+            # and keeping them means the next apply never asks again: a
+            # decision keyed on a column name goes on answering for any later
+            # rename that happens to match. Nothing cleared them before, so
+            # `pending.toml` survived every successful migration.
+            clear_decisions(schema_dir)
+            if verbose:
+                print("Cleared pending decisions")
+
             return 0
         else:
             print(f"\n✗ Migration failed: {apply_result['error']}")
@@ -202,7 +217,7 @@ async def cmd_snapshot(
     *,
     connection_string: str,
     schema_dir: str,
-    dialect: str,
+    dialect: Dialect,
     force: bool,
     verbose: bool,
 ) -> int:
@@ -296,7 +311,7 @@ async def cmd_migrate_remote(
     remote_url: str,
     auth_token: str | None,
     schema_path: str,
-    dialect: str,
+    dialect: Dialect,
     expand_enums: bool,
     init: bool,
     dry_run: bool,
@@ -387,7 +402,7 @@ async def cmd_migrate_remote(
                 print(f"Introspected {len(current_schema)} tables from cloud DB")
 
             # Diff
-            diff_result = diff(current_schema, target_schema)
+            diff_result = diff(current_schema, target_schema, dialect=dialect)
 
             if not diff_result["operations"]:
                 print("Cloud schema is up to date — no changes needed.")
@@ -451,7 +466,7 @@ async def cmd_generate(
     *,
     connection_string: str,
     schema_dir: str,
-    dialect: str,
+    dialect: Dialect,
     output: str | None,
     force: bool,
 ) -> int:
@@ -484,7 +499,7 @@ async def cmd_generate(
                 return 2
 
         decisions = load_decisions(schema_dir)
-        result = diff(actual, target, decisions=decisions)
+        result = diff(actual, target, dialect=dialect, decisions=decisions)
 
         if result["ambiguities"]:
             raise AmbiguityError(result["ambiguities"])
@@ -518,7 +533,7 @@ async def cmd_generate(
 # Helper functions
 
 
-async def _connect(connection_string: str, dialect: str) -> Any:
+async def _connect(connection_string: str, dialect: Dialect) -> Any:
     """Create database connection."""
     if dialect == "postgresql":
         import asyncpg
@@ -538,7 +553,7 @@ async def _connect(connection_string: str, dialect: str) -> Any:
         raise ValueError(f"Unsupported dialect: {dialect}")
 
 
-async def _disconnect(connection: Any, dialect: str) -> None:
+async def _disconnect(connection: Any, dialect: Dialect) -> None:
     """Close database connection."""
     if dialect == "postgresql" or dialect == "sqlite" or dialect == "turso":
         await connection.close()

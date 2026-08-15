@@ -54,3 +54,6 @@ Thumbs.db
 .claude/
 .hypothesis/
 .env
+# `.env` alone did not cover `.env.bak.prod-url`, which holds a live
+# production token and was one `git add -A` from being published.
+.env.*

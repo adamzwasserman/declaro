@@ -17,6 +17,7 @@ import asyncio
 import os
 import sys
 from collections.abc import Sequence
+from typing import cast
 
 from declaro_persistum import __version__
 from declaro_persistum.cli.commands import (
@@ -27,6 +28,7 @@ from declaro_persistum.cli.commands import (
     cmd_snapshot,
     cmd_validate,
 )
+from declaro_persistum.types import Dialect
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -270,11 +272,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 1
 
-    # Detect or use specified dialect
-    dialect: str | None = args.dialect
+    # THE ONE PLACE A DIALECT ENTERS FROM OUTSIDE, so the one place the
+    # vocabulary is enforced. argparse already restricts `--dialect` to
+    # `choices=["postgresql", "sqlite", "turso"]` and `detect_dialect` returns
+    # only those three, so the narrowing is declared here rather than
+    # re-checked in each of the 44 signatures downstream (Rule 13).
+    dialect: Dialect | None = cast("Dialect | None", args.dialect)
     if connection_string and not dialect:
         try:
-            dialect = detect_dialect(connection_string)
+            dialect = cast("Dialect", detect_dialect(connection_string))
         except ValueError as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1

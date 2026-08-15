@@ -124,14 +124,10 @@ Feature: Diffing two schemas into an ordered list of operations
     Then a CycleError is raised naming the cycle, because there is no order that works and running some prefix of it leaves the database in a state neither schema describes
 
   # ============================================================
-  # Extended objects — enums, views, triggers, procedures
+  # Views. Enums, triggers and procedures were here and their diffs are
+  # gone: they emitted operations no applier could execute. See
+  # differ/extended.py.
   # ============================================================
-
-  Scenario: an enum that gains a value is altered rather than replaced
-    Given an enum "status" with values active, inactive
-    And a target enum "status" with values active, inactive, archived
-    When the enums are diffed
-    Then an operation is produced for the added value
 
   Scenario: a view whose query changed is replaced
     Given a view "recent" with one query
@@ -139,7 +135,7 @@ Feature: Diffing two schemas into an ordered list of operations
     When the views are diffed
     Then an operation is produced for the changed view
 
-  Scenario: an unchanged object produces no operation at all
-    Given an enum, a view, a trigger and a procedure that are identical in both schemas
-    When each is diffed
+  Scenario: an unchanged view produces no operation at all
+    Given a view that is identical in both schemas
+    When it is diffed
     Then no operations are produced, because a migration that rewrites things nobody changed is indistinguishable from one that had a reason to

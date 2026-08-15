@@ -34,7 +34,7 @@ import inspect
 
 import pytest
 
-from declaro_persistum.database import Database, new_database
+from declaro_persistum.database import Database, new_database, writing
 
 pytestmark = pytest.mark.precommit
 
@@ -110,6 +110,7 @@ async def test_a_drainer_runs_whatever_writer_it_was_given() -> None:
             token=None,
             connect=connect,
             close_connection=close_connection,
+            for_ddl=writing,
             serialise=None,
             shutdown="exit_immediately",
             write_one=_recording(label),

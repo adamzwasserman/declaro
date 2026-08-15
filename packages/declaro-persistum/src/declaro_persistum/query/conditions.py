@@ -44,9 +44,32 @@ novel).
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from typing import Any
 
-__all__ = ["OPERATORS", "COMBINATORS", "render"]
+__all__ = ["OPERATORS", "COMBINATORS", "Rendered", "Renderer", "render"]
+
+# WHAT EVERY OPERATOR IN THE TABLE IS. Fifteen entries built by four factories,
+# and none of them declared a signature: `render_binary(column, operand, path,
+# dialect)` said only that it takes four things. An audit read that as an
+# undeclared domain and was right.
+#
+# DECLARING IT EXPOSED A FOURTH ARGUMENT NOBODY READS. Every one of the five
+# leaf renderers took `dialect` and loaded it zero times; `render` and
+# `_render_group` only passed it down. A condition renders the same on every
+# engine, so there was nothing for it to decide. It was removed rather than
+# typed: a parameter no implementation reads is not a contract, and giving it
+# a precise type would only have made the claim precise.
+#
+# It also hid a defect for as long as it existed. `builder.py` called
+# `render(where, "sql", path)`, passing the literal "sql" as the dialect,
+# which is not one. Nothing noticed, because nothing read it.
+#
+# It is also the shape the rest of this package already uses for an injected
+# callable: `Connect`, `WriteOne`, `Transaction`, `ForDDL`. One more of the
+# same is consistent; a Protocol per operator would not be.
+Rendered = tuple[str, dict[str, Any]]
+Renderer = Callable[[str, Any, str], Rendered]
 
 # Characters that cannot appear in a generated parameter name. A column called
 # `user.id` or `order-total` would otherwise produce `:w_user.id`, which no
@@ -58,7 +81,7 @@ def _name(path: str, column: str, suffix: str = "") -> str:
     return f"{path}_{column.translate(_SAFE)}{suffix}"
 
 
-def _binary(op: str):
+def _binary(op: str) -> Renderer:
     """Build a renderer for the `col OP :param` shape.
 
     Ten of the fifteen operators differ only in the SQL token, so they are
@@ -67,14 +90,14 @@ def _binary(op: str):
     hide it.
     """
 
-    def render_binary(column, operand, path, dialect):
+    def render_binary(column: str, operand: Any, path: str) -> Rendered:
         name = _name(path, column)
         return f"{column} {op} :{name}", {name: operand}
 
     return render_binary
 
 
-def _like(pattern):
+def _like(pattern: str) -> Renderer:
     """LIKE with the wildcards supplied by the operator, not by the caller.
 
     `startswith` means the caller said "a", not "a%". Putting the wildcard in
@@ -82,15 +105,15 @@ def _like(pattern):
     containing `%` cannot silently become a wildcard.
     """
 
-    def render_like(column, operand, path, dialect):
+    def render_like(column: str, operand: Any, path: str) -> Rendered:
         name = _name(path, column)
         return f"{column} LIKE :{name}", {name: pattern.format(operand)}
 
     return render_like
 
 
-def _in(negated: bool):
-    def render_in(column, operand, path, dialect):
+def _in(negated: bool) -> Renderer:
+    def render_in(column: str, operand: Sequence[Any], path: str) -> Rendered:
         values = list(operand)
         if not values:
             # `IN ()` is a syntax error in every dialect. An empty set matches
@@ -111,7 +134,7 @@ def _in(negated: bool):
     return render_in
 
 
-def _between(column, operand, path, dialect):
+def _between(column: str, operand: tuple[Any, Any], path: str) -> Rendered:
     low_name, high_name = _name(path, column, "_lo"), _name(path, column, "_hi")
     low, high = operand
     return (
@@ -120,8 +143,8 @@ def _between(column, operand, path, dialect):
     )
 
 
-def _null(sql: str):
-    def render_null(column, operand, path, dialect):
+def _null(sql: str) -> Renderer:
+    def render_null(column: str, operand: Any, path: str) -> Rendered:
         # The operand is ignored on purpose: `{"col": {"is_null": True}}` and
         # `{"col": {"is_null": False}}` would otherwise mean opposite things
         # while looking alike. Use `is_not_null` for the negation.
@@ -130,7 +153,7 @@ def _null(sql: str):
     return render_null
 
 
-OPERATORS = {
+OPERATORS: dict[str, Renderer] = {
     "eq": _binary("="),
     "ne": _binary("!="),
     "gt": _binary(">"),
@@ -151,16 +174,16 @@ OPERATORS = {
 fails at the lookup rather than falling through an if/elif chain to whatever
 the last branch happened to be (Rule 1)."""
 
-COMBINATORS = {"and": " AND ", "or": " OR "}
+COMBINATORS: dict[str, str] = {"and": " AND ", "or": " OR "}
 
 
 def _render_group(
-    key: str, members: list[dict], dialect: str, path: str
+    key: str, members: list[dict], path: str
 ) -> tuple[str, dict[str, Any]]:
     parts: list[str] = []
     params: dict[str, Any] = {}
     for i, member in enumerate(members):
-        sql, member_params = render(member, dialect, f"{path}_{i}")
+        sql, member_params = render(member, f"{path}_{i}")
         if sql:
             parts.append(f"({sql})")
             params.update(member_params)
@@ -168,7 +191,7 @@ def _render_group(
 
 
 def render(
-    condition: dict[str, Any], dialect: str, path: str
+    condition: dict[str, Any], path: str
 ) -> tuple[str, dict[str, Any]]:
     """Render a condition to (sql, params). Pure.
 
@@ -185,7 +208,7 @@ def render(
         here = f"{path}_{i}"
 
         if key in COMBINATORS:
-            sql, group_params = _render_group(key, value, dialect, here)
+            sql, group_params = _render_group(key, value, here)
             if sql:
                 parts.append(sql)
                 params.update(group_params)
@@ -195,7 +218,7 @@ def render(
         if not isinstance(value, dict):
             # `{"status": "active"}` — a bare value means equality, because
             # that is what a caller writing a plain value means.
-            sql, p = OPERATORS["eq"](column, value, here, dialect)
+            sql, p = OPERATORS["eq"](column, value, here)
             parts.append(sql)
             params.update(p)
             continue
@@ -206,7 +229,7 @@ def render(
                     f"Unknown operator {op!r} on column {column!r}. "
                     f"Known operators: {', '.join(sorted(OPERATORS))}"
                 )
-            sql, p = OPERATORS[op](column, operand, here, dialect)
+            sql, p = OPERATORS[op](column, operand, here)
             parts.append(sql)
             params.update(p)
 

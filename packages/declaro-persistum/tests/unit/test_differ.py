@@ -15,18 +15,18 @@ class TestDiff:
 
     def test_diff_empty_schemas(self):
         """Diffing two empty schemas produces no operations."""
-        result = diff(current={}, target={})
+        result = diff(current={}, target={}, dialect="postgresql")
         assert result["operations"] == []
         assert result["ambiguities"] == []
 
     def test_diff_identical_schemas(self, simple_schema):
         """Diffing identical schemas produces no operations."""
-        result = diff(current=simple_schema, target=simple_schema)
+        result = diff(current=simple_schema, target=simple_schema, dialect="postgresql")
         assert result["operations"] == []
 
     def test_diff_create_table(self, simple_schema):
         """Adding a new table creates CREATE TABLE operation."""
-        result = diff(current={}, target=simple_schema)
+        result = diff(current={}, target=simple_schema, dialect="postgresql")
 
         assert len(result["operations"]) >= 1
         create_ops = [op for op in result["operations"] if op["op"] == "create_table"]
@@ -35,7 +35,7 @@ class TestDiff:
 
     def test_diff_drop_table(self, simple_schema):
         """Removing a table creates DROP TABLE operation."""
-        result = diff(current=simple_schema, target={})
+        result = diff(current=simple_schema, target={}, dialect="postgresql")
 
         drop_ops = [op for op in result["operations"] if op["op"] == "drop_table"]
         assert len(drop_ops) == 1
@@ -50,7 +50,7 @@ class TestDiff:
             "users": {"columns": {"id": {"type": "uuid"}, "email": {"type": "text"}}}
         }
 
-        result = diff(current=current, target=target)
+        result = diff(current=current, target=target, dialect="postgresql")
 
         add_ops = [op for op in result["operations"] if op["op"] == "add_column"]
         assert len(add_ops) == 1
@@ -66,7 +66,7 @@ class TestDiff:
             "users": {"columns": {"id": {"type": "uuid"}}}
         }
 
-        result = diff(current=current, target=target)
+        result = diff(current=current, target=target, dialect="postgresql")
 
         drop_ops = [op for op in result["operations"] if op["op"] == "drop_column"]
         assert len(drop_ops) == 1
@@ -81,7 +81,7 @@ class TestDiff:
             "users": {"columns": {"full_name": {"type": "text", "renamed_from": "name"}}}
         }
 
-        result = diff(current=current, target=target)
+        result = diff(current=current, target=target, dialect="postgresql")
 
         rename_ops = [op for op in result["operations"] if op["op"] == "rename_column"]
         assert len(rename_ops) == 1
@@ -97,7 +97,7 @@ class TestDiff:
             "users": {"columns": {"count": {"type": "bigint"}}}
         }
 
-        result = diff(current=current, target=target)
+        result = diff(current=current, target=target, dialect="postgresql")
 
         alter_ops = [op for op in result["operations"] if op["op"] == "alter_column"]
         assert len(alter_ops) == 1
@@ -116,7 +116,7 @@ class TestDiff:
             }
         }
 
-        result = diff(current=current, target=target)
+        result = diff(current=current, target=target, dialect="postgresql")
 
         add_idx_ops = [op for op in result["operations"] if op["op"] == "add_index"]
         assert len(add_idx_ops) == 1
@@ -138,7 +138,7 @@ class TestDiff:
             },
         }
 
-        result = diff(current=current, target=target)
+        result = diff(current=current, target=target, dialect="postgresql")
 
         fk_ops = [op for op in result["operations"] if op["op"] == "add_foreign_key"]
         assert len(fk_ops) == 1
@@ -157,7 +157,7 @@ class TestAmbiguityDetection:
             "users": {"columns": {"full_name": {"type": "text"}}}
         }
 
-        ambiguities = detect_ambiguities(current, target)
+        ambiguities = detect_ambiguities(current, target, "postgresql")
 
         assert len(ambiguities) >= 1
         assert any(a["type"] == "possible_rename" for a in ambiguities)
@@ -171,7 +171,7 @@ class TestAmbiguityDetection:
             "users": {"columns": {"total": {"type": "text"}}}
         }
 
-        ambiguities = detect_ambiguities(current, target)
+        ambiguities = detect_ambiguities(current, target, "postgresql")
 
         rename_amb = [a for a in ambiguities if a["type"] == "possible_rename"]
         assert len(rename_amb) == 0
@@ -185,7 +185,7 @@ class TestAmbiguityDetection:
             "users": {"columns": {"full_name": {"type": "text", "renamed_from": "name"}}}
         }
 
-        ambiguities = detect_ambiguities(current, target)
+        ambiguities = detect_ambiguities(current, target, "postgresql")
 
         assert len(ambiguities) == 0
 
@@ -198,7 +198,7 @@ class TestAmbiguityDetection:
             "users": {"columns": {"full_name": {"type": "text", "is_new": True}}}
         }
 
-        ambiguities = detect_ambiguities(current, target)
+        ambiguities = detect_ambiguities(current, target, "postgresql")
 
         rename_amb = [a for a in ambiguities if a["type"] == "possible_rename"]
         assert len(rename_amb) == 0

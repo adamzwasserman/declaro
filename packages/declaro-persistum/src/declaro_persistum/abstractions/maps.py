@@ -9,6 +9,8 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from declaro_persistum.types import Dialect
+
 
 def parse_map_type(type_str: str) -> tuple[str, str] | None:
     """
@@ -105,7 +107,7 @@ SET_SQL: dict[str, Callable[[str, str], str]] = {
 }
 
 
-def map_set_sql(parent_table: str, column_name: str, dialect: str) -> str:
+def map_set_sql(parent_table: str, column_name: str, dialect: Dialect) -> str:
     """Generate UPSERT SQL for one map entry.
 
     Looked up, not branched on, for the same reason as `array_reindex_sql`:

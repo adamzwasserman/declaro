@@ -82,7 +82,7 @@ async def apply(
             except Exception as e:
                 await connection.rollback()
                 raise MigrationError(
-                    f"Failed to execute operation",
+                    "Failed to execute operation",
                     operation=operation,
                     original_error=e,
                 ) from e

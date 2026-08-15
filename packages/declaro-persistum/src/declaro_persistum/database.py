@@ -27,11 +27,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, Literal, TypedDict
 
 from declaro_persistum.exceptions import DatabaseClosedError
-from declaro_persistum.writers import WriteOne
+from declaro_persistum.types import Dialect
+from declaro_persistum.writers import TRANSACTIONS, WriteOne
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,9 @@ ShutdownPolicy = Literal["replicate", "exit_immediately"]
 # object straight to caller code that may call anything on it. What IS declared
 # is the shape of the call — one `Database` in, an awaitable out.
 Connect = Callable[["Database"], Awaitable[Any]]
+# The door DDL goes through, which is not always the door a write goes
+# through. See `Database.for_ddl`.
+ForDDL = Callable[["Database"], "AbstractAsyncContextManager[Any]"]
 CloseConnection = Callable[[Any], Awaitable[None]]
 ReplicateOnce = Callable[["Database"], Awaitable[bool]]
 RefreshOnce = Callable[["Database"], Awaitable[None]]
@@ -127,6 +131,24 @@ class Database(TypedDict):
     the lock a replicated database needs and a local one does not; it is None
     for local, which is the whole difference expressed as data rather than as
     a branch someone has to remember.
+
+    `for_ddl` is the door a SCHEMA CHANGE goes through, and it is not always
+    the door a write goes through. On a local Turso database DDL must run on
+    WAL: a table created on an MVCC connection is invisible to any other
+    connection that has already read, which is silent and total. Measured
+    2026-08-14, pyturso 0.7.2, the other connection open in every case:
+
+        A writes, then DDL                  the other connection is fine
+        the other connection READ first     "Parse error: no such table: t"
+        ALTER instead of CREATE             fine
+        the other connection WROTE first    fine
+
+    One row fails and it fails every run, so the trigger is a prior READ.
+
+    On a replicated database the same substitution would be wrong: DDL has to
+    go through the held sync connection or it never reaches the primary. So
+    the right door differs by topology, is known at open, and is a field here
+    rather than a branch at the call site.
     """
 
     path: str
@@ -137,6 +159,7 @@ class Database(TypedDict):
     token: str | None
     connect: Connect
     close_connection: CloseConnection
+    for_ddl: ForDDL
     serialise: WriteLock | None
     shutdown: ShutdownPolicy
     write_one: WriteOne
@@ -150,13 +173,14 @@ class Database(TypedDict):
 
 def new_database(
     path: str,
-    dialect: str,
+    dialect: Dialect,
     journal_mode: str,
     busy_timeout_s: float,
     primary: str | None,
     token: str | None,
     connect: Connect,
     close_connection: CloseConnection,
+    for_ddl: ForDDL,
     serialise: WriteLock | None,
     shutdown: ShutdownPolicy,
     write_one: WriteOne,
@@ -182,6 +206,7 @@ def new_database(
         "token": token,
         "connect": connect,
         "close_connection": close_connection,
+        "for_ddl": for_ddl,
         "serialise": serialise,
         "shutdown": shutdown,
         "write_one": write_one,
@@ -228,6 +253,34 @@ async def reading(db: Database) -> AsyncIterator[Any]:
 
 
 @asynccontextmanager
+async def _write_connection(db: Database) -> AsyncIterator[Any]:
+    """One connection, one transaction, one place a write block can end.
+
+    A TRANSACTION SCOPE, NOT JUST A CONNECTION. `writing` yielded and did
+    nothing else, so a block that forgot `await conn.commit()` lost its write
+    and reported nothing. Measured 2026-08-14: two writes through two blocks,
+    the second without a commit, left one row.
+
+    Committing cannot be a call to `conn.commit()`, because asyncpg has none;
+    see `writers.COMMIT`. A second commit is harmless on the engines that have
+    one, so a caller who still writes it explicitly is unaffected.
+
+    THIS IS A SEPARATE FUNCTION BECAUSE `writing` HAS TWO PATHS AND I FIXED
+    ONE. A local database takes an early return with no lock; a replicated one
+    takes the serialised path. The commit went into the second only, so every
+    local write still vanished, and the probe that caught it read 0 rows where
+    it had read 1 before the "fix". Two paths that must agree are one function
+    or they drift.
+    """
+    conn = await db["connect"](db)
+    try:
+        async with TRANSACTIONS[db["dialect"]](conn):
+            yield conn
+    finally:
+        await db["close_connection"](conn)
+
+
+@asynccontextmanager
 async def writing(db: Database) -> AsyncIterator[Any]:
     """A connection for writing, for the span of the block.
 
@@ -236,15 +289,15 @@ async def writing(db: Database) -> AsyncIterator[Any]:
     (measured, real replica, 2026-08-12). On a local database there is no lock
     and no serialisation, because concurrency is the entire reason MVCC is on
     there.
+
+    The block commits on a clean exit and rolls back on an exception, on both
+    paths. See `_write_connection`.
     """
     _check_open(db)
     serialise = db["serialise"]
     if serialise is None:
-        conn = await db["connect"](db)
-        try:
+        async with _write_connection(db) as conn:
             yield conn
-        finally:
-            await db["close_connection"](conn)
         return
 
     # INCREMENTED AROUND THE AWAIT, not anywhere convenient. A counter that is
@@ -258,11 +311,8 @@ async def writing(db: Database) -> AsyncIterator[Any]:
     finally:
         serialise["waiting"] -= 1
     try:
-        conn = await db["connect"](db)
-        try:
+        async with _write_connection(db) as conn:
             yield conn
-        finally:
-            await db["close_connection"](conn)
     finally:
         serialise["lock"].release()
 

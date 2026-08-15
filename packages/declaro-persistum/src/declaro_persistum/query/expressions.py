@@ -20,12 +20,14 @@ from __future__ import annotations
 
 from typing import Any, Literal, Protocol, TypedDict
 
+from declaro_persistum.types import Dialect
+
 
 class RendersCondition(Protocol):
     """What a JOIN's `on` must be able to do. Structural, so this module
     names no class from `table.py` and the dependency stays one-way."""
 
-    def to_sql(self, dialect: str, path: str) -> tuple[str, dict[str, Any]]: ...
+    def to_sql(self, dialect: Dialect, path: str) -> tuple[str, dict[str, Any]]: ...
 
 
 class RendersBareFragment(Protocol):
@@ -37,7 +39,7 @@ class RendersBareFragment(Protocol):
     """
 
     def _bare_sql_fragment(
-        self, dialect: str, path: str
+        self, dialect: Dialect, path: str
     ) -> tuple[str, dict[str, Any]]: ...
 
 
@@ -73,7 +75,7 @@ def _render_order_by(
 
 
 def _render_case_order_by(
-    term: CaseOrderBy, dialect: str, path: str
+    term: CaseOrderBy, dialect: Dialect, path: str
 ) -> tuple[str, dict[str, Any]]:
     """A CASE term emits the BARE expression — an alias is not valid here."""
     sql, params = term["expr"]._bare_sql_fragment(dialect, path)
@@ -93,7 +95,7 @@ to whichever branch happened to be last.
 
 
 def render_order_term(
-    term: "OrderBy | CaseOrderBy", dialect: str, path: str
+    term: OrderBy | CaseOrderBy, dialect: Dialect, path: str
 ) -> tuple[str, dict[str, Any]]:
     """Render one ORDER BY term. Pure: term in, (sql, params) out."""
     return ORDER_TERM_RENDERERS[term["kind"]](term, dialect, path)
@@ -125,7 +127,7 @@ def is_subquery(value: Any) -> bool:
     return isinstance(value, dict) and value.get("kind") == "subquery"
 
 
-def render_subquery(expr: SubqueryExpr, dialect: str) -> tuple[str, dict[str, Any]]:
+def render_subquery(expr: SubqueryExpr, dialect: Dialect) -> tuple[str, dict[str, Any]]:
     """Render the inner SELECT."""
     return expr["query"].to_sql(dialect)
 

@@ -26,19 +26,25 @@ three writers had.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from contextlib import AbstractAsyncContextManager
+from collections.abc import AsyncIterator, Callable, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, Protocol
 
 __all__ = [
     "WRITERS",
+    "TRANSACTIONS",
     "DbApiConnection",
     "AsyncpgConnection",
     "WriteOne",
     "turso_write_one",
     "sqlite_write_one",
     "postgres_write_one",
+    "Transaction",
 ]
+
+# "Scope a write block on this engine." Same shape as WriteOne and for the
+# same reason: the connection type and the dialect vary together.
+Transaction = Callable[[Any], "AbstractAsyncContextManager[None]"]
 
 
 class DbApiConnection(Protocol):
@@ -48,6 +54,14 @@ class DbApiConnection(Protocol):
         ...
 
     async def commit(self) -> None:
+        ...
+
+    async def rollback(self) -> None:
+        # DECLARED BECAUSE `dbapi_transaction` DEPENDS ON IT. The Protocol
+        # named `execute` and `commit` only, so the rollback half of the
+        # transaction scope rested on a method no contract required. mypy
+        # caught it the moment the dialect vocabulary made these signatures
+        # precise enough to check.
         ...
 
 
@@ -125,4 +139,65 @@ WRITERS: dict[str, WriteOne] = {
     "turso": turso_write_one,
     "sqlite": sqlite_write_one,
     "postgresql": postgres_write_one,
+}
+
+
+# ---------------------------------------------------------------------------
+# Scoping a `writing` block. The same engine difference, one step later.
+# ---------------------------------------------------------------------------
+#
+# `writing(db)` yielded a connection and neither committed nor rolled back, so
+# a block that forgot `await conn.commit()` lost its write and said nothing.
+# Measured 2026-08-14, two writes through two blocks, the second without a
+# commit:
+#
+#     sqlite: rows after a block that forgot to commit: 1 of 2
+#     turso : rows after a block that forgot to commit: 1 of 2
+#
+# ONE ENTRY, NOT TWO. This was first written as separate COMMIT and ROLLBACK
+# tables, and that shape let one half be right while the other was wrong: the
+# PostgreSQL entries were no-ops, on the reasoning that `postgres_write_one`
+# runs inside `conn.transaction()` and commits itself. True of the crew path
+# and false of this one — `writing` hands the raw asyncpg connection to the
+# caller, who executes outside any transaction, so asyncpg autocommits each
+# statement. Measured, a block that raises:
+#
+#     sqlite     rows after the block: 0
+#     turso      rows after the block: 0
+#     postgresql rows after the block: 1     <- committed anyway
+#
+# Same call, opposite outcome, which is the one thing priority 2 forbids.
+# Commit and rollback are two halves of one concept, so they are one entry.
+#
+# A SECOND COMMIT IS HARMLESS on the DB-API engines, measured, so a caller who
+# still writes `await conn.commit()` inside the block is not broken by this.
+
+
+@asynccontextmanager
+async def dbapi_transaction(conn: DbApiConnection) -> AsyncIterator[None]:
+    """Turso and SQLite: commit on a clean exit, roll back on an exception."""
+    try:
+        yield
+    except BaseException:
+        await conn.rollback()
+        raise
+    else:
+        await conn.commit()
+
+
+def postgres_transaction(conn: AsyncpgConnection) -> Any:
+    """PostgreSQL: asyncpg's own transaction, which already has these
+    semantics.
+
+    Returned rather than wrapped. `conn.transaction()` is an async context
+    manager that commits on exit and rolls back on an exception, so writing a
+    second one around it would add a layer that can only disagree.
+    """
+    return conn.transaction()
+
+
+TRANSACTIONS: dict[str, Transaction] = {
+    "turso": dbapi_transaction,
+    "sqlite": dbapi_transaction,
+    "postgresql": postgres_transaction,
 }

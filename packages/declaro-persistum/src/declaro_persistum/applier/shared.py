@@ -19,7 +19,7 @@ from typing import Any
 from declaro_persistum.inspector.shared import (
     columns_from_pragma_rows as columns_from_pragma_rows,
 )
-from declaro_persistum.types import ApplyResult, Column, Operation
+from declaro_persistum.types import ApplyResult, Column, Dialect, Operation
 
 # =============================================================================
 # Type mapping
@@ -82,7 +82,25 @@ TYPE_MAPS: dict[str, TypeMap] = {
 }
 
 
-def map_type(type_str: str, dialect: str) -> str:
+def same_type(left: str | None, right: str | None, dialect: Dialect) -> bool:
+    """Do two declared types name the same column ON THIS ENGINE?
+
+    `uuid` and `text` are one column on SQLite and two on PostgreSQL, so the
+    question cannot be answered without the dialect and a string comparison
+    cannot answer it at all. The differ compared the raw strings and therefore
+    proposed a type change on every migration after the first: introspection
+    reports what the engine stored, the models file says what was declared,
+    and on SQLite those are never the same word.
+
+    Absent on either side means the caller has no type to compare, which is
+    not the same as the types differing; two absences are equal and one is not.
+    """
+    if left is None or right is None:
+        return left is right
+    return map_type(left, dialect) == map_type(right, dialect)
+
+
+def map_type(type_str: str, dialect: Dialect) -> str:
     """Spell a declared type for one engine.
 
     `dialect` is required (Rule 14). A default would have meant PostgreSQL
@@ -130,7 +148,7 @@ DEFAULTS: dict[str, RenderDefault] = {
 }
 
 
-def column_definition(name: str, col: Column, dialect: str) -> str:
+def column_definition(name: str, col: Column, dialect: Dialect) -> str:
     """One column, spelled for one engine.
 
     There used to be two of these, here and in `applier/postgresql.py`, and
@@ -200,7 +218,22 @@ def create_table_sql(table: str, details: dict[str, Any]) -> str:
     return f'CREATE TABLE "{table}" (\n    {columns_sql}\n)'
 
 
-def drop_table_sql(table: str, details: dict[str, Any]) -> str:
+# AN UNDERSCORE MEANS "THE TABLE REQUIRES IT, THIS ONE DOES NOT READ IT".
+#
+# Every generator below is an entry in `_SQL_GENERATORS`, so every one takes
+# `(table, details)` whether it needs both or not. That is dict-lookup
+# polymorphism working (Rule 1): the uniform signature is what lets the
+# dispatch be a lookup instead of an if/elif chain.
+#
+# It is worth marking rather than leaving bare. An argument that is silently
+# unread reads the same as one that was forgotten, and this package has just
+# been bitten by exactly that: `dialect` was threaded through the whole
+# condition renderer, read by nothing, and carrying the literal "sql" from
+# `builder.py` for as long as it existed. The convention is already used by
+# `_render_order_by(term, _dialect, _path)` in query/expressions.py.
+
+
+def drop_table_sql(table: str, _details: dict[str, Any]) -> str:
     """Generate DROP TABLE statement."""
     return f'DROP TABLE "{table}"'
 
@@ -232,7 +265,7 @@ def rename_column_sql(table: str, details: dict[str, Any]) -> str:
     return f'ALTER TABLE "{table}" RENAME COLUMN "{from_col}" TO "{to_col}"'
 
 
-def alter_column_sql(table: str, details: dict[str, Any]) -> str:
+def alter_column_sql(_table: str, _details: dict[str, Any]) -> str:
     """ALTER COLUMN not supported — requires table reconstruction."""
     raise NotImplementedError(
         "ALTER COLUMN not supported in SQLite-compatible databases. "
@@ -252,13 +285,13 @@ def add_index_sql(table: str, details: dict[str, Any]) -> str:
     return f'CREATE {unique}INDEX "{idx_name}" ON "{table}" ({cols_sql}){where}'
 
 
-def drop_index_sql(table: str, details: dict[str, Any]) -> str:
+def drop_index_sql(_table: str, details: dict[str, Any]) -> str:
     """Generate DROP INDEX statement."""
     idx_name = details["index"]
     return f'DROP INDEX "{idx_name}"'
 
 
-def add_constraint_sql(table: str, details: dict[str, Any]) -> str:
+def add_constraint_sql(_table: str, details: dict[str, Any]) -> str:
     """ADD CONSTRAINT not supported after table creation."""
     const_name = details["constraint"]
     raise NotImplementedError(
@@ -267,7 +300,7 @@ def add_constraint_sql(table: str, details: dict[str, Any]) -> str:
     )
 
 
-def drop_constraint_sql(table: str, details: dict[str, Any]) -> str:
+def drop_constraint_sql(_table: str, _details: dict[str, Any]) -> str:
     """DROP CONSTRAINT not supported — requires table reconstruction."""
     raise NotImplementedError(
         "DROP CONSTRAINT not supported in SQLite-compatible databases. "
@@ -275,7 +308,7 @@ def drop_constraint_sql(table: str, details: dict[str, Any]) -> str:
     )
 
 
-def add_foreign_key_sql(table: str, details: dict[str, Any]) -> str:
+def add_foreign_key_sql(_table: str, _details: dict[str, Any]) -> str:
     """ADD FOREIGN KEY not supported — requires table reconstruction."""
     raise NotImplementedError(
         "Adding foreign keys after table creation not supported in SQLite-compatible databases. "
@@ -283,7 +316,7 @@ def add_foreign_key_sql(table: str, details: dict[str, Any]) -> str:
     )
 
 
-def drop_foreign_key_sql(table: str, details: dict[str, Any]) -> str:
+def drop_foreign_key_sql(_table: str, _details: dict[str, Any]) -> str:
     """DROP FOREIGN KEY not supported — requires table reconstruction."""
     raise NotImplementedError(
         "Dropping foreign keys not supported in SQLite-compatible databases. "
@@ -291,14 +324,14 @@ def drop_foreign_key_sql(table: str, details: dict[str, Any]) -> str:
     )
 
 
-def create_view_sql(table: str, details: dict[str, Any]) -> str:
+def create_view_sql(_table: str, details: dict[str, Any]) -> str:
     """Generate CREATE VIEW statement."""
     from declaro_persistum.applier.sqlite import generate_create_view
 
     return generate_create_view(details)  # type: ignore[arg-type]
 
 
-def drop_view_sql(table: str, details: dict[str, Any]) -> str:
+def drop_view_sql(_table: str, details: dict[str, Any]) -> str:
     """Generate DROP VIEW statement."""
     from declaro_persistum.applier.sqlite import generate_drop_view
 

@@ -25,7 +25,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Union
 
 from declaro_persistum.database import Database
 from declaro_persistum.mirror import Mirror, mirror
@@ -43,7 +42,7 @@ async def begin_cutover(
     target: Database,
     source_dialect: str,
     target_dialect: str,
-    schema_path: Union[str, Path],
+    schema_path: str | Path,
     *,
     batch_size: int = 1000,
     tables: list[str] | None = None,

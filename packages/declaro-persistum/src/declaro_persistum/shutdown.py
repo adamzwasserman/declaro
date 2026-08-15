@@ -21,8 +21,16 @@ import logging
 import signal
 import time
 from collections.abc import Callable
+from types import FrameType
 
 from declaro_persistum.database import Database, replicate_on_shutdown
+
+# WHAT THE OS HANDS A SIGNAL HANDLER, AND WHAT WE HAND IT BACK. `_handler` took
+# four unannotated arguments: two from the signal module and two bound per
+# signal in the loop below. An audit reads that as an undeclared domain and is
+# right; `signal.getsignal` returns exactly this union, so the name already
+# existed and was simply not written down.
+Handler = Callable[[int, FrameType | None], object] | int | None
 
 __all__ = ["trap_shutdown"]
 
@@ -56,7 +64,12 @@ def trap_shutdown(db: Database) -> Callable[[], None]:
         except (ValueError, OSError):
             continue
 
-        def _handler(signum, frame, _previous=previous, _db=db):
+        def _handler(
+            signum: int,
+            frame: FrameType | None,
+            _previous: Handler = previous,
+            _db: Database = db,
+        ) -> None:
             if callable(_previous):
                 _previous(signum, frame)
             logger.info(

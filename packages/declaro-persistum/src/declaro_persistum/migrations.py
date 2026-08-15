@@ -1,3 +1,6 @@
+
+from declaro_persistum.types import Dialect
+
 """
 Automatic schema migration support for declaro_persistum.
 
@@ -18,7 +21,7 @@ import hashlib
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Union
+from typing import Any
 
 from declaro_persistum.abstractions.enums import expand_schema_enums
 from declaro_persistum.applier.protocol import create_applier
@@ -27,11 +30,13 @@ from declaro_persistum.database import (
     is_replicated,
     reading,
     refresh,
-    writing,
 )
-from declaro_persistum.differ import diff
-from declaro_persistum.inspector.protocol import create_inspector
-from declaro_persistum.pydantic_loader import load_models_from_module
+from declaro_persistum.differ import diff, diff_views
+from declaro_persistum.inspector import introspect_with_views
+from declaro_persistum.pydantic_loader import (
+    load_declarations,
+    load_models_from_module,
+)
 
 META_TABLE = "_declaro_meta"
 
@@ -39,14 +44,37 @@ logger = logging.getLogger(__name__)
 
 
 def _for_ddl(db: Database) -> Any:
-    """A write connection. DDL and hash writes never go through a read.
+    """The database's own DDL door. Never a read, and not always a write.
 
-    On a replicated database a read connection reaches the local copy only, so
-    DDL applied through one would never reach the primary. `writing` also takes
-    the serialise lock, which is what keeps a schema change from interleaving
-    with an ordinary write.
+    This called `writing(db)` for every backend, which is right for three of
+    the four cases and silently wrong for the fourth. On a LOCAL Turso
+    database `writing` is an MVCC connection, and a table created on one is
+    invisible to any other connection that has already read — the migration
+    reports success and a live reader goes on seeing the old schema.
+
+    Measured 2026-08-14, pyturso 0.7.2, the other connection open throughout:
+
+        A writes, then DDL                  the other connection is fine
+        the other connection READ first     "Parse error: no such table: t"
+        ALTER instead of CREATE             fine
+        the other connection WROTE first    fine
+
+    A prior read is the trigger, and that row fails every run.
+
+    THE FIX IS NOT A BRANCH HERE. On a replicated database `writing` is the
+    only correct answer: the held connection is the one bound to the primary,
+    and `migrating` would open a fresh non-sync connection whose DDL never
+    leaves the machine. PostgreSQL and SQLite want `writing` too. So the door
+    is a property of the database, settled at open, and this function asks the
+    value rather than deciding for it.
+
+    On a local Turso database the door is `migrating`, which is WAL and needs
+    the file to itself. If another connection is holding a read, it raises
+    "database is locked" instead of migrating. That is the point: a loud,
+    true failure in place of a silent one, and it is what `crew.py` already
+    requires when it says migration must finish before a crew starts.
     """
-    return writing(db)
+    return db["for_ddl"](db)
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +104,7 @@ def _compute_schema_hash(schema_path: Path, version: str) -> str:
     return h.hexdigest()
 
 
-def _dialect_needs_orphan_recovery(dialect: str) -> bool:
+def _dialect_needs_orphan_recovery(dialect: Dialect) -> bool:
     """True iff this dialect uses the sqlite_master-based temp-table scheme
     that `_recover_orphaned_tmp_tables` was written for.
 
@@ -200,28 +228,45 @@ async def _schema_is_clean(
     empty.  We guard against this by verifying that at least one user table
     (anything other than ``_declaro_meta``) exists — unless the schema itself
     defines zero tables (empty module), in which case an empty DB is expected.
+
+    NOTHING IS CAUGHT HERE ANY MORE. Two `except Exception: return False`
+    blocks used to wrap this, and "return False" means "the schema is dirty,
+    go and migrate". So the answer to "is the schema clean?" was False in
+    three unrelated situations that need three different responses:
+
+        the stored hash differs          -> migrate, correct
+        the database would not answer    -> migrated against a broken
+                                            connection, one layer down
+        the schema module will not load  -> reported as dirty, then the
+                                            migration re-imports the same
+                                            broken module and fails anyway,
+                                            with the real ImportError two
+                                            call frames from where it was
+                                            first seen and swallowed
+
+    The outer block also carried the comment "Meta table doesn't exist", but
+    `_ensure_meta_table` is the first thing called and it is CREATE TABLE IF
+    NOT EXISTS. Absence was already handled; the catch only hid everything
+    else.
+
+    A question this function cannot answer is not a "no". It raises, and the
+    caller at `apply_migrations_async` sees the real error at the point it
+    happened.
     """
-    try:
-        await _ensure_meta_table(conn)
-        stored = await _get_stored_hash(conn, schema_path.name, schema_hash)
-        if stored != schema_hash:
-            return False
-        # Hash matches — verify cloud DB is not empty (stale-hash guard).
-        # Skip this check for empty schemas (no tables defined).
-        has_tables = await _has_user_tables(conn)
-        if has_tables:
-            return True
-        # No user tables — only trust the hash if the schema file itself
-        # produces no tables (empty module).  Otherwise, the DB was likely
-        # destroyed and recreated.
-        try:
-            target = load_models_from_module(schema_path)
-            return len(target) == 0
-        except Exception:
-            return False
-    except Exception:
-        # Meta table doesn't exist or query failed — treat as dirty
+    await _ensure_meta_table(conn)
+    stored = await _get_stored_hash(conn, schema_path.name, schema_hash)
+    if stored != schema_hash:
         return False
+    # Hash matches — verify cloud DB is not empty (stale-hash guard).
+    # Skip this check for empty schemas (no tables defined).
+    has_tables = await _has_user_tables(conn)
+    if has_tables:
+        return True
+    # No user tables — only trust the hash if the schema file itself
+    # produces no tables (empty module).  Otherwise, the DB was likely
+    # destroyed and recreated.
+    target = load_models_from_module(schema_path)
+    return len(target) == 0
 
 
 async def _has_user_tables(conn: Any) -> bool:
@@ -334,8 +379,8 @@ async def _recover_orphaned_tmp_tables(db: Database) -> int:
 
 async def apply_migrations_async(
     db: Database,
-    dialect: str,
-    schema_path: Union[str, Path],
+    dialect: Dialect,
+    schema_path: str | Path,
     *,
     expand_enums: bool = True,
     force: bool = False,
@@ -403,7 +448,7 @@ async def apply_migrations_async(
     if not force:
         async with reading(db) as conn:
             if await _schema_is_clean(conn, schema_path, schema_hash):
-                logger.info(f"Schema unchanged (hash match) — skipping migration")
+                logger.info("Schema unchanged (hash match) — skipping migration")
                 return {
                     "success": True,
                     "operations_applied": 0,
@@ -414,7 +459,7 @@ async def apply_migrations_async(
                 }
 
     logger.info(f"Loading schema from {schema_path}")
-    target_schema = load_models_from_module(schema_path)
+    target_schema, target_views = load_declarations(schema_path)
 
     if not target_schema:
         logger.warning("No tables found in schema models")
@@ -440,15 +485,36 @@ async def apply_migrations_async(
             f"Expanded schema to {len(target_schema)} tables (including enum lookup tables)"
         )
 
-    # Introspect current database state
-    inspector = create_inspector(dialect)
+    # Introspect current database state, VIEWS INCLUDED. Asking without them
+    # is what made views unreachable: the inspectors, the differ and the
+    # appliers all handled views, and the apply path never carried one.
     async with reading(db) as conn:
-        current_schema = await inspector.introspect(conn)
+        current_schema, current_views = await introspect_with_views(conn, dialect)
 
-    logger.info(f"Introspected {len(current_schema)} tables from database")
+    logger.info(
+        f"Introspected {len(current_schema)} tables and "
+        f"{len(current_views)} views from database"
+    )
 
-    # Compute diff
-    diff_result = diff(current_schema, target_schema)
+    # Compute diff. Tables and views are diffed by different functions because
+    # they are different things: a table is reconciled column by column, a view
+    # is replaced whole when its query changes.
+    diff_result = diff(current_schema, target_schema, dialect=dialect)
+
+    # VIEWS GO LAST, AND THEIR INDICES GO INTO THE ORDER OR NOTHING RUNS THEM.
+    # `execution_order` is the differ's topological sort over the TABLE
+    # operations, so an operation appended after it is invisible to the
+    # applier: the first version of this appended the view ops and not their
+    # indices, and the migration reported success having created no view.
+    # Appending is also the right order rather than merely a convenient one,
+    # since a view selects from tables and must be created after them.
+    view_operations = diff_views(current_views, target_views)
+    first_view_index = len(diff_result["operations"])
+    diff_result["operations"] = [*diff_result["operations"], *view_operations]
+    diff_result["execution_order"] = [
+        *diff_result["execution_order"],
+        *range(first_view_index, first_view_index + len(view_operations)),
+    ]
 
     if not diff_result["operations"]:
         logger.info("Schema is up to date - no migrations needed")

@@ -7,6 +7,20 @@ This ensures serialization to/from TOML/JSON and compatibility with pure functio
 
 from typing import Any, Literal, TypedDict
 
+# THE ENGINES, AS A VOCABULARY RATHER THAN A STRING.
+#
+# `dialect: str` appeared on 44 signatures. `str` permits every string, so a
+# slop audit counted three unexercised input regions behind each one — empty,
+# unicode, very long — about 132 in total, or 9% of this package's unexercised
+# regions. None of them is a missing test. They are one declaration, wrong in
+# 44 places: the vocabulary has exactly three members and always did.
+#
+# Declaring it is the Rule 13 remedy. The regions do not need exercising; they
+# need to stop existing. The boundary that admits a dialect from outside is
+# argparse's `choices=` in cli/main.py, which already enforces this same set,
+# so the interior can trust the contract rather than re-check it.
+Dialect = Literal["postgresql", "sqlite", "turso"]
+
 # =============================================================================
 # Extended Schema Objects (Addendum)
 # =============================================================================

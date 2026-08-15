@@ -112,9 +112,17 @@ class DriftError(DeclaroError):
             diff_lines.append(f"    {diff.get('symbol', '~')} {diff.get('description', 'Unknown')}")
         diff_display = "\n".join(diff_lines)
 
-        timestamps = ""
-        if last_snapshot and current_time:
-            timestamps = f"\n\n  Last snapshot: {last_snapshot}\n  Current time:  {current_time}"
+        # EACH TIMESTAMP STANDS ALONE. This read `if last_snapshot and
+        # current_time`, so passing one without the other dropped BOTH, in
+        # silence. "The database drifted, and I will not tell you when the
+        # snapshot was taken because I do not know what time it is now" is not
+        # a trade a caller would make.
+        stamps = [
+            f"  Last snapshot: {last_snapshot}" if last_snapshot else "",
+            f"  Current time:  {current_time}" if current_time else "",
+        ]
+        given = [line for line in stamps if line]
+        timestamps = "\n\n" + "\n".join(given) if given else ""
 
         super().__init__(
             f"Database schema has drifted from expected state\n\n"

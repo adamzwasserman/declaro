@@ -1,18 +1,5 @@
 # declaro_persistum
 
-
-> ## ⚠️ DEPRECATED — POISONOUS PRACTICE
->
-> **Every example below that hands a `ConnectionPool` to the consumer is poisonous practice. Do not copy it, and do not write new code in this shape.**
->
-> The pool decision must never reach the consumer or the common syntax. The consumer chooses **async (default) or sync**, and nothing else. Whether a pool exists behind that choice, whether a write reuses a connection, and whether the engine runs MVCC or WAL are all internal, owned by exactly one writer, and invisible above that boundary.
->
-> A pool exposed as a surface is promiscuous mutable state with no determinable owner — measured directly on this codebase 2026-08-11, where L1.18b reported the pool's holder fields as `unresolved, drives a decision`. It is the reason every conditional about MVCC kept ending up inside the pool: with no single owner, a branch had no outside to live in.
->
-> Binding constraint: **[docs/design/state-ownership-and-the-pool-boundary.md](docs/design/state-ownership-and-the-pool-boundary.md)**
->
-> This document is retained as a record. It is not guidance.
-
 You declare the state you want; the library works out how to reach it — across PostgreSQL, SQLite and Turso, without rewriting your application to move between them.
 
 ## Architectural priorities
@@ -33,7 +20,7 @@ A single API spans PostgreSQL, SQLite and Turso, so that changing database is a 
 
 This is why two of the largest parts of the package exist. Neither is a feature in its own right:
 
-- The **connection pool** is not "a pool". It is the single entry point that makes several different drivers answer to one API.
+- **`open_sqlite` / `open_postgresql` / `open_turso`** each return the same `Database` value, so `reading`, `writing` and the query layer are written once and work on all three.
 - The **compatibility layer** is not a bag of tricks. It supplies capabilities a given database lacks — arrays, maps, ranges, enums, hierarchies, materialized views, CHECK constraints — so that the difference between databases never reaches your application.
 
 Where a database genuinely cannot do something, the gap is closed here rather than handed to the caller.
@@ -48,8 +35,8 @@ There is no chain here to collide. Each branch carries its own declared schema, 
 
 Named explicitly, so that their size in the codebase is not mistaken for their importance:
 
-- **The query builder** is an expression of priority 1, not a goal of its own. It exists so that queries can be declared rather than concatenated. The several styles it offers (native, Django-like, Prisma-like, SQLAlchemy-like) are on-ramps for teams arriving from those tools — not four competing APIs to choose between.
-- **The connection pool** serves priority 2.
+- **The query builder** is an expression of priority 1, not a goal of its own. It exists so that queries can be declared rather than concatenated. It offers one style. The Django-like, Prisma-like and SQLAlchemy-like surfaces were on-ramps for teams arriving from those tools and are gone; `264cedd` and `9ff59e7` deleted them.
+- **The three `open_*` functions** serve priority 2.
 - **The compatibility layer** serves priority 2.
 - **Pure functions, TypedDicts and the absence of hidden state** are how this code is written, not what it is for. They make the three priorities achievable and testable; they are not themselves the architecture.
 
@@ -58,239 +45,106 @@ Named explicitly, so that their size in the codebase is not mistaken for their i
 ```bash
 pip install declaro_persistum
 
-# With PostgreSQL support
-pip install declaro_persistum[postgresql]
-
-# With SQLite support
-pip install declaro_persistum[sqlite]
-
-# With all databases
-pip install declaro_persistum[all]
+pip install declaro_persistum asyncpg     # PostgreSQL
+pip install declaro_persistum aiosqlite   # SQLite
+pip install declaro_persistum pyturso     # Turso, embedded or cloud
 ```
+
+Turso Cloud needs no extra package. It is `pyturso` pointed at a primary.
 
 ## Quick Start
 
-### Define Schema (Pydantic)
+### Declare the schema
 
 ```python
 # models/user.py
 from uuid import UUID
+
 from pydantic import BaseModel
-from declaro_persistum import table, field
+
+from declaro_persistum import field, table
 
 @table("users")
 class User(BaseModel):
-    id: UUID = field(primary_key=True, default="gen_random_uuid()")
+    id: UUID = field(primary_key=True)
     email: str = field(unique=True)
 ```
 
-### Run Migrations
+`@table` sets the name the loader looks for. `field()` carries what a column MEANS: `primary_key`, `unique`, `references`, `on_delete`, `check`, `default`, `db_type`. A misspelled property is a `TypeError` at import rather than a column property that silently vanishes.
+
+### Run the migration
 
 ```bash
-# Show proposed changes
-declaro diff -c postgresql://localhost/mydb
-
-# Apply migrations
-declaro apply -c postgresql://localhost/mydb
-
-# Generate SQL without executing
-declaro generate -c postgresql://localhost/mydb > migration.sql
+declaro diff -c postgresql://localhost/mydb        # show the proposed change
+declaro apply -c postgresql://localhost/mydb       # apply it
+declaro generate -c postgresql://localhost/mydb    # SQL only, nothing executed
+declaro validate -s ./schema                       # check the model files
 ```
 
-### Query with Connection Pool
+### Query
 
 ```python
-from declaro_persistum import ConnectionPool
-from declaro_persistum.query import table
-from declaro_persistum.loader import load_schema
+import asyncio
+from uuid import uuid4
 
-# Create a connection pool
-pool = await ConnectionPool.postgresql("postgresql://localhost/mydb")
-schema = load_schema("./schema")
-
-# Bind table to pool — no connection on the caller surface
-users = table("users", schema, pool)
-
-results = await (
-    users
-    .select(users.id, users.email)
-    .where(users.status == "active")
-    .execute()
+from declaro_persistum import (
+    close, execute, insert, open_sqlite, reading, select, writing,
 )
 
-await pool.close()
+async def main():
+    db = await open_sqlite("./app.db", shutdown="exit_immediately", busy_timeout_s=5.0)
+
+    async with writing(db) as conn:
+        await execute(
+            insert("users", {"id": str(uuid4()), "email": "alice@example.com"}), conn
+        )
+        await conn.commit()
+
+    async with reading(db) as conn:
+        rows = await execute(
+            select("id", "email", from_table="users",
+                   where={"email": "alice@example.com"}),
+            conn,
+        )
+
+    await close(db)
+    return rows
+
+asyncio.run(main())
 ```
 
-## Philosophy & Getting Started
+`select`, `insert`, `update`, `delete` and `raw` build a `Query`. `execute(query, conn)` runs it. A query is data until something executes it, which is why it can be built, inspected and tested without a database.
 
-Declaro is part of a larger functional-Python stack that shuns hidden state and prefers pure functions. If you haven't read it yet, the [Declaro Manifesto](../../MANIFESTO.md) lays out the fundamental ideas (banana/monkey/jungle, caching policy, anti-OOP, etc.).
+**`writing` commits when the block ends cleanly, and rolls back if it raises.** The `await conn.commit()` above is therefore optional; a second commit is harmless, so writing it explicitly still works. It did NOT commit until 2026-08-14, and a block that forgot lost its write and reported nothing.
 
-This package is the persistence layer. Its three architectural priorities are stated at the top of this file, and they are the frame for everything below: what you read here as a list of features is, in every case, either a way of letting you declare an outcome instead of a procedure (priority 1), or a way of holding one API steady across three different databases (priority 2), or the team-safe migration engine (priority 3).
-
-The functional style — pure functions, TypedDicts, no hidden state — is the discipline that makes those three achievable, not a fourth goal competing with them.
-
-Caching inside this package is deliberately narrow (pools, schemas, prepared statements). Application-specific result caching belongs in an adjacent package such as `tablix`, or in your own code.
-
-### Quick Start
-
-```bash
-pip install declaro-persistum[all]
-```
+## Opening a Database
 
 ```python
-from uuid import uuid4
-from declaro_persistum import ConnectionPool
-from declaro_persistum.query import table
-from declaro_persistum.loader import load_schema
+db = await open_sqlite("./app.db", shutdown="exit_immediately", busy_timeout_s=5.0)
+db = await open_postgresql(os.environ["DATABASE_URL"],
+                           shutdown="exit_immediately", busy_timeout_s=5.0)
+db = await open_turso("./app.db", shutdown="exit_immediately")
 
-schema = load_schema("./schema")
-pool = await ConnectionPool.sqlite("./app.db")
-
-# Bind table to pool — pool is a required parameter
-users = table("users", schema, pool)
-
-# All query methods acquire connections internally
-async with pool.acquire() as conn:
-    await conn.execute("CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT)")
-    await conn.commit()
-
-await users.insert(id=str(uuid4()), name="alice").execute()
-rows = await users.select().execute()
-print(rows)
-await pool.close()
+# Turso Cloud: a local replica kept in sync with a cloud primary.
+db = await open_turso(
+    "./replica.db",
+    primary="https://your-db-org.turso.io",
+    token=os.environ["TURSO_AUTH_TOKEN"],
+    shutdown="replicate",
+)
 ```
 
-For more examples and migration commands see the top‑level README.
+`Database` is a TypedDict, not an object with methods. `reading(db)`, `writing(db)` and `close(db)` are functions that take one.
+
+There is no pool, and that is a constraint rather than an omission. A pool exposed as a surface is mutable state with no determinable owner, which is why every conditional about MVCC used to end up inside it: with no single owner, a branch had no outside to live in. Measured on this codebase 2026-08-11: L1.18b reported the pool's holder fields as `unresolved, drives a decision`.
+
+**`shutdown` is required and has no default.** It says what happens to writes that have not reached the primary when the process stops: `"replicate"` waits for them, `"exit_immediately"` abandons them. Which one is right is a property of the deployment, and a default here would pick one silently. `busy_timeout_s` is required for the same reason.
 
 ## Features
 
-### Connection Pool
+### Enum support via Literal types
 
-Unified connection pool with consistent API across all backends:
-
-```python
-from declaro_persistum import ConnectionPool
-
-# PostgreSQL (wraps asyncpg pool)
-pool = await ConnectionPool.postgresql(
-    "postgresql://localhost/mydb",
-    min_size=5,
-    max_size=20,
-)
-
-# SQLite (semaphore-based for WAL mode)
-pool = await ConnectionPool.sqlite("./app.db", max_size=5)
-
-# Turso embedded (pyturso - SQLite-compatible with vector search & CDC)
-# Provides async interface via dedicated thread pool
-pool = await ConnectionPool.turso("./app.db", max_size=5)
-
-# Turso Cloud — a local replica kept in sync with a cloud primary.
-# Same factory as embedded Turso; adding remote_url is the only change.
-pool = await ConnectionPool.turso(
-    "./app.db",                          # local replica path
-    remote_url="libsql://your-db.turso.io",
-    auth_token="...",
-)
-
-# Bind table to pool, then execute without managing connections
-users = table("users", schema, pool)
-results = await users.select().execute()
-
-await pool.close()
-```
-
-### Schema-Validated Queries
-
-Typos caught at build time, not runtime:
-
-```python
-users = table("users", schema, pool)
-users.emial  # AttributeError: Table 'users' has no column 'emial'
-```
-
-### Atomic Increment & Bulk Updates
-
-Atomic counter math at the storage layer — no read-modify-write round trip, no race window:
-
-```python
-from declaro_persistum import increment
-
-# Single-row atomic increment via the Prisma-style API:
-await db.tags.update_one(
-    where={"tag_id": tag_id},
-    increment={"card_count": 1},
-)
-# → UPDATE tags SET card_count = card_count + :inc_card_count WHERE tag_id = :tag_id
-
-# Bulk update — apply the same delta to every row matching an IN clause:
-removed = await db.tags.update_many(
-    where={"tag_id": {"in": list(removed_tags)}},
-    increment={"card_count": -1},
-)
-# → UPDATE tags SET card_count = card_count + :inc_card_count WHERE tag_id IN (?,?,...)
-# Returns the number of rows updated (int).
-
-# data= and increment= compose in a single UPDATE statement:
-await db.tags.update_one(
-    where={"tag_id": tag_id},
-    data={"last_touched": "now()"},
-    increment={"card_count": -1},
-)
-```
-
-The native query layer accepts `increment(delta)` directly as a column value, so update-many is also expressible without the Prisma shortcut:
-
-```python
-from declaro_persistum import increment
-from declaro_persistum.query.table import table
-
-tags = table("tags", schema, pool)
-await (
-    tags.update(card_count=increment(1))
-        .where(tags.tag_id.in_(added_tag_ids))
-        .execute()
-)
-```
-
-Negative deltas are supported (`increment(-1)`). The emitted SQL stays `col = col + :param` with the negative value bound to the parameter — no special-casing of subtraction, no separate decrement function. The operation is atomic at the storage layer regardless of dialect.
-
-### Query Hooks (pre / post)
-
-Pass functions in — don't register them. `table_factory(...)` returns a closure that produces `TableProxy` instances with your pre-hook and post-hook pre-wired. Pre-hooks transform the query builder *before* SQL is built; post-hooks transform rows *after* the DB returns them.
-
-```python
-from declaro_persistum import table_factory
-from declaro_persistum.query.select import SelectQuery
-from declaro_persistum.query.table import table
-
-# Your app-defined hook — a pure function, testable without declaro.
-def apply_rls(query):
-    user = current_user_id.get()
-    if isinstance(query, SelectQuery):
-        proxy = table(query._table, query._schema, query._pool)
-        return query.where(proxy.owner == user)
-    return query
-
-def log_audit(rows, meta):
-    audit_log.append({"sql": meta["sql"], "rows": len(rows)})
-    return rows
-
-# Bind once at app startup:
-get_table = table_factory(schema, pool, pre=apply_rls, post=log_audit)
-
-# Use normally — hooks fire automatically on every .execute():
-items = get_table("items")
-rows = await items.select().where(items.owner == user_id).execute()
-```
-
-Because hooks are just function arguments, nothing is registered globally, nothing runs at import time, and you can compose them with ordinary Python — different scopes use different factories with different hook functions. Pre-hooks can structurally rewrite queries (DELETE → UPDATE for soft delete) by returning a different query type; the executor runs whatever comes back.
-
-Full API + RLS / audit / soft-delete recipes: [`docs/hooks.md`](docs/hooks.md).
-
-### Enum Support via Literal Types
-
-Use Python's `Literal` type for enum fields - declaro_persistum automatically creates lookup tables with foreign key constraints (providing consistent enum enforcement across all backends):
+Declare a column as a `Literal` and the migration builds a lookup table with a foreign key, so the constraint holds identically on every backend:
 
 ```python
 from typing import Literal
@@ -303,201 +157,122 @@ class Order(BaseModel):
     status: OrderStatus = "pending"
 ```
 
-This generates:
+The apply path expands it through `expand_schema_enums` into:
+
 ```sql
--- Lookup table (auto-generated)
-CREATE TABLE _dp_enum_orders_status (value TEXT PRIMARY KEY);
-INSERT INTO _dp_enum_orders_status VALUES ('pending'), ('confirmed'), ('shipped'), ('delivered');
-
--- Orders table with FK constraint
-CREATE TABLE orders (
-    id UUID PRIMARY KEY,
-    status TEXT NOT NULL DEFAULT 'pending' REFERENCES _dp_enum_orders_status(value)
+CREATE TABLE "orders" (
+    "id" TEXT PRIMARY KEY NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'pending' REFERENCES "_dp_enum_orders_status"("value")
 );
+
+CREATE TABLE "_dp_enum_orders_status" ("value" TEXT PRIMARY KEY NOT NULL);
 ```
 
-Adding or removing enum values is handled automatically during migrations.
+Adding or removing values is a migration like any other. The expansion happens in `apply_migrations_async`, not in the loader: calling `diff` on a loaded schema directly gives a plain `TEXT` column, because `literal_values` is still sitting on it unexpanded.
 
-### Multiple Query Styles
+### One column vocabulary, one spelling per engine
 
-These are on-ramps, not four APIs to choose between. All of them build the same declared query and run through the same executor; the alternative surfaces exist so a team arriving from Django, Prisma or SQLAlchemy can port code without rewriting every call site first. The native surface is the one to write new code against.
+`db_type` says what a column means. How it is spelled is the engine's business:
 
-```python
-# All styles — pool bound at table creation, no conn on caller surface
+| Declared | PostgreSQL | SQLite / Turso |
+|----------|------------|----------------|
+| `uuid` | `uuid` | `TEXT` |
+| `timestamptz` | `timestamptz` | `TEXT` |
+| `jsonb` | `jsonb` | `TEXT` |
+| `boolean` | `boolean` | `INTEGER` |
+| `numeric(10,2)` | `numeric(10,2)` | `REAL` |
+| `bytea` | `bytea` | `BLOB` |
 
-# Native fluent API
-results = await users.select().where(users.active == True).execute()
+`map_type(declared, dialect)` does the translation and takes the dialect as a required argument. An unknown dialect raises rather than quietly receiving PostgreSQL SQL.
 
-# Django-style
-results = await users.objects.filter(status="active").all()
+### The write queue
 
-# Prisma-style
-results = await users.prisma.find_many(where={"status": "active"})
-```
-
-### Latency Instrumentation
-
-Record every query's duration, op type, and success/failure:
+A waiting room in front of the WAL, for callers who arrive at the same instant. The WAL is already the queue, since a write is durable once it is in the log, so the only job left is to hand overlapping callers to the log in order.
 
 ```python
-pool = await ConnectionPool.turso(
-    "./app.db",                          # local replica path
-    remote_url="libsql://your-db.turso.io",
-    auth_token="...",
-    instrumentation=True,
-    tier_label="project",
-    latency_sink="jsonl",
-    latency_path="./data/db_latency.jsonl",
-)
-```
-
-Or attach a callable sink (Prometheus, StatsD, etc.):
-
-```python
-pool = await ConnectionPool.sqlite("./app.db")
-pool.configure_instrumentation(
-    tier_label="my-app",
-    callable_sink=lambda record: metrics.record(record),
-)
-```
-
-Each record is a `LatencyRecord` dict: `ts`, `tier`, `op`, `duration_ms`, `success`, `sql`, `error`.
-Zero overhead when disabled — no timing, no allocations.
-
-### Optimistic Write Queue
-
-For high-latency backends (Turso Cloud writes can take 750–1100ms), the write queue returns data to the caller immediately while persisting in the background:
-
-```python
-pool = await ConnectionPool.turso(
-    "./app.db",                          # local replica path
-    remote_url="libsql://your-db.turso.io",
-    auth_token="...",
-    instrumentation=True,
-    tier_label="project",
-    write_queue_path="./data/pending_writes.jsonl",
-    write_queue_threshold_ms=50.0,
+from declaro_persistum import (
+    collect, deposit, migrating, new_room, start_crew, stop_crew,
 )
 
-users = table("users", schema, pool)
+async with migrating(db) as conn:       # DDL takes its own WAL connection
+    await conn.execute("CREATE TABLE hits (id INTEGER)")
+    await conn.commit()
 
-# Returns immediately — write continues in background if >50ms
-await users.insert(id=new_id, name="alice").execute()
+room = new_room()
+crew = await start_crew(room, db, size=4, retry=retry, idle_s=0.05)
 
-# Reads merge pending queue entries so inserts appear instantly
-rows = await users.select().execute()
+tickets = [deposit(room, {"sql": "INSERT INTO hits VALUES (?)", "params": (i,)})
+           for i in range(20)]
+receipts = await asyncio.gather(*(collect(room, t) for t in tickets))
+
+await stop_crew(crew)
 ```
 
-The queue is:
-- **Transparent**: callers see no API difference
-- **Durable**: pending writes survive restarts (JSONL persistence)
-- **Self-healing**: supervisor retries with exponential backoff, CRITICAL log after 6 hours
-- **Read-aware**: SELECT results include pending entries merged by primary key
+`deposit` returns a ticket immediately; `collect` waits for that write to land. Nothing is stored: the room is empty except during the microseconds when callers overlap, so there is no pending list to survive a failure and every write has a caller holding its ticket.
+
+`migrating` is a context manager because the journal mode belongs to the FILE, not to a connection. It forces WAL for the DDL and gives the mode back on exit. Leaving the database in WAL used to undo the mode settled at open, silently.
+
+`start_crew` opens all `size` connections before it returns, so a connection that cannot open raises to you rather than killing one drainer quietly. On this laptop `size` above 1 opens cleanly but cannot write concurrently: pyturso is thread-per-connection with a blocking driver, and two drainers on one local file hit the engine's busy-wait inside a worker thread. The crew's throughput numbers were measured on Render.
+
+DDL does not go through the crew, and `declaro apply` does not choose its own connection either: the door is a field on the `Database`, settled at open. A local Turso database sends DDL through `migrating`, because a table created on an MVCC connection is invisible to any connection that has already read. A replicated one sends it through `writing`, because only the held connection reaches the primary. Migration must finish before a crew starts, and on a local database it now says so out loud: `migrating` needs the file to itself and raises "database is locked" rather than migrating around a live reader.
+
+### Latency instrumentation
+
+`build_record`, `emit_record`, `format_jsonl` and `classify_sql` in `instrumentation.py` turn a timed call into a `LatencyRecord`: `ts`, `tier`, `op`, `duration_ms`, `success`, `sql`, `error`.
+
+**Nothing in the package calls them.** There is no `instrumentation=True` switch and no automatic timing; you time the call and build the record yourself. They are pure functions, so they cost nothing when you do not.
 
 ## Supported Databases
 
-- PostgreSQL (via asyncpg)
-- SQLite (via aiosqlite)
-- Turso (via pyturso) — embedded SQLite-compatible engine, with optional cloud sync via `remote_url`
+- PostgreSQL, via asyncpg
+- SQLite, via aiosqlite
+- Turso, via pyturso: the embedded engine, or a local replica synced to a cloud primary
 
-All three answer to the same API (priority 2 above): moving between them is configuration, not a code change.
+All three answer to the same API, which is priority 2 above. Moving between them is configuration, not a code change.
 
-libsql is no longer used. `ConnectionPool.libsql()` does not exist; Turso Cloud is reached with `ConnectionPool.turso(local_path, remote_url=...)`, which keeps a local replica in sync with the cloud primary. A `libsql://` URL is still a valid Turso Cloud address — that is Turso's own URL scheme, not the removed libsql package.
+libsql is gone. Turso Cloud is reached with `open_turso(path, primary=..., token=...)`. A `libsql://` URL is still a valid Turso Cloud address, since that is Turso's own URL scheme rather than the removed libsql package.
 
 ## Database Credentials
 
-**Each database backend requires different environment variables.** Client applications must handle these differences when configuring connections.
+| Backend | Required | Example |
+|---------|----------|---------|
+| PostgreSQL | connection URL | `DATABASE_URL=postgresql://user:pass@host:5432/dbname` |
+| SQLite | file path | `DATABASE_PATH=./app.db` |
+| Turso, embedded | file path | `DATABASE_PATH=./app.db` |
+| Turso Cloud | replica path, primary URL, token | `DATABASE_PATH`, `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` |
 
-| Backend | Required Credentials | Example Env Vars |
-|---------|---------------------|------------------|
-| **PostgreSQL** | Connection URL | `DATABASE_URL=postgresql://user:pass@host:5432/dbname` |
-| **SQLite** | File path only | `DATABASE_PATH=./app.db` |
-| **Turso (embedded)** | File path only | `DATABASE_PATH=./app.db` |
-| **Turso Cloud** | Local path + URL + Auth token | See multi-tenant pattern below |
+Provisioning a Turso Cloud database is a platform API call and this package does not make it. Use the Turso CLI:
 
-### Single-Tenant Configuration
-
-```python
-import os
-from declaro_persistum import ConnectionPool
-
-# PostgreSQL - single connection string
-pool = await ConnectionPool.postgresql(os.environ["DATABASE_URL"])
-
-# SQLite / Turso embedded - just a path
-pool = await ConnectionPool.sqlite(os.environ.get("DATABASE_PATH", "./app.db"))
-pool = await ConnectionPool.turso(os.environ.get("DATABASE_PATH", "./app.db"))
-```
-
-### Multi-Tenant Configuration (Turso Cloud)
-
-**Turso cloud is designed for one database per client/tenant.** Use `TursoCloudManager` for database provisioning, token management, and connection pooling:
-
-```python
-import os
-from declaro_persistum import TursoCloudManager
-
-# Create manager with Platform API credentials
-manager = TursoCloudManager(
-    org=os.environ["TURSO_ORG"],          # e.g., "mycompany"
-    api_token=os.environ["TURSO_API_TOKEN"],  # Platform API token
-)
-
-# Create database for new tenant
-db_info = await manager.create_database("tenant-123")
-
-# Get connection pool for tenant (cached, auto-creates token)
-pool = await manager.get_pool("tenant-123")
-async with pool.acquire() as conn:
-    cursor = await conn.execute("SELECT * FROM users")
-    users = await cursor.fetchall()
-
-# Delete tenant database when they leave
-await manager.delete_database("tenant-123")
-
-# Clean up on shutdown
-await manager.close()
-```
-
-Or via CLI:
 ```bash
 turso db create my-db
 turso db tokens create my-db
 turso db destroy my-db --yes
 ```
 
+For one database per tenant, hold one `Database` per tenant in a dict. See [docs/usage.md](docs/usage.md).
+
 ## Example Applications
 
-Four complete Todo apps demonstrating different query styles, each supporting **all 4 database backends**:
+Three Todo apps, each running on all supported backends:
 
-| Example | Port | Query Style |
-|---------|------|-------------|
-| [Native Fluent SQL](examples/todo_app_native/) | 7777 | Built-in fluent query builder |
-| [Django-style](examples/todo_app_django_style/) | 7778 | QuerySet-like API with lookups |
-| [Prisma-style](examples/todo_app_prisma_style/) | 7779 | Dict-based queries |
-| [SQLAlchemy-style](examples/todo_app_sqlalchemy/) | 7780 | Declarative models with Session |
-
-### Running Examples
+| Example | Port |
+|---------|------|
+| [`examples/todo_app_native/`](examples/todo_app_native/) | 7777 |
+| [`examples/todo_app_django_style/`](examples/todo_app_django_style/) | 7778 |
+| [`examples/todo_app_prisma_style/`](examples/todo_app_prisma_style/) | 7779 |
 
 ```bash
 cd examples/todo_app_native
 uv run uvicorn app:app --reload --port 7777
 ```
 
-### Runtime Database Switching
+`examples/todo_app_sqlalchemy/` is listed in older docs as a fourth app on port 7780. It holds templates and a stale `todos.db` and no Python at all, and the SQLAlchemy-style API it demonstrated was deleted in `9ff59e7`.
 
-Each example app supports hot-swapping databases at runtime via the `/db` endpoint:
-
-- **SQLite** - Local file database (configurable path)
-- **PostgreSQL** - Production database (host/port/credentials)
-- **Turso Embedded** - Rust-based SQLite with vector search (configurable path)
-- **Turso Cloud** - Edge-hosted SQLite (URL + auth token)
-
-Visit `http://localhost:7777/db` to switch between backends without restarting the app.
+Each app switches backend at runtime through its `/db` endpoint at `http://localhost:7777/db`.
 
 ## Documentation
 
-See [docs/usage.md](docs/usage.md) for comprehensive documentation.
+[docs/usage.md](docs/usage.md) is the full reference.
 
 ## License
 

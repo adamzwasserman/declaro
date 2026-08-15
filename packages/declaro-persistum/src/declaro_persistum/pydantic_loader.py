@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from pydantic import Field as PydanticField
 
 from declaro_persistum.exceptions import LoaderError
-from declaro_persistum.types import Column, Index, Schema, Table
+from declaro_persistum.types import Column, Index, Schema, Table, View
 
 # Python type to SQL type mapping
 PYTHON_TO_SQL_TYPE: dict[type | str, str] = {
@@ -452,6 +452,43 @@ def pydantic_model_to_table(model_cls: type) -> tuple[str, Table] | None:
     return table_name, table
 
 
+def _import_module_file(module_path: Path) -> Any:
+    """Import a model file once and hand back the module.
+
+    Tables and views are both read off the same module, so the import is
+    separated from what is read out of it. Doing it twice would execute the
+    file twice, and a models file is ordinary Python that may do anything at
+    import time.
+    """
+    if not module_path.exists():
+        raise LoaderError(f"Module not found: {module_path}", path=str(module_path))
+
+    module_name = f"_dp_model_{module_path.stem}_{id(module_path)}"
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise LoaderError(f"Cannot load module: {module_path}", path=str(module_path))
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:
+        raise LoaderError(f"Error executing module: {e}", path=str(module_path)) from e
+    return module
+
+
+def load_declarations(module_path: Path) -> tuple[Schema, dict[str, View]]:
+    """Everything a models file declares: its tables AND its views.
+
+    ONE IMPORT, BOTH ANSWERS. A models file is ordinary Python and may do
+    anything at import time, so reading tables and views through two separate
+    entry points would execute it twice. Callers that want only tables still
+    have `load_models_from_module`; the apply path wants both.
+    """
+    module = _import_module_file(module_path)
+    return _schema_of(module), views_from_module(module)
+
+
 def load_models_from_module(module_path: Path) -> Schema:
     """Load all @table decorated Pydantic models from a Python module.
 
@@ -464,24 +501,11 @@ def load_models_from_module(module_path: Path) -> Schema:
     Raises:
         LoaderError: If module cannot be loaded
     """
-    if not module_path.exists():
-        raise LoaderError(f"Module not found: {module_path}", path=str(module_path))
+    return _schema_of(_import_module_file(module_path))
 
-    # Generate unique module name to avoid conflicts
-    module_name = f"_dp_model_{module_path.stem}_{id(module_path)}"
 
-    spec = importlib.util.spec_from_file_location(module_name, module_path)
-    if spec is None or spec.loader is None:
-        raise LoaderError(f"Cannot load module: {module_path}", path=str(module_path))
-
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-
-    try:
-        spec.loader.exec_module(module)
-    except Exception as e:
-        raise LoaderError(f"Error executing module: {e}", path=str(module_path)) from e
-
+def _schema_of(module: Any) -> Schema:
+    """The tables a loaded module declares."""
     schema: Schema = {}
 
     # Find all classes with __tablename__
@@ -502,6 +526,72 @@ def load_models_from_module(module_path: Path) -> Schema:
             schema[table_name] = table
 
     return schema
+
+
+# What a `View` value must carry, and what it may. Checked at load time for the
+# same reason `index_from_meta` checks index keys: a misspelled key in a plain
+# dict is silently dropped, and the view is then missing a property nobody can
+# see the absence of.
+def load_views_from_models(models_dir: str | Path) -> dict[str, View]:
+    """Every view declared across a models directory.
+
+    Mirrors `load_schema_from_models`, and skips the same files it skips.
+    """
+    models_path = Path(models_dir)
+    if not models_path.exists():
+        raise LoaderError(
+            f"Models directory not found: {models_path}", path=str(models_path)
+        )
+
+    views: dict[str, View] = {}
+    for py_file in models_path.glob("**/*.py"):
+        if py_file.name.startswith(("_", "test_")):
+            continue
+        try:
+            views.update(views_from_module(_import_module_file(py_file)))
+        except LoaderError:
+            raise
+        except Exception:
+            continue
+    return views
+
+
+VIEW_REQUIRED = ("name", "query")
+VIEW_OPTIONAL = ("materialized", "refresh", "depends_on", "trigger_sources")
+
+
+def views_from_module(module: Any) -> dict[str, View]:
+    """Every `View` value declared at module level.
+
+    A view is data, not a decorated class, because there is no Python object
+    for it to decorate: it has a name and a SELECT and no fields. So it is
+    written as a dict matching `View` and picked up by shape.
+
+    THE LOADER READ NONE OF THIS UNTIL NOW, and the whole chain around it
+    already worked. The inspectors return views when asked, the appliers
+    render `create_view` and `drop_view`, and `differ/extended.diff_views`
+    computes them — but nothing called it, so no view ever reached the applier
+    from a models directory. `usage.md` claimed views worked end to end. They
+    did not.
+    """
+    views: dict[str, View] = {}
+    for name in dir(module):
+        if name.startswith("_"):
+            continue
+        obj = getattr(module, name)
+        if not isinstance(obj, dict):
+            continue
+        if not all(k in obj for k in VIEW_REQUIRED):
+            continue
+        unknown = set(obj) - set(VIEW_REQUIRED) - set(VIEW_OPTIONAL)
+        if unknown:
+            raise LoaderError(
+                f"view '{obj['name']}' declares unknown {'keys' if len(unknown) > 1 else 'key'} "
+                f"{sorted(unknown)}. A view may carry "
+                f"{list(VIEW_REQUIRED + VIEW_OPTIONAL)}.",
+            )
+        views[obj["name"]] = obj  # type: ignore[assignment]
+    return views
 
 
 def load_schema_from_models(models_dir: str | Path) -> Schema:

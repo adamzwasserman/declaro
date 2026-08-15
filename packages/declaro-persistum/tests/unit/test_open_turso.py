@@ -59,10 +59,9 @@ class TestALocalDatabase:
         # DDL goes through `migrating`, which is WAL. Creating the table on an
         # MVCC connection makes it INVISIBLE to every later connection —
         # measured, and the reason `migrating` exists.
-        conn = await migrating(db)
-        await conn.execute("CREATE TABLE t (v TEXT)")
-        await conn.commit()
-        await conn.close()
+        async with migrating(db) as conn:
+            await conn.execute("CREATE TABLE t (v TEXT)")
+            await conn.commit()
 
         async with writing(db) as conn:
             await conn.execute("INSERT INTO t VALUES (?)", ("hello",))
@@ -117,10 +116,9 @@ class TestALocalDatabase:
         would do anyway.
         """
         db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
-        conn = await migrating(db)
-        await conn.execute("CREATE TABLE t (v INT)")
-        await conn.commit()
-        await conn.close()
+        async with migrating(db) as conn:
+            await conn.execute("CREATE TABLE t (v INT)")
+            await conn.commit()
 
         for i in range(5):
             async with writing(db) as conn:

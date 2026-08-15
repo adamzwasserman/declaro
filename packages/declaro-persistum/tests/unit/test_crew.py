@@ -8,19 +8,29 @@ compounded with MVCC — and a connection per write throws it away.
 CREW SIZE IS 1 HERE, DELIBERATELY. What this file tests is the MACHINERY:
 deposit returns a ticket at once, a drainer picks the write up, executes it on
 its held connection, and the receipt comes back. None of that needs two
-drainers.
+drainers. Size above 1 is `test_a_crew_opens_before_it_runs.py`.
 
-Two DOES NOT WORK ON A LAPTOP, and that is a property of the laptop. pyturso
-is thread-per-connection with a blocking driver, so two drainers writing to
-one local file on macOS hit the engine's busy-wait INSIDE a worker thread,
-which never returns — the await never completes and the test hangs rather than
-failing. Measured directly: one-connection-per-write on macOS loses writes at
-2 concurrent writers and locks the file outright by 10.
+"TWO DOES NOT WORK ON A LAPTOP" WAS WRITTEN HERE AND IS FALSE. It said pyturso
+is thread-per-connection with a blocking driver, so two drainers writing one
+local file on macOS hit the engine's busy-wait inside a worker thread and the
+await never returns. That WAS the observed behaviour, and it was a symptom of
+a defect rather than a property of the machine: the journal mode was
+negotiated on every connect, so N drainers raced to bootstrap the MV store and
+the survivors ran on WAL. Two WAL writers on one file is the busy-wait. The
+negotiation now happens once, at open. Measured 2026-08-14 on this MacBook,
+200 writes per run, two runs each:
 
-The crew's concurrency was measured on Render — 4,721 writes/s at crew 16,
-knees at 16 and 64 on two tiers — and belongs there. Asserting it here would
-be asserting server behaviour on a MacBook, which this package has now done
-twice and been corrected for twice.
+    crew  1   200/200 landed   2,036 and 2,181 w/s
+    crew  4   200/200 landed   2,795 and 2,706 w/s
+    crew  8   200/200 landed   2,930 and 3,023 w/s
+    crew 16   200/200 landed   2,836 and 5,757 w/s
+
+Nothing lost, nothing hung, and every row on disk.
+
+The SIZING still does not come from here. Crew 16 gave 4,721 writes/s on
+Render with knees at 16 and 64 on two tiers, and a laptop number is not a
+server number. What changed is that "a laptop cannot run two" is no longer a
+reason for anything.
 
 DDL goes through `migrating`, which is WAL. A table created on an MVCC
 connection is invisible to every other connection.
@@ -33,7 +43,7 @@ import asyncio
 import pytest
 
 from declaro_persistum.crew import start_crew, stop_crew
-from declaro_persistum.database import reading
+from declaro_persistum.database import reading, writing
 from declaro_persistum.retry import ON_CONTENTION
 from declaro_persistum.turso_database import migrating, open_turso
 from declaro_persistum.write_queue import collect, deposit, new_room
@@ -52,10 +62,9 @@ async def _write_one(conn, sql, params):
 
 async def _database_with_table(tmp_path):
     db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
-    conn = await migrating(db)
-    await conn.execute("CREATE TABLE t (v INTEGER)")
-    await conn.commit()
-    await conn.close()
+    async with migrating(db) as conn:
+        await conn.execute("CREATE TABLE t (v INTEGER)")
+        await conn.commit()
     return db
 
 
@@ -136,6 +145,7 @@ async def test_a_crew_refuses_a_replicated_database(tmp_path):
         token="t",
         connect=unused,
         close_connection=unused,
+        for_ddl=writing,
         serialise=asyncio.Lock(),
         replicate_once=unused,
         refresh_once=unused,

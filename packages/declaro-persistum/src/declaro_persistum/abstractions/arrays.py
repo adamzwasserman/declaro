@@ -9,6 +9,8 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from declaro_persistum.types import Dialect
+
 
 def parse_array_type(type_str: str) -> str | None:
     """
@@ -233,7 +235,7 @@ REINDEX_SQL: dict[str, Callable[[str, str], str]] = {
 }
 
 
-def array_reindex_sql(parent_table: str, column_name: str, dialect: str) -> str:
+def array_reindex_sql(parent_table: str, column_name: str, dialect: Dialect) -> str:
     """Generate SQL to normalize positions to 0, 1, 2, ..., closing gaps.
 
     THE DIALECT IS LOOKED UP, NOT BRANCHED ON. This was

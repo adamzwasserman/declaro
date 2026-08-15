@@ -1,5 +1,7 @@
 # SQLite Applier Bug Fixes and Enhancements
 
+**Status**: historical record. It describes the code as it stood on 2026-02-01 and is not a claim about the current API. `SQLiteApplier` and `SQLiteInspector` were classes then; both are functions now, dispatched on the dialect.
+
 ## Date Identified: 2026-02-01
 
 ## Overview

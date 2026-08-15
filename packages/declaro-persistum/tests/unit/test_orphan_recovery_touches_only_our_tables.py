@@ -62,7 +62,7 @@ def _database(conn: _Conn):
     rather than a fake of the old shape is what keeps this test honest about
     the interface it is exercising.
     """
-    from declaro_persistum.database import new_database
+    from declaro_persistum.database import new_database, writing
 
     async def connect(db):
         return conn
@@ -91,6 +91,7 @@ def _database(conn: _Conn):
         token=None,
         connect=connect,
         close_connection=close_connection,
+        for_ddl=writing,
         serialise=None,
         shutdown="exit_immediately",
         write_one=_write_one,

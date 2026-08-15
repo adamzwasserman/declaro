@@ -6,7 +6,7 @@ Defines the interface that all dialect-specific inspectors must implement.
 
 from typing import Any, Protocol
 
-from declaro_persistum.types import Schema
+from declaro_persistum.types import Dialect, Schema
 
 
 class DatabaseInspector(Protocol):
@@ -105,7 +105,7 @@ class DatabaseInspector(Protocol):
         ...
 
 
-def create_inspector(dialect: str) -> DatabaseInspector:
+def create_inspector(dialect: Dialect) -> DatabaseInspector:
     """
     Factory function to create the appropriate inspector for a dialect.
 

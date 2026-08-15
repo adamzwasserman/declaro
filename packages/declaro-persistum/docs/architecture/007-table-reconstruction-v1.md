@@ -3,7 +3,7 @@
 **Document Version**: 1.1
 **Date**: 2026-02-01
 **Updated**: 2026-03-06
-**Status**: Implemented
+**Status**: Implemented, then superseded. This is a historical record of the v1 design, not a claim about the current API: `parse_columns`, `parse_to_column_dict` and `apply_operation_to_schema` were its function names and none of them survives. See [table_reconstruction.md](../table_reconstruction.md) for what runs today.
 
 ---
 

@@ -19,7 +19,7 @@ from collections import deque
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, TypedDict, Union
+from typing import Any, Literal, TypedDict
 
 from declaro_persistum.abstractions.enums import is_enum_table
 from declaro_persistum.bulk_loader import BULK_LOADERS, BulkLoader
@@ -27,6 +27,7 @@ from declaro_persistum.database import Database, reading
 from declaro_persistum.exceptions import TransferError
 from declaro_persistum.inspector.protocol import create_inspector
 from declaro_persistum.migrations import apply_migrations_async
+from declaro_persistum.types import Dialect
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +115,7 @@ def _toposort_tables(
     graph = _build_table_fk_graph(schema, tables)
 
     # Compute in-degree
-    in_degree: dict[str, int] = {t: 0 for t in tables}
+    in_degree: dict[str, int] = dict.fromkeys(tables, 0)
     for deps in graph.values():
         for dep in deps:
             if dep in in_degree:
@@ -318,9 +319,9 @@ async def _transfer_table(
 async def bulk_transfer(
     source: Database,
     target: Database,
-    source_dialect: str,
-    target_dialect: str,
-    schema_path: Union[str, Path],
+    source_dialect: Dialect,
+    target_dialect: Dialect,
+    schema_path: str | Path,
     *,
     batch_size: int = 1000,
     tables: list[str] | None = None,
@@ -414,95 +415,94 @@ async def bulk_transfer(
     total_rows = 0
     errors: dict[str, str] = {}
 
-    async with reading(source) as source_conn:
-        async with reading(target) as target_conn:
-            # Create progress table
-            await _ensure_progress_table(target_conn, target_loader)
+    async with reading(source) as source_conn, reading(target) as target_conn:
+        # Create progress table
+        await _ensure_progress_table(target_conn, target_loader)
 
-            # Disable FK checks if circular refs detected
-            if circular_refs:
-                try:
-                    await target_loader["disable_fk_checks"](target_conn)
-                except Exception as e:
-                    logger.warning(f"Could not disable FK checks: {e}")
-
+        # Disable FK checks if circular refs detected
+        if circular_refs:
             try:
-                for table in sorted_tables:
-                    table_def = source_schema.get(table, {})
-                    columns = list(table_def.get("columns", {}).keys())
-                    if not columns:
-                        logger.warning(f"Skipping {table}: no columns found")
+                await target_loader["disable_fk_checks"](target_conn)
+            except Exception as e:
+                logger.warning(f"Could not disable FK checks: {e}")
+
+        try:
+            for table in sorted_tables:
+                table_def = source_schema.get(table, {})
+                columns = list(table_def.get("columns", {}).keys())
+                if not columns:
+                    logger.warning(f"Skipping {table}: no columns found")
+                    tables_skipped += 1
+                    continue
+
+                # Check resume status
+                if resume:
+                    status = await _get_table_status(target_conn, table)
+                    if status and status["status"] == "completed":
+                        logger.info(f"Skipping {table}: already completed")
                         tables_skipped += 1
-                        continue
-
-                    # Check resume status
-                    if resume:
-                        status = await _get_table_status(target_conn, table)
-                        if status and status["status"] == "completed":
-                            logger.info(f"Skipping {table}: already completed")
-                            tables_skipped += 1
-                            total_rows += status.get("rows_transferred", 0)
-                            if on_progress:
-                                on_progress({
-                                    "table": table,
-                                    "status": "skipped",
-                                    "rows_transferred": status.get("rows_transferred", 0),
-                                    "total_rows": status.get("total_rows", 0),
-                                    "error": None,
-                                })
-                            continue
-
-                        if status and status["status"] == "in_progress":
-                            logger.info(
-                                f"Restarting {table}: was in_progress, "
-                                f"deleting existing rows"
-                            )
-                            await target_loader["delete_rows"](target_conn, table)
-                            if hasattr(target_conn, "commit"):
-                                await target_conn.commit()
-
-                    # Transfer the table
-                    try:
-                        progress = await _transfer_table(
-                            source_conn,
-                            target_conn,
-                            source_loader,
-                            target_loader,
-                            table,
-                            columns,
-                            batch_size,
-                            on_progress,
-                        )
-                        tables_transferred += 1
-                        total_rows += progress["rows_transferred"]
-                        logger.info(
-                            f"Transferred {table}: "
-                            f"{progress['rows_transferred']}/{progress['total_rows']} rows"
-                        )
-                    except Exception as e:
-                        tables_failed += 1
-                        error_msg = f"{type(e).__name__}: {e}"
-                        errors[table] = error_msg
-                        logger.error(f"Failed to transfer {table}: {error_msg}")
-
-                        await _upsert_progress(
-                            target_conn, table, "failed", error=error_msg
-                        )
+                        total_rows += status.get("rows_transferred", 0)
                         if on_progress:
                             on_progress({
                                 "table": table,
-                                "status": "failed",
-                                "rows_transferred": 0,
-                                "total_rows": 0,
-                                "error": error_msg,
+                                "status": "skipped",
+                                "rows_transferred": status.get("rows_transferred", 0),
+                                "total_rows": status.get("total_rows", 0),
+                                "error": None,
                             })
-            finally:
-                # Re-enable FK checks
-                if circular_refs:
-                    try:
-                        await target_loader["enable_fk_checks"](target_conn)
-                    except Exception as e:
-                        logger.warning(f"Could not re-enable FK checks: {e}")
+                        continue
+
+                    if status and status["status"] == "in_progress":
+                        logger.info(
+                            f"Restarting {table}: was in_progress, "
+                            f"deleting existing rows"
+                        )
+                        await target_loader["delete_rows"](target_conn, table)
+                        if hasattr(target_conn, "commit"):
+                            await target_conn.commit()
+
+                # Transfer the table
+                try:
+                    progress = await _transfer_table(
+                        source_conn,
+                        target_conn,
+                        source_loader,
+                        target_loader,
+                        table,
+                        columns,
+                        batch_size,
+                        on_progress,
+                    )
+                    tables_transferred += 1
+                    total_rows += progress["rows_transferred"]
+                    logger.info(
+                        f"Transferred {table}: "
+                        f"{progress['rows_transferred']}/{progress['total_rows']} rows"
+                    )
+                except Exception as e:
+                    tables_failed += 1
+                    error_msg = f"{type(e).__name__}: {e}"
+                    errors[table] = error_msg
+                    logger.error(f"Failed to transfer {table}: {error_msg}")
+
+                    await _upsert_progress(
+                        target_conn, table, "failed", error=error_msg
+                    )
+                    if on_progress:
+                        on_progress({
+                            "table": table,
+                            "status": "failed",
+                            "rows_transferred": 0,
+                            "total_rows": 0,
+                            "error": error_msg,
+                        })
+        finally:
+            # Re-enable FK checks
+            if circular_refs:
+                try:
+                    await target_loader["enable_fk_checks"](target_conn)
+                except Exception as e:
+                    logger.warning(f"Could not re-enable FK checks: {e}")
 
     duration = (datetime.now(UTC) - start).total_seconds()
 

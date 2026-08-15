@@ -45,11 +45,15 @@ such table"). Migration takes its own WAL connection — `turso_database
 from __future__ import annotations
 
 import asyncio
-from typing import TypedDict
+import contextlib
+import logging
+from typing import Any, TypedDict
 
 from declaro_persistum.database import Database, is_replicated
 from declaro_persistum.retry import Retry
 from declaro_persistum.write_queue import PendingWrite, Room, drain
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["Crew", "start_crew", "stop_crew", "drainer"]
 
@@ -70,6 +74,7 @@ class Crew(TypedDict):
 async def drainer(
     room: Room,
     db: Database,
+    conn: Any,
     stop: asyncio.Event,
     retry: Retry,
     idle_s: float,
@@ -79,14 +84,21 @@ async def drainer(
     It does not know which engine it is on. `db["write_one"]` came from the
     WRITERS table at open; see writers.py.
 
-    The connection is opened once and used for writes ONLY. It never reads,
-    because a partially-consumed cursor alive on an MVCC connection when a
-    write commits is the documented silent-rollback window, and on pyturso
-    0.7.2 it panics the engine outright (core/mvcc/database/mod.rs:5424,
-    reproducible 3 of 3). One connection, one job.
+    THE CONNECTION IS HANDED IN, NOT OPENED HERE. This used to call
+    `db["connect"](db)` as its first act, inside its own task, where nothing
+    could observe the result. A connection that failed to open killed the task
+    silently and its share of the queue was never drained — `collect` then
+    waited on a future no one would resolve, so a dead drainer and a slow
+    queue looked identical from outside. Opening at the boundary, in
+    `start_crew`, is what makes the failure reach the caller (Rule 4).
+
+    The connection is used for writes ONLY. It never reads, because a
+    partially-consumed cursor alive on an MVCC connection when a write commits
+    is the documented silent-rollback window, and on pyturso 0.7.2 it panics
+    the engine outright (core/mvcc/database/mod.rs:5424, reproducible 3 of 3).
+    One connection, one job.
     """
     write_one = db["write_one"]
-    conn = await db["connect"](db)
     try:
         while not stop.is_set():
             # CLEAR BEFORE CHECKING. The reverse order is a lost wakeup: a
@@ -126,7 +138,18 @@ async def drainer(
                 # go as a tuple or positionally, or whether there is a commit.
                 await write_one(conn, write["sql"], write["params"])
 
-            await drain(room, execute, retry)
+            drained = await drain(room, execute, retry)
+            # A failure whose depositor cancelled its `collect` has no ticket
+            # to raise on. `drain` hands it back rather than dropping it, and
+            # this is the boundary, so this is where it becomes visible. The
+            # write reached the database; that its caller stopped listening
+            # does not make the engine's answer uninteresting.
+            for orphan in drained["orphaned"]:
+                logger.warning(
+                    "A write failed after its caller stopped waiting for it. "
+                    "Nobody will see this exception except this line.",
+                    exc_info=orphan,
+                )
     finally:
         await db["close_connection"](conn)
 
@@ -154,10 +177,25 @@ async def start_crew(
             "serialises, which is the most a replica can do."
         )
 
+    # EVERY CONNECTION IS OPEN BEFORE A SINGLE DRAINER STARTS. A failure here
+    # raises to the caller, where it can be seen and handled, instead of
+    # killing one task and leaving the queue with a share nobody drains.
+    # Already-opened connections are closed on the way out, so a partial crew
+    # never exists.
+    conns: list[Any] = []
+    try:
+        for _ in range(size):
+            conns.append(await db["connect"](db))
+    except Exception:
+        for conn in conns:
+            with contextlib.suppress(Exception):
+                await db["close_connection"](conn)
+        raise
+
     stop = asyncio.Event()
     tasks = [
-        asyncio.create_task(drainer(room, db, stop, retry, idle_s))
-        for _ in range(size)
+        asyncio.create_task(drainer(room, db, conn, stop, retry, idle_s))
+        for conn in conns
     ]
     return {"room": room, "stop": stop, "tasks": tasks, "size": size}
 

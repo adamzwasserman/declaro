@@ -26,9 +26,6 @@ from declaro_persistum.differ import (
     calculate_rename_confidence,
     detect_ambiguities,
     diff,
-    diff_enums,
-    diff_procedures,
-    diff_triggers,
     diff_views,
     topological_sort,
 )
@@ -124,13 +121,13 @@ def _given_any(ctx):
 
 @when("the schemas are diffed")
 def _when_diff(ctx):
-    ctx["result"] = diff(ctx["current"], ctx["target"], decisions=ctx["decisions"])
+    ctx["result"] = diff(ctx["current"], ctx["target"], decisions=ctx["decisions"], dialect="postgresql")
 
 
 @when("the schemas are diffed twice")
 def _when_diff_twice(ctx):
-    ctx["result"] = diff(ctx["current"], ctx["target"])
-    ctx["result_again"] = diff(ctx["current"], ctx["target"])
+    ctx["result"] = diff(ctx["current"], ctx["target"], dialect="postgresql")
+    ctx["result_again"] = diff(ctx["current"], ctx["target"], dialect="postgresql")
 
 
 @then(parsers.parse('there is a create_table operation for "{name}"'))
@@ -245,7 +242,7 @@ def _given_decision(ctx):
 @when("ambiguities are detected")
 def _when_detect(ctx):
     ctx["ambiguities"] = detect_ambiguities(
-        ctx["current"], ctx["target"], ctx["decisions"] or None
+        ctx["current"], ctx["target"], "postgresql", ctx["decisions"] or None
     )
 
 
@@ -464,26 +461,6 @@ def _given_enum(ctx, name, values):
     }
 
 
-@given(parsers.parse('a target enum "{name}" with values {values}'))
-def _given_target_enum(ctx, name, values):
-    ctx["new_enums"] = {
-        name: {"name": name, "values": [v.strip() for v in values.split(",")]}
-    }
-
-
-@when("the enums are diffed")
-def _when_diff_enums(ctx):
-    ctx["operations"] = diff_enums(ctx["old_enums"], ctx["new_enums"])
-
-
-@then("an operation is produced for the added value")
-def _then_enum_op(ctx):
-    assert ctx["operations"], (
-        "an enum gained a value and no operation was produced, so the new "
-        "value would be rejected at write time"
-    )
-
-
 @given(parsers.parse('a view "{name}" with one query'))
 def _given_view(ctx, name):
     ctx["old_views"] = {name: {"name": name, "query": "SELECT 1"}}
@@ -507,26 +484,15 @@ def _then_view_op(ctx):
     )
 
 
-@given("an enum, a view, a trigger and a procedure that are identical in both schemas")
+@given("a view that is identical in both schemas")
 def _given_all_identical(ctx):
-    ctx["identical"] = {
-        "enums": {"s": {"name": "s", "values": ["a"]}},
-        "views": {"v": {"name": "v", "query": "SELECT 1"}},
-        "triggers": {"t": {"name": "t", "timing": "BEFORE", "event": "INSERT",
-                           "body": "SELECT 1"}},
-        "procedures": {"p": {"name": "p", "body": "SELECT 1"}},
-    }
+    ctx["identical"] = {"views": {"v": {"name": "v", "query": "SELECT 1"}}}
 
 
-@when("each is diffed")
+@when("it is diffed")
 def _when_diff_identical(ctx):
     same = ctx["identical"]
-    ctx["all_operations"] = (
-        diff_enums(same["enums"], same["enums"])
-        + diff_views(same["views"], same["views"])
-        + diff_triggers("t", same["triggers"], same["triggers"])
-        + diff_procedures(same["procedures"], same["procedures"])
-    )
+    ctx["all_operations"] = diff_views(same["views"], same["views"])
 
 
 @then(

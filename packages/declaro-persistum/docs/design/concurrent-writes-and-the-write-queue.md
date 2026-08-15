@@ -7,7 +7,7 @@
 >
 > The consumer chooses **async (default) or sync**, and nothing else. Whether a pool exists, whether a write reuses a connection, and whether the engine runs MVCC or WAL are internal, owned by exactly one writer, and invisible above that boundary.
 >
-> Binding constraint: **[state-ownership-and-the-pool-boundary.md](state-ownership-and-the-pool-boundary.md)**
+> Binding constraint: the pool is never a surface. That constraint document was deleted in `07fc023` with ten other superseded planning documents, once the pool was gone from the code.
 >
 > The measurements in this document remain valid. The API shape does not.
 
