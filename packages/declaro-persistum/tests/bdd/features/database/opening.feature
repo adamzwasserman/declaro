@@ -37,16 +37,15 @@ Feature: What a database is when you open it, and what that decides
     When a local SQLite database is opened without saying what shutdown means
     Then the opener refuses
 
-  # RECORDED, NOT ASSERTED AS DESIRABLE. CLAUDE.md states "`open_sqlite` and
-  # `open_postgresql` accept only `exit_immediately`; asking a database with no
-  # primary to replicate at shutdown is refused." Measured 2026-08-17: it
-  # accepts "replicate", and it accepts "nonsense" too, so it validates
-  # nothing. A local database can therefore promise at SIGTERM to push to a
-  # primary it does not have. This pins what happens so a fix flips it.
-  Scenario: a local database is not yet stopped from promising to replicate
+  # FLIPPED 2026-08-17, by the note the previous version of this scenario
+  # carried. It recorded that `open_sqlite` accepted "replicate" and
+  # "nonsense" alike, against what CLAUDE.md has always said, so a local
+  # database could promise at SIGTERM to push to a primary it does not have.
+  # The scenario now asserts the refusal it was written to wait for.
+  Scenario: a local database is stopped from promising to replicate
     Given a temporary directory
     When a local SQLite database is opened promising to replicate at shutdown
-    Then it is accepted, though the documentation says it is refused
+    Then it is refused, naming the primary it does not have
 
   Scenario: a local database leaves its writers unserialised
     Given a temporary directory

@@ -62,6 +62,7 @@ from typing import Any
 from declaro_persistum.database import (
     Database,
     ShutdownPolicy,
+    check_shutdown,
     new_database,
     new_write_lock,
     writing,
@@ -286,6 +287,10 @@ async def open_turso(
     2026-08-13: 2.8s alone, 20-25s for 25 cold opens at once, because they
     serialize.
     """
+    check_shutdown(
+        shutdown, can_replicate=primary is not None, opener="open_turso"
+    )
+
     db = (
         await _open_local(path, shutdown)
         if primary is None

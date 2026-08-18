@@ -17,6 +17,7 @@ from typing import Any
 from declaro_persistum.database import (
     Database,
     ShutdownPolicy,
+    check_shutdown,
     new_database,
     writing,
 )
@@ -77,6 +78,8 @@ async def open_sqlite(
     that failure. Concurrency comes from the crew (crew.py), which bounds how
     many writes are in flight rather than how many connections exist.
     """
+    check_shutdown(shutdown, can_replicate=False, opener="open_sqlite")
+
     import asyncio
 
     db = new_database(

@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "Database",
     "ShutdownPolicy",
+    "check_shutdown",
     "WriteLock",
     "new_database",
     "new_write_lock",
@@ -69,6 +70,42 @@ __all__ = [
 # already calls close(). Stating it is the difference between a decision and an
 # omission, and a default cannot tell those apart.
 ShutdownPolicy = Literal["replicate", "exit_immediately"]
+
+def check_shutdown(policy: str, *, can_replicate: bool, opener: str) -> None:
+    """Refuse a shutdown policy this database cannot honour.
+
+    `shutdown` is required on every opener and has no default, because the
+    usual deployment has ephemeral disk and durability rests on replicating at
+    SIGTERM. It was also unchecked, and `ShutdownPolicy` is a `Literal`, which
+    Python does not enforce -- so a plain string reached the record.
+
+    THE TYPO WAS THE EXPENSIVE CASE. `trap_shutdown` reads
+
+        if db["shutdown"] != "replicate": return
+
+    so anything misspelt means "do not replicate". Someone who meant to
+    replicate and typed it wrong installed no handler, was told nothing, and
+    lost the writes on the next deploy. The argument that exists to guarantee
+    durability switched it off in silence.
+
+    `replicate` with nowhere to replicate to is the other half: the failure
+    would otherwise arrive at SIGTERM, which is the worst moment to find it.
+    """
+    if policy not in ("replicate", "exit_immediately"):
+        raise ValueError(
+            f"{opener}: shutdown={policy!r} is not a policy. It takes "
+            f"'exit_immediately', or 'replicate' where there is a primary to "
+            f"replicate to. A value that is neither reaches the database "
+            f"record and reads as 'do not replicate', so the writes are lost "
+            f"at the next deploy without anything being said."
+        )
+    if policy == "replicate" and not can_replicate:
+        raise ValueError(
+            f"{opener}: shutdown='replicate' needs a primary to replicate to, "
+            f"and this database has none. Pass 'exit_immediately', or open a "
+            f"replica with a primary and a token."
+        )
+
 
 
 # THE INJECTED BOUNDARY, NAMED. Every one of these was `Callable[..., Any]`,

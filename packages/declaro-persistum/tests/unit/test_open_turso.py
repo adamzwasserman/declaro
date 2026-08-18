@@ -159,16 +159,49 @@ class TestTheShutdownPolicyIsActedOn:
     """
 
     @pytest.mark.asyncio
-    async def test_asking_to_replicate_on_shutdown_installs_the_trap(self, tmp_path):
+    async def test_a_local_database_cannot_ask_to_replicate(self, tmp_path):
+        """CHANGED 2026-08-17. This opened a LOCAL database asking to
+        replicate and asserted the SIGTERM trap was installed.
+
+        That open is refused now: a database with no primary has nowhere to
+        replicate to, and the failure would otherwise arrive at SIGTERM. So
+        the policy IS acted on at open, which is what this test was for.
+        """
+        with pytest.raises(ValueError, match="primary"):
+            await open_turso(str(tmp_path / "t.db"), shutdown="replicate")
+
+    async def test_the_trap_is_installed_for_a_database_that_can_replicate(self):
+        """The original intent, kept, without opening a replica.
+
+        Opening one reaches the remote -- a fake primary answers `status=404,
+        Host not found` -- so the trap is asserted against the record it reads
+        rather than against a network I would have to stand up.
+        """
         import signal
+
+        from declaro_persistum.shutdown import trap_shutdown
 
         before = signal.getsignal(signal.SIGTERM)
         try:
-            await open_turso(str(tmp_path / "t.db"), shutdown="replicate")
+            release = trap_shutdown({"shutdown": "replicate", "path": "x.db"})
             assert signal.getsignal(signal.SIGTERM) is not before, (
-                'the database was opened with shutdown="replicate" and no '
-                "handler was installed; the policy was stored and ignored"
+                'a database carrying shutdown="replicate" installed no '
+                "handler; the policy would be stored and ignored"
             )
+            release()
+        finally:
+            signal.signal(signal.SIGTERM, before)
+
+    async def test_no_trap_is_installed_when_the_policy_says_exit(self):
+        """The floor. Always trapping would pass the test above."""
+        import signal
+
+        from declaro_persistum.shutdown import trap_shutdown
+
+        before = signal.getsignal(signal.SIGTERM)
+        try:
+            trap_shutdown({"shutdown": "exit_immediately", "path": "x.db"})
+            assert signal.getsignal(signal.SIGTERM) is before
         finally:
             signal.signal(signal.SIGTERM, before)
 

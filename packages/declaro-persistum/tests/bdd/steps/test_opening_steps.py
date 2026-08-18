@@ -122,27 +122,24 @@ def _then_refuses(ctx):
     )
 
 
-@then("it is accepted, though the documentation says it is refused")
-def _then_accepted_against_the_docs(ctx):
-    """Pinned, not endorsed.
+@then("it is refused, naming the primary it does not have")
+def _then_refused_naming_the_primary(ctx):
+    """FLIPPED 2026-08-17 by the note this step used to carry.
 
-    Measured 2026-08-17: `open_sqlite` accepts "replicate", "exit_immediately"
-    and "nonsense" alike. So a local database can promise at SIGTERM to push to
-    a primary it does not have, and `shutdown` is typed rather than checked.
+    It recorded that `open_sqlite` accepted "replicate", "exit_immediately"
+    and "nonsense" alike, against what CLAUDE.md has always said, and it said
+    it should fail the day someone added the validation and be renamed to the
+    refusal. That day came, and this is the rename.
 
-    This fails the day someone adds the validation, which is when the note
-    should come off and the scenario should be renamed to the refusal.
+    The error names the primary because that is what the author has to supply
+    or stop asking for.
     """
-    assert ctx["refused"] is None, (
-        "`open_sqlite` now refuses `shutdown='replicate'`, which is what "
-        "CLAUDE.md has always said it does. Rename this scenario to the "
-        "refusal and delete this note."
+    refused = ctx["refused"]
+    assert refused is not None, (
+        "the opener accepted a promise to replicate from a database with no "
+        "primary, so the failure would arrive at SIGTERM instead"
     )
-    assert ctx["db"]["primary"] is None
-    assert ctx["db"]["shutdown"] == "replicate", (
-        f"the policy was rewritten to {ctx['db']['shutdown']!r} on the way in, "
-        f"which is a silent correction rather than a refusal"
-    )
+    assert "primary" in str(refused).lower(), refused
 
 
 @when("a Turso database is opened against a primary that is not there")

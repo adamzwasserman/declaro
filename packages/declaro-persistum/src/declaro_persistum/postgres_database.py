@@ -16,6 +16,7 @@ from typing import Any
 from declaro_persistum.database import (
     Database,
     ShutdownPolicy,
+    check_shutdown,
     new_database,
     writing,
 )
@@ -71,6 +72,8 @@ async def open_postgresql(
     Writers are not serialised. PostgreSQL does multi-writer MVCC server-side,
     so a lock here would take away what the server provides.
     """
+    check_shutdown(shutdown, can_replicate=False, opener="open_postgresql")
+
     db = new_database(
         path=dsn,
         dialect=DIALECT,

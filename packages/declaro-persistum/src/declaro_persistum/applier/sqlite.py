@@ -22,11 +22,8 @@ from declaro_persistum.applier.shared import (
     requires_reconstruction,
     single_change_property,
 )
-from declaro_persistum.applier.shared import (
-    map_type as _map_type_shared,
-)
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, MigrationError
-from declaro_persistum.types import ApplyResult, Enum, Operation, Trigger, View
+from declaro_persistum.types import ApplyResult, Operation, View
 
 
 def get_dialect() -> str:
