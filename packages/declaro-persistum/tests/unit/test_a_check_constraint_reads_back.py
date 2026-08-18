@@ -164,3 +164,88 @@ def test_normalisation_does_not_unwrap_a_meaningful_paren(expression) -> None:
     from declaro_persistum.inspector.shared import normalize_check
 
     assert normalize_check(expression) == expression
+
+
+# ---------------------------------------------------------------------------
+# The edges a hand-written scanner is most likely to get wrong
+# ---------------------------------------------------------------------------
+#
+# `checks_from_ddl` scans SQL text; it is not a parser. I listed these as
+# untested when the scanner shipped, then measured them against a real SQLite
+# rather than reasoning about them. All seven already held, which is worth
+# knowing precisely: the scanner is sturdier than I credited it, and now the
+# claim is pinned instead of assumed.
+
+
+@pytest.mark.parametrize(
+    "statement,expected",
+    [
+        (
+            "CREATE TABLE t (id TEXT, n INTEGER CONSTRAINT positive CHECK (n > 0))",
+            {"n": "n > 0"},
+        ),
+        (
+            "CREATE TABLE t (id TEXT, n INTEGER, g INTEGER GENERATED ALWAYS AS (n * 2))",
+            {},
+        ),
+        (
+            "CREATE TABLE t (id TEXT, n INTEGER CHECK (n > 0), "
+            "g INTEGER GENERATED ALWAYS AS (n * 2))",
+            {"n": "n > 0"},
+        ),
+        (
+            "CREATE TABLE t (\n  id TEXT,\n  n INTEGER\n    CHECK (n > 0)\n)",
+            {"n": "n > 0"},
+        ),
+        (
+            "CREATE TABLE t (id TEXT, n INTEGER, CONSTRAINT positive CHECK (n > 0))",
+            {},
+        ),
+        (
+            "CREATE TABLE t (id TEXT, s TEXT COLLATE NOCASE CHECK (s <> ''))",
+            {"s": "s <> ''"},
+        ),
+    ],
+    ids=[
+        "named-column-check",
+        "generated-column",
+        "generated-beside-a-check",
+        "newlines",
+        "named-table-check",
+        "collate-before-check",
+    ],
+)
+def test_the_scanner_holds_at_its_edges(statement, expected) -> None:
+    from declaro_persistum.inspector.shared import checks_from_ddl
+
+    assert checks_from_ddl(_ddl(statement)) == expected
+
+
+def test_a_comma_inside_a_quoted_identifier_does_not_split_the_clause() -> None:
+    """`"odd,name"` is one column, and splitting on its comma makes two.
+
+    This is the case `_split_top_level` tracks quotes for, and it is easy to
+    write a scanner that only tracks single ones.
+    """
+    from declaro_persistum.inspector.shared import checks_from_ddl
+
+    ddl = _ddl("""CREATE TABLE t ("odd,name" TEXT CHECK ("odd,name" <> ''))""")
+
+    assert checks_from_ddl(ddl) == {"odd,name": "\"odd,name\" <> ''"}
+
+
+def test_a_type_name_ending_in_check_is_not_a_constraint() -> None:
+    """SQLite accepts any type name, so `MYCHECK(10)` is a legal column type.
+
+    FOUND BY A MUTATION CONTROL. Deleting the word-boundary guard around the
+    keyword left every test passing, because my input was `checksum TEXT` and
+    what follows the letters there is not `(` -- the `rest.startswith("(")`
+    check rescued it, so the guard was never reached.
+
+    `n MYCHECK(10)` is the shape that needs it: the letters are followed
+    immediately by a parenthesis, so without the boundary check the scanner
+    reports a constraint of `10` on a column that declares none.
+    """
+    from declaro_persistum.inspector.shared import checks_from_ddl
+
+    assert checks_from_ddl(_ddl("CREATE TABLE t (id TEXT, n MYCHECK(10))")) == {}
