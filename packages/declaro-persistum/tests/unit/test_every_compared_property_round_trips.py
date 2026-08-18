@@ -110,9 +110,12 @@ def _compared_properties() -> set[str]:
         ):
             continue
         for element in ast.walk(node.value):
-            if isinstance(element, ast.Constant) and isinstance(element.value, str):
-                if element.value not in ("sqlite", "turso", "postgresql"):
-                    found.add(element.value)
+            if (
+                isinstance(element, ast.Constant)
+                and isinstance(element.value, str)
+                and element.value not in ("sqlite", "turso", "postgresql")
+            ):
+                found.add(element.value)
     return found
 
 
