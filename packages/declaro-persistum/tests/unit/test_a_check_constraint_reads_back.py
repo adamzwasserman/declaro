@@ -249,3 +249,86 @@ def test_a_type_name_ending_in_check_is_not_a_constraint() -> None:
     from declaro_persistum.inspector.shared import checks_from_ddl
 
     assert checks_from_ddl(_ddl("CREATE TABLE t (id TEXT, n MYCHECK(10))")) == {}
+
+
+# ---------------------------------------------------------------------------
+# The identifier quoting SQLite accepts, which is more than one form
+# ---------------------------------------------------------------------------
+#
+# MEASURED 2026-08-17, and these were wrong:
+#
+#     [odd name] INTEGER CHECK ([odd name] > 0)   column reported as 'odd'
+#     `odd name` INTEGER CHECK (`odd name` > 0)   column reported as 'odd'
+#     [a,b]      INTEGER CHECK ([a,b] > 0)        column reported as 'b'
+#
+# The scanner took `words[0]` off a whitespace split, so a quoted name
+# containing a space ended at the space. And `_split_top_level` tracked `'` and
+# `"` but not brackets, so a comma inside `[a,b]` split the clause in two.
+#
+# THE CONSEQUENCE IS THE LOOP AGAIN, not a wrong name in a dict. A name that
+# does not match a column is dropped by the `if name in columns` guard, so the
+# CHECK goes unreported, and an unreported CHECK is compared against None on
+# every deploy -- which is exactly the failure that took a commit to ship and
+# a commit to remove earlier today. A bracketed column name would have brought
+# it back for anyone using one.
+#
+# SQLite prohibits a subquery in a CHECK, measured, so there is no case there.
+
+
+@pytest.mark.parametrize(
+    "statement,expected",
+    [
+        (
+            "CREATE TABLE t (id TEXT, [odd name] INTEGER CHECK ([odd name] > 0))",
+            {"odd name": "[odd name] > 0"},
+        ),
+        (
+            "CREATE TABLE t (id TEXT, `odd name` INTEGER CHECK (`odd name` > 0))",
+            {"odd name": "`odd name` > 0"},
+        ),
+        (
+            'CREATE TABLE t (id TEXT, "odd name" INTEGER CHECK ("odd name" > 0))',
+            {"odd name": '"odd name" > 0'},
+        ),
+        (
+            "CREATE TABLE t (id TEXT, [a,b] INTEGER CHECK ([a,b] > 0))",
+            {"a,b": "[a,b] > 0"},
+        ),
+        # A COMMA, NOT A SPACE, and in each quoting form. A mutation control
+        # found that dropping the backtick from the splitter's quote set
+        # changed nothing, because the backtick case above holds a space and
+        # the splitter only splits on commas. The guard is observable only
+        # when the quoted name contains one.
+        (
+            "CREATE TABLE t (id TEXT, `a,b` INTEGER CHECK (`a,b` > 0))",
+            {"a,b": "`a,b` > 0"},
+        ),
+        (
+            'CREATE TABLE t (id TEXT, "a,b" INTEGER CHECK ("a,b" > 0))',
+            {"a,b": '"a,b" > 0'},
+        ),
+    ],
+    ids=[
+        "brackets",
+        "backticks",
+        "double-quotes",
+        "comma-in-brackets",
+        "comma-in-backticks",
+        "comma-in-double-quotes",
+    ],
+)
+def test_a_quoted_column_name_survives_the_scan(statement, expected) -> None:
+    from declaro_persistum.inspector.shared import checks_from_ddl
+
+    assert checks_from_ddl(_ddl(statement)) == expected
+
+
+def test_a_comma_inside_a_check_expression_does_not_split_the_clause() -> None:
+    """`substr(s, 1, 2)` has two commas and is one clause."""
+    from declaro_persistum.inspector.shared import checks_from_ddl
+
+    ddl = _ddl(
+        "CREATE TABLE t (id TEXT, s TEXT CHECK (substr(s, 1, 2) <> 'xx'))"
+    )
+
+    assert checks_from_ddl(ddl) == {"s": "substr(s, 1, 2) <> 'xx'"}

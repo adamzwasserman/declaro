@@ -295,14 +295,47 @@ def checks_from_ddl(create_statement: str) -> dict[str, str]:
 
     checks: dict[str, str] = {}
     for clause in _split_top_level(body):
-        words = clause.split()
-        if not words or words[0].upper() in ("CHECK", "PRIMARY", "FOREIGN", "UNIQUE", "CONSTRAINT"):
+        column = _leading_identifier(clause)
+        if column is None or column.upper() in (
+            "CHECK",
+            "PRIMARY",
+            "FOREIGN",
+            "UNIQUE",
+            "CONSTRAINT",
+        ):
             continue
-        column = words[0].strip('"`[]')
         expression = _check_in(clause)
         if expression is not None:
             checks[column] = expression
     return checks
+
+
+# SQLite quotes an identifier four ways, and three of them can hold a space
+# or a comma: "name", `name`, [name]. Taking `clause.split()[0]` ended the
+# name at its first space, and `_split_top_level` tracking only ' and " split
+# a clause in half at the comma inside `[a,b]`.
+_CLOSING = {'"': '"', "`": "`", "[": "]"}
+
+
+def _leading_identifier(clause: str) -> str | None:
+    """The column name a clause opens with, however it is quoted.
+
+    Returns None for a clause that starts with something other than a name,
+    which is how a table-level constraint is told from a column.
+    """
+    text = clause.lstrip()
+    if not text:
+        return None
+
+    closing = _CLOSING.get(text[0])
+    if closing:
+        end = text.find(closing, 1)
+        return text[1:end] if end != -1 else None
+
+    for position, char in enumerate(text):
+        if char.isspace() or char in "(,":
+            return text[:position]
+    return text
 
 
 def _table_body(create_statement: str) -> str | None:
@@ -334,8 +367,10 @@ def _split_top_level(body: str) -> list[str]:
             if char == quote:
                 quote = None
             continue
-        if char in "'\"":
+        if char in "'\"`":
             quote = char
+        elif char == "[":
+            quote = "]"
         elif char == "(":
             depth += 1
         elif char == ")":
