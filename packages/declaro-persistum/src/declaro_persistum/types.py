@@ -242,6 +242,12 @@ class Operation(TypedDict):
         "drop_foreign_key",
         "create_view",
         "drop_view",
+        # THE SIXTEENTH, AND IT WAS MISSING FOR AS LONG AS IT EXISTED. The
+        # differ emits `insert_enum_values` beside every `create_table` that
+        # has a lookup table to fill, and all three appliers render it, and
+        # this Literal declared fifteen. A type that undercounts the vocabulary
+        # cannot catch a misspelt op name, which is the one thing it is for.
+        "insert_enum_values",
     ]
     table: str
     details: dict[str, Any]

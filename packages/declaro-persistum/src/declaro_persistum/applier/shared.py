@@ -364,9 +364,12 @@ def rename_column_sql(table: str, details: dict[str, Any]) -> str:
     return f'ALTER TABLE "{table}" RENAME COLUMN "{from_col}" TO "{to_col}"'
 
 
-def alter_column_sql(_table: str, _details: dict[str, Any]) -> str:
-    """ALTER COLUMN not supported — requires table reconstruction."""
-    raise NotImplementedError("CODE NOT WRITTEN")
+def alter_column_sql(table: str, _details: dict[str, Any]) -> str:
+    """Rendered as the note `apply` acts on, because `apply` does act on it.
+
+    See `_reconstruction_note` below for why this is a comment and not DDL.
+    """
+    return _reconstruction_note(table, "altering a column")
 
 
 def add_index_sql(table: str, details: dict[str, Any]) -> str:
@@ -387,28 +390,55 @@ def drop_index_sql(_table: str, details: dict[str, Any]) -> str:
     return f'DROP INDEX "{idx_name}"'
 
 
-def add_constraint_sql(_table: str, details: dict[str, Any]) -> str:
-    """ADD CONSTRAINT not supported after table creation."""
-    const_name = details["constraint"]
+# THE APPLIER RECONSTRUCTS THESE THREE AND THE RENDERER RAISED ON THEM, SO
+# THE MIGRATION RAN AND COULD NOT BE PREVIEWED. `apply()` checks
+# `requires_reconstruction` before it reaches this table, rebuilds the table,
+# and reports success. `generate_sql()` has no such check and came straight
+# here, so `declaro generate` died with `NotImplementedError: CODE NOT
+# WRITTEN` on a schema change that `declaro apply` performs without complaint.
+# Measured 2026-08-18 on SQLite and on Turso, for add_foreign_key,
+# drop_foreign_key and alter_column alike.
+#
+# The comment below is what `dry_run_preview` in this same module has always
+# returned for these operations. Two preview paths asked the same question and
+# only one of them knew the answer.
+#
+# It is a comment and not the DDL because the real statements cannot be
+# written without a connection: reconstruction reads the table's stored schema
+# to know which columns to copy, and `generate_sql` is a pure function that is
+# handed operations and nothing else.
+def _reconstruction_note(table: str, what: str) -> str:
+    return f"-- Table reconstruction required for {table} ({what})"
+
+
+def add_constraint_sql(table: str, details: dict[str, Any]) -> str:
+    """SQLite and Turso cannot add a named constraint to an existing table."""
     raise NotImplementedError(
-        f"ADD CONSTRAINT not supported after table creation in SQLite-compatible databases. "
-        f"Constraint '{const_name}' must be defined in CREATE TABLE."
+        f"Cannot add constraint {details['constraint']!r} to {table!r}: SQLite "
+        f"and Turso have no ADD CONSTRAINT, and this package does not yet "
+        f"rebuild a table to add one. Declare the constraint in the model "
+        f"before the table is first created, or add it by hand."
     )
 
 
-def drop_constraint_sql(_table: str, _details: dict[str, Any]) -> str:
-    """DROP CONSTRAINT not supported — requires table reconstruction."""
-    raise NotImplementedError("CODE NOT WRITTEN")
+def drop_constraint_sql(table: str, details: dict[str, Any]) -> str:
+    """SQLite and Turso cannot drop a named constraint from an existing table."""
+    raise NotImplementedError(
+        f"Cannot drop constraint {details['constraint']!r} from {table!r}: "
+        f"SQLite and Turso have no DROP CONSTRAINT, and this package does not "
+        f"yet rebuild a table to remove one. Drop it by hand, or recreate the "
+        f"table."
+    )
 
 
-def add_foreign_key_sql(_table: str, _details: dict[str, Any]) -> str:
-    """ADD FOREIGN KEY not supported — requires table reconstruction."""
-    raise NotImplementedError("CODE NOT WRITTEN")
+def add_foreign_key_sql(table: str, _details: dict[str, Any]) -> str:
+    """Rendered as the note `apply` acts on, because `apply` does act on it."""
+    return _reconstruction_note(table, "adding a foreign key")
 
 
-def drop_foreign_key_sql(_table: str, _details: dict[str, Any]) -> str:
-    """DROP FOREIGN KEY not supported — requires table reconstruction."""
-    raise NotImplementedError("CODE NOT WRITTEN")
+def drop_foreign_key_sql(table: str, _details: dict[str, Any]) -> str:
+    """Rendered as the note `apply` acts on, because `apply` does act on it."""
+    return _reconstruction_note(table, "dropping a foreign key")
 
 
 def create_view_sql(_table: str, details: dict[str, Any]) -> str:
