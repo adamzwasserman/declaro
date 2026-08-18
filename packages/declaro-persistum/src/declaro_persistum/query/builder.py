@@ -5,6 +5,7 @@ Builds parameterized SQL queries without ORM overhead.
 All functions are pure and return Query objects.
 """
 
+import re
 from typing import Any, TypedDict
 
 
@@ -353,15 +354,48 @@ def raw(sql: str, params: dict[str, Any] | None = None) -> Query:
     }
 
 
+# What tells an EXPRESSION from a column name: parentheses, a comma, or an
+# ` AS ` alias. A bare word, even `count`, is a column.
+_EXPRESSION = re.compile(r"[(),]|\s+AS\s+", re.IGNORECASE)
+
+
+def is_expression(col: str) -> bool:
+    """Is this a thing to evaluate rather than a name to quote?"""
+    return bool(_EXPRESSION.search(col))
+
+
 def _quote_column(col: str) -> str:
-    """Quote a column name, handling table.column notation."""
+    """Quote a column name, handling table.column notation.
+
+    AN EXPRESSION IS PASSED THROUGH. This quoted everything except `*` and
+    `table.column`, so `COUNT(*) AS c` became the identifier
+    `"COUNT(*) AS c"`. SQLite treats a double-quoted string it cannot resolve
+    as a string LITERAL, so the query succeeded and returned the text of the
+    expression:
+
+        select("COUNT(*) AS c", from_table="t")
+        ->  SELECT "COUNT(*) AS c" FROM "t"
+        ->  'COUNT(*) AS c'
+
+    Measured 2026-08-17. PostgreSQL raises on the same SQL, which is at least
+    loud; SQLite answers a plausible wrong thing. Every aggregate the query
+    layer offers -- count_, sum_, avg_, min_, max_, now_ -- produces this
+    shape, and all three shipped example apps import count_.
+
+    Passing an expression through unquoted is the only thing that can work,
+    and it is worth saying what it means: a SELECT list is developer-authored,
+    like a `Literal` vocabulary, and is not a place for user input. Quoting
+    would not make that safe either, because a quoted expression is not an
+    expression, it is a wrong answer.
+    """
+    if col == "*":
+        return "*"
+    if is_expression(col):
+        return col
     if "." in col:
         parts = col.split(".", 1)
         return f'"{parts[0]}"."{parts[1]}"'
-    elif col == "*":
-        return "*"
-    else:
-        return f'"{col}"'
+    return f'"{col}"'
 
 
 # Query composition helpers

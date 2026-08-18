@@ -31,12 +31,30 @@ def _conn_module(conn: Any) -> str:
 
 
 def detect_dialect(connection: Any) -> str:
-    """Detect database dialect from connection type."""
+    """Which engine this connection belongs to, or a refusal naming the ones
+    that are recognised.
+
+    THE LAST LINE WAS `return "postgresql"  # Default`. Parameter binding is
+    the thing this decides -- $1 for asyncpg, ? and :name for the others -- so
+    an unrecognised connection was handed PostgreSQL placeholders and failed
+    somewhere downstream with a message about SQL syntax rather than about the
+    connection. Measured 2026-08-17:
+
+        detect_dialect(SomeOtherDriver()) -> 'postgresql'
+        detect_dialect(None)              -> 'postgresql'
+
+    A driver nobody has taught this package about is not PostgreSQL, and
+    saying so is the difference between a clear error here and a confusing one
+    three layers away.
+    """
     conn_type = _conn_module(connection)
     for key, dialect in _DIALECT_MAP.items():
         if key in conn_type:
             return dialect
-    return "postgresql"  # Default
+    raise ValueError(
+        f"cannot tell which engine {conn_type!r} belongs to. Recognised: "
+        f"{', '.join(sorted(set(_DIALECT_MAP.values())))}."
+    )
 
 
 async def execute(
@@ -241,10 +259,23 @@ async def _execute_fetch(connection: Any, sql: str, params: Any) -> list[dict[st
         return [dict(row) for row in rows]
 
     async def _fetch_aiosqlite() -> list[dict[str, Any]]:
+        # BORROWED AND GIVEN BACK. This assigned `connection.row_factory` and
+        # left it assigned. The connection belongs to the CALLER -- it is
+        # passed in, not owned here -- so after one query every raw
+        # `conn.execute(...)` they made returned dicts instead of tuples, for
+        # the life of the connection.
+        #
+        # That is also how the scalar defect hid. On a fresh connection a row
+        # is a tuple and `row[0]` works; run any other query first and it is a
+        # dict and `row[0]` is a lookup for the key `0`. The behaviour
+        # depended on what had run before it.
+        previous = connection.row_factory
         connection.row_factory = _dict_factory
-        cursor = await connection.execute(sql, params)
-        rows = await cursor.fetchall()
-        return list(rows)
+        try:
+            cursor = await connection.execute(sql, params)
+            return list(await cursor.fetchall())
+        finally:
+            connection.row_factory = previous
 
     async def _fetch_turso() -> list[dict[str, Any]]:
         cursor = await connection.execute(sql, params if params else ())
@@ -298,6 +329,27 @@ async def _execute_fetch_one(connection: Any, sql: str, params: Any) -> dict[str
     raise ValueError(f"Unsupported connection type: {conn_type}")
 
 
+def _first_value(row: Any) -> Any:
+    """The single value a scalar query selected, however the driver spells a row.
+
+    `row[0]` was here, and a row arrives as a MAPPING from these drivers, so
+    that is a lookup for the key `0` and raises:
+
+        total = await execute_scalar(select("COUNT(*) AS c", ...), conn)
+        KeyError: 0
+
+    Measured on SQLite 2026-08-17. `COUNT(*)` is the commonest scalar query
+    there is, and the shipped example app reaches for `execute_one` and then
+    `list(result.values())[0]`, which is this workaround written at the call
+    site by somebody who hit the same wall.
+    """
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        return next(iter(row.values()), None)
+    return row[0]
+
+
 async def _execute_fetch_scalar(connection: Any, sql: str, params: Any) -> Any:
     """Execute and fetch scalar value."""
     conn_type = _conn_module(connection)
@@ -307,13 +359,11 @@ async def _execute_fetch_scalar(connection: Any, sql: str, params: Any) -> Any:
 
     async def _scalar_aiosqlite() -> Any:
         cursor = await connection.execute(sql, params)
-        row = await cursor.fetchone()
-        return row[0] if row else None
+        return _first_value(await cursor.fetchone())
 
     async def _scalar_turso() -> Any:
         cursor = await connection.execute(sql, params if params else ())
-        row = await cursor.fetchone()
-        return row[0] if row else None
+        return _first_value(await cursor.fetchone())
 
     _FETCHERS = {
         "asyncpg": _scalar_asyncpg,

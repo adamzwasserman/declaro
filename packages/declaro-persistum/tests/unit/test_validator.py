@@ -45,10 +45,10 @@ class TestKnownTypes:
 
 class TestColumnTypes:
     def test_a_known_type_produces_nothing(self):
-        _result = _validate_column("users", "id", {"type": "integer"}, {})
-        w = _result["warnings"]
-        e = _result["errors"]
-        assert (w, e) == ([], [])
+        assert _validate_column("users", "id", {"type": "integer"}, {}) == {
+            "warnings": [],
+            "errors": [],
+        }
 
     def test_an_unknown_type_warns_and_does_not_error(self):
         _result = _validate_column("users", "id", {"type": "wat"}, {})
@@ -59,30 +59,25 @@ class TestColumnTypes:
         assert "Unknown type 'wat'" in w[0]
 
     def test_a_type_is_matched_case_insensitively(self):
-        _result = _validate_column("users", "id", {"type": "INTEGER"}, {})
-        w = _result["warnings"]
-        e = _result["errors"]
-        assert (w, e) == ([], [])
+        assert _validate_column("users", "id", {"type": "INTEGER"}, {}) == {
+            "warnings": [],
+            "errors": [],
+        }
 
     def test_a_size_specifier_is_stripped_before_matching(self):
         _result = _validate_column("users", "n", {"type": "varchar(255)"}, {})
         assert _result["warnings"] == [], "varchar(255) is varchar"
 
     def test_whitespace_around_a_size_specifier_is_stripped(self):
-        _result = _validate_column("users", "n", {"type": "numeric (10, 2)"}, {})
-        w = _result["warnings"]
+        w = _validate_column("users", "n", {"type": "numeric (10, 2)"}, {})["warnings"]
         assert w == []
 
     def test_any_array_type_is_accepted_without_being_listed(self):
-        _result = _validate_column("users", "tags", {"type": "customtype[]"}, {})
-        w = _result["warnings"]
+        w = _validate_column("users", "tags", {"type": "customtype[]"}, {})["warnings"]
         assert w == [], "the [] suffix is accepted on its own"
 
     def test_a_column_with_no_type_defaults_to_text_and_does_not_warn(self):
-        _result = _validate_column("users", "id", {}, {})
-        w = _result["warnings"]
-        e = _result["errors"]
-        assert (w, e) == ([], [])
+        assert _validate_column("users", "id", {}, {}) == {"warnings": [], "errors": []}
 
 
 class TestColumnWarnings:
@@ -103,9 +98,7 @@ class TestColumnWarnings:
         unchanged schema forever, an operation PostgreSQL refuses. One mistake,
         two modules, one day. The question is `types.is_nullable` now.
         """
-        _result = _validate_column(
-            "users", "id", {"type": "integer", "primary_key": True}, {}
-        )
+        _result = _validate_column("users", "id", {"type": "integer", "primary_key": True}, {})
         w = _result["warnings"]
         e = _result["errors"]
         assert (w, e) == ([], [])
@@ -154,17 +147,13 @@ class TestColumnWarnings:
         assert w == []
 
     def test_a_new_nullable_column_does_not_warn(self):
-        _result = _validate_column(
-            "users", "email", {"type": "text", "is_new": True}, {}
-        )
+        _result = _validate_column("users", "email", {"type": "text", "is_new": True}, {})
         w = _result["warnings"]
         assert w == []
 
     def test_an_existing_not_null_column_without_a_default_does_not_warn(self):
         """Only NEW columns can fail against rows that already exist."""
-        _result = _validate_column(
-            "users", "email", {"type": "text", "nullable": False}, {}
-        )
+        _result = _validate_column("users", "email", {"type": "text", "nullable": False}, {})
         w = _result["warnings"]
         assert w == []
 
@@ -226,9 +215,7 @@ class TestIndexes:
         assert "Column 'nope' does not exist" in errs[0]
 
     def test_every_missing_index_column_is_reported(self):
-        errs = _validate_index(
-            "users", "ix", {"columns": ["nope", "also_nope"]}, USERS["columns"]
-        )
+        errs = _validate_index("users", "ix", {"columns": ["nope", "also_nope"]}, USERS["columns"])
         assert len(errs) == 2
 
 
@@ -277,14 +264,18 @@ class TestCircularDependencies:
         available here is the cycle itself.
         """
         schema = {
-            "a": _t({
-                "id": {"type": "integer"},
-                "x": {"type": "integer", "references": "b.id"},
-            }),
-            "b": _t({
-                "id": {"type": "integer"},
-                "y": {"type": "integer", "references": "a.id"},
-            }),
+            "a": _t(
+                {
+                    "id": {"type": "integer"},
+                    "x": {"type": "integer", "references": "b.id"},
+                }
+            ),
+            "b": _t(
+                {
+                    "id": {"type": "integer"},
+                    "y": {"type": "integer", "references": "a.id"},
+                }
+            ),
         }
         _result = validate_schema(schema)
         warnings = _result["warnings"]
@@ -304,8 +295,10 @@ class TestValidateSchema:
         schema = {
             "users": USERS,
             "posts": _t(
-                {"id": {"type": "integer"},
-                 "author": {"type": "integer", "references": "users.id"}},
+                {
+                    "id": {"type": "integer"},
+                    "author": {"type": "integer", "references": "users.id"},
+                },
                 indexes={"ix_author": {"columns": ["author"]}},
                 primary_key=["id"],
             ),
@@ -314,8 +307,7 @@ class TestValidateSchema:
 
     def test_a_primary_key_naming_a_missing_column_is_an_error(self):
         schema = {"users": _t({"id": {"type": "integer"}}, primary_key=["nope"])}
-        _result = validate_schema(schema)
-        errors = _result["errors"]
+        errors = validate_schema(schema)["errors"]
         assert len(errors) == 1
         assert "Primary key column 'nope' does not exist" in errors[0]
 
@@ -327,16 +319,17 @@ class TestValidateSchema:
             "a": _t({"id": {"type": "integer"}}, indexes={"ix": {"columns": ["no"]}}),
             "b": _t({"id": {"type": "integer"}}, indexes={"ix": {"columns": ["no"]}}),
         }
-        _result = validate_schema(schema)
-        errors = _result["errors"]
+        errors = validate_schema(schema)["errors"]
         assert len(errors) == 2
 
     def test_warnings_and_errors_are_kept_apart(self):
         schema = {
-            "posts": _t({
-                "weird": {"type": "wat"},
-                "author": {"type": "integer", "references": "ghosts.id"},
-            })
+            "posts": _t(
+                {
+                    "weird": {"type": "wat"},
+                    "author": {"type": "integer", "references": "ghosts.id"},
+                }
+            )
         }
         _result = validate_schema(schema)
         warnings = _result["warnings"]
@@ -359,10 +352,12 @@ class TestValidateSchemaStrict:
 
     def test_the_message_counts_the_errors_and_lists_them(self):
         schema = {
-            "posts": _t({
-                "a": {"type": "integer", "references": "ghosts.id"},
-                "b": {"type": "integer", "references": "spooks.id"},
-            })
+            "posts": _t(
+                {
+                    "a": {"type": "integer", "references": "ghosts.id"},
+                    "b": {"type": "integer", "references": "spooks.id"},
+                }
+            )
         }
         with pytest.raises(ValidationError, match="2 error") as exc:
             validate_schema_strict(schema)
