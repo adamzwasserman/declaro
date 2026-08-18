@@ -161,10 +161,12 @@ def _remote_steps() -> set[str]:
             if not isinstance(node, ast.FunctionDef):
                 continue
             body = ast.unparse(node)
-            if not any(v in body for v in REMOTE_VARIABLES):
-                # The credentials may come from a helper this step calls.
-                if "_real_primary" not in body or node.name.startswith("_real"):
-                    continue
+            # The credentials may come from a helper this step calls, so a
+            # step that never names them can still reach the remote.
+            reads_directly = any(v in body for v in REMOTE_VARIABLES)
+            through_helper = "_real_primary" in body and not node.name.startswith("_real")
+            if not reads_directly and not through_helper:
+                continue
             for decorator in node.decorator_list:
                 if not isinstance(decorator, ast.Call):
                     continue
