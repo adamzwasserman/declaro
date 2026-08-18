@@ -1,6 +1,6 @@
 r"""A file named `test_*.py` must contain a test.
 
-THREE STILL DO NOT. Twenty-four did. Each was a docstring, its imports,
+TWO STILL DO NOT. Twenty-four did. Each was a docstring, its imports,
 sometimes a helper, and then blank space where the tests had been, and the
 suite total said nothing about the gap.
 
@@ -11,11 +11,36 @@ also the evidence that restoring them was safe. The suite went from 299 to 774.
 
 WHAT IS LEFT, AND WHY EACH IS LEFT. Measured by restoring it and running it:
 
-    test_views.py             48 tests   24 pass, 24 fail
     test_procedures.py        20 tests    9 pass, 11 fail
     test_triggers.py          20 tests    8 pass, 12 fail
 
-98 tests.
+50 tests.
+
+`test_views.py` is the fourth RESOLVED BY FILLING, 2026-08-17. Restored it ran
+47 tests, 23 passing, and the 24 failures sorted into three kinds.
+
+TWENTY-THREE WERE THE DE-CLASSING. `SQLiteApplier()`, `PostgreSQLInspector()`
+and the rest are gone, and the classes were stateless with module-level
+functions beside them, so the module IS the replacement and
+`applier.generate_create_view(v)` reads identically. Mechanical.
+
+ONE WAS A BELIEF THAT DOES NOT SURVIVE EITHER ENGINE. A changed view query
+asserted one operation, commented "CREATE OR REPLACE handles this". Measured:
+SQLite answers `near "OR": syntax error`, and PostgreSQL refuses a changed
+column list with "cannot drop columns from view". The differ emits drop then
+create, which is what works on both, so the test moved.
+
+TWELVE DESCRIBED REPLACED DESIGNS and are deleted. Views declared in TOML --
+`parse_view`, `load_views` -- became `load_declarations` off a models module.
+Native materialized views became an emulated table: `refresh_matview_sql`
+produces DELETE plus INSERT, and `grep CONCURRENTLY src/` finds nothing, so
+the six-test class guarding PostgreSQL's unique-index precondition for a
+concurrent refresh guards a statement this package never emits. The precondition
+is real and is recorded where that class stood, in case native matviews return.
+
+One more was rewritten rather than ported: it hand-wrote a `MockCursor` and a
+`MockConn` and asserted against what they returned. SQLite costs nothing to
+create, so it runs against a real one.
 
 `test_write_queue.py` is the third RESOLVED BY FILLING, 2026-08-17. The note
 above said "import error: `pool` is abolished". That was no longer true:
@@ -141,7 +166,6 @@ KNOWN_HOLLOW = {
     "test_sqlite.py",
     "test_procedures.py",
     "test_triggers.py",
-    "test_views.py",
 }
 
 
