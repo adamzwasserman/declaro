@@ -197,3 +197,64 @@ async def test_a_local_database_never_consults_them(tmp_path) -> None:
         )
     finally:
         await close_db(db)
+
+
+@pytest.mark.turso
+async def test_a_replica_injects_callables_that_reach_its_primary(tmp_path) -> None:
+    """The half I recorded as unclosable, closed.
+
+    I wrote that the replicated seam could not be tested because opening a
+    replica reaches the remote and a fake primary answers 404. That was true
+    of a FAKE primary. There is a real one: `.env` holds TEST_TURSO_URL and
+    TEST_TURSO_AUTH_TOKEN, and other tests in this suite already parse that
+    file and open against it -- `test_a_bug_in_the_push_does_not_spin_forever`
+    runs green in four seconds doing exactly this.
+
+    So the suite already touches a live remote, and the pattern for it is
+    established rather than something I would be introducing.
+
+    What this adds is the far side of the seam for a REPLICA: the callables a
+    real replicated open injects are not the local placeholders, and they take
+    the same shape `replicate` awaits.
+    """
+    import inspect
+    import pathlib as _pathlib
+
+    from declaro_persistum import close as close_db
+    from declaro_persistum import open_turso
+
+    env = _pathlib.Path(__file__).resolve().parents[2] / ".env"
+    if not env.exists():
+        pytest.skip("no .env, so there is no primary to open against")
+    values = dict(
+        line.split("=", 1)
+        for line in env.read_text().splitlines()
+        if line.strip() and not line.startswith("#") and "=" in line
+    )
+    url = values.get("TEST_TURSO_URL", "").strip().strip("\"'")
+    token = values.get("TEST_TURSO_AUTH_TOKEN", "").strip().strip("\"'")
+    if not url or not token:
+        pytest.skip("TEST_TURSO_URL or TEST_TURSO_AUTH_TOKEN is not set")
+
+    db = await open_turso(
+        str(tmp_path / "replica.db"),
+        primary=url,
+        token=token,
+        shutdown="exit_immediately",
+    )
+    try:
+        assert db["primary"] is not None
+
+        for field in ("replicate_once", "refresh_once"):
+            fn = db[field]
+            assert inspect.iscoroutinefunction(fn), f"{field} is not awaitable"
+            assert list(inspect.signature(fn).parameters) == ["_db"], field
+            assert getattr(fn, "__name__", "") not in (
+                "nothing_to_replicate",
+                "nothing_to_refresh",
+            ), (
+                f"a replica was given the local placeholder for {field}, so it "
+                f"would report a replication that never left the machine"
+            )
+    finally:
+        await close_db(db)
