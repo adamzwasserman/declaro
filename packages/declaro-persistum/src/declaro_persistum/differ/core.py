@@ -251,6 +251,26 @@ def _diff_table(
     return operations
 
 
+def _with_unique_folded(table: dict[str, Any]) -> dict[str, Column]:
+    """A table's columns, with single-column unique indexes folded onto them.
+
+    The same fold `inspector.shared.apply_unique_columns` performs on the way
+    out of a database, applied to both sides of a diff so they are asking one
+    question.
+    """
+    columns = {name: dict(col) for name, col in (table.get("columns") or {}).items()}
+    for definition in (table.get("indexes") or {}).values():
+        if not definition.get("unique"):
+            continue
+        targets = definition.get("columns") or []
+        if len(targets) != 1:
+            continue
+        name = targets[0]
+        if name in columns and not columns[name].get("primary_key"):
+            columns[name]["unique"] = True
+    return columns
+
+
 def _diff_columns(
     table_name: str,
     current: Table,
@@ -270,8 +290,20 @@ def _diff_columns(
     """
     operations: list[Operation] = []
 
-    current_columns = current.get("columns", {})
-    target_columns = target.get("columns", {})
+    # ONE SPELLING FOR UNIQUENESS ON BOTH SIDES.
+    #
+    # A schema may say a column is unique in two ways: `unique: True` on the
+    # column, or a single-column unique index in `indexes`. Introspection folds
+    # the second into the first -- `apply_unique_columns` does it -- and a
+    # declared schema usually writes whichever the author prefers.
+    #
+    # Comparing the flag without folding both sides made a table that declared
+    # a unique INDEX look like a column that had lost its uniqueness, and the
+    # differ proposed an alter_column on every deploy. The same shape as
+    # comparing a translated default against its declared spelling, one screen
+    # up: two ways of writing one fact, compared as though they were two facts.
+    current_columns = _with_unique_folded(current)
+    target_columns = _with_unique_folded(target)
 
     current_col_names = set(current_columns.keys())
     target_col_names = set(target_columns.keys())
@@ -381,6 +413,21 @@ def _compute_column_alterations(
     if not same_default(current_default, target_default, dialect):
         changes["default"] = {"from": current_default, "to": target_default}
 
+    # EVERY OTHER DECLARED CONSTRAINT, which were compared by nothing.
+    #
+    # Measured 2026-08-17 at the table level: adding or removing `unique`,
+    # and changing `check`, emitted NO operations, and `apply` then reported
+    # success with the DDL unchanged. A user declares a constraint, deploys,
+    # is told the migration succeeded, and it is not there.
+    #
+    # It also closed the only route out of a related failure. SQLite refuses
+    # to drop a UNIQUE column, so the way through is to drop the constraint
+    # first and the column second -- and step one did nothing, so step two
+    # went on failing forever.
+    for prop in ("unique", "check"):
+        if current.get(prop) != target.get(prop):
+            changes[prop] = {"from": current.get(prop), "to": target.get(prop)}
+
     return changes if changes else None
 
 
@@ -483,6 +530,37 @@ def _diff_foreign_keys(
 
         current_ref = current_col.get("references")
         target_ref = target_col.get("references")
+
+        # THE CASCADE IS PART OF THE FOREIGN KEY, and changing it was
+        # invisible: `on_delete` cascade to restrict emitted nothing. Those are
+        # opposite answers to "what happens to the children when the parent
+        # goes", so a schema that changed its mind was told it had migrated.
+        if current_ref and target_ref and current_ref == target_ref:
+            for prop in ("on_delete", "on_update"):
+                if current_col.get(prop) != target_col.get(prop):
+                    operations.append(
+                        {
+                            "op": "drop_foreign_key",
+                            "table": table_name,
+                            "details": {"column": col_name},
+                        }
+                    )
+                    operations.append(
+                        {
+                            "op": "add_foreign_key",
+                            "table": table_name,
+                            "details": {
+                                "column": col_name,
+                                "references": target_ref,
+                                **{
+                                    k: target_col[k]
+                                    for k in ("on_delete", "on_update")
+                                    if k in target_col
+                                },
+                            },
+                        }
+                    )
+                    break
 
         if current_ref and not target_ref:
             # FK removed
