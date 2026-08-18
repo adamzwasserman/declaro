@@ -144,6 +144,7 @@ def test_the_injected_names_are_the_ones_an_opener_fills() -> None:
 
 
 @pytest.mark.turso
+@pytest.mark.network
 async def test_a_local_open_injects_callables_of_the_right_shape(tmp_path) -> None:
     """A real `open_turso`, not a record I wrote."""
     import inspect
@@ -164,6 +165,7 @@ async def test_a_local_open_injects_callables_of_the_right_shape(tmp_path) -> No
 
 
 @pytest.mark.turso
+@pytest.mark.network
 async def test_a_local_database_never_consults_them(tmp_path) -> None:
     """`nothing_to_replicate` returns True, which would read as success.
 
@@ -200,6 +202,7 @@ async def test_a_local_database_never_consults_them(tmp_path) -> None:
 
 
 @pytest.mark.turso
+@pytest.mark.network
 async def test_a_replica_injects_callables_that_reach_its_primary(tmp_path) -> None:
     """The half I recorded as unclosable, closed.
 

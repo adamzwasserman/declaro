@@ -147,6 +147,7 @@ def _credentials():
 
 
 @pytest.mark.turso
+@pytest.mark.network
 async def test_the_real_replicate_once_lets_our_bug_out(tmp_path) -> None:
     """Against a live replica, because the swallow is inside `open_turso`.
 

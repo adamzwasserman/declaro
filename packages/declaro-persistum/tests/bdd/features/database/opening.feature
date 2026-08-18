@@ -53,12 +53,14 @@ Feature: What a database is when you open it, and what that decides
     Then it reports that it is not replicated
     And it carries no write lock, because nothing needs serialising
 
+  @network
   Scenario: a replicated database serialises its writers
     Given a temporary directory
     When a Turso database is opened with a primary
     Then it reports that it is replicated
     And it carries a write lock, because the replica takes one connection
 
+  @network
   Scenario: the answer comes from the primary, not from a flag beside it
     Given a temporary directory
     When a Turso database is opened with a primary

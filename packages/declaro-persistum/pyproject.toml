@@ -122,6 +122,7 @@ markers = [
     "sqlite: requires SQLite database",
     "postgresql: requires PostgreSQL database",
     "turso: requires Turso database",
+    "network: opens against a live remote; exclude with -m \"not network\"",
 ]
 
 [tool.coverage.run]
