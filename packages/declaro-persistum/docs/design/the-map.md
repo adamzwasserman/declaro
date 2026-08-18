@@ -1,5 +1,7 @@
 # The map
 
+**Status**: historical record
+
 **2026-08-12. A complete inventory of declaro-persistum against the Honest four-column model.** Machine-checkable core in [`persistum.hd`](persistum.hd); this is the whole picture, including the parts `.hd` cannot express.
 
 ## Correction, 2026-08-13. The measurements below are one day out of date and badly so.
@@ -84,7 +86,7 @@ So the pure query layer was written, exported, and abandoned. The class layer is
 
 Rule 2 permits a class that wraps a stateful external resource. A connection is exactly that. **The permission covers holding a connection; it does not cover 28 fields and 35 methods.**
 
-`TursoPool` currently owns: two database paths, a remote URL and token, a write connection, a read free list, a replica lock, a push task, a push interval, retry budgets, three initial-replication state fields, stale-holder tracking, instrumentation config, and the MVCC decision. It is the connection holder, the replication engine, the retry policy, the serialiser and the engine-mode decision in one object.
+`TursoPool` owned, on 2026-08-12: two database paths, a remote URL and token, a write connection, a read free list, a replica lock, a push task, a push interval, retry budgets, three initial-replication state fields, stale-holder tracking, instrumentation config, and the MVCC decision. It is the connection holder, the replication engine, the retry policy, the serialiser and the engine-mode decision in one object.
 
 Every defect this week came from it:
 
