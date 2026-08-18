@@ -8,6 +8,8 @@ Validates schema definitions for correctness:
 - Type names are valid
 """
 
+from typing import TypedDict
+
 from declaro_persistum.exceptions import ValidationError
 from declaro_persistum.types import Column, Index, Schema, is_nullable
 
@@ -65,7 +67,25 @@ KNOWN_TYPES = {
 }
 
 
-def validate_schema(schema: Schema) -> tuple[list[str], list[str]]:
+class ValidationResult(TypedDict):
+    """What a validation found, reached by name.
+
+    Both validators returned `tuple[list[str], list[str]]` as
+    `(warnings, errors)`. The annotation is honest about the types and silent
+    about the only thing a caller needs, and a swapped pair of same-typed
+    lists does not raise: it inverts a check and passes.
+
+    Measured on myself, 2026-08-17. Writing a test against that signature I
+    subscripted the result as a dict, then unpacked it as `errors, warnings`.
+    The second version asserted the absence of warnings by looking at the
+    errors, and it passed, because both lists were empty.
+    """
+
+    warnings: list[str]
+    errors: list[str]
+
+
+def validate_schema(schema: Schema) -> ValidationResult:
     """
     Validate a schema for correctness.
 
@@ -79,7 +99,7 @@ def validate_schema(schema: Schema) -> tuple[list[str], list[str]]:
         schema: Schema to validate
 
     Returns:
-        Tuple of (warnings, errors)
+        A ValidationResult, whose two lists are reached by name
         - warnings: Non-fatal issues (unknown types, etc.)
         - errors: Fatal issues (invalid references, etc.)
     """
@@ -91,7 +111,8 @@ def validate_schema(schema: Schema) -> tuple[list[str], list[str]]:
         columns = table.get("columns", {})
 
         for col_name, col_def in columns.items():
-            col_warnings, col_errors = _validate_column(table_name, col_name, col_def, schema)
+            column = _validate_column(table_name, col_name, col_def, schema)
+            col_warnings, col_errors = column["warnings"], column["errors"]
             warnings.extend(col_warnings)
             errors.extend(col_errors)
 
@@ -111,7 +132,7 @@ def validate_schema(schema: Schema) -> tuple[list[str], list[str]]:
     cycle_warnings = _check_circular_dependencies(schema)
     warnings.extend(cycle_warnings)
 
-    return warnings, errors
+    return {"warnings": warnings, "errors": errors}
 
 
 def _validate_column(
@@ -119,7 +140,7 @@ def _validate_column(
     col_name: str,
     col_def: Column,
     schema: Schema,
-) -> tuple[list[str], list[str]]:
+) -> ValidationResult:
     """Validate a single column definition."""
     warnings: list[str] = []
     errors: list[str] = []
@@ -162,7 +183,7 @@ def _validate_column(
             f"New NOT NULL column without default may fail if table has data"
         )
 
-    return warnings, errors
+    return {"warnings": warnings, "errors": errors}
 
 
 def _validate_reference(
@@ -298,7 +319,7 @@ def validate_schema_strict(schema: Schema) -> None:
     Raises:
         ValidationError: If any validation errors found
     """
-    warnings, errors = validate_schema(schema)
+    errors = validate_schema(schema)["errors"]
 
     if errors:
         error_list = "\n  - ".join(errors)

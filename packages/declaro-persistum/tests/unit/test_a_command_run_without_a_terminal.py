@@ -175,14 +175,13 @@ def test_a_primary_key_needs_no_second_declaration() -> None:
 
     schema = {"t": {"columns": {"id": {"type": "text", "primary_key": True}}}}
 
-    # `return warnings, errors`. My first version subscripted the result as a
-    # dict, and my second unpacked the pair the other way round. Two lists of
-    # the same type returned positionally, annotated `tuple[list[str],
-    # list[str]]`, tell a caller nothing about which is which.
-    warnings, errors = validate_schema(schema)
+    # Reached by name. This returned `tuple[list[str], list[str]]` and I got
+    # the order wrong twice writing this very test, which is why it does not
+    # any more.
+    result = validate_schema(schema)
 
-    assert not warnings, warnings
-    assert not errors, errors
+    assert not result["warnings"], result["warnings"]
+    assert not result["errors"], result["errors"]
 
 
 def test_a_primary_key_declared_nullable_is_still_a_contradiction() -> None:
@@ -197,9 +196,9 @@ def test_a_primary_key_declared_nullable_is_still_a_contradiction() -> None:
         "t": {"columns": {"id": {"type": "text", "primary_key": True, "nullable": True}}}
     }
 
-    warnings, _errors = validate_schema(schema)
-
-    assert warnings, "a nullable primary key was accepted in silence"
+    assert validate_schema(schema)["warnings"], (
+        "a nullable primary key was accepted in silence"
+    )
 
 
 def test_the_question_is_asked_in_one_place() -> None:

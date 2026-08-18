@@ -45,33 +45,43 @@ class TestKnownTypes:
 
 class TestColumnTypes:
     def test_a_known_type_produces_nothing(self):
-        w, e = _validate_column("users", "id", {"type": "integer"}, {})
+        _result = _validate_column("users", "id", {"type": "integer"}, {})
+        w = _result["warnings"]
+        e = _result["errors"]
         assert (w, e) == ([], [])
 
     def test_an_unknown_type_warns_and_does_not_error(self):
-        w, e = _validate_column("users", "id", {"type": "wat"}, {})
+        _result = _validate_column("users", "id", {"type": "wat"}, {})
+        w = _result["warnings"]
+        e = _result["errors"]
         assert e == [], "an unknown type may be a custom type or enum"
         assert len(w) == 1
         assert "Unknown type 'wat'" in w[0]
 
     def test_a_type_is_matched_case_insensitively(self):
-        w, e = _validate_column("users", "id", {"type": "INTEGER"}, {})
+        _result = _validate_column("users", "id", {"type": "INTEGER"}, {})
+        w = _result["warnings"]
+        e = _result["errors"]
         assert (w, e) == ([], [])
 
     def test_a_size_specifier_is_stripped_before_matching(self):
-        w, e = _validate_column("users", "n", {"type": "varchar(255)"}, {})
-        assert w == [], "varchar(255) is varchar"
+        _result = _validate_column("users", "n", {"type": "varchar(255)"}, {})
+        assert _result["warnings"] == [], "varchar(255) is varchar"
 
     def test_whitespace_around_a_size_specifier_is_stripped(self):
-        w, _ = _validate_column("users", "n", {"type": "numeric (10, 2)"}, {})
+        _result = _validate_column("users", "n", {"type": "numeric (10, 2)"}, {})
+        w = _result["warnings"]
         assert w == []
 
     def test_any_array_type_is_accepted_without_being_listed(self):
-        w, _ = _validate_column("users", "tags", {"type": "customtype[]"}, {})
+        _result = _validate_column("users", "tags", {"type": "customtype[]"}, {})
+        w = _result["warnings"]
         assert w == [], "the [] suffix is accepted on its own"
 
     def test_a_column_with_no_type_defaults_to_text_and_does_not_warn(self):
-        w, e = _validate_column("users", "id", {}, {})
+        _result = _validate_column("users", "id", {}, {})
+        w = _result["warnings"]
+        e = _result["errors"]
         assert (w, e) == ([], [])
 
 
@@ -93,60 +103,69 @@ class TestColumnWarnings:
         unchanged schema forever, an operation PostgreSQL refuses. One mistake,
         two modules, one day. The question is `types.is_nullable` now.
         """
-        w, e = _validate_column(
+        _result = _validate_column(
             "users", "id", {"type": "integer", "primary_key": True}, {}
         )
+        w = _result["warnings"]
+        e = _result["errors"]
         assert (w, e) == ([], [])
 
     def test_a_primary_key_declared_nullable_still_warns(self):
         """The floor. An explicit contradiction is the author's, not ours."""
-        w, e = _validate_column(
+        _result = _validate_column(
             "users",
             "id",
             {"type": "integer", "primary_key": True, "nullable": True},
             {},
         )
+        w = _result["warnings"]
+        e = _result["errors"]
         assert e == []
         assert any("should be NOT NULL" in m for m in w)
 
     def test_a_not_null_primary_key_does_not_warn(self):
-        w, _ = _validate_column(
+        _result = _validate_column(
             "users",
             "id",
             {"type": "integer", "primary_key": True, "nullable": False},
             {},
         )
+        w = _result["warnings"]
         assert w == []
 
     def test_a_new_not_null_column_without_a_default_warns(self):
-        w, _ = _validate_column(
+        _result = _validate_column(
             "users",
             "email",
             {"type": "text", "is_new": True, "nullable": False},
             {},
         )
+        w = _result["warnings"]
         assert any("without default may fail" in m for m in w)
 
     def test_a_new_not_null_column_with_a_default_does_not_warn(self):
-        w, _ = _validate_column(
+        _result = _validate_column(
             "users",
             "email",
             {"type": "text", "is_new": True, "nullable": False, "default": "''"},
             {},
         )
+        w = _result["warnings"]
         assert w == []
 
     def test_a_new_nullable_column_does_not_warn(self):
-        w, _ = _validate_column(
+        _result = _validate_column(
             "users", "email", {"type": "text", "is_new": True}, {}
         )
+        w = _result["warnings"]
         assert w == []
 
     def test_an_existing_not_null_column_without_a_default_does_not_warn(self):
         """Only NEW columns can fail against rows that already exist."""
-        w, _ = _validate_column(
+        _result = _validate_column(
             "users", "email", {"type": "text", "nullable": False}, {}
         )
+        w = _result["warnings"]
         assert w == []
 
 
@@ -176,9 +195,11 @@ class TestReferences:
         assert "non-existent column" in msg
 
     def test_a_bad_reference_reaches_the_errors_list_not_the_warnings(self):
-        w, e = _validate_column(
+        _result = _validate_column(
             "posts", "author", {"type": "integer", "references": "ghosts.id"}, {}
         )
+        w = _result["warnings"]
+        e = _result["errors"]
         assert w == []
         assert len(e) == 1
 
@@ -265,7 +286,9 @@ class TestCircularDependencies:
                 "y": {"type": "integer", "references": "a.id"},
             }),
         }
-        warnings, errors = validate_schema(schema)
+        _result = validate_schema(schema)
+        warnings = _result["warnings"]
+        errors = _result["errors"]
         assert errors == []
         assert any("Circular foreign key dependency" in m for m in warnings)
 
@@ -275,7 +298,7 @@ class TestCircularDependencies:
 
 class TestValidateSchema:
     def test_an_empty_schema_is_clean(self):
-        assert validate_schema({}) == ([], [])
+        assert validate_schema({}) == {"warnings": [], "errors": []}
 
     def test_a_valid_schema_is_clean(self):
         schema = {
@@ -287,23 +310,25 @@ class TestValidateSchema:
                 primary_key=["id"],
             ),
         }
-        assert validate_schema(schema) == ([], [])
+        assert validate_schema(schema) == {"warnings": [], "errors": []}
 
     def test_a_primary_key_naming_a_missing_column_is_an_error(self):
         schema = {"users": _t({"id": {"type": "integer"}}, primary_key=["nope"])}
-        _, errors = validate_schema(schema)
+        _result = validate_schema(schema)
+        errors = _result["errors"]
         assert len(errors) == 1
         assert "Primary key column 'nope' does not exist" in errors[0]
 
     def test_a_table_with_no_columns_key_is_tolerated(self):
-        assert validate_schema({"t": {}}) == ([], [])
+        assert validate_schema({"t": {}}) == {"warnings": [], "errors": []}
 
     def test_index_errors_are_collected_across_tables(self):
         schema = {
             "a": _t({"id": {"type": "integer"}}, indexes={"ix": {"columns": ["no"]}}),
             "b": _t({"id": {"type": "integer"}}, indexes={"ix": {"columns": ["no"]}}),
         }
-        _, errors = validate_schema(schema)
+        _result = validate_schema(schema)
+        errors = _result["errors"]
         assert len(errors) == 2
 
     def test_warnings_and_errors_are_kept_apart(self):
@@ -313,7 +338,9 @@ class TestValidateSchema:
                 "author": {"type": "integer", "references": "ghosts.id"},
             })
         }
-        warnings, errors = validate_schema(schema)
+        _result = validate_schema(schema)
+        warnings = _result["warnings"]
+        errors = _result["errors"]
         assert len(warnings) == 1 and "Unknown type" in warnings[0]
         assert len(errors) == 1 and "non-existent table" in errors[0]
 

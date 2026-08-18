@@ -311,7 +311,8 @@ def cmd_validate(
         print(f"✗ Failed to load schema: {e}")
         return 1
 
-    warnings, errors = validate_schema(schema)
+    result = validate_schema(schema)
+    warnings, errors = result["warnings"], result["errors"]
 
     if errors:
         print(f"✗ Schema validation failed with {len(errors)} error(s):")
