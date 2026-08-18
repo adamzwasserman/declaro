@@ -153,7 +153,7 @@ class Drained(TypedDict):
     A number would say a write failed and refuse to say how.
     """
 
-    appended: int
+    attempted: int
     orphaned: list[BaseException]
 
 
@@ -262,8 +262,19 @@ async def drain(
 
     One at a time: the next write starts only after the previous one
     returns, so the order the caller deposited in is the order the log
-    receives. Returns how many were appended, and any failure that found
+    receives. Returns how many were ATTEMPTED, and any failure that found
     nobody waiting for it.
+
+    THE FIELD WAS CALLED `appended` AND COUNTED ATTEMPTS. Measured
+    2026-08-17: three writes with one raising returned
+    `{'appended': 3, 'orphaned': []}`, and two of the three were appended.
+    Three tests already relied on the real meaning and said so in their own
+    assertion messages -- "every write was attempted, including the two after
+    the failure" -- so the count is right and the name was wrong.
+
+    Attempts is also the more useful number: it says the queue did not stop
+    at the first failure, which is the property this module exists to have.
+    A caller who wants to know which writes landed asks their own ticket.
 
     `retry` is required, not defaulted. Pass `NO_RETRY` to run each write
     once; retry.py says why the choice is forced on the caller.
@@ -301,7 +312,7 @@ async def drain(
     that runs `drain` decides what to do with it. This module still logs
     nothing and still stores nothing (Rule 4).
     """
-    appended = 0
+    attempted = 0
     orphaned: list[BaseException] = []
     while room["writes"]:
         ticket, write = room["writes"].pop(0)
@@ -329,12 +340,12 @@ async def drain(
                 waiter.set_exception(exc)
             else:
                 orphaned.append(exc)
-            appended += 1
+            attempted += 1
             continue
         if waiter is not None and not waiter.done():
             waiter.set_result(receipt)
-        appended += 1
-    return {"appended": appended, "orphaned": orphaned}
+        attempted += 1
+    return {"attempted": attempted, "orphaned": orphaned}
 
 
 async def _append_one(

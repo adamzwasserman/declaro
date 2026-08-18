@@ -8,7 +8,7 @@ row.
 IT IS WRONG FOR A BUG OF OURS, because ours fails every write. Measured
 2026-08-17 with five writes queued and a `TypeError` from `execute`:
 
-    drained: appended=5 orphaned=0
+    drained: attempted=5 orphaned=0
     callers told their write failed: 5 of 5
 
 Five callers each learn that their SQL failed. None of them wrote anything
@@ -57,7 +57,7 @@ async def test_a_refused_write_still_reaches_only_its_own_caller() -> None:
         return None
 
     drained = await drain(room, refuse_the_third, NO_RETRY)
-    assert drained["appended"] == 5
+    assert drained["attempted"] == 5
 
     told = []
     for index, ticket in enumerate(tickets):
@@ -160,7 +160,7 @@ async def test_a_clean_drain_is_unchanged() -> None:
 
     drained = await drain(room, fine, NO_RETRY)
 
-    assert drained["appended"] == 5
+    assert drained["attempted"] == 5
     assert drained["orphaned"] == []
     for ticket in tickets:
         receipt = await collect(room, ticket)

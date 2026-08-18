@@ -124,7 +124,7 @@ async def test_one_refused_write_does_not_stop_the_queue() -> None:
     ]
     drained = await drain(room, execute, NO_RETRY)
 
-    assert drained["appended"] == 3, (
+    assert drained["attempted"] == 3, (
         "every write was attempted, including the two after the failure"
     )
     assert (await collect(room, tickets[0]))["ok"] is True
@@ -187,7 +187,7 @@ async def test_a_failure_with_no_living_caller_comes_back_as_data() -> None:
 
     drained = await drain(room, execute, NO_RETRY)
 
-    assert drained["appended"] == 1
+    assert drained["attempted"] == 1
     assert len(drained["orphaned"]) == 1, "the exception must not fall off the end"
     assert isinstance(drained["orphaned"][0], TheRowAlreadyExists)
     assert "nobody is listening" in str(drained["orphaned"][0])
@@ -207,7 +207,7 @@ async def test_a_write_that_lands_for_nobody_is_not_an_orphan() -> None:
 
     drained = await drain(room, execute, NO_RETRY)
 
-    assert drained["appended"] == 1
+    assert drained["attempted"] == 1
     assert drained["orphaned"] == []
 
 

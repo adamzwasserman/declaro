@@ -1,6 +1,6 @@
 r"""A file named `test_*.py` must contain a test.
 
-FOUR STILL DO NOT. Twenty-four did. Each was a docstring, its imports,
+THREE STILL DO NOT. Twenty-four did. Each was a docstring, its imports,
 sometimes a helper, and then blank space where the tests had been, and the
 suite total said nothing about the gap.
 
@@ -12,11 +12,29 @@ also the evidence that restoring them was safe. The suite went from 299 to 774.
 WHAT IS LEFT, AND WHY EACH IS LEFT. Measured by restoring it and running it:
 
     test_views.py             48 tests   24 pass, 24 fail
-    test_write_queue.py       25 tests   import error: `pool` is abolished
     test_procedures.py        20 tests    9 pass, 11 fail
     test_triggers.py          20 tests    8 pass, 12 fail
 
-113 tests.
+98 tests.
+
+`test_write_queue.py` is the third RESOLVED BY FILLING, 2026-08-17. The note
+above said "import error: `pool` is abolished". That was no longer true:
+restored from 4c6b106 it imported cleanly and ran 15 tests, 11 passing.
+
+The four failures were the OLD CONTRACT, not defects. `drain` returned an int
+and returns a `Drained` now, and a non-contention failure raises down the
+depositor's ticket instead of being flattened into `receipt["error"]` as a
+string. Both changes are better and both are documented in `write_queue.py`,
+so the tests moved to them: a caller now gets the exception with its type
+intact and can ask whether it was a constraint violation.
+
+Filling it found one defect. `Drained["appended"]` counted ATTEMPTS, including
+writes that raised, while the docstring said "how many were appended". I first
+changed the count and that was the wrong end -- three existing tests state the
+meaning they rely on in their own assertion messages, "every write was
+attempted, including the two after the failure", and they were right. Attempts
+is the useful number, because it says the queue did not stop at the first
+failure. The field is `attempted` now.
 
 `test_query_expressions.py` is the second RESOLVED BY DELETION, 2026-08-17.
 Restored, all 30 of its tests failed on one line: `table(name, schema,
@@ -124,7 +142,6 @@ KNOWN_HOLLOW = {
     "test_procedures.py",
     "test_triggers.py",
     "test_views.py",
-    "test_write_queue.py",
 }
 
 
