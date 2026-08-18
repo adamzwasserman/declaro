@@ -456,12 +456,60 @@ def _compute_column_alterations(
     # Matching it would mean reimplementing PostgreSQL's parser and printer,
     # and this function is pure so it cannot ask the server. So a CHECK change
     # is not noticed on PostgreSQL, which is where it stood before today.
-    compared = ("unique", "check") if dialect in ("sqlite", "turso") else ("unique",)
+    # SQLITE ONLY. Turso was in this list, and it rewrites a stored expression
+    # too -- measured 2026-08-17 by the round-trip gate:
+    #
+    #     c <> ''         stored as  c != ''
+    #     length(c) > 2   stored as  length (c) > 2
+    #
+    # The operator change is the one that settles it: `<>` and `!=` mean the
+    # same thing and no amount of whitespace folding turns one into the other
+    # without an expression parser. PostgreSQL is excluded for the same
+    # reason. SQLite keeps the CREATE TABLE text verbatim, which is what makes
+    # the comparison sound there and nowhere else.
+    compared = ("unique", "check") if dialect == "sqlite" else ("unique",)
     for prop in compared:
         if not _same_constraint(prop, current.get(prop), target.get(prop)):
             changes[prop] = {"from": current.get(prop), "to": target.get(prop)}
 
     return changes if changes else None
+
+
+def _canonical_spacing(expression: str) -> str:
+    """An expression with its cosmetic whitespace and outer parens removed.
+
+    Turso stores `datetime('now')` as `datetime ('now')`. The space carries no
+    meaning, and a string literal is left alone because a space inside quotes
+    is a character.
+    """
+    out: list[str] = []
+    quote: str | None = None
+    for char in expression.strip():
+        if quote:
+            out.append(char)
+            if char == quote:
+                quote = None
+            continue
+        if char in "'\"":
+            quote = char
+            out.append(char)
+            continue
+        if char == "(" and out and out[-1] == " ":
+            out.pop()
+        out.append(char)
+
+    text = "".join(out)
+    while text.startswith("(") and text.endswith(")"):
+        depth = 0
+        for position, char in enumerate(text):
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0 and position != len(text) - 1:
+                    return text
+        text = text[1:-1].strip()
+    return text
 
 
 def _same_constraint(prop: str, current: Any, target: Any) -> bool:
@@ -555,6 +603,19 @@ def same_default(current: Any, target: Any, dialect: Dialect) -> bool:
         target = spelled.get(target.strip().lower().replace(" ", ""), target)
     if isinstance(current, str):
         current = spelled.get(current.strip().lower().replace(" ", ""), current)
+
+    # `datetime ('now')` AND `datetime('now')` ARE ONE DEFAULT. Turso inserts
+    # a space after a function name when it stores DDL, so a declared `now()`
+    # -- translated to `(datetime('now'))` on the way in -- came back as
+    # `((datetime ('now')))` and migrated on every deploy. Measured by the
+    # round-trip gate; `now()` is in the schema this package ships.
+    #
+    # Whitespace and redundant parentheses only. An operator rewrite is not
+    # foldable and is why the CHECK comparison is SQLite-only.
+    if isinstance(current, str):
+        current = _canonical_spacing(current)
+    if isinstance(target, str):
+        target = _canonical_spacing(target)
 
     current_number = _as_number(current)
     target_number = _as_number(target)

@@ -110,10 +110,13 @@ def test_an_unchanged_unique_emits_nothing(dialect: str) -> None:
 # repeated the identical mistake on a different engine.
 
 
-# SQLITE AND TURSO ONLY. PostgreSQL rewrites the expression when it stores
-# one, so its text cannot be compared -- see the section at the foot of this
-# file, and `test_a_check_is_not_compared_on_postgresql`.
-TEXT_ROUND_TRIPS = ["sqlite", "turso"]
+# SQLITE ONLY. Turso was here too until the round-trip gate ran against it:
+# it stores `c <> ''` as `c != ''` and `length(c) > 2` as `length (c) > 2`, so
+# it rewrites an expression as surely as PostgreSQL does. The operator change
+# settles it -- no whitespace folding turns `<>` into `!=` without a parser.
+# SQLite keeps the CREATE TABLE text verbatim, which is what makes the
+# comparison sound there and nowhere else.
+TEXT_ROUND_TRIPS = ["sqlite"]
 
 
 @pytest.mark.parametrize("dialect", TEXT_ROUND_TRIPS)
@@ -475,22 +478,24 @@ def test_a_primary_key_is_not_marked_unique_by_its_own_index() -> None:
 # defaults already have: a question that only has an answer per engine.
 
 
-@pytest.mark.parametrize("dialect", ["sqlite", "turso"])
+@pytest.mark.parametrize("dialect", TEXT_ROUND_TRIPS)
 def test_a_check_change_is_noticed_where_the_text_round_trips(dialect: str) -> None:
     assert _ops({"type": "integer", "check": "c > 0"},
                 {"type": "integer", "check": "c > 10"}, dialect) != []
 
 
-def test_a_check_is_not_compared_on_postgresql() -> None:
-    """RECORDED, NOT ENDORSED, and it replaces a loop rather than a fix.
+@pytest.mark.parametrize("dialect", ["postgresql", "turso"])
+def test_a_check_is_not_compared_where_the_engine_rewrites_it(dialect: str) -> None:
+    """Both engines store their own form of the expression.
 
-    A changed CHECK migrates nothing on PostgreSQL, which is the behaviour
-    before any of today's work. The alternative on offer was an alter_column
-    on every deploy for any expression PostgreSQL rewrites, which is five of
-    the seven forms measured.
+        PostgreSQL  n > 0 AND n < 100  ->  (n > 0) AND (n < 100)
+        Turso       c <> ''            ->  c != ''
+
+    A changed CHECK migrates nothing on either, which is where it stood before
+    today, and is the alternative to an alter_column on every deploy.
     """
     assert _ops({"type": "integer", "check": "c > 0"},
-                {"type": "integer", "check": "c > 10"}, "postgresql") == []
+                {"type": "integer", "check": "c > 10"}, dialect) == []
 
 
 @pytest.mark.parametrize(

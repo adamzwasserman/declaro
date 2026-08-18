@@ -469,3 +469,37 @@ def test_a_bare_keyword_still_folds(dialect: str) -> None:
                                       "default": "current_timestamp"}}}}
 
     assert diff(current, target, dialect=dialect)["operations"] == []
+
+
+@pytest.mark.parametrize("dialect", DIALECTS)
+def test_a_space_inside_a_string_default_is_not_cosmetic(dialect: str) -> None:
+    """The spacing fold must not reach inside a quoted literal.
+
+    Turso stores `datetime('now')` as `datetime ('now')`, so a space before a
+    parenthesis is folded away. Inside quotes it is a CHARACTER: `'a ('` and
+    `'a('` are two different default values, and folding them together would
+    tell a schema that changed one to the other that nothing had changed.
+
+    FOUND BY A MUTATION CONTROL. Deleting the quote guard left everything
+    passing, because every default in the suite either had no quotes or no
+    space-before-paren inside them.
+    """
+    current = {"t": {"columns": {"c": {"type": "text", "default": "'a ('"}}}}
+    target = {"t": {"columns": {"c": {"type": "text", "default": "'a('"}}}}
+
+    ops = diff(current, target, dialect=dialect)["operations"]
+
+    assert [o["op"] for o in ops] == ["alter_column"], (
+        f"two different string defaults were folded together: {ops}"
+    )
+
+
+@pytest.mark.parametrize("dialect", DIALECTS)
+def test_a_space_outside_quotes_still_folds(dialect: str) -> None:
+    """The floor. Removing the fold entirely would pass the test above."""
+    current = {"t": {"columns": {"c": {"type": "text",
+                                       "default": "(datetime ('now'))"}}}}
+    target = {"t": {"columns": {"c": {"type": "text",
+                                      "default": "(datetime('now'))"}}}}
+
+    assert diff(current, target, dialect=dialect)["operations"] == []

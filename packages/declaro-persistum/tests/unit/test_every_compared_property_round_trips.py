@@ -193,3 +193,29 @@ async def test_it_round_trips_on_postgresql(prop, value) -> None:
     finally:
         await conn.execute('DROP TABLE IF EXISTS t CASCADE')
         await conn.close()
+
+
+@pytest.mark.turso
+@pytest.mark.parametrize("prop,value", list(_cases()), ids=lambda v: str(v)[:20])
+async def test_it_round_trips_on_turso(prop, value) -> None:
+    """The engine this gate exists for as much as any.
+
+    Turso is where the CHECK comparison would have looped: SQLite had just
+    learned to read one and Turso had not, and enabling the comparison after
+    checking SQLite alone would have repeated the same defect on a different
+    engine. It was caught by hand that time. This is the check that does not
+    depend on my remembering.
+    """
+    import turso.aio
+
+    declared = _declaration(prop, value)
+    directory = tempfile.mkdtemp()
+    conn = await turso.aio.connect(os.path.join(directory, "roundtrip.db"))
+    try:
+        operations = await _converges(conn, "turso", declared)
+        assert operations == [], (
+            f"{prop}={value!r} migrates on every deploy: "
+            f"{[(o['op'], o['details']) for o in operations]}"
+        )
+    finally:
+        await conn.close()
