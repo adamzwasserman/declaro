@@ -13,7 +13,9 @@ because the verification window has indeterminate duration — the caller
 decides when confidence is sufficient.
 
 Usage:
-    m = await begin_cutover(source, target, ...)
+    m = await begin_cutover(
+            source, target, schema_path="models/", target_dialect="postgresql"
+        )
     # verify through the mirror, then:
     m = promote(m)
     old_local = detach(m)

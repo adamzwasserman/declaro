@@ -20,10 +20,50 @@ Reference: https://www.sqlite.org/lang_altertable.html#making_other_kinds_of_tab
 import logging
 from typing import Any
 
+from declaro_persistum.abstractions.pragma_compat import (
+    create_index_statements,
+    table_column_names,
+)
 from declaro_persistum.applier.shared import sqlite_type
 from declaro_persistum.types import Column
 
 logger = logging.getLogger(__name__)
+
+
+
+def columns_to_copy(stored: list[str], declared: list[str]) -> list[tuple[str, str]]:
+    """Pairs of (name in the old table, name in the new one). Pure.
+
+    SQLITE FOLDS IDENTIFIER CASE AND PYTHON DOES NOT, and the rebuild used to
+    decide with `[col for col in stored if col in declared]`. A column stored
+    as `Note` and declared as `note` is one column for every query anyone can
+    write, and was not in that intersection.
+
+    MEASURED 2026-08-17:
+
+        stored columns:            ['id', 'Note']
+        declared:                  {'id': ..., 'note': ...}
+        rows after reconstruction: [(1, None)]
+
+    The row survived and the value did not.
+
+    NOTHING WARNED. The rebuild logs "No common columns" only when the
+    intersection is EMPTY; `id` matched, so the copy went ahead quietly missing
+    one column. The loud case is the one you would notice anyway, because the
+    table comes out empty.
+
+    Both spellings are returned because both are needed: the SELECT reads the
+    old table, which knows the column by its stored name, and the INSERT writes
+    the new one, which knows it by the declared name.
+
+    First match wins if a schema somehow declares two columns differing only in
+    case. SQLite would refuse to create that table, so the situation cannot
+    survive to be a question.
+    """
+    by_folded: dict[str, str] = {}
+    for name in declared:
+        by_folded.setdefault(name.lower(), name)
+    return [(name, by_folded[name.lower()]) for name in stored if name.lower() in by_folded]
 
 
 async def reconstruct_table(
@@ -60,8 +100,13 @@ async def reconstruct_table(
         ... }
         >>> await reconstruct_table(conn, "users", new_cols)
     """
-    import uuid
-    temp_table = f"_declaro_tmp_{table_name}_{uuid.uuid4().hex[:8]}"
+    # One definition, in migrations.py, shared with the recovery that reads
+    # these names back. It was a literal here and a literal there, and a change
+    # to either is silent: reconstruction keeps working, recovery keeps finding
+    # nothing, and a table vanishes after a crash.
+    from declaro_persistum.migrations import temp_table_name
+
+    temp_table = temp_table_name(table_name)
     fk_enabled = 0
 
     try:
@@ -85,14 +130,15 @@ async def reconstruct_table(
         # 4. Copy compatible data if requested
         if preserve_data:
             # Get intersection of old and new column names
-            old_columns = await _get_table_columns(connection, table_name)
-            common_columns = [col for col in old_columns if col in new_columns]
+            old_columns = await table_column_names(connection, table_name)
+            common_columns = columns_to_copy(old_columns, list(new_columns))
 
             if common_columns:
-                columns_sql = ", ".join(f'"{col}"' for col in common_columns)
+                read_sql = ", ".join(f'"{old}"' for old, _ in common_columns)
+                write_sql = ", ".join(f'"{new}"' for _, new in common_columns)
                 copy_sql = (
-                    f'INSERT INTO "{temp_table}" ({columns_sql}) '
-                    f'SELECT {columns_sql} FROM "{table_name}"'
+                    f'INSERT INTO "{temp_table}" ({write_sql}) '
+                    f'SELECT {read_sql} FROM "{table_name}"'
                 )
                 logger.debug(f"Copying data: {copy_sql}")
                 await connection.execute(copy_sql)
@@ -103,7 +149,7 @@ async def reconstruct_table(
                 )
 
         # 5. Get indexes and constraints to recreate
-        indexes = await _get_table_indexes(connection, table_name)
+        indexes = await create_index_statements(connection, table_name)
 
         # 6. Drop old table
         await connection.execute(f'DROP TABLE "{table_name}"')
@@ -118,9 +164,23 @@ async def reconstruct_table(
             logger.debug(f"Recreating index: {recreate_sql}")
             await connection.execute(recreate_sql)
 
-        # 9. Re-enable foreign keys if we managed them
+        # 9. THE RESTORE IS NOT DONE HERE, AND CANNOT BE.
+        #
+        # This used to be `PRAGMA foreign_keys = ON`, and it never took effect.
+        # SQLite IGNORES that pragma while a transaction is open, and does not
+        # raise, so the line read as though it worked. Measured 2026-08-17:
+        #
+        #     inside an open transaction   PRAGMA foreign_keys = ON -> still 0
+        #     after the transaction ends   -> 1
+        #
+        # This function must not commit: the applier commits once for all
+        # operations, so committing here would break its all-or-nothing
+        # transaction. The restore therefore belongs to whoever commits, and
+        # `applier/sqlite.py` and `applier/turso.py` both do it after theirs.
+        #
+        # A caller using this function directly owns the restore, and
+        # `test_the_fk_restore_actually_lands.py` says so.
         if manage_foreign_keys and fk_enabled:
-            await connection.execute("PRAGMA foreign_keys = ON")
 
             # Verify foreign key constraints
             check_cursor = await connection.execute(f'PRAGMA foreign_key_check("{table_name}")')
@@ -258,12 +318,6 @@ async def alter_column_default(
 # =============================================================================
 
 
-async def _get_table_columns(connection: Any, table_name: str) -> list[str]:
-    """Get list of column names for a table."""
-    from declaro_persistum.abstractions.pragma_compat import pragma_table_info
-
-    rows = await pragma_table_info(connection, table_name)
-    return [row[1] for row in rows]  # Column name is at index 1
 
 
 async def _get_full_table_schema(connection: Any, table_name: str) -> dict[str, Column]:
@@ -326,37 +380,6 @@ async def _get_full_table_schema(connection: Any, table_name: str) -> dict[str, 
     return columns
 
 
-async def _get_table_indexes(connection: Any, table_name: str) -> list[str]:
-    """
-    Get CREATE INDEX statements for all indexes on a table.
-
-    Returns list of CREATE INDEX SQL statements.
-    """
-    from declaro_persistum.abstractions.pragma_compat import pragma_index_list
-
-    index_list = await pragma_index_list(connection, table_name)
-    index_sqls = []
-
-    for row in index_list:
-        # row format: (seq, name, unique, origin, partial)
-        index_name = row[1]
-        origin = row[3]
-
-        # Skip auto-generated indexes (UNIQUE/PRIMARY KEY constraints)
-        if origin in ("u", "pk"):
-            continue
-
-        # Get CREATE INDEX statement from sqlite_master
-        cursor = await connection.execute(
-            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
-            (index_name,),
-        )
-        result = await cursor.fetchone()
-
-        if result and result[0]:
-            index_sqls.append(result[0])
-
-    return index_sqls
 
 
 def _generate_create_table_sql(table_name: str, columns: dict[str, Column]) -> str:

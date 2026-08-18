@@ -386,3 +386,38 @@ class NotSupportedError(DeclaroError):
                 f"  {i + 1}. {alt}" for i, alt in enumerate(alternatives)
             )
         super().__init__(message)
+
+
+A_BUG_IN_THIS_PACKAGE = (
+    AttributeError,
+    IndexError,
+    KeyError,
+    NameError,
+    TypeError,
+)
+"""The exception types that mean WE called something wrongly.
+
+Not that a database refused anything. Python raises these when code reaches for
+an attribute that is not there, indexes past the end, looks up a key that does
+not exist, uses a name it never bound, or calls something with the wrong
+arguments. A driver refusing a write raises its own type instead.
+
+CATCH THIS AND RE-RAISE IT AHEAD OF ANY BROAD HANDLER. A per-item loop that
+absorbs `Exception` is right for one item the engine refuses and wrong for a
+bug of ours, because ours fails on EVERY item. Measured 2026-08-17 in
+`bulk_transfer`: a `TypeError` from `_transfer_table` was recorded against all
+four tables, and the caller was handed "4 tables failed" with none of the four
+at fault.
+
+    try:
+        ...
+    except A_BUG_IN_THIS_PACKAGE:
+        raise
+    except Exception as exc:
+        ...  # the engine refused this one item
+
+THE TYPE IS THE SIGNAL, NEVER THE MESSAGE. Sorting on message text is what made
+a contention check retry a `KeyError('busy')`: the word matched and the cause
+was ours. A type is decidable; a string is a guess about somebody else's
+wording.
+"""

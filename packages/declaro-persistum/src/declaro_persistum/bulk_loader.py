@@ -48,7 +48,7 @@ class ReadRows(Protocol):
         limit: int | None = None,
     ) -> list[tuple[Any, ...]]:
         """Read rows in a STABLE order, so paging cannot repeat or skip one."""
-        ...
+        raise NotImplementedError("CODE NOT WRITTEN")
 
 
 class LoadRows(Protocol):
@@ -60,24 +60,24 @@ class LoadRows(Protocol):
         rows: Sequence[tuple[Any, ...]],
     ) -> int:
         """Insert rows. Returns how many. `columns` matches tuple position."""
-        ...
+        raise NotImplementedError("CODE NOT WRITTEN")
 
 
 class CountRows(Protocol):
     async def __call__(self, conn: Any, table: str) -> int:
-        ...
+        raise NotImplementedError("CODE NOT WRITTEN")
 
 
 class DeleteRows(Protocol):
     async def __call__(self, conn: Any, table: str) -> int:
         """Empty the table. Returns how many rows went."""
-        ...
+        raise NotImplementedError("CODE NOT WRITTEN")
 
 
 class SetFkChecks(Protocol):
     async def __call__(self, conn: Any) -> None:
         """Turn FK enforcement off or on for this connection."""
-        ...
+        raise NotImplementedError("CODE NOT WRITTEN")
 
 
 class BulkLoader(TypedDict):

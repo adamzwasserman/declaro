@@ -22,6 +22,10 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from declaro_persistum.abstractions.pragma_compat import (
+    create_index_statements,
+    table_column_names,
+)
 from declaro_persistum.applier.shared import sqlite_type
 from declaro_persistum.types import Column, Operation
 
@@ -303,11 +307,16 @@ async def execute_reconstruction_async(
     # Validate column definitions before any destructive operations
     _validate_columns(table_name, new_columns)
 
-    import uuid
-    temp_table = f"_declaro_tmp_{table_name}_{uuid.uuid4().hex[:8]}"
+    # One definition, in migrations.py, shared with the recovery that reads
+    # these names back. It was a literal here and a literal there, and a change
+    # to either is silent: reconstruction keeps working, recovery keeps finding
+    # nothing, and a table vanishes after a crash.
+    from declaro_persistum.migrations import temp_table_name
+
+    temp_table = temp_table_name(table_name)
 
     # 1. Fresh introspection - get current state
-    current_columns = await _get_table_columns_async(connection, table_name)
+    current_columns = await table_column_names(connection, table_name)
 
     # 2. Get current foreign key state
     fk_enabled = 0
@@ -332,10 +341,22 @@ async def execute_reconstruction_async(
 
         # 5. Copy compatible data if requested
         if preserve_data:
-            common_columns = [col for col in current_columns if col in new_columns]
+            # ONE DEFINITION, in `table_reconstruction`. Both modules made the
+            # same case-sensitive intersection and both lost the same data.
+            from declaro_persistum.abstractions.table_reconstruction import (
+                columns_to_copy,
+            )
+
+            pairs = columns_to_copy(list(current_columns), list(new_columns))
+            common_columns = [old for old, _ in pairs]
 
             if common_columns:
-                copy_sql = generate_data_copy_sql(table_name, temp_table, common_columns)
+                read_sql = ", ".join(f'"{old}"' for old, _ in pairs)
+                write_sql = ", ".join(f'"{new}"' for _, new in pairs)
+                copy_sql = (
+                    f'INSERT INTO "{temp_table}" ({write_sql}) '
+                    f'SELECT {read_sql} FROM "{table_name}"'
+                )
                 logger.debug(f"Copying data: {copy_sql}")
                 await connection.execute(copy_sql)
             else:
@@ -345,7 +366,7 @@ async def execute_reconstruction_async(
                 )
 
         # 6. Get indexes to recreate
-        indexes = await _get_table_indexes_async(connection, table_name)
+        indexes = await create_index_statements(connection, table_name)
 
         # 7. Drop old table
         await connection.execute(f'DROP TABLE "{table_name}"')
@@ -436,45 +457,8 @@ def _validate_columns(table_name: str, columns: dict[str, Column]) -> None:
 # =============================================================================
 
 
-async def _get_table_columns_async(connection: Any, table_name: str) -> list[str]:
-    """Get list of column names for a table (async)."""
-    from declaro_persistum.abstractions.pragma_compat import pragma_table_info
-
-    rows = await pragma_table_info(connection, table_name)
-    return [row[1] for row in rows]  # Column name is at index 1
 
 
-async def _get_table_indexes_async(connection: Any, table_name: str) -> list[str]:
-    """
-    Get CREATE INDEX statements for all indexes on a table (async).
-
-    Returns list of CREATE INDEX SQL statements.
-    """
-    from declaro_persistum.abstractions.pragma_compat import pragma_index_list
-
-    index_list = await pragma_index_list(connection, table_name)
-    index_sqls = []
-
-    for row in index_list:
-        # row format: (seq, name, unique, origin, partial)
-        index_name = row[1]
-        origin = row[3]
-
-        # Skip auto-generated indexes (UNIQUE/PRIMARY KEY constraints)
-        if origin in ("u", "pk"):
-            continue
-
-        # Get CREATE INDEX statement from sqlite_master
-        cursor = await connection.execute(
-            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
-            (index_name,),
-        )
-        result = await cursor.fetchone()
-
-        if result and result[0]:
-            index_sqls.append(result[0])
-
-    return index_sqls
 
 
 def _map_type(type_str: str) -> str:

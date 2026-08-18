@@ -117,6 +117,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any, TypedDict
 
+from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE
 from declaro_persistum.retry import Retry, delay_before, is_contention
 
 
@@ -307,6 +308,22 @@ async def drain(
         waiter = room["waiting"].get(ticket)
         try:
             receipt = await _append_one(ticket, write, execute, retry)
+        except A_BUG_IN_THIS_PACKAGE as exc:
+            # OURS, SO IT FAILS EVERY WRITE, and handing it to each ticket in
+            # turn tells every caller their own SQL was wrong.
+            #
+            # Measured 2026-08-17, five writes queued and a TypeError from
+            # `execute`: appended=5, and all five callers were told their write
+            # failed. None of them had written anything wrong.
+            #
+            # The caller in flight IS told, because it is genuinely waiting and
+            # would otherwise never be resolved. Then this raises, so the
+            # appender stops instead of grinding the rest of the room through
+            # the same broken call. Those writes stay queued, which is
+            # recoverable and visible; popped and dropped is neither.
+            if waiter is not None and not waiter.done():
+                waiter.set_exception(exc)
+            raise
         except Exception as exc:
             if waiter is not None and not waiter.done():
                 waiter.set_exception(exc)

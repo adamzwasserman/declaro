@@ -54,3 +54,57 @@ async def pragma_index_info(conn: Any, index_name: str) -> list[tuple]:
 async def pragma_foreign_key_list(conn: Any, table: str) -> list[tuple]:
     """Foreign keys declared on `table`."""
     return await _rows(conn, f'PRAGMA foreign_key_list("{table}")')
+
+
+# =============================================================================
+# Readers built on the pragmas above
+# =============================================================================
+#
+# ONE DEFINITION EACH, AND THERE WERE TWO. `abstractions/reconstruction.py` and
+# `abstractions/table_reconstruction.py` each carried its own copy, named
+# `_get_table_columns_async` / `_get_table_columns` and
+# `_get_table_indexes_async` / `_get_table_indexes`. Measured 2026-08-17 the
+# bodies were character-for-character identical; only the name and one word of
+# docstring differed, and both were `async def` so the `_async` suffix
+# distinguished nothing.
+#
+# A fix to one copy misses the other in silence. This package has already paid
+# that: the `Literal` `_map_type` crash needed the same fix in three files.
+#
+# They live here because this is where the pragmas they read live.
+
+async def table_column_names(connection: Any, table_name: str) -> list[str]:
+    """Get list of column names for a table ."""
+    rows = await pragma_table_info(connection, table_name)
+    return [row[1] for row in rows]  # Column name is at index 1
+
+
+async def create_index_statements(connection: Any, table_name: str) -> list[str]:
+    """
+    Get CREATE INDEX statements for all indexes on a table .
+
+    Returns list of CREATE INDEX SQL statements.
+    """
+    index_list = await pragma_index_list(connection, table_name)
+    index_sqls = []
+
+    for row in index_list:
+        # row format: (seq, name, unique, origin, partial)
+        index_name = row[1]
+        origin = row[3]
+
+        # Skip auto-generated indexes (UNIQUE/PRIMARY KEY constraints)
+        if origin in ("u", "pk"):
+            continue
+
+        # Get CREATE INDEX statement from sqlite_master
+        cursor = await connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+            (index_name,),
+        )
+        result = await cursor.fetchone()
+
+        if result and result[0]:
+            index_sqls.append(result[0])
+
+    return index_sqls

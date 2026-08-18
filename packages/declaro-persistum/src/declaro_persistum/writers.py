@@ -51,10 +51,10 @@ class DbApiConnection(Protocol):
     """Turso and SQLite. Parameters as a sequence, an explicit commit."""
 
     async def execute(self, sql: str, parameters: Sequence[object] = ..., /) -> object:
-        ...
+        raise NotImplementedError("CODE NOT WRITTEN")
 
     async def commit(self) -> None:
-        ...
+        raise NotImplementedError("CODE NOT WRITTEN")
 
     async def rollback(self) -> None:
         # DECLARED BECAUSE `dbapi_transaction` DEPENDS ON IT. The Protocol
@@ -62,17 +62,17 @@ class DbApiConnection(Protocol):
         # transaction scope rested on a method no contract required. mypy
         # caught it the moment the dialect vocabulary made these signatures
         # precise enough to check.
-        ...
+        raise NotImplementedError("CODE NOT WRITTEN")
 
 
 class AsyncpgConnection(Protocol):
     """PostgreSQL. Parameters positionally, the transaction block commits."""
 
     async def execute(self, sql: str, /, *args: object) -> object:
-        ...
+        raise NotImplementedError("CODE NOT WRITTEN")
 
     def transaction(self) -> AbstractAsyncContextManager[object]:
-        ...
+        raise NotImplementedError("CODE NOT WRITTEN")
 
 
 class WriteOne(Protocol):
@@ -93,7 +93,7 @@ class WriteOne(Protocol):
     async def __call__(
         self, conn: Any, sql: str, params: Sequence[object]
     ) -> None:
-        ...
+        raise NotImplementedError("CODE NOT WRITTEN")
 
 
 async def turso_write_one(

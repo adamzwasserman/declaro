@@ -34,7 +34,6 @@ import pytest
 
 from declaro_persistum.exceptions import (
     AmbiguityError,
-    ConnectionError as DeclaroConnectionError,
     CycleError,
     DatabaseClosedError,
     DeclaroError,
@@ -46,6 +45,9 @@ from declaro_persistum.exceptions import (
     SchemaError,
     TransferError,
     ValidationError,
+)
+from declaro_persistum.exceptions import (
+    ConnectionError as DeclaroConnectionError,
 )
 
 pytestmark = pytest.mark.precommit

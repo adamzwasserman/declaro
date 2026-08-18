@@ -66,6 +66,7 @@ from declaro_persistum.database import (
     new_write_lock,
     writing,
 )
+from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE
 from declaro_persistum.types import Dialect
 from declaro_persistum.writers import WRITERS
 
@@ -382,6 +383,20 @@ async def _open_replicated(
         try:
             await held.push()
             return True
+        except A_BUG_IN_THIS_PACKAGE:
+            # OURS, AND IT WILL NEVER SUCCEED ON RETRY. `flush` loops
+            # `while not await replicate_once(db)` with no bound, and `close`
+            # calls `flush`, so returning False here for a TypeError turns a
+            # defect of ours into a process that never shuts down.
+            #
+            # Measured 2026-08-17: replacing `held.push` with one that raises
+            # TypeError made a test spend its full sixty-second budget inside
+            # `close(db)`, retrying something that could not work.
+            #
+            # A network failure is ordinary and is still absorbed below. A
+            # wrong call is not ordinary, and patience is the wrong response
+            # to it.
+            raise
         except Exception:
             # A failed push is ordinary — the network is not always there. The
             # caller decides how long to keep trying; `flush` retries until it

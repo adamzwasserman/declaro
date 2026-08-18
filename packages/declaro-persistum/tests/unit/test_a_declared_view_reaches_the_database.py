@@ -26,8 +26,6 @@ its operations were already in the applier's table.
 
 from __future__ import annotations
 
-import pathlib
-
 import pytest
 
 from declaro_persistum.differ import diff_views

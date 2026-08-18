@@ -30,7 +30,8 @@ from __future__ import annotations
 
 import pytest
 
-from declaro_persistum.inspector import INSPECTORS, introspect
+from declaro_persistum.inspector import INSPECTORS, TABLE_EXISTS, introspect
+from declaro_persistum.types import for_dialect
 
 DIALECTS = ["postgresql", "sqlite", "turso"]
 
@@ -46,9 +47,19 @@ def test_every_dialect_has_an_inspect_function(dialect):
 
 
 def test_an_unknown_dialect_fails_loudly():
-    """A dict lookup on a bounded vocabulary must not fall through."""
+    """A dict lookup on a bounded vocabulary must not fall through.
+
+    The raise lived in `class _Inspectors(dict).__missing__` and now lives in
+    `for_dialect`. See `test_apply_is_functions.py` for why the class went.
+    """
     with pytest.raises(ValueError, match="postgres"):
-        INSPECTORS["mysql"]
+        for_dialect(INSPECTORS, "mysql", "Inspectors")
+
+
+def test_both_tables_are_plain_dicts():
+    """`TABLE_EXISTS` shared the wrapper class, so it is checked here too."""
+    assert type(INSPECTORS) is dict, type(INSPECTORS).__name__
+    assert type(TABLE_EXISTS) is dict, type(TABLE_EXISTS).__name__
 
 
 class TestAgainstARealSqliteDatabase:

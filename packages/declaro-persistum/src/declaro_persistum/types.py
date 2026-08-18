@@ -369,3 +369,29 @@ class ConnectionConfig(TypedDict, total=False):
     ssl: str
     path: str
     token: str
+
+
+def for_dialect(table: dict[str, Any], dialect: str, what: str) -> Any:
+    """Read a dispatch table, naming what exists when the key does not.
+
+    THIS WAS TWO CLASSES. `applier/__init__.py` and `inspector/__init__.py`
+    each declared `class _Appliers(dict)` / `class _Inspectors(dict)` whose
+    only member was `__missing__`, subclassing `dict` to borrow its behaviour
+    and override one hook. A wrapper around a dict is allowed when it holds no
+    methods; the method was the whole reason each class existed, so it was
+    inheritance for code reuse and nothing else.
+
+    The lookup is what varies, so the lookup is the function. The tables stay
+    plain dicts, which means they can be printed, merged, compared with `==`
+    and passed to anything expecting a dict.
+
+    A bare `KeyError: 'mysql'` tells a caller what they asked for and not what
+    was available. `what` names the table so one message can serve every one
+    of them.
+    """
+    if dialect in table:
+        return table[dialect]
+    raise ValueError(
+        f"Unsupported dialect: {dialect}. "
+        f"{what} exist for: {', '.join(sorted(table))}"
+    )

@@ -282,7 +282,6 @@ def test_no_sample_calls_a_function_the_wrong_way() -> None:
     It found three stale `diff(...)` calls the moment it was written, left
     behind when `dialect` became required.
     """
-    import ast
     import inspect
 
     wrong: list[str] = []
