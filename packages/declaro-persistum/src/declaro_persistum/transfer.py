@@ -24,8 +24,8 @@ from typing import Any, Literal, TypedDict
 from declaro_persistum.abstractions.enums import is_enum_table
 from declaro_persistum.bulk_loader import BULK_LOADERS, BulkLoader
 from declaro_persistum.database import Database, reading
-from declaro_persistum.exceptions import TransferError
-from declaro_persistum.inspector.protocol import create_inspector
+from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, TransferError
+from declaro_persistum.inspector import introspect
 from declaro_persistum.migrations import apply_migrations_async
 from declaro_persistum.types import Dialect
 
@@ -375,15 +375,40 @@ async def bulk_transfer(
     )
 
     # Step 2: Introspect source
-    inspector = create_inspector(source_dialect)
+
     async with reading(source) as source_conn:
-        source_schema = await inspector.introspect(source_conn)
+        source_schema = await introspect(source_conn, source_dialect)
 
     all_tables = list(source_schema.keys())
     logger.info(f"Source has {len(all_tables)} tables")
 
     # Step 3: Filter
     if tables is not None:
+        # A NAME THAT IS NOT THERE IS A REFUSAL, NOT A FILTER. This was
+        # `[t for t in tables if t in source_schema]`, so a table the caller
+        # named and the source does not have was dropped: not skipped, not
+        # counted, not reported.
+        #
+        # Measured 2026-08-17, asking for ["users", "orders_typo"] against a
+        # source holding only `users`:
+        #
+        #     success=True transferred=1 skipped=0 failed=0 errors={}
+        #
+        # `tables=[...]` is the caller stating that these exist and it wants
+        # them. Intersecting that with reality turns a typo, a stale deploy
+        # script or a half-finished rename into a green result with rows left
+        # in the old database.
+        #
+        # Refused HERE, before anything moves. A partial transfer that then
+        # raises is worse than either outcome.
+        missing = [t for t in tables if t not in source_schema]
+        if missing:
+            raise TransferError(
+                f"These tables were asked for and the source does not have "
+                f"them: {', '.join(sorted(missing))}. The source holds "
+                f"{', '.join(sorted(all_tables))}. Nothing has been "
+                f"transferred."
+            )
         transfer_tables = [t for t in tables if t in source_schema]
     else:
         transfer_tables = [
@@ -421,10 +446,26 @@ async def bulk_transfer(
 
         # Disable FK checks if circular refs detected
         if circular_refs:
+            # DISABLING IS A PRECONDITION, NOT A COURTESY, so a failure stops
+            # the run. This was a warning, and the transfer then proceeded with
+            # checks still on: every table in the cycle failed on its first row
+            # and each failure was recorded against that table. One failed
+            # pragma became N table failures, and the report named N tables
+            # that were all fine.
+            #
+            # The tables in `circular_refs` reference each other, so there is
+            # no load order that satisfies the constraints. Carrying on is not
+            # a degraded transfer, it is a guaranteed one.
             try:
                 await target_loader["disable_fk_checks"](target_conn)
-            except Exception as e:
-                logger.warning(f"Could not disable FK checks: {e}")
+            except Exception as exc:
+                raise TransferError(
+                    f"Could not disable foreign key checks on the target, and "
+                    f"these tables have circular references so no load order "
+                    f"satisfies them: {', '.join(sorted(circular_refs))}. "
+                    f"Transferring now would fail on the first row of each and "
+                    f"report those tables as the problem."
+                ) from exc
 
         try:
             for table in sorted_tables:
@@ -479,6 +520,15 @@ async def bulk_transfer(
                         f"Transferred {table}: "
                         f"{progress['rows_transferred']}/{progress['total_rows']} rows"
                     )
+                except A_BUG_IN_THIS_PACKAGE:
+                    # OURS, NOT THE ENGINE'S, so it must not be filed against
+                    # a table. A bug of ours fails on every table, and this
+                    # loop turned one defect into one "failure" per table:
+                    # measured, a TypeError from `_transfer_table` produced
+                    # `tables_failed=4` with none of the four at fault. The
+                    # operator reads the report, opens the database, and finds
+                    # four healthy tables.
+                    raise
                 except Exception as e:
                     tables_failed += 1
                     error_msg = f"{type(e).__name__}: {e}"
@@ -501,8 +551,24 @@ async def bulk_transfer(
             if circular_refs:
                 try:
                     await target_loader["enable_fk_checks"](target_conn)
-                except Exception as e:
-                    logger.warning(f"Could not re-enable FK checks: {e}")
+                except Exception as exc:
+                    # TEARDOWN, so this does NOT raise: it runs in a `finally`
+                    # and would replace whatever failure is already in flight
+                    # with its own.
+                    #
+                    # It is an ERROR rather than a warning because of what it
+                    # leaves behind. The connection is still enforcing nothing,
+                    # so a caller that reuses it writes against unchecked
+                    # constraints and never knows. That is worth waking someone
+                    # for even though the transfer itself succeeded.
+                    logger.error(
+                        "Could not re-enable foreign key checks on the target "
+                        "after the transfer: %s. The connection is left NOT "
+                        "enforcing them, so anything written on it from here "
+                        "is unchecked.",
+                        exc,
+                        exc_info=True,
+                    )
 
     duration = (datetime.now(UTC) - start).total_seconds()
 

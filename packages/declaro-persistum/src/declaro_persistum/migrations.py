@@ -1,6 +1,4 @@
 
-from declaro_persistum.types import Dialect
-
 """
 Automatic schema migration support for declaro_persistum.
 
@@ -19,12 +17,13 @@ Usage:
 
 import hashlib
 import logging
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from declaro_persistum.abstractions.enums import expand_schema_enums
-from declaro_persistum.applier.protocol import create_applier
+from declaro_persistum.applier import apply as apply_operations
 from declaro_persistum.database import (
     Database,
     is_replicated,
@@ -32,11 +31,13 @@ from declaro_persistum.database import (
     refresh,
 )
 from declaro_persistum.differ import diff, diff_views
+from declaro_persistum.exceptions import MigrationError
 from declaro_persistum.inspector import introspect_with_views
 from declaro_persistum.pydantic_loader import (
     load_declarations,
     load_models_from_module,
 )
+from declaro_persistum.types import Dialect, for_dialect
 
 META_TABLE = "_declaro_meta"
 
@@ -97,6 +98,22 @@ def _compute_schema_hash(schema_path: Path, version: str) -> str:
     from the new version's computed hash, so the runner performs a fresh
     introspection on first startup after upgrade.
     """
+    # A DIRECTORY EXISTS, SO `exists()` WAS THE WRONG QUESTION. The caller's
+    # guard is `if not schema_path.exists()`, which a models directory passes,
+    # and `read_bytes` then raised `IsADirectoryError` three frames down --
+    # naming a function the caller never called instead of the argument it got
+    # wrong. Measured 2026-08-17.
+    #
+    # The mistake is the likely one, not an exotic one: this package has both
+    # shapes, and `docs/usage.md` shows a `models/` directory holding
+    # `users.py` and `orders.py`. So the refusal names the other function.
+    if schema_path.is_dir():
+        raise ValueError(
+            f"{schema_path} is a directory. `apply_migrations_async` hashes a "
+            f"single models file. For a directory of them, load it with "
+            f"`load_schema_from_models` and pass the file you want stamped."
+        )
+
     h = hashlib.sha256()
     h.update(schema_path.read_bytes())
     h.update(b"\x00")  # delimiter so file content cannot collide with version
@@ -140,17 +157,129 @@ def partition_replica_operations(
     return safe_order, skipped
 
 
-async def _ensure_meta_table(conn: Any) -> None:
-    """Create the _declaro_meta table if it doesn't exist."""
-    sql = (
+
+# =============================================================================
+# The statements, as values
+# =============================================================================
+#
+# EVERY FUNCTION BELOW RETURNS SQL AND RUNS NOTHING, and that split is a fix
+# for a measured failure. Five mutations were made to this module and run
+# against two suites:
+#
+#     mutation                              dict double   real database
+#     _stamp_key drops the hash  (Python)   CAUGHT        CAUGHT
+#     ON CONFLICT -> DO NOTHING  (SQL)      missed        CAUGHT
+#     ON CONFLICT removed        (SQL)      missed        CAUGHT
+#     key stops being PRIMARY KEY (DDL)     missed        CAUGHT
+#     value becomes nullable      (DDL)     missed        CAUGHT
+#
+# The double caught the Python mutation and missed every SQL one, because the
+# statements were built and executed in the same function and were therefore
+# never values anybody could look at. The only test seam left was the
+# connection, and the connection is what gives SQL its meaning, so a double
+# there is a re-implementation of a database.
+#
+# `applier/shared.py` has had this shape all along: fourteen functions that
+# return SQL, none that execute it, all tested by equality.
+#
+# THE DIALECT IS A TABLE, NOT `hasattr(conn, "fetch")`. Each function below
+# used to carry that branch inline: one arm for asyncpg, one for everything
+# else. "Everything else" is not a decision, so a third engine took the SQLite
+# arm in silence. An engine that is not in the table now raises.
+
+_PLACEHOLDER = {"sqlite": "?", "postgresql": "$1"}
+
+
+def _placeholder(dialect: str) -> str:
+    return cast(str, for_dialect(_PLACEHOLDER, dialect, "Statement builders"))
+
+
+def meta_table_sql() -> str:
+    """The stamp table. One statement, both engines take it unchanged.
+
+    `key TEXT PRIMARY KEY` is the upsert's conflict target. Without it every
+    restamp inserts a row instead of updating one, and two services sharing a
+    database accumulate a row per boot.
+    """
+    return (
         f'CREATE TABLE IF NOT EXISTS "{META_TABLE}" ('
         f"key TEXT PRIMARY KEY, "
         f"value TEXT NOT NULL, "
         f"updated_at TEXT NOT NULL"
         f")"
     )
-    if hasattr(conn, "fetch"):
-        # asyncpg
+
+
+def stored_hash_sql(dialect: str) -> str:
+    """Read one stamp by key. The engines differ only in the placeholder."""
+    return f'SELECT value FROM "{META_TABLE}" WHERE key = {_placeholder(dialect)}'
+
+
+def store_hash_sql(dialect: str) -> str:
+    """Write one stamp, updating it if the key is already there.
+
+    `DO UPDATE`, never `DO NOTHING`. Both keep the row count at one, and only
+    the first refreshes the stamp, so `DO NOTHING` leaves a database reporting
+    a boot that never happened.
+
+    asyncpg numbers its parameters and repeats them by number; SQLite reads
+    the row it was about to insert, through `excluded`. The clause is the same
+    clause.
+    """
+    if dialect == "postgresql":
+        _placeholder(dialect)  # refuses an engine that is not in the table
+        return (
+            f'INSERT INTO "{META_TABLE}" (key, value, updated_at) '
+            f"VALUES ($1, $2, $3) "
+            f"ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = $3"
+        )
+    _placeholder(dialect)
+    return (
+        f'INSERT INTO "{META_TABLE}" (key, value, updated_at) '
+        f"VALUES (?, ?, ?) "
+        f"ON CONFLICT (key) DO UPDATE SET "
+        f"value = excluded.value, updated_at = excluded.updated_at"
+    )
+
+
+def user_tables_sql(dialect: str) -> str:
+    """Any table that is not ours. The one query that genuinely differs.
+
+    `_declaro_meta` is excluded because it is ours: a database holding only it
+    is empty, and counting it would make every fresh database look populated.
+    SQLite's own `sqlite_%` tables are excluded for the same reason, and
+    `sqlite_sequence` appears the moment any table uses AUTOINCREMENT.
+    """
+    if dialect == "postgresql":
+        _placeholder(dialect)
+        return (
+            f"SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
+            f"AND tablename != '{META_TABLE}'"
+        )
+    _placeholder(dialect)
+    return (
+        f"SELECT name FROM sqlite_master "
+        f"WHERE type = 'table' AND name NOT LIKE 'sqlite_%' "
+        f"AND name != '{META_TABLE}'"
+    )
+
+
+def _dialect_of(conn: Any) -> str:
+    """asyncpg or not, decided once rather than in every statement.
+
+    This is still a shape check rather than a declared dialect, and it is the
+    boundary: `apply_migrations` is handed a connection and no dialect. What
+    changed is that the answer is computed here, once, instead of inside each
+    of five functions where a third engine would have taken the SQLite arm in
+    silence.
+    """
+    return "postgresql" if hasattr(conn, "fetch") else "sqlite"
+
+
+async def _ensure_meta_table(conn: Any) -> None:
+    """Run `meta_table_sql`. The statement is asserted in its own test."""
+    sql = meta_table_sql()
+    if _dialect_of(conn) == "postgresql":
         await conn.execute(sql)
     else:
         await conn.execute(sql, ())
@@ -183,38 +312,26 @@ def _stamp_key(schema_name: str, schema_hash: str) -> str:
 async def _get_stored_hash(conn: Any, schema_name: str, schema_hash: str) -> str | None:
     """Return the stored stamp for this exact schema and version, else None."""
     key = _stamp_key(schema_name, schema_hash)
-    if hasattr(conn, "fetch"):
-        row = await conn.fetchrow(
-            f'SELECT value FROM "{META_TABLE}" WHERE key = $1', key
-        )
+    dialect = _dialect_of(conn)
+    sql = stored_hash_sql(dialect)
+    if dialect == "postgresql":
+        row = await conn.fetchrow(sql, key)
         return row["value"] if row else None
-    else:
-        cursor = await conn.execute(
-            f'SELECT value FROM "{META_TABLE}" WHERE key = ?', (key,)
-        )
-        row = await cursor.fetchone()
-        return row[0] if row else None
+    cursor = await conn.execute(sql, (key,))
+    row = await cursor.fetchone()
+    return row[0] if row else None
 
 
 async def _store_hash(conn: Any, schema_name: str, schema_hash: str) -> None:
     """Store (upsert) the schema hash in _declaro_meta."""
     key = _stamp_key(schema_name, schema_hash)
     now = datetime.now(UTC).isoformat()
-    if hasattr(conn, "fetch"):
-        await conn.execute(
-            f'INSERT INTO "{META_TABLE}" (key, value, updated_at) '
-            f"VALUES ($1, $2, $3) "
-            f"ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = $3",
-            key, schema_hash, now,
-        )
+    dialect = _dialect_of(conn)
+    sql = store_hash_sql(dialect)
+    if dialect == "postgresql":
+        await conn.execute(sql, key, schema_hash, now)
     else:
-        await conn.execute(
-            f'INSERT INTO "{META_TABLE}" (key, value, updated_at) '
-            f"VALUES (?, ?, ?) "
-            f"ON CONFLICT (key) DO UPDATE SET "
-            f"value = excluded.value, updated_at = excluded.updated_at",
-            (key, schema_hash, now),
-        )
+        await conn.execute(sql, (key, schema_hash, now))
         await conn.commit()
 
 
@@ -271,19 +388,84 @@ async def _schema_is_clean(
 
 async def _has_user_tables(conn: Any) -> bool:
     """Return True if the database has at least one table besides _declaro_meta."""
-    sql = (
-        "SELECT name FROM sqlite_master "
-        "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name != ?"
-    )
-    if hasattr(conn, "fetch"):
-        # asyncpg — use information_schema instead
-        rows = await conn.fetch(
-            "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+    dialect = _dialect_of(conn)
+    sql = user_tables_sql(dialect)
+    if dialect == "postgresql":
+        return bool(await conn.fetch(sql))
+    cursor = await conn.execute(sql)
+    return await cursor.fetchone() is not None
+
+
+
+# The prefix persistum owns. ONE definition, read by the generator and by the
+# recovery query alike. It was two string literals in two modules: a change to
+# one is silent, because reconstruction keeps working and recovery keeps
+# returning zero, and the only symptom is a table that vanishes after a crash.
+TMP_PREFIX = "_declaro_tmp_"
+
+# One underscore and eight hex characters. The recovery rule below strips this
+# many characters by POSITION, which is right only while the width is fixed.
+_SUFFIX_WIDTH = 9
+
+
+def temp_table_name(table: str) -> str:
+    """The name a reconstruction copies rows into. Pure.
+
+    The random tail is what stops a retry colliding with a tmp table the
+    previous attempt left behind.
+    """
+    return f"{TMP_PREFIX}{table}_{uuid.uuid4().hex[:8]}"
+
+
+def original_table_name(tmp_name: str) -> str:
+    """The table a tmp name was made from. Pure, and the inverse of the above.
+
+    STRIPPING NINE CHARACTERS BY POSITION IS CORRECT HERE, and I recorded it as
+    a bug for a day because I tested it with a name the generator cannot make.
+    `temp_table_name` always appends an underscore and eight hex, so the
+    remainder is always `{table}_{8}` and removing nine always yields the table
+    exactly, dated names included. Verified by round trip over every shape in
+    `TABLE_NAMES`, with the input built by the generator rather than by hand.
+
+    A name without our prefix RAISES rather than being guessed at. The old code
+    silently `continue`d past those inside the loop, which put the decision in
+    the caller and left this function with no opinion about its own domain.
+    """
+    if not tmp_name.startswith(TMP_PREFIX):
+        raise ValueError(
+            f"{tmp_name!r} is not a tmp table this package wrote. Only names "
+            f"beginning {TMP_PREFIX!r} are ours to rename or drop."
         )
-        return any(r["tablename"] != META_TABLE for r in rows)
-    cursor = await conn.execute(sql, (META_TABLE,))
-    row = await cursor.fetchone()
-    return row is not None
+    remainder = tmp_name[len(TMP_PREFIX):]
+    if len(remainder) > _SUFFIX_WIDTH and remainder[-_SUFFIX_WIDTH] == "_":
+        return remainder[:-_SUFFIX_WIDTH]
+    return remainder
+
+
+def orphaned_tmp_tables_sql() -> str:
+    """Every tmp table this package wrote. Returns SQL, runs nothing.
+
+    THE UNDERSCORE IS ESCAPED, AND IT WAS NOT. SQLite reads `_` in a LIKE
+    pattern as a single-character wildcard, so `LIKE '_declaro_tmp_%'` also
+    matched `Xdeclaro_tmp_users_a1b2c3d4` -- a table this package did not
+    create. Measured 2026-08-17 against a real database.
+
+    Nothing foreign was ever harmed, because `original_table_name` refuses a
+    name without the prefix, so the extra rows were dropped in Python. But the
+    docstring's promise that "only that prefix is matched" was true of the
+    function and false of its query, and a guard doing the SQL's job is a guard
+    somebody will one day remove as redundant.
+    """
+    # THE PATTERN IS BUILT OUTSIDE THE f-STRING. A backslash inside one is a
+    # syntax error before Python 3.12, and this package declares >=3.11, so the
+    # first version of this fix would not have imported on the oldest supported
+    # interpreter. The tests passed because they run on 3.14; ruff caught it.
+    pattern = TMP_PREFIX.replace("_", r"\_")
+    return (
+        "SELECT name FROM sqlite_master "
+        f"WHERE type = 'table' AND name LIKE '{pattern}%' "
+        "ESCAPE '\\'"
+    )
 
 
 async def _recover_orphaned_tmp_tables(db: Database) -> int:
@@ -300,26 +482,17 @@ async def _recover_orphaned_tmp_tables(db: Database) -> int:
     Returns the number of tables recovered.
     """
     async with _for_ddl(db) as conn:
-        cursor = await conn.execute(
-            "SELECT name FROM sqlite_master "
-            "WHERE type = 'table' AND name LIKE '_declaro_tmp_%'"
-        )
+        cursor = await conn.execute(orphaned_tmp_tables_sql())
         tmp_tables = await cursor.fetchall()
 
         recovered = 0
         for row in tmp_tables:
             tmp_name = row[0]
-
-            if tmp_name.startswith("_declaro_tmp_"):
-                # Strip prefix and UUID suffix: _declaro_tmp_<table>_<8hex>
-                remainder = tmp_name[len("_declaro_tmp_"):]
-                # The last 9 chars are _{8hex} — strip them
-                if len(remainder) > 9 and remainder[-9] == "_":
-                    original_name = remainder[:-9]
-                else:
-                    original_name = remainder
-            else:
-                continue
+            # `original_table_name` refuses a name without our prefix, and the
+            # query no longer returns one: its LIKE now escapes the underscores
+            # it used to treat as wildcards. Both halves check, because the
+            # query is the fix and this is the belt.
+            original_name = original_table_name(tmp_name)
 
             # Check if the original table exists
             check = await conn.execute(
@@ -328,31 +501,60 @@ async def _recover_orphaned_tmp_tables(db: Database) -> int:
             )
             original_exists = await check.fetchone()
 
-            try:
-                if original_exists:
-                    # Original exists — tmp is leftover junk, drop it
-                    await conn.execute(f'DROP TABLE "{tmp_name}"')
-                    await conn.commit()
-                    logger.warning(
-                        f"Dropped leftover tmp table: {tmp_name}"
-                    )
-                else:
-                    # Original missing — rename tmp to recover
+            # NO `except` HERE, AND ITS ABSENCE IS THE FIX. This was
+            # `except Exception as e: logger.error(...)`, so a rename that
+            # could not land was logged and the loop moved on.
+            #
+            # MEASURED 2026-08-17, with a view occupying the target name:
+            #
+            #     Failed to clean up tmp table _declaro_tmp_orders_b2dd4c8f:
+            #       there is already another table or index with this name
+            #     returned 0, and the caller discards the return value
+            #
+            # The migration then ran, saw `orders` as absent and created it
+            # empty, while the rows sat in the tmp table where nothing would
+            # ever query them. The swallow was not a caution about the
+            # recovery, it WAS the data loss the recovery exists to prevent.
+            #
+            # So it raises, and `apply_migrations_async` stops. Stopping is
+            # right: a migration against a half-recovered database is what
+            # produced the tmp table in the first place. The rows stay where
+            # they are, under a name an operator can find (Rule 8).
+            if original_exists:
+                # The original survived, so the tmp is leftover junk.
+                await conn.execute(f'DROP TABLE "{tmp_name}"')
+                await conn.commit()
+                logger.warning("Dropped leftover tmp table: %s", tmp_name)
+            else:
+                try:
                     await conn.execute(
                         f'ALTER TABLE "{tmp_name}" RENAME TO "{original_name}"'
                     )
                     await conn.commit()
-                    logger.warning(
-                        f"Recovered orphaned table: {tmp_name} → {original_name}"
-                    )
-                    recovered += 1
-            except Exception as e:
-                logger.error(
-                    f"Failed to clean up tmp table {tmp_name}: {e}"
+                except Exception as exc:
+                    raise MigrationError(
+                        f"Could not recover {tmp_name!r} to {original_name!r}. "
+                        f"A reconstruction died between dropping the original "
+                        f"and renaming its replacement, and the replacement "
+                        f"cannot be moved into place. The rows are intact in "
+                        f"{tmp_name!r}. Migrating now would create "
+                        f"{original_name!r} empty beside them.",
+                        sql=f'ALTER TABLE "{tmp_name}" RENAME TO "{original_name}"',
+                        original_error=exc,
+                    ) from exc
+                logger.warning(
+                    "Recovered orphaned table: %s -> %s", tmp_name, original_name
                 )
+                recovered += 1
 
         # Invalidate stored hash so migration re-runs after recovery
         if recovered:
+            # THE EXPECTED CASE IS PREVENTED, NOT CAUGHT. A database that has
+            # never been migrated has no meta table, so the DELETE below used
+            # to raise and be absorbed along with everything else. Creating the
+            # table first makes that case impossible, which leaves the handler
+            # narrowed to failures that are genuinely worth seeing.
+            await _ensure_meta_table(conn)
             try:
                 await conn.execute(
                     f'DELETE FROM "{META_TABLE}" WHERE key LIKE ?',
@@ -587,9 +789,8 @@ async def apply_migrations_async(
     # No pause. A migration is a writer, and it holds the serialise lock for
     # the whole of `_for_ddl`; opportunistic replication defers to a waiting
     # writer, so nothing can push mid-transaction.
-    applier = create_applier(dialect)
     async with _for_ddl(db) as conn:
-        result = await applier.apply(conn, operations, execution_order)
+        result = await apply_operations(conn, operations, execution_order, dialect, dry_run=False)
 
     if result["success"]:
         logger.info(f"Successfully applied {result['operations_applied']} migrations")

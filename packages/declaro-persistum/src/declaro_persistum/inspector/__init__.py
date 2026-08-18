@@ -22,44 +22,28 @@ from __future__ import annotations
 from typing import Any, cast
 
 from declaro_persistum.inspector import postgresql, sqlite, turso
-from declaro_persistum.types import Dialect, Schema, View
+from declaro_persistum.types import Dialect, Schema, View, for_dialect
 
+# PLAIN DICTS. Both tables were `_Inspectors(dict)`, a class whose only member
+# was `__missing__`. See `for_dialect` in `types.py`: the lookup is the thing
+# that varied, so the lookup is a function and the tables are data.
+INSPECTORS: dict[str, Any] = {
+    "postgresql": postgresql.introspect,
+    "sqlite": sqlite.introspect,
+    "turso": turso.introspect,
+}
 
-class _Inspectors(dict):
-    """A dispatch table that explains itself when asked for something absent.
-
-    A bare dict raises `KeyError: 'mysql'`, which tells a caller what they
-    asked for and not what was available. Subclassing to override one method
-    is the smallest thing that turns the failure into an answer.
-    """
-
-    def __missing__(self, dialect: Dialect) -> Any:
-        raise ValueError(
-            f"Unsupported dialect: {dialect}. "
-            f"Supported dialects: {', '.join(sorted(self))}"
-        )
-
-
-INSPECTORS = _Inspectors(
-    {
-        "postgresql": postgresql.introspect,
-        "sqlite": sqlite.introspect,
-        "turso": turso.introspect,
-    }
-)
-
-TABLE_EXISTS = _Inspectors(
-    {
-        "postgresql": postgresql.table_exists,
-        "sqlite": sqlite.table_exists,
-        "turso": turso.table_exists,
-    }
-)
+TABLE_EXISTS: dict[str, Any] = {
+    "postgresql": postgresql.table_exists,
+    "sqlite": sqlite.table_exists,
+    "turso": turso.table_exists,
+}
 
 
 async def introspect(connection: Any, dialect: Dialect) -> Schema:
     """Read a database's tables back out of it."""
-    result = await INSPECTORS[dialect](connection, include_views=False)
+    inspector = for_dialect(INSPECTORS, dialect, "Inspectors")
+    result = await inspector(connection, include_views=False)
     return cast(Schema, result)
 
 
@@ -82,12 +66,14 @@ async def introspect_with_views(
     The flag was also an implicit default (Rule 14): `False` decided for every
     caller who never knew there was a choice.
     """
-    result = await INSPECTORS[dialect](connection, include_views=True)
+    inspector = for_dialect(INSPECTORS, dialect, "Inspectors")
+    result = await inspector(connection, include_views=True)
     return cast(tuple[Schema, dict[str, View]], result)
 
 
 async def table_exists(connection: Any, dialect: Dialect, table: str) -> bool:
-    return await TABLE_EXISTS[dialect](connection, table)
+    exists = for_dialect(TABLE_EXISTS, dialect, "Table-exists checks")
+    return cast(bool, await exists(connection, table))
 
 
 __all__ = [

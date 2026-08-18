@@ -241,7 +241,11 @@ def detect_dialect(connection_string: str) -> str:
     """Detect dialect from connection string."""
     if connection_string.startswith("postgresql://") or connection_string.startswith("postgres://"):
         return "postgresql"
-    elif connection_string.startswith("sqlite://"):
+    elif connection_string.startswith("sqlite:///"):
+        # THREE SLASHES, not two. `sqlite://foo.db` used to be accepted here
+        # and could not be opened by `_connect`, so the CLI said yes at the
+        # front door and failed at the back one with an error about the
+        # database rather than about the URL.
         return "sqlite"
     elif connection_string.startswith("libsql://") or connection_string.startswith("https://"):
         return "turso"

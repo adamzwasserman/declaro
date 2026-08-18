@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from declaro_persistum.exceptions import AmbiguityError
-from declaro_persistum.types import Ambiguity, Decision, Dialect, DiffResult, Schema
+from declaro_persistum.types import Ambiguity, Decision, Dialect, DiffResult, Schema, for_dialect
 
 
 async def cmd_diff(
@@ -32,7 +32,7 @@ async def cmd_diff(
         2 if there's drift and --force not specified
     """
     from declaro_persistum.differ import diff
-    from declaro_persistum.inspector.protocol import create_inspector
+    from declaro_persistum.inspector import introspect
     from declaro_persistum.loader import load_decisions, load_schema, load_snapshot
 
     # Determine interactive mode
@@ -53,8 +53,7 @@ async def cmd_diff(
     # Connect and introspect database
     connection = await _connect(connection_string, dialect)
     try:
-        inspector = create_inspector(dialect)
-        actual = await inspector.introspect(connection)
+        actual = await introspect(connection, dialect)
 
         if verbose:
             print(f"Introspected {len(actual)} tables from database")
@@ -113,9 +112,9 @@ async def cmd_apply(
         0 if migrations applied successfully
         1 if there are errors
     """
-    from declaro_persistum.applier.protocol import create_applier
+    from declaro_persistum.applier import apply as apply_operations
     from declaro_persistum.differ import diff
-    from declaro_persistum.inspector.protocol import create_inspector
+    from declaro_persistum.inspector import introspect
     from declaro_persistum.loader import (
         clear_decisions,
         load_decisions,
@@ -131,12 +130,21 @@ async def cmd_apply(
         unattended = not is_tty
 
     # Load schema and connect
+    if verbose:
+        print(f"Loading schema from {schema_dir}...", file=sys.stderr)
+
     target = load_schema(schema_dir)
+
+    if verbose:
+        print(f"Loaded {len(target)} tables from schema files", file=sys.stderr)
+
     connection = await _connect(connection_string, dialect)
 
     try:
-        inspector = create_inspector(dialect)
-        actual = await inspector.introspect(connection)
+        actual = await introspect(connection, dialect)
+
+        if verbose:
+            print(f"Introspected {len(actual)} tables from database", file=sys.stderr)
 
         # Check drift
         snapshot_path = Path(schema_dir) / "snapshot.toml"
@@ -180,11 +188,12 @@ async def cmd_apply(
                 return 1
 
         # Apply migrations
-        applier = create_applier(dialect)
-        apply_result = await applier.apply(
+        apply_result = await apply_operations(
             connection,
             result["operations"],
             result["execution_order"],
+            dialect,
+            dry_run=False,
         )
 
         if apply_result["success"]:
@@ -228,7 +237,7 @@ async def cmd_snapshot(
         0 if snapshot updated successfully
         1 if error or user declined
     """
-    from declaro_persistum.inspector.protocol import create_inspector
+    from declaro_persistum.inspector import introspect
     from declaro_persistum.loader import save_snapshot
 
     snapshot_path = Path(schema_dir) / "snapshot.toml"
@@ -241,8 +250,7 @@ async def cmd_snapshot(
 
     connection = await _connect(connection_string, dialect)
     try:
-        inspector = create_inspector(dialect)
-        actual = await inspector.introspect(connection)
+        actual = await introspect(connection, dialect)
 
         save_snapshot(schema_dir, actual, dialect)
         print(f"✓ Snapshot saved to {snapshot_path}")
@@ -339,9 +347,9 @@ async def cmd_migrate_remote(
     from pathlib import Path
 
     from declaro_persistum.abstractions.enums import expand_schema_enums
-    from declaro_persistum.applier.protocol import create_applier
+    from declaro_persistum.applier import apply as apply_operations
     from declaro_persistum.differ import diff
-    from declaro_persistum.inspector.protocol import create_inspector
+    from declaro_persistum.inspector import introspect
     from declaro_persistum.pydantic_loader import load_models_from_module
 
     schema_file = Path(schema_path)
@@ -385,18 +393,32 @@ async def cmd_migrate_remote(
         )
 
         try:
-            # Pull current cloud state into temp file — try both methods
-            try:
-                await conn.sync()
-            except Exception:
-                await conn.pull()
+            # PULL UNTIL THE COPY IS LEVEL, not once, and never via `sync`.
+            #
+            # This was `try: await conn.sync() except Exception: await
+            # conn.pull()`, which had two defects in four lines.
+            #
+            # `ConnectionSync.sync` does not exist on pyturso. Measured
+            # 2026-08-17: `hasattr(ConnectionSync, "sync")` is False, so the
+            # first call raised AttributeError on every run and the `except`
+            # did the real work. An AttributeError means WE called something
+            # wrongly, and it was being used as feature detection.
+            #
+            # And one `pull()` fetches ONE batch. `_pull_until_level` exists
+            # because of that: a replica showed nothing after connect, gained
+            # the missing table on pull #1, and reported empty on pull #2.
+            # Pulling once here left the copy possibly behind, so the schema
+            # this command introspects could be missing tables the primary
+            # has, and the migration would propose creating them.
+            from declaro_persistum.turso_database import _pull_until_level
+
+            await _pull_until_level(conn)
 
             if verbose:
                 print("Replicated current schema from cloud")
 
             # Introspect cloud DB (via local replica)
-            inspector = create_inspector(dialect)
-            current_schema = await inspector.introspect(conn)
+            current_schema = await introspect(conn, dialect)
 
             if verbose:
                 print(f"Introspected {len(current_schema)} tables from cloud DB")
@@ -442,10 +464,13 @@ async def cmd_migrate_remote(
                 return 0
 
             # Apply DDL locally
-            applier = create_applier(dialect)
-            result = await applier.apply(
-                conn, diff_result["operations"], diff_result["execution_order"]
-            )
+            result = await apply_operations(
+                conn,
+                diff_result["operations"],
+                diff_result["execution_order"],
+                dialect,
+            dry_run=False,
+        )
 
             if result["success"]:
                 # Push DDL changes to cloud
@@ -469,6 +494,7 @@ async def cmd_generate(
     dialect: Dialect,
     output: str | None,
     force: bool,
+    verbose: bool,
 ) -> int:
     """
     Generate SQL without executing.
@@ -477,17 +503,26 @@ async def cmd_generate(
         0 if SQL generated successfully
         1 if errors
     """
-    from declaro_persistum.applier.protocol import create_applier
+    from declaro_persistum.applier import generate_sql
     from declaro_persistum.differ import diff
-    from declaro_persistum.inspector.protocol import create_inspector
+    from declaro_persistum.inspector import introspect
     from declaro_persistum.loader import load_decisions, load_schema, load_snapshot
 
+    if verbose:
+        print(f"Loading schema from {schema_dir}...", file=sys.stderr)
+
     target = load_schema(schema_dir)
+
+    if verbose:
+        print(f"Loaded {len(target)} tables from schema files", file=sys.stderr)
+
     connection = await _connect(connection_string, dialect)
 
     try:
-        inspector = create_inspector(dialect)
-        actual = await inspector.introspect(connection)
+        actual = await introspect(connection, dialect)
+
+        if verbose:
+            print(f"Introspected {len(actual)} tables from database", file=sys.stderr)
 
         # Check drift
         snapshot_path = Path(schema_dir) / "snapshot.toml"
@@ -509,13 +544,16 @@ async def cmd_generate(
             return 0
 
         # Generate SQL
-        applier = create_applier(dialect)
-        sql_statements = applier.generate_sql(
+        sql_statements = generate_sql(
             result["operations"],
             result["execution_order"],
+            dialect,
         )
 
         # Output
+        if verbose:
+            print(f"Generated {len(sql_statements)} statements", file=sys.stderr)
+
         sql_output = "\n".join(sql_statements) + "\n"
 
         if output:
@@ -533,30 +571,79 @@ async def cmd_generate(
 # Helper functions
 
 
+SQLITE_RELATIVE = "sqlite:///"
+SQLITE_ABSOLUTE = "sqlite:////"
+
+
+def sqlite_path(connection_string: str) -> str:
+    """The filename a `sqlite://` URL names, or a refusal that shows the forms.
+
+    THREE SLASHES IS RELATIVE, FOUR IS ABSOLUTE, which is the convention the
+    documented examples use (`sqlite:///./data/app.db`).
+
+    THIS WAS `connection_string.replace("sqlite:///", "")`, and two things were
+    wrong with it. A replace is not a prefix strip, so it also ate the sequence
+    out of the middle of a path. And it did nothing at all to a two-slash URL,
+    which `detect_dialect` accepted as SQLite, so aiosqlite was handed
+    `sqlite://foo.db` as a FILENAME and answered
+
+        sqlite3.OperationalError: unable to open database file
+
+    A user who typed a URL this CLI called valid is sent to look at disk
+    permissions. Measured 2026-08-17.
+    """
+    if connection_string.startswith(SQLITE_ABSOLUTE):
+        return connection_string[len(SQLITE_ABSOLUTE) - 1 :]
+    if connection_string.startswith(SQLITE_RELATIVE):
+        return connection_string[len(SQLITE_RELATIVE) :]
+    raise ValueError(
+        f"{connection_string!r} is not a SQLite URL this CLI can open. Use "
+        f"{SQLITE_RELATIVE}relative/path.db or {SQLITE_ABSOLUTE}absolute/path.db"
+    )
+
+
+async def _connect_postgresql(connection_string: str) -> Any:
+    import asyncpg
+
+    return await asyncpg.connect(connection_string)
+
+
+async def _connect_sqlite(connection_string: str) -> Any:
+    import aiosqlite
+
+    return await aiosqlite.connect(sqlite_path(connection_string))
+
+
+async def _connect_turso(connection_string: str) -> Any:
+    import turso.aio
+
+    return await turso.aio.connect(connection_string)
+
+
+CONNECTORS: dict[str, Any] = {
+    "postgresql": _connect_postgresql,
+    "sqlite": _connect_sqlite,
+    "turso": _connect_turso,
+}
+
+
 async def _connect(connection_string: str, dialect: Dialect) -> Any:
-    """Create database connection."""
-    if dialect == "postgresql":
-        import asyncpg
-
-        return await asyncpg.connect(connection_string)
-    elif dialect == "sqlite":
-        import aiosqlite
-
-        # Extract path from sqlite:///path
-        path = connection_string.replace("sqlite:///", "")
-        return await aiosqlite.connect(path)
-    elif dialect == "turso":
-        import turso.aio
-
-        return await turso.aio.connect(connection_string)
-    else:
-        raise ValueError(f"Unsupported dialect: {dialect}")
+    """Open a connection for `dialect`."""
+    connector = for_dialect(CONNECTORS, dialect, "Connectors")
+    return await connector(connection_string)
 
 
 async def _disconnect(connection: Any, dialect: Dialect) -> None:
-    """Close database connection."""
-    if dialect == "postgresql" or dialect == "sqlite" or dialect == "turso":
-        await connection.close()
+    """Close a connection.
+
+    The chain here read `if dialect == "postgresql" or dialect == "sqlite" or
+    dialect == "turso"`, which is every dialect there is, so it was an `if`
+    that is always true guarding the one line it contains -- and silence for
+    any engine added later. `for_dialect` keeps the check and makes the
+    silence impossible.
+    """
+    for_dialect(CONNECTORS, dialect, "Connectors")
+    await connection.close()
 
 
 def _check_drift(actual: Schema, expected: Schema) -> list[dict[str, str]]:

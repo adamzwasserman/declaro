@@ -295,7 +295,7 @@ triggers = generate_refresh_trigger_sql(
 The SQLite and Turso inspectors read `_dp_materialized_views` to tell an emulated materialized view from an ordinary one, and exclude its backing table from the schema. Neither did before 2026-08-14: every view came back `materialized: False` and the backing table came back as a user table nobody had declared, so each migration proposed dropping it and discarding the view's contents.
 
 ```python
-schema, views = await inspector.introspect(conn, include_views=True)
+schema, views = await introspect_with_views(conn, "postgresql")
 
 for name, view in views.items():
     if view.get("materialized"):
@@ -734,10 +734,10 @@ PostgreSQL supports multiple schemas. By default, introspection uses the `public
 
 ```python
 # Introspect public schema (default)
-schema = await inspector.introspect(conn)
+schema = await introspect(conn, "postgresql")
 
 # Introspect a specific schema
-schema = await inspector.introspect(conn, schema_name="myapp")
+schema = await introspect(conn, "postgresql")  # schema_name is not a parameter
 
 # Check table existence in a specific schema
 exists = await inspector.table_exists(conn, "users", schema_name="myapp")
@@ -795,7 +795,7 @@ async def introspect_with_views():
     conn = await asyncpg.connect("postgresql://localhost/mydb")
 
     # Returns tuple of (schema, views) when include_views=True
-    schema, views = await introspect(conn, "postgresql", include_views=True)
+    schema, views = await introspect_with_views(conn, "postgresql")
 
     print("Tables:")
     for table_name in schema:
@@ -838,7 +838,7 @@ from declaro_persistum import load_schema_from_models
 target = load_schema_from_models("./models")
 
 # Current schema from introspection (see above)
-current = await inspector.introspect(conn)
+current = await introspect(conn, "postgresql")
 
 # Compute diff
 result = diff(current, target, dialect="postgresql")
@@ -1717,7 +1717,8 @@ for sql in result['executed_sql']:
 Generate SQL without applying:
 
 ```python
-from declaro_persistum.applier.postgresql import generate_operation_sql, generate_sql
+from declaro_persistum.applier import generate_sql
+from declaro_persistum.applier.postgresql import generate_operation_sql
 
 # Generate SQL for a single operation
 sql = generate_operation_sql({
@@ -1731,7 +1732,7 @@ sql = generate_operation_sql({
 print(sql)  # ALTER TABLE "users" ADD COLUMN "phone" text
 
 # Generate all SQL in execution order
-sql_list = generate_sql(operations, execution_order)
+sql_list = generate_sql(operations, execution_order, "postgresql")
 for sql in sql_list:
     print(sql)
 ```
