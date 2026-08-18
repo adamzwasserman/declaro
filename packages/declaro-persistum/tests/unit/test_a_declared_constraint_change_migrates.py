@@ -89,25 +89,43 @@ def test_an_unchanged_unique_emits_nothing(dialect: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# check
+# check, which is NOT compared, and the reason is measured
 # ---------------------------------------------------------------------------
+#
+# These three tests asserted that a CHECK change emits an operation. I wrote
+# them, made them pass, shipped it, and it was a migration loop: see the
+# section at the bottom of this file. A CHECK is created and enforced and no
+# inspector reads it back, so the declared value was compared against None on
+# every deploy and `alter_column` rebuilt the table each time.
+#
+# What is true today is written here instead of being left as a passing test
+# for behaviour the package does not have.
 
 
 @pytest.mark.parametrize("dialect", DIALECTS)
-def test_a_check_constraint_change_emits_an_operation(dialect: str) -> None:
+def test_a_check_change_still_migrates_nothing(dialect: str) -> None:
+    """RECORDED, NOT ENDORSED. This is a gap, and the fix is in the inspector.
+
+    A changed CHECK emits no operation, so a schema that tightens `n > 0` to
+    `n > 10` is told the migration succeeded and the old constraint stands.
+
+    Closing it means teaching the inspectors to read a CHECK back, out of
+    `sqlite_master` for SQLite and `pg_constraint` for PostgreSQL. Comparing it
+    without that is what produced the loop.
+    """
     assert _ops({"type": "integer", "check": "c > 0"},
-                {"type": "integer", "check": "c > 10"}, dialect) != []
+                {"type": "integer", "check": "c > 10"}, dialect) == []
 
 
 @pytest.mark.parametrize("dialect", DIALECTS)
-def test_removing_a_check_emits_an_operation(dialect: str) -> None:
-    assert _ops({"type": "integer", "check": "c > 0"}, {"type": "integer"}, dialect) != []
+def test_a_declared_check_still_reaches_the_database(dialect: str) -> None:
+    """The half that works: a CHECK on a NEW table is created."""
+    plan = diff({}, _table({"type": "integer", "check": "c > 0"}), dialect=dialect)
 
+    from declaro_persistum.applier import generate_sql
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_an_unchanged_check_emits_nothing(dialect: str) -> None:
-    same = {"type": "integer", "check": "c > 0"}
-    assert _ops(same, dict(same), dialect) == []
+    sql = "\n".join(generate_sql(plan["operations"], plan["execution_order"], dialect))
+    assert "CHECK" in sql.upper(), sql
 
 
 # ---------------------------------------------------------------------------
@@ -319,3 +337,64 @@ def test_a_primary_key_is_not_marked_unique_by_its_own_index() -> None:
     }
 
     assert "unique" not in _with_unique_folded(table)["id"]
+
+
+# ---------------------------------------------------------------------------
+# The half of that change that had to come back out
+# ---------------------------------------------------------------------------
+#
+# I ADDED A MIGRATION LOOP AND SHIPPED IT. Comparing `check` alongside `unique`
+# looked like one change and was two, because introspection cannot see a CHECK:
+#
+#     DDL created         CREATE TABLE "t" (... "n" INTEGER CHECK (n > 0))
+#     a violating row     refused, IntegrityError
+#     introspected check  None
+#     second diff         alter_column {"check": {"from": None, "to": "n > 0"}}
+#
+# The constraint IS created and IS enforced. The inspector does not read it
+# back, so every table declaring a CHECK migrated on every deploy -- and
+# `alter_column` routes through table reconstruction on SQLite, so each of
+# those deploys copied the table, dropped it and renamed the copy.
+#
+# That is worse than what it replaced. The old behaviour ignored a CHECK
+# change silently; this rebuilt a table forever to apply a change that was
+# already applied.
+#
+# So `check` is not compared, and this file says why rather than the code
+# quietly going back to how it was. Closing it properly means teaching the
+# inspectors to read a CHECK back -- out of `sqlite_master` for SQLite, out of
+# `pg_constraint` for PostgreSQL -- and until then a changed CHECK still
+# migrates nothing.
+
+
+def test_a_declared_check_does_not_migrate_on_every_deploy() -> None:
+    """The loop I introduced, pinned so it cannot come back."""
+    introspected = {
+        "t": {"columns": {"id": {"type": "text", "primary_key": True},
+                          "n": {"type": "integer"}}}
+    }
+    declared = {
+        "t": {"columns": {"id": {"type": "text", "primary_key": True},
+                          "n": {"type": "integer", "check": "n > 0"}}}
+    }
+
+    assert diff(introspected, declared, dialect="sqlite")["operations"] == [], (
+        "a CHECK the inspector cannot see is proposed on every deploy, and "
+        "alter_column rebuilds the table to apply it"
+    )
+
+
+def test_the_inspector_still_cannot_see_a_check() -> None:
+    """The reason the comparison is out, asserted rather than remembered.
+
+    When an inspector learns to read a CHECK back, this fails, and that is the
+    signal to compare it again.
+    """
+    import inspect
+
+    from declaro_persistum.inspector import shared
+
+    assert "check" not in inspect.getsource(shared.columns_from_pragma_rows), (
+        "the SQLite inspector now reads CHECK constraints, so `check` can "
+        "join the compared properties in _compute_column_alterations"
+    )
