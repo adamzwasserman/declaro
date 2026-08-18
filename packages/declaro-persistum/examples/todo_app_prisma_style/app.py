@@ -11,32 +11,33 @@ Run with: uv run uvicorn app:app --reload --port 7779
 """
 
 import uuid
-from pathlib import Path
 from contextlib import asynccontextmanager
-
-from fastapi import FastAPI, Request, Form
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
+from pathlib import Path
 
 # Database abstraction - handles SQLite, PostgreSQL, Turso Cloud, Turso Embedded
 from db import (
-    get_connection,
-    get_database,
-    set_database,
-    init_schema,
-    test_connection,
-    check_driver_available,
-    get_sqlite_config,
-    get_turso_embedded_config,
-    get_postgres_config,
-    get_turso_cloud_config,
+    commit,
     DEFAULT_SQLITE_PATH,
     DEFAULT_TURSO_EMBEDDED_PATH,
+    check_driver_available,
+    get_connection,
+    get_database,
+    get_postgres_config,
+    get_sqlite_config,
+    get_turso_cloud_config,
+    get_turso_embedded_config,
+    init_schema,
+    set_database,
+    test_connection,
 )
+from fastapi import FastAPI, Form, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+
+from declaro_persistum.loader import load_schema
 
 # Import Prisma-style query API
 from declaro_persistum.query.table import table
-from declaro_persistum.loader import load_schema
 
 SCHEMA_DIR = Path(__file__).parent / "schema"
 
@@ -103,7 +104,7 @@ async def use_sqlite(request: Request, database_path: str = Form(DEFAULT_SQLITE_
         "request": request,
         "success": success,
         "message": message if not success else "Switched to SQLite",
-        "db_name": config.display_name,
+        "db_name": config["display_name"],
     })
 
 
@@ -128,7 +129,7 @@ async def use_postgres(
         "request": request,
         "success": success,
         "message": message,
-        "db_name": config.display_name if success else "PostgreSQL",
+        "db_name": config["display_name"] if success else "PostgreSQL",
     })
 
 
@@ -154,7 +155,7 @@ async def use_turso_cloud(
         "request": request,
         "success": success,
         "message": message,
-        "db_name": config.display_name if success else "Turso Cloud",
+        "db_name": config["display_name"] if success else "Turso Cloud",
     })
 
 
@@ -172,7 +173,7 @@ async def use_turso_embedded(request: Request, database_path: str = Form(DEFAULT
         "request": request,
         "success": success,
         "message": message if not success else "Switched to Turso Embedded",
-        "db_name": config.display_name,
+        "db_name": config["display_name"],
     })
 
 
@@ -194,7 +195,7 @@ async def index(request: Request):
     return templates.TemplateResponse("index.html", {
         "request": request,
         "todos": todos,
-        "current_db": get_database().display_name,
+        "current_db": get_database()["display_name"],
     })
 
 
@@ -211,11 +212,7 @@ async def create_todo(request: Request, title: str = Form(...)):
             data={"id": todo_id, "title": title, "completed": 0}
         )
 
-        dialect = get_database().dialect
-        if dialect == "sqlite":
-            await conn.commit()
-        elif dialect in ("turso_cloud", "turso_embedded"):
-            conn.commit()
+        await commit(conn)
 
     return templates.TemplateResponse("partials/todo_item.html", {
         "request": request,
@@ -240,11 +237,7 @@ async def toggle_todo(request: Request, todo_id: str):
             data={"completed": new_completed}
         )
 
-        dialect = get_database().dialect
-        if dialect == "sqlite":
-            await conn.commit()
-        elif dialect in ("turso_cloud", "turso_embedded"):
-            conn.commit()
+        await commit(conn)
 
     return templates.TemplateResponse("partials/todo_item.html", {
         "request": request,
@@ -260,11 +253,7 @@ async def delete_todo(todo_id: str):
         # Prisma-style: delete with where
         await todos_table.prisma.delete(conn, where={"id": todo_id})
 
-        dialect = get_database().dialect
-        if dialect == "sqlite":
-            await conn.commit()
-        elif dialect in ("turso_cloud", "turso_embedded"):
-            conn.commit()
+        await commit(conn)
 
     return ""  # Return empty to remove the element
 

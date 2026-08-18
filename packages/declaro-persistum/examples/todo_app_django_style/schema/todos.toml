@@ -4,7 +4,11 @@ description = "Todo items"
 [todos.columns.id]
 type = "uuid"
 primary_key = true
-default = "gen_random_uuid()"
+# NO DEFAULT. `gen_random_uuid()` is PostgreSQL's, and this schema is offered
+# to four backends: SQLite and Turso have no UUID generator, so the default
+# made `declaro generate -d sqlite` emit DDL those engines refuse. All three
+# example apps already write `str(uuid.uuid4())` at insert time, so the
+# default never produced a single id.
 
 [todos.columns.title]
 type = "text"
