@@ -97,6 +97,8 @@ from __future__ import annotations
 
 from typing import TypedDict
 
+from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE
+
 
 class Retry(TypedDict):
     """How many attempts a refused write gets, and how long between them.
@@ -194,10 +196,31 @@ def is_contention(error: BaseException) -> bool:
     CONCURRENT. The replication engine also wraps contention as "database tape
     error: database is busy".
 
-    NOTE: the same predicate is carried elsewhere. Two
-    definitions of "retryable" WILL drift. Tracked as a task to unify; do
-    not add a third.
+    A BUG OF OURS IS NEVER CONTENTION, whatever its message says. This
+    classified by text alone, and measured 2026-08-17:
+
+        KeyError('busy')                 -> True
+        AttributeError('busy')           -> True
+        TypeError('conflict')            -> True
+        NameError('conflict resolution') -> True
+
+    Every one is a bug in this package, every one is deterministic, and the
+    retry loop in `write_queue.py` ran each again for `retry["attempts"]`
+    rounds before reporting a database contention failure for something the
+    database never saw. `A_BUG_IN_THIS_PACKAGE` is the tuple five other
+    handlers already ask, and this is the sixth.
+
+    THE REST IS STILL TEXT, deliberately: the three supported drivers raise
+    three unrelated types for the same condition, so a genuine engine error is
+    recognised by its message until that is narrowed per driver. What is fixed
+    here is the half that could never have been right.
+
+    An earlier note here said this predicate was carried elsewhere too. It is
+    not, as of 2026-08-17: `grep` finds no second definition and no other
+    "busy" text check in `src/`. Do not add one.
     """
+    if isinstance(error, A_BUG_IN_THIS_PACKAGE):
+        return False
     text = str(error).lower()
     return "busy" in text or "sqlite_busy" in text or "conflict" in text
 
