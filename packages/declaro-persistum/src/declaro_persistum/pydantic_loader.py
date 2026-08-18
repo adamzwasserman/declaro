@@ -714,9 +714,31 @@ def load_schema_from_models(models_dir: str | Path) -> Schema:
         except LoaderError:
             # Re-raise loader errors
             raise
-        except Exception:
-            # Skip files that can't be imported (might not be model files)
-            continue
+        except Exception as exc:
+            # A FILE THAT FAILS TO LOAD IS NOT A FILE THAT DECLARES NOTHING.
+            #
+            # This was `except Exception: continue`, commented "Skip files
+            # that can't be imported (might not be model files)". The intent
+            # is real -- a models directory may hold helpers -- but the two
+            # cases are different and conflating them cost the author the only
+            # error they could act on.
+            #
+            # Measured 2026-08-17. A one-letter typo in a Meta index,
+            # `"uniqe": True`, which `index_from_meta` refuses by name and by
+            # design, reached the author as:
+            #
+            #     LoaderError: No @table decorated models found in models/
+            #
+            # which sends them looking for a missing decorator.
+            #
+            # A helper that imports cleanly and declares no table still
+            # contributes nothing, which is the case the swallow was reaching
+            # for and which needs no swallow at all.
+            raise LoaderError(
+                f"{py_file.name} could not be loaded: "
+                f"{type(exc).__name__}: {exc}",
+                path=str(py_file),
+            ) from exc
 
         # A COLLISION IS REFUSED, NOT MERGED. This was `schema.update(...)`,
         # and a dict update is last-wins, so two files both declaring
