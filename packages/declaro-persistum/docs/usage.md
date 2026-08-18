@@ -1263,7 +1263,7 @@ Each backend requires different environment variables:
 
 ## Example Applications
 
-Four complete Todo apps demonstrate different query styles, each supporting all 4 database backends:
+**Three Todo apps, one query style.** This line said four apps demonstrating different query styles. There are three apps with Python in them, and the styles they were named for were deleted -- as this document says two hundred lines above. `examples/todo_app_sqlalchemy/` holds templates and a stale `todos.db` and no Python at all. Until 2026-08-17 every data route in all three raised `AttributeError: 'dict' object has no attribute 'delete'`; they now use `select`/`insert`/`update`/`delete` with `execute`, which makes them identical from `index` onward. All three support all four backends:
 
 | Example | Port | Query Style |
 |---------|------|-------------|

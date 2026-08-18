@@ -1,11 +1,29 @@
-"""
-Todo App Demo using declaro_persistum Django-style queries.
+"""Todo app demo. One query API, four database backends.
 
-This demonstrates the Django ORM-style query API:
+THIS FILE USED TO ADVERTISE A DJANGO-STYLE API:
+
     todos.objects.filter(completed=0).order("-created_at")
-    todos.insert(id=id, title=title).execute(conn)
     todos.update(completed=1).where(todos.id == id).execute(conn)
-    todos.delete().where(todos.id == id).execute(conn)
+
+None of those surfaces exists. They were deleted deliberately -- the Django and
+Prisma ones in 264cedd, the SQLAlchemy layer in 9ff59e7 -- and `docs/usage.md`
+records the decision: "There are none, and there is one style left." The three
+example apps were not updated with it, so every data route here raised
+
+    AttributeError: 'dict' object has no attribute 'delete'
+
+until 2026-08-17. Listing, creating, toggling and deleting a todo all failed,
+in all three apps, measured by calling the route functions.
+
+They use the one API the package has now: `select`, `insert`, `update` and
+`delete` build a query, `execute` / `execute_one` / `execute_scalar` run it.
+That makes the three apps identical from `index` onward, which is the honest
+outcome of having one query API and is why their names no longer mean what
+they used to.
+
+Every database operation is the same whatever the backend. `db.py` holds the
+SQLite, PostgreSQL, Turso Cloud and Turso Embedded differences, as rows in a
+table rather than as branches.
 
 Run with: uv run uvicorn app:app --reload --port 7778
 """
@@ -16,10 +34,10 @@ from pathlib import Path
 
 # Database abstraction - handles SQLite, PostgreSQL, Turso Cloud, Turso Embedded
 from db import (
-    commit,
     DEFAULT_SQLITE_PATH,
     DEFAULT_TURSO_EMBEDDED_PATH,
     check_driver_available,
+    commit,
     get_connection,
     get_database,
     get_postgres_config,
@@ -37,7 +55,15 @@ from fastapi.templating import Jinja2Templates
 from declaro_persistum.loader import load_schema
 
 # Import Django-style query API
-from declaro_persistum.query.table import table
+from declaro_persistum.query import (
+    delete,
+    execute,
+    execute_one,
+    execute_scalar,
+    insert,
+    select,
+    update,
+)
 
 SCHEMA_DIR = Path(__file__).parent / "schema"
 
@@ -55,10 +81,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Todo App (Django-style)", lifespan=lifespan)
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
-
-
-def get_todos_table():
-    return table("todos", schema=_schema)
 
 
 # =============================================================================
@@ -185,9 +207,17 @@ async def use_turso_embedded(request: Request, database_path: str = Form(DEFAULT
 async def index(request: Request):
     """Render the main page with all todos."""
     async with get_connection() as conn:
-        todos_table = get_todos_table()
-        # Django-style: objects.order("-field").all(conn)
-        todos = await todos_table.objects.order("-created_at").all(conn)
+        todos = await execute(
+            select(
+                "id",
+                "title",
+                "completed",
+                "created_at",
+                from_table="todos",
+                order_by=["-created_at"],
+            ),
+            conn,
+        )
 
     return templates.TemplateResponse("index.html", {
         "request": request,
@@ -195,74 +225,73 @@ async def index(request: Request):
         "current_db": get_database()["display_name"],
     })
 
-
 @app.post("/todos", response_class=HTMLResponse)
 async def create_todo(request: Request, title: str = Form(...)):
-    """Create a new todo and return the todo item HTML."""
+    """Create a new todo."""
     todo_id = str(uuid.uuid4())
 
     async with get_connection() as conn:
-        todos_table = get_todos_table()
-        # Django-style: table.insert(col=val).execute(conn)
-        await todos_table.insert(id=todo_id, title=title, completed=0).execute(conn)
-
+        await execute(
+            insert("todos", {"id": todo_id, "title": title, "completed": 0}),
+            conn,
+        )
         await commit(conn)
 
-        # Django-style: objects.get(conn, id=id)
-        todo = await todos_table.objects.get(conn, id=todo_id)
+        todo = await execute_one(
+            select("id", "title", "completed", from_table="todos",
+                   where={"id": todo_id}),
+            conn,
+        )
 
     return templates.TemplateResponse("partials/todo_item.html", {
         "request": request,
         "todo": todo,
     })
-
 
 @app.put("/todos/{todo_id}/toggle", response_class=HTMLResponse)
 async def toggle_todo(request: Request, todo_id: str):
     """Toggle todo completion status."""
     async with get_connection() as conn:
-        todos_table = get_todos_table()
-
-        # Django-style: objects.get to fetch current state
-        current = await todos_table.objects.get(conn, id=todo_id)
+        current = await execute_one(
+            select("completed", from_table="todos", where={"id": todo_id}),
+            conn,
+        )
         new_completed = 0 if current["completed"] else 1
 
-        # Django-style: table.update(col=val).where(condition).execute(conn)
-        await todos_table.update(completed=new_completed).where(
-            todos_table.id == todo_id
-        ).execute(conn)
-
+        await execute(
+            update("todos", {"completed": new_completed}, where={"id": todo_id}),
+            conn,
+        )
         await commit(conn)
 
-        # Django-style: objects.get(conn, id=id)
-        todo = await todos_table.objects.get(conn, id=todo_id)
+        todo = await execute_one(
+            select("id", "title", "completed", from_table="todos",
+                   where={"id": todo_id}),
+            conn,
+        )
 
     return templates.TemplateResponse("partials/todo_item.html", {
         "request": request,
         "todo": todo,
     })
 
-
 @app.delete("/todos/{todo_id}", response_class=HTMLResponse)
 async def delete_todo(todo_id: str):
     """Delete a todo."""
     async with get_connection() as conn:
-        todos_table = get_todos_table()
-        # Django-style: table.delete().where(condition).execute(conn)
-        await todos_table.delete().where(todos_table.id == todo_id).execute(conn)
-
+        await execute(delete("todos", where={"id": todo_id}), conn)
         await commit(conn)
 
-    return ""  # Return empty to remove the element
-
+    return ""
 
 @app.get("/todos/count", response_class=HTMLResponse)
 async def get_count(request: Request):
     """Get todo counts for the footer."""
     async with get_connection() as conn:
-        todos_table = get_todos_table()
-        # Django-style: objects.filter(field=val).count(conn)
-        active_count = await todos_table.objects.filter(completed=0).count(conn)
+        active_count = await execute_scalar(
+            select("COUNT(*) AS c", from_table="todos", where={"completed": 0}),
+            conn,
+        )
 
     return templates.TemplateResponse("partials/todo_count.html", {
         "request": request,

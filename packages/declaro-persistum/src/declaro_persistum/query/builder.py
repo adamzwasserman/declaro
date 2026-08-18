@@ -276,7 +276,26 @@ def update(
         all_params.update(params)
 
     set_sql = ", ".join(set_parts)
-    where_sql, params = _clause(where, params, "w")
+
+    # THE MERGED PARAMS, NOT A LOCAL NOBODY READS. This said
+    #
+    #     where_sql, params = _clause(where, params, "w")
+    #
+    # and then returned `all_params`, which was built from `set_values` and
+    # the caller's original `params` BEFORE `_clause` ran. So a dict WHERE
+    # rendered `:w_0_id` and bound nothing:
+    #
+    #     update("t", {"a": 1}, where={"id": "x"})
+    #     sql    'UPDATE "t" SET "a" = :set_a WHERE id = :w_0_id'
+    #     params {'set_a': 1}
+    #     sqlite3.ProgrammingError: You did not supply a value for binding
+    #     parameter :w_0_id.
+    #
+    # `delete` returns what `_clause` gives it, which is why only this one was
+    # wrong, and only for a dict WHERE: a string WHERE takes its bindings from
+    # the caller's `params`, which `all_params` already had.
+    where_sql, where_params = _clause(where, params, "w")
+    all_params.update(where_params)
     sql_parts = [f'UPDATE "{table}"', f"SET {set_sql}", f"WHERE {where_sql}"]
 
     # Add RETURNING

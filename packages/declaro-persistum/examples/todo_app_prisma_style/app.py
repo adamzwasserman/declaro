@@ -1,11 +1,29 @@
-"""
-Todo App Demo using declaro_persistum Prisma-style queries.
+"""Todo app demo. One query API, four database backends.
 
-This demonstrates the Prisma-style query API:
-    todos.prisma.find_many(where={"completed": 0}, order={"created_at": "desc"})
-    todos.prisma.create(data={"id": "...", "title": "..."})
+THIS FILE USED TO ADVERTISE A PRISMA-STYLE API:
+
+    todos.prisma.find_many(where={"completed": 0})
     todos.prisma.update(where={"id": "..."}, data={"completed": True})
-    todos.prisma.delete(where={"id": "..."})
+
+None of those surfaces exists. They were deleted deliberately -- the Django and
+Prisma ones in 264cedd, the SQLAlchemy layer in 9ff59e7 -- and `docs/usage.md`
+records the decision: "There are none, and there is one style left." The three
+example apps were not updated with it, so every data route here raised
+
+    AttributeError: 'dict' object has no attribute 'delete'
+
+until 2026-08-17. Listing, creating, toggling and deleting a todo all failed,
+in all three apps, measured by calling the route functions.
+
+They use the one API the package has now: `select`, `insert`, `update` and
+`delete` build a query, `execute` / `execute_one` / `execute_scalar` run it.
+That makes the three apps identical from `index` onward, which is the honest
+outcome of having one query API and is why their names no longer mean what
+they used to.
+
+Every database operation is the same whatever the backend. `db.py` holds the
+SQLite, PostgreSQL, Turso Cloud and Turso Embedded differences, as rows in a
+table rather than as branches.
 
 Run with: uv run uvicorn app:app --reload --port 7779
 """
@@ -16,10 +34,10 @@ from pathlib import Path
 
 # Database abstraction - handles SQLite, PostgreSQL, Turso Cloud, Turso Embedded
 from db import (
-    commit,
     DEFAULT_SQLITE_PATH,
     DEFAULT_TURSO_EMBEDDED_PATH,
     check_driver_available,
+    commit,
     get_connection,
     get_database,
     get_postgres_config,
@@ -37,7 +55,15 @@ from fastapi.templating import Jinja2Templates
 from declaro_persistum.loader import load_schema
 
 # Import Prisma-style query API
-from declaro_persistum.query.table import table
+from declaro_persistum.query import (
+    delete,
+    execute,
+    execute_one,
+    execute_scalar,
+    insert,
+    select,
+    update,
+)
 
 SCHEMA_DIR = Path(__file__).parent / "schema"
 
@@ -55,10 +81,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Todo App (Prisma-style)", lifespan=lifespan)
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
-
-
-def get_todos_table():
-    return table("todos", schema=_schema)
 
 
 # =============================================================================
@@ -185,11 +207,16 @@ async def use_turso_embedded(request: Request, database_path: str = Form(DEFAULT
 async def index(request: Request):
     """Render the main page with all todos."""
     async with get_connection() as conn:
-        todos_table = get_todos_table()
-        # Prisma-style: find_many with order
-        todos = await todos_table.prisma.find_many(
+        todos = await execute(
+            select(
+                "id",
+                "title",
+                "completed",
+                "created_at",
+                from_table="todos",
+                order_by=["-created_at"],
+            ),
             conn,
-            order={"created_at": "desc"}
         )
 
     return templates.TemplateResponse("index.html", {
@@ -198,73 +225,73 @@ async def index(request: Request):
         "current_db": get_database()["display_name"],
     })
 
-
 @app.post("/todos", response_class=HTMLResponse)
 async def create_todo(request: Request, title: str = Form(...)):
-    """Create a new todo and return the todo item HTML."""
+    """Create a new todo."""
     todo_id = str(uuid.uuid4())
 
     async with get_connection() as conn:
-        todos_table = get_todos_table()
-        # Prisma-style: create with data dict
-        todo = await todos_table.prisma.create(
+        await execute(
+            insert("todos", {"id": todo_id, "title": title, "completed": 0}),
             conn,
-            data={"id": todo_id, "title": title, "completed": 0}
         )
-
         await commit(conn)
+
+        todo = await execute_one(
+            select("id", "title", "completed", from_table="todos",
+                   where={"id": todo_id}),
+            conn,
+        )
 
     return templates.TemplateResponse("partials/todo_item.html", {
         "request": request,
         "todo": todo,
     })
-
 
 @app.put("/todos/{todo_id}/toggle", response_class=HTMLResponse)
 async def toggle_todo(request: Request, todo_id: str):
     """Toggle todo completion status."""
     async with get_connection() as conn:
-        todos_table = get_todos_table()
-
-        # Prisma-style: find_one to get current state
-        current = await todos_table.prisma.find_one(conn, where={"id": todo_id})
+        current = await execute_one(
+            select("completed", from_table="todos", where={"id": todo_id}),
+            conn,
+        )
         new_completed = 0 if current["completed"] else 1
 
-        # Prisma-style: update with where and data
-        todo = await todos_table.prisma.update(
+        await execute(
+            update("todos", {"completed": new_completed}, where={"id": todo_id}),
             conn,
-            where={"id": todo_id},
-            data={"completed": new_completed}
         )
-
         await commit(conn)
+
+        todo = await execute_one(
+            select("id", "title", "completed", from_table="todos",
+                   where={"id": todo_id}),
+            conn,
+        )
 
     return templates.TemplateResponse("partials/todo_item.html", {
         "request": request,
         "todo": todo,
     })
 
-
 @app.delete("/todos/{todo_id}", response_class=HTMLResponse)
 async def delete_todo(todo_id: str):
     """Delete a todo."""
     async with get_connection() as conn:
-        todos_table = get_todos_table()
-        # Prisma-style: delete with where
-        await todos_table.prisma.delete(conn, where={"id": todo_id})
-
+        await execute(delete("todos", where={"id": todo_id}), conn)
         await commit(conn)
 
-    return ""  # Return empty to remove the element
-
+    return ""
 
 @app.get("/todos/count", response_class=HTMLResponse)
 async def get_count(request: Request):
     """Get todo counts for the footer."""
     async with get_connection() as conn:
-        todos_table = get_todos_table()
-        # Prisma-style: count with where filter
-        active_count = await todos_table.prisma.count(conn, where={"completed": 0})
+        active_count = await execute_scalar(
+            select("COUNT(*) AS c", from_table="todos", where={"completed": 0}),
+            conn,
+        )
 
     return templates.TemplateResponse("partials/todo_count.html", {
         "request": request,
