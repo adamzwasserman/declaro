@@ -438,7 +438,26 @@ def _compute_column_alterations(
     # looped: SQLite had just learned to read one and Turso had not, and
     # enabling this after checking only SQLite would have repeated the same
     # mistake on a different engine.
-    for prop in ("unique", "check"):
+    # `check` ONLY WHERE THE STORED TEXT IS THE DECLARED TEXT.
+    #
+    # SQLite and Turso keep the CREATE TABLE verbatim, so what comes back is
+    # what was written. PostgreSQL parses the expression and stores its own
+    # canonical form: measured over seven expressions, five differ --
+    # `n > 0 AND n < 100` becomes `(n > 0) AND (n < 100)`, `s <> ''` gains a
+    # `::text` cast, and `s IN ('x','y')` becomes
+    # `s = ANY (ARRAY['x'::text, 'y'::text])`.
+    #
+    # Comparing the declared text against that proposes an alter_column on
+    # every deploy. I enabled this comparison after measuring the round trip
+    # on all three engines and still shipped that loop, because I measured
+    # every engine with ONE expression and `n > 0` is one of the two
+    # PostgreSQL leaves alone.
+    #
+    # Matching it would mean reimplementing PostgreSQL's parser and printer,
+    # and this function is pure so it cannot ask the server. So a CHECK change
+    # is not noticed on PostgreSQL, which is where it stood before today.
+    compared = ("unique", "check") if dialect in ("sqlite", "turso") else ("unique",)
+    for prop in compared:
         if current.get(prop) != target.get(prop):
             changes[prop] = {"from": current.get(prop), "to": target.get(prop)}
 

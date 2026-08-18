@@ -110,13 +110,19 @@ def test_an_unchanged_unique_emits_nothing(dialect: str) -> None:
 # repeated the identical mistake on a different engine.
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
+# SQLITE AND TURSO ONLY. PostgreSQL rewrites the expression when it stores
+# one, so its text cannot be compared -- see the section at the foot of this
+# file, and `test_a_check_is_not_compared_on_postgresql`.
+TEXT_ROUND_TRIPS = ["sqlite", "turso"]
+
+
+@pytest.mark.parametrize("dialect", TEXT_ROUND_TRIPS)
 def test_a_check_constraint_change_emits_an_operation(dialect: str) -> None:
     assert _ops({"type": "integer", "check": "c > 0"},
                 {"type": "integer", "check": "c > 10"}, dialect) != []
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
+@pytest.mark.parametrize("dialect", TEXT_ROUND_TRIPS)
 def test_removing_a_check_emits_an_operation(dialect: str) -> None:
     assert _ops({"type": "integer", "check": "c > 0"}, {"type": "integer"}, dialect) != []
 
@@ -433,3 +439,76 @@ def test_a_primary_key_is_not_marked_unique_by_its_own_index() -> None:
 # comparison as a migration loop and took it back out. It is closed: all three
 # inspectors read a CHECK now, the round trip is measured on each above, and
 # the comparison is back on.
+
+
+# ---------------------------------------------------------------------------
+# PostgreSQL rewrites a CHECK, so its text cannot be compared
+# ---------------------------------------------------------------------------
+#
+# I ENABLED THIS COMPARISON AFTER MEASURING THE ROUND TRIP ON EVERY ENGINE AND
+# STILL SHIPPED A LOOP, because I measured every engine with ONE expression.
+# `n > 0` is one of the two PostgreSQL happens to leave alone.
+#
+# Measured across seven expressions, five differ:
+#
+#     n > 0                     -> n > 0
+#     length(s) > 2             -> length(s) > 2
+#     n > 0 AND n < 100         -> (n > 0) AND (n < 100)
+#     s <> ''                   -> s <> ''::text
+#     s IN ('x', 'y')           -> s = ANY (ARRAY['x'::text, 'y'::text])
+#     substr(s, 1, 2) <> 'xx'   -> substr(s, 1, 2) <> 'xx'::text
+#     (n > 0)                   -> n > 0
+#
+# PostgreSQL parses the expression and stores its own canonical form. Matching
+# that from the declared text means reimplementing PostgreSQL's parser and
+# printer, and the differ is pure so it cannot ask the server.
+#
+# End to end, before this fix:
+#
+#     declared     n > 0 AND n < 100
+#     introspected (n > 0) AND (n < 100)
+#     second diff  alter_column {"check": {...}}   on every deploy
+#
+# SQLite and Turso store the CREATE TABLE text verbatim, so there the declared
+# spelling IS what comes back and the comparison is sound. It is dialect-
+# dependent now, which is the same shape `same_type` and the expression
+# defaults already have: a question that only has an answer per engine.
+
+
+@pytest.mark.parametrize("dialect", ["sqlite", "turso"])
+def test_a_check_change_is_noticed_where_the_text_round_trips(dialect: str) -> None:
+    assert _ops({"type": "integer", "check": "c > 0"},
+                {"type": "integer", "check": "c > 10"}, dialect) != []
+
+
+def test_a_check_is_not_compared_on_postgresql() -> None:
+    """RECORDED, NOT ENDORSED, and it replaces a loop rather than a fix.
+
+    A changed CHECK migrates nothing on PostgreSQL, which is the behaviour
+    before any of today's work. The alternative on offer was an alter_column
+    on every deploy for any expression PostgreSQL rewrites, which is five of
+    the seven forms measured.
+    """
+    assert _ops({"type": "integer", "check": "c > 0"},
+                {"type": "integer", "check": "c > 10"}, "postgresql") == []
+
+
+@pytest.mark.parametrize(
+    "declared,stored",
+    [
+        ("n > 0 AND n < 100", "(n > 0) AND (n < 100)"),
+        ("s <> ''", "s <> ''::text"),
+        ("s IN ('x', 'y')", "s = ANY (ARRAY['x'::text, 'y'::text])"),
+    ],
+    ids=["parenthesised", "cast-added", "rewritten-to-any"],
+)
+def test_postgresql_does_not_loop_on_an_expression_it_rewrote(declared, stored) -> None:
+    """The loop I shipped, at the three shapes that cause it.
+
+    Each `stored` value is what a live PostgreSQL returned for that
+    declaration, not what I expected it to return.
+    """
+    current = {"t": {"columns": {"c": {"type": "text", "check": stored}}}}
+    target = {"t": {"columns": {"c": {"type": "text", "check": declared}}}}
+
+    assert diff(current, target, dialect="postgresql")["operations"] == []
