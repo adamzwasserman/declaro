@@ -27,20 +27,72 @@ class RendersCondition(Protocol):
     """What a JOIN's `on` must be able to do. Structural, so this module
     names no class from `table.py` and the dependency stays one-way."""
 
-    def to_sql(self, dialect: Dialect, path: str) -> tuple[str, dict[str, Any]]: ...
+    def to_sql(self, dialect: Dialect, path: str) -> tuple[str, dict[str, Any]]:
+        raise NotImplementedError("CODE NOT WRITTEN")
 
 
-class RendersBareFragment(Protocol):
-    """What a CASE ORDER BY term's expression must be able to do.
+# `RendersBareFragment` stood here, a Protocol declaring `_bare_sql_fragment`.
+# NOTHING HAD THAT METHOD. A CASE expression is a dict, and
+# `_render_case_order_by` called the method on it, so ordering by a CASE
+# raised `'dict' object has no attribute '_bare_sql_fragment'` on every call.
+# Measured 2026-08-17, by the first test ever written for that renderer.
+#
+# It is a leftover from the object API: the de-classing turned the VALUES into
+# dicts and left two renderers calling methods on them. The other is
+# `render_subquery`, which is a missing feature rather than a one-line repair
+# and is pinned as broken in
+# `test_the_query_expression_layer_renders.py`.
 
-    `_bare_sql_fragment` rather than `to_sql_fragment`: an ORDER BY term must
-    emit the CASE without its alias, because `... END AS band ASC` is not
-    valid SQL.
+
+class CaseExpression(TypedDict):
+    """A CASE expression. `whens` pairs a condition dict with a result."""
+
+    kind: Literal["case"]
+    whens: list[tuple[dict[str, Any], Any]]
+    else_: Any
+    alias: str | None
+
+
+
+def render_case(
+    expr: CaseExpression, path: str, *, with_alias: bool
+) -> tuple[str, dict[str, Any]]:
+    """Render CASE WHEN ... THEN ... ELSE ... END.
+
+    NO DIALECT. It took one and read it zero times. The argument existed only
+    to be handed to `render_condition`, and that function no longer takes one
+    either, for the same reason: a condition renders the same on every engine.
+    Threading a value nobody reads is how `builder.py` came to pass the
+    literal "sql" as a dialect without anything noticing.
+
+    `with_alias` is REQUIRED, not defaulted, because the two callers want
+    opposite things and neither is the obvious one: a SELECT column wants the
+    alias, and an ORDER BY term must not have it — `... END AS band ASC` is
+    not valid SQL.
     """
+    from declaro_persistum.query.conditions import render as render_condition
 
-    def _bare_sql_fragment(
-        self, dialect: Dialect, path: str
-    ) -> tuple[str, dict[str, Any]]: ...
+    params: dict[str, Any] = {}
+    parts = ["CASE"]
+
+    for i, (condition, result) in enumerate(expr["whens"]):
+        cond_sql, cond_params = render_condition(condition, f"{path}_w{i}")
+        params.update(cond_params)
+        name = f"{path}_t{i}"
+        params[name] = result
+        parts.append(f"WHEN {cond_sql} THEN :{name}")
+
+    if expr["else_"] is not None:
+        name = f"{path}_else"
+        params[name] = expr["else_"]
+        parts.append(f"ELSE :{name}")
+
+    parts.append("END")
+    sql = " ".join(parts)
+    if with_alias and expr["alias"]:
+        sql = f"{sql} AS {expr['alias']}"
+    return sql, params
+
 
 
 class OrderBy(TypedDict):
@@ -63,7 +115,7 @@ class CaseOrderBy(TypedDict):
     """An ORDER BY term over a CASE expression. The other bounded member."""
 
     kind: Literal["case_order_by"]
-    expr: RendersBareFragment
+    expr: CaseExpression
     direction: str
 
 
@@ -75,10 +127,10 @@ def _render_order_by(
 
 
 def _render_case_order_by(
-    term: CaseOrderBy, dialect: Dialect, path: str
+    term: CaseOrderBy, _dialect: Dialect, path: str
 ) -> tuple[str, dict[str, Any]]:
     """A CASE term emits the BARE expression — an alias is not valid here."""
-    sql, params = term["expr"]._bare_sql_fragment(dialect, path)
+    sql, params = render_case(term["expr"], path, with_alias=False)
     return f"{sql} {term['direction']}", params
 
 
@@ -86,7 +138,12 @@ ORDER_TERM_RENDERERS: dict[str, Any] = {
     "order_by": _render_order_by,
     "case_order_by": _render_case_order_by,
 }
-"""The bounded ORDER BY vocabulary. Two members, both rendered by tests.
+"""The bounded ORDER BY vocabulary. Two members.
+
+An earlier version of this line said "both rendered by tests". Neither was:
+of 22 public callables in this module and `table.py`, 21 were never called by
+any test, and the first one written for `case_order_by` found it raising
+AttributeError on every call.
 
 Replaces `if hasattr(o, "to_sql_fragment"): ... else: ...` in select.py. A
 term carrying an unrecognised tag raises KeyError instead of falling through

@@ -32,11 +32,13 @@ from __future__ import annotations
 from typing import Any, Literal, TypedDict
 
 from declaro_persistum.query.expressions import (  # noqa: F401
+    CaseExpression,
     CaseOrderBy,
     JoinClause,
     OrderBy,
     SubqueryExpr,
     is_subquery,
+    render_case,
     render_order_term,
     render_subquery,
 )
@@ -65,15 +67,6 @@ class SQLFunction(TypedDict):
     kind: Literal["function"]
     name: str
     args: list[Any]
-    alias: str | None
-
-
-class CaseExpression(TypedDict):
-    """A CASE expression. `whens` pairs a condition dict with a result."""
-
-    kind: Literal["case"]
-    whens: list[tuple[dict[str, Any], Any]]
-    else_: Any
     alias: str | None
 
 
@@ -141,46 +134,6 @@ def case_(
 
 def subquery(query: Any) -> SubqueryExpr:
     return {"kind": "subquery", "query": query}
-
-
-def render_case(
-    expr: CaseExpression, path: str, *, with_alias: bool
-) -> tuple[str, dict[str, Any]]:
-    """Render CASE WHEN ... THEN ... ELSE ... END.
-
-    NO DIALECT. It took one and read it zero times. The argument existed only
-    to be handed to `render_condition`, and that function no longer takes one
-    either, for the same reason: a condition renders the same on every engine.
-    Threading a value nobody reads is how `builder.py` came to pass the
-    literal "sql" as a dialect without anything noticing.
-
-    `with_alias` is REQUIRED, not defaulted, because the two callers want
-    opposite things and neither is the obvious one: a SELECT column wants the
-    alias, and an ORDER BY term must not have it — `... END AS band ASC` is
-    not valid SQL.
-    """
-    from declaro_persistum.query.conditions import render as render_condition
-
-    params: dict[str, Any] = {}
-    parts = ["CASE"]
-
-    for i, (condition, result) in enumerate(expr["whens"]):
-        cond_sql, cond_params = render_condition(condition, f"{path}_w{i}")
-        params.update(cond_params)
-        name = f"{path}_t{i}"
-        params[name] = result
-        parts.append(f"WHEN {cond_sql} THEN :{name}")
-
-    if expr["else_"] is not None:
-        name = f"{path}_else"
-        params[name] = expr["else_"]
-        parts.append(f"ELSE :{name}")
-
-    parts.append("END")
-    sql = " ".join(parts)
-    if with_alias and expr["alias"]:
-        sql = f"{sql} AS {expr['alias']}"
-    return sql, params
 
 
 def render_function(

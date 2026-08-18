@@ -99,8 +99,34 @@ def unwrap_optional(annotation: Any) -> Any:
     return annotation
 
 
-def python_type_to_sql(annotation: Any) -> str:
-    """Convert Python type annotation to SQL type string."""
+def declared_type(annotation: Any) -> str:
+    """The declared column type this annotation means. NOT SQL.
+
+    `python_type_to_sql` was the old name and it named the wrong arrow. This
+    returns the CANONICAL type that goes into the schema dict -- "text",
+    "integer", "timestamptz", "jsonb" -- and a second function spells that for
+    an engine:
+
+        datetime  ->  timestamptz  ->  sqlite=TEXT  postgresql=timestamptz
+        dict      ->  jsonb        ->  sqlite=TEXT  postgresql=jsonb
+
+    So the pipeline is annotation -> declared type -> dialect SQL, and this is
+    only the first step. `map_type(declared, dialect)` is the one that writes
+    SQL, and it is documented as "Spell a declared type for one engine".
+    `declared type` was already the package's word for this layer; only this
+    function stood outside the vocabulary.
+
+    AN ANNOTATION IT DOES NOT KNOW IS REFUSED, naming the ones it does. The
+    last line used to be `return "text"`, so `set[str]`, `tuple[int, int]`,
+    `Any`, `complex`, `object` and `frozenset` all became text columns and
+    said nothing. `str` returns "text" too, so the value could not distinguish
+    a mapped type from a guess, and no test or reader could tell them apart.
+    Measured 2026-08-17 across 23 annotations.
+
+    A caller who wants a column this does not map declares it outright with
+    `field(db_type=...)`, which the loader reads first and which is why the
+    refusal closes no door.
+    """
     # Handle Optional types
     if is_optional_type(annotation):
         annotation = unwrap_optional(annotation)
@@ -127,8 +153,11 @@ def python_type_to_sql(annotation: Any) -> str:
     if "Decimal" in type_str:
         return "numeric"
 
-    # Default to text
-    return "text"
+    raise LoaderError(
+        f"cannot tell what column type {annotation!r} means. Declared types "
+        f"come from: {', '.join(sorted(set(PYTHON_TO_SQL_TYPE.values())))}. "
+        f"Use field(db_type=...) to declare one this mapping does not know."
+    )
 
 
 OnAction = Literal["cascade", "set null", "restrict", "no action"]
@@ -364,7 +393,7 @@ def pydantic_model_to_table(model_cls: type) -> tuple[str, Table] | None:
         unwrapped = unwrap_optional(annotation)
 
         # Determine SQL type
-        sql_type = meta.get("db_type") or python_type_to_sql(unwrapped)
+        sql_type = meta.get("db_type") or declared_type(unwrapped)
 
         # Build column definition
         col: Column = {"type": sql_type}
@@ -590,8 +619,65 @@ def views_from_module(module: Any) -> dict[str, View]:
                 f"{sorted(unknown)}. A view may carry "
                 f"{list(VIEW_REQUIRED + VIEW_OPTIONAL)}.",
             )
+        _check_view(obj)
         views[obj["name"]] = obj  # type: ignore[assignment]
     return views
+
+
+# What each field must BE, not merely that it is present. The keys were checked
+# and the values were not, so a view could carry any type at all.
+#
+# MEASURED 2026-08-17: `{"name": 123, "query": None, "materialized": "yes"}`
+# has both required keys, passed, and came back keyed by the integer 123. It
+# would have travelled to an applier and rendered `CREATE VIEW 123 AS None`,
+# and the failure would have arrived from a SQL parser with no idea which
+# models file wrote it.
+#
+# Rule 13: the boundary declares the shape once so the differ and both
+# appliers can treat `name` as a string and `query` as SQL without re-checking.
+_VIEW_FIELD_TYPES: dict[str, type] = {
+    "name": str,
+    "query": str,
+    "materialized": bool,
+    "refresh": str,
+    "depends_on": list,
+    "trigger_sources": list,
+}
+
+# Fields that must also carry something. An empty name is not a name, and an
+# empty query is not a SELECT.
+_VIEW_MUST_NOT_BE_BLANK = ("name", "query")
+
+
+def _check_view(obj: dict[str, Any]) -> None:
+    """Refuse a view whose fields are the wrong type or empty. Raises or returns.
+
+    WHAT IS DELIBERATELY NOT CHECKED: whether the query is valid SQL. That
+    needs an engine, the engine says so at apply time, and a loader guessing
+    at validity would reject dialect-specific syntax it does not know.
+    """
+    described = obj.get("name") if isinstance(obj.get("name"), str) else repr(obj.get("name"))
+
+    for field, expected in _VIEW_FIELD_TYPES.items():
+        if field not in obj:
+            continue
+        value = obj[field]
+        # `bool` is a subclass of `int`, so an `isinstance(x, int)` check would
+        # accept True for a numeric field. Only `materialized` is a bool here
+        # and it is checked against `bool` directly, so the order is safe.
+        if not isinstance(value, expected):
+            raise LoaderError(
+                f"view {described}: {field!r} is "
+                f"{type(value).__name__}, and a view's {field!r} must be "
+                f"{expected.__name__}."
+            )
+
+    for field in _VIEW_MUST_NOT_BE_BLANK:
+        if not obj[field].strip():
+            raise LoaderError(
+                f"view {described}: {field!r} is empty. A view needs a name "
+                f"and a SELECT."
+            )
 
 
 def load_schema_from_models(models_dir: str | Path) -> Schema:
@@ -612,6 +698,9 @@ def load_schema_from_models(models_dir: str | Path) -> Schema:
         raise LoaderError(f"Models directory not found: {models_path}", path=str(models_path))
 
     schema: Schema = {}
+    # Which file declared each table, so a collision can name both sides. One
+    # filename tells a developer a collision happened without saying where.
+    declared_in: dict[str, str] = {}
 
     # Load all .py files (except __init__.py and test files)
     for py_file in models_path.glob("**/*.py"):
@@ -622,13 +711,43 @@ def load_schema_from_models(models_dir: str | Path) -> Schema:
 
         try:
             file_schema = load_models_from_module(py_file)
-            schema.update(file_schema)
         except LoaderError:
             # Re-raise loader errors
             raise
         except Exception:
             # Skip files that can't be imported (might not be model files)
             continue
+
+        # A COLLISION IS REFUSED, NOT MERGED. This was `schema.update(...)`,
+        # and a dict update is last-wins, so two files both declaring
+        # `@table("users")` produced one table and which one depended on the
+        # order `glob` returned.
+        #
+        # MEASURED 2026-08-17:
+        #
+        #     a_users.py  @table("users")  id, email
+        #     z_other.py  @table("users")  id, totally_different
+        #     loaded: {"users": columns id, email}
+        #
+        # The losing model's columns are absent from the schema, so the differ
+        # compares a database that has them against a target that does not and
+        # emits a DROP. A copy-pasted decorator costs a column and its data.
+        #
+        # It has to be caught HERE because this is the only moment both halves
+        # exist. Once the update has run, the first declaration is gone and
+        # nothing downstream can tell a collision from a single model.
+        for table_name, definition in file_schema.items():
+            if table_name in declared_in:
+                raise LoaderError(
+                    f"Two models declare the table {table_name!r}: "
+                    f"{declared_in[table_name]} and {py_file.name}. A schema "
+                    f"holds one definition per table, so merging them would "
+                    f"silently keep whichever file loaded last and drop the "
+                    f"other's columns from the database.",
+                    path=str(py_file),
+                )
+            declared_in[table_name] = py_file.name
+            schema[table_name] = definition
 
     if not schema:
         raise LoaderError(

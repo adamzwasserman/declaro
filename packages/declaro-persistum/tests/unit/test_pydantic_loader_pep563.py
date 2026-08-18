@@ -11,6 +11,13 @@ Bug fixed in 0.1.3:
     `get_origin()` and returned False, so every `T | None` field was
     materialized as NOT NULL.
 
+    That function is `declared_type` now, and it has no `text` default: an
+    annotation it cannot place raises `LoaderError` naming the ones it can.
+    So this bug would be loud today rather than silent, which is the point of
+    removing the default and not a reason to stop testing for it -- the
+    resolution of string annotations is what these tests hold, and the
+    refusal only changes what happens after it fails.
+
     Fix: use `typing.get_type_hints(model_cls)` instead of
     `getattr(model_cls, "__annotations__", {})`. get_type_hints resolves
     string annotations against the model's module globals, returning

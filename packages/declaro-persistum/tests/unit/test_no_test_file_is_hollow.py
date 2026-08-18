@@ -1,6 +1,6 @@
 r"""A file named `test_*.py` must contain a test.
 
-SIX STILL DO NOT. Twenty-four did. Each was a docstring, its imports,
+FOUR STILL DO NOT. Twenty-four did. Each was a docstring, its imports,
 sometimes a helper, and then blank space where the tests had been, and the
 suite total said nothing about the gap.
 
@@ -12,13 +12,49 @@ also the evidence that restoring them was safe. The suite went from 299 to 774.
 WHAT IS LEFT, AND WHY EACH IS LEFT. Measured by restoring it and running it:
 
     test_views.py             48 tests   24 pass, 24 fail
-    test_query_expressions.py 30 tests    0 pass, 30 fail
     test_write_queue.py       25 tests   import error: `pool` is abolished
     test_procedures.py        20 tests    9 pass, 11 fail
     test_triggers.py          20 tests    8 pass, 12 fail
-    test_enums.py             17 tests    8 pass,  9 fail
 
-160 tests. test_arrays.py and test_maps.py are no longer among them: their
+113 tests.
+
+`test_query_expressions.py` is the second RESOLVED BY DELETION, 2026-08-17.
+Restored, all 30 of its tests failed on one line: `table(name, schema,
+pool=None)`. The pool is abolished, and the file describes a `TableProxy` API
+with `.alias()`, `._full_name` and `._table_name`; `table(name, schema)`
+returns `{"columns": {...}}` now. Table aliasing and self-joins have no
+support at all in the rewritten query layer, so 6 of its 30 tests are a
+feature request, not a restoration.
+
+The rest of its subject was real and uncovered. Of 22 public callables across
+`query/table.py` and `query/expressions.py`, 21 were called by no test in the
+suite -- including `count_`, which all three shipped example apps import. They
+are covered now by `test_the_query_expression_layer_renders.py`, and the first
+test ever written for `_render_case_order_by` found it raising
+`'dict' object has no attribute '_bare_sql_fragment'` on every call. Fixed.
+`render_subquery` has the identical defect, is a missing feature rather than a
+repair, and is pinned as broken there.
+
+`test_enums.py` was the sixth and is RESOLVED BY DELETION, 2026-08-17. Restored
+and run, its 17 tests were 5 pass and 12 fail, and every one of the twelve was
+an ImportError for a function the package no longer has: `parse_enum`,
+`generate_create_enum`, `generate_drop_enum`, `generate_alter_enum_add_value`,
+`diff_enums`. `grep "CREATE TYPE"` over `src/` returns nothing. The design
+those tests describe -- a native PostgreSQL ENUM type with a SQLite CHECK
+fallback -- is gone, replaced by a `_dp_enum_` lookup table and a foreign key.
+
+The FIVE THAT PASSED were the worse half. Three built a dict literal and
+asserted its own contents, touching no package code at all. The other two
+exercised `generate_enum_check` and `generate_column_sql` in
+`applier/sqlite.py`, which had no caller in `src/` and keyed on an `enum:name`
+column type no loader has ever produced. Test and code were each other's only
+reason to exist, and the file being hollow is what kept the pair invisible.
+Both functions are deleted, and the live enum path is covered by
+`test_a_declared_enum_value_is_accepted.py` on all three engines.
+
+THIS IS WHY THE LIST IS NOT A BACKLOG OF COPY JOBS. Restoring that file
+verbatim would have re-pinned an abandoned architecture and resurrected dead
+code to satisfy it. test_arrays.py and test_maps.py are no longer among them: their
 four failures all passed the abolished dialect "libsql" and were right that it
 must not yield PostgreSQL SQL. Fixing that in src (cfc0b1c) brought both files
 back, 43 tests.
@@ -59,13 +95,33 @@ import pytest
 pytestmark = pytest.mark.precommit
 
 UNIT = pathlib.Path(__file__).resolve().parent
+TESTS = UNIT.parent
 
 # Verified 2026-08-13 against `pytest --co`: this AST count and pytest's
 # collection agree on zero versus non-zero for every file in this directory.
+# `tests/integration/` WAS OUTSIDE THIS GATE'S HORIZON until 2026-08-17. The
+# scan globbed `tests/unit/` only, so two files there were hollow for as long
+# as this ratchet has existed and it reported six.
+#
+# `test_postgresql.py` was the most expensive of the set and is FILLED as of
+# 2026-08-17. It carried a `skipif` on an unset environment variable and a
+# connection fixture, so it READ as a suite waiting for a server, and there was
+# nothing behind the guard to wait: setting the variable moved the collected
+# count from zero to zero. PostgreSQL is the backend this package documents as
+# production and had 2 marked tests in a suite of 1241.
+#
+# It holds 11 now, run against a real server, and the first one written found
+# a defect nothing else could see: a round trip emitted two `alter_column`
+# operations on an unchanged schema, one of them asking PostgreSQL to make a
+# PRIMARY KEY nullable. Every deploy proposed it and it could never succeed.
+# Fixed in `differ/core.py`; pinned by
+# `test_a_migration_stops_when_nothing_changed.py`.
+#
+# `test_sqlite.py` stays listed. SQLite is exercised by 74 marked tests
+# elsewhere, so an integration file is not the gap there that it was here.
 KNOWN_HOLLOW = {
-    "test_enums.py",
+    "test_sqlite.py",
     "test_procedures.py",
-    "test_query_expressions.py",
     "test_triggers.py",
     "test_views.py",
     "test_write_queue.py",
@@ -88,14 +144,15 @@ def _holds_a_test(path: pathlib.Path) -> bool:
 
 def test_the_gate_can_see_the_test_files_at_all() -> None:
     """A gate that reads nothing passes forever."""
-    files = list(UNIT.glob("test_*.py"))
+    files = list(UNIT.glob("test_*.py")) + list((TESTS / "integration").glob("test_*.py"))
     assert len(files) > 30, f"found only {len(files)} test files in {UNIT}"
 
 
 def test_no_new_test_file_is_hollow() -> None:
-    hollow = {
-        p.name for p in UNIT.glob("test_*.py") if not _holds_a_test(p)
-    }
+    scanned = list(UNIT.glob("test_*.py")) + list(
+        (TESTS / "integration").glob("test_*.py")
+    )
+    hollow = {p.name for p in scanned if not _holds_a_test(p)}
 
     appeared = hollow - KNOWN_HOLLOW
     assert not appeared, (
