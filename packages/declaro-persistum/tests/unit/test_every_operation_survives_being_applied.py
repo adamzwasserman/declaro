@@ -27,9 +27,14 @@ schema, applies the change, introspects, and diffs again. Zero operations is
 the only pass. A hand-written expected statement pins whatever the code does
 today, including its bugs, which this suite has already done once.
 
-WHAT THIS DOES NOT COVER: PostgreSQL and Turso. Both are one parametrisation
-away and both cost a server or a file per case; SQLite is where the renderer
-shared by SQLite and Turso lives, so it is where the gap was widest.
+POSTGRESQL RUNS THE SAME CASES AGAINST A REAL SERVER, because it does not
+share a renderer with anything. `postgresql.OPERATION_SQL` is its own table of
+its own functions, and the matrix above says two of its sixteen entries had
+ever been applied. It skips, naming the URL it tried, when no server answers.
+
+WHAT THIS DOES NOT COVER: Turso. It shares `shared._SQL_GENERATORS` with
+SQLite, so the renderers here are the ones it uses; what it does not share is
+the applier, which rewrites stored DDL in ways SQLite does not.
 """
 
 from __future__ import annotations
@@ -171,17 +176,28 @@ def test_the_cases_cover_the_operations_they_claim_to() -> None:
     )
 
 
-async def _apply_plan(connection: Any, current: dict, target: dict) -> None:
+async def _apply_plan(
+    connection: Any, current: dict, target: dict, dialect: str
+) -> None:
     from declaro_persistum.applier import apply
 
-    plan = diff(current, target, dialect="sqlite")
+    plan = diff(current, target, dialect=dialect)
     await apply(
         connection,
         plan["operations"],
         plan["execution_order"],
-        "sqlite",
+        dialect,
         dry_run=False,
     )
+
+
+async def _converged(connection: Any, target: dict, dialect: str) -> list:
+    actual = await introspect(connection, dialect)
+    return diff(
+        {name: actual[name] for name in target if name in actual},
+        target,
+        dialect=dialect,
+    )["operations"]
 
 
 @pytest.mark.parametrize(
@@ -200,15 +216,10 @@ async def test_the_change_applies_and_then_stops_being_emitted(
     path = tempfile.mktemp(suffix=".db")
     connection = await aiosqlite.connect(path)
     try:
-        await _apply_plan(connection, {}, current)
-        await _apply_plan(connection, current, target)
+        await _apply_plan(connection, {}, current, "sqlite")
+        await _apply_plan(connection, current, target, "sqlite")
 
-        actual = await introspect(connection, "sqlite")
-        remaining = diff(
-            {name: actual[name] for name in target if name in actual},
-            target,
-            dialect="sqlite",
-        )["operations"]
+        remaining = await _converged(connection, target, "sqlite")
 
         assert remaining == [], (
             f"{label} migrates on every deploy: "
@@ -236,8 +247,8 @@ async def test_the_change_leaves_the_declared_tables_present(
     path = tempfile.mktemp(suffix=".db")
     connection = await aiosqlite.connect(path)
     try:
-        await _apply_plan(connection, {}, current)
-        await _apply_plan(connection, current, target)
+        await _apply_plan(connection, {}, current, "sqlite")
+        await _apply_plan(connection, current, target, "sqlite")
 
         actual = await introspect(connection, "sqlite")
 
@@ -248,3 +259,86 @@ async def test_the_change_leaves_the_declared_tables_present(
     finally:
         await connection.close()
         os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
+# The same cases against a real PostgreSQL server
+# ---------------------------------------------------------------------------
+
+PROBE_URL = os.environ.get(
+    "TEST_POSTGRESQL_URL", "postgresql://postgres:postgres@localhost/declaro_probe"
+)
+
+# Every table any case names. Dropped before and after each one, so a case
+# that fails halfway cannot poison the next. Read off the cases rather than
+# listed, because a list here would go stale the moment a case is added.
+TOUCHED = sorted({name for _l, c, t in CASES for name in (*c, *t)} | {"_dp_enum_t_status"})
+
+
+async def _clean(connection: Any) -> None:
+    for name in TOUCHED:
+        await connection.execute(f'DROP TABLE IF EXISTS "{name}" CASCADE')
+
+
+@pytest.mark.postgresql
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "label,current,target", CASES, ids=[c[0].replace(" ", "_") for c in CASES]
+)
+async def test_the_change_applies_and_converges_on_postgresql(
+    label: str, current: dict, target: dict
+) -> None:
+    """PostgreSQL renders through its own table, which nothing had exercised."""
+    import asyncpg
+
+    try:
+        connection = await asyncpg.connect(PROBE_URL)
+    except (OSError, asyncpg.PostgresError) as unreachable:
+        pytest.skip(f"no server at {PROBE_URL}: {unreachable}")
+
+    try:
+        await _clean(connection)
+        await _apply_plan(connection, {}, current, "postgresql")
+        await _apply_plan(connection, current, target, "postgresql")
+
+        remaining = await _converged(connection, target, "postgresql")
+
+        assert remaining == [], (
+            f"{label} migrates on every deploy: "
+            f"{[(o['op'], o['table'], o['details']) for o in remaining]}"
+        )
+    finally:
+        await _clean(connection)
+        await connection.close()
+
+
+@pytest.mark.postgresql
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "label,current,target", CASES, ids=[c[0].replace(" ", "_") for c in CASES]
+)
+async def test_the_change_leaves_the_declared_tables_present_on_postgresql(
+    label: str, current: dict, target: dict
+) -> None:
+    """The same floor. A migration that dropped everything would converge."""
+    import asyncpg
+
+    try:
+        connection = await asyncpg.connect(PROBE_URL)
+    except (OSError, asyncpg.PostgresError) as unreachable:
+        pytest.skip(f"no server at {PROBE_URL}: {unreachable}")
+
+    try:
+        await _clean(connection)
+        await _apply_plan(connection, {}, current, "postgresql")
+        await _apply_plan(connection, current, target, "postgresql")
+
+        actual = await introspect(connection, "postgresql")
+
+        assert set(target) <= set(actual), (
+            f"{label} left {sorted(set(target) - set(actual))} missing; "
+            f"the database holds {sorted(actual)}"
+        )
+    finally:
+        await _clean(connection)
+        await connection.close()
