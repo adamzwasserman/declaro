@@ -18,6 +18,7 @@ from declaro_persistum.types import (
     Operation,
     Schema,
     Table,
+    is_nullable,
 )
 
 
@@ -346,8 +347,8 @@ def _compute_column_alterations(
         changes["type"] = {"from": current.get("type"), "to": target.get("type")}
 
     # Nullability change
-    current_nullable = _is_nullable(current)
-    target_nullable = _is_nullable(target)
+    current_nullable = is_nullable(current)
+    target_nullable = is_nullable(target)
     if current_nullable != target_nullable:
         changes["nullable"] = {"from": current_nullable, "to": target_nullable}
 
@@ -358,32 +359,6 @@ def _compute_column_alterations(
         changes["default"] = {"from": current_default, "to": target_default}
 
     return changes if changes else None
-
-
-def _is_nullable(column: Column) -> bool:
-    """Whether this column accepts NULL, including what the key already said.
-
-    A PRIMARY KEY column is NOT NULL on every engine this package supports, by
-    definition rather than by declaration. So a schema writes
-
-        "id": {"type": "text", "primary_key": True}
-
-    and never repeats `nullable: False`, while introspection reads the
-    constraint off the database and reports it. Taking the missing key as
-    `True` made those two disagree on a column nobody had touched.
-
-    MEASURED 2026-08-17 against a real PostgreSQL server:
-
-        alter_column widgets {"column": "id",
-                              "changes": {"nullable": {"from": false, "to": true}}}
-
-    on the round trip immediately after creating the table. Every deploy
-    emitted it, and PostgreSQL refuses to make a primary key nullable, so the
-    operation could never succeed and never stopped being proposed.
-    """
-    if column.get("primary_key"):
-        return False
-    return bool(column.get("nullable", True))
 
 
 def _as_number(value: Any) -> float | None:

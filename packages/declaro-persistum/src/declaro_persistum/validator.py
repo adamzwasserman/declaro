@@ -9,7 +9,7 @@ Validates schema definitions for correctness:
 """
 
 from declaro_persistum.exceptions import ValidationError
-from declaro_persistum.types import Column, Index, Schema
+from declaro_persistum.types import Column, Index, Schema, is_nullable
 
 # Known SQL types (normalized lowercase)
 KNOWN_TYPES = {
@@ -145,14 +145,18 @@ def _validate_column(
         if ref_error:
             errors.append(ref_error)
 
-    # Check for nullable primary key (warning)
-    if col_def.get("primary_key") and col_def.get("nullable", True):
+    # A PRIMARY KEY that was DECLARED nullable is a contradiction the author
+    # wrote down, and no engine can honour it. An omitted `nullable` is not:
+    # declaring the key has already said NOT NULL. This used to read
+    # `col_def.get("nullable", True)` and so warned about the schema this
+    # package ships, telling the author to repeat themselves.
+    if col_def.get("primary_key") and col_def.get("nullable") is True:
         warnings.append(
             f"Table '{table_name}', column '{col_name}': Primary key column should be NOT NULL"
         )
 
     # Check for default on NOT NULL without default (warning for new columns)
-    if col_def.get("is_new") and not col_def.get("nullable", True) and "default" not in col_def:
+    if col_def.get("is_new") and not is_nullable(col_def) and "default" not in col_def:
         warnings.append(
             f"Table '{table_name}', column '{col_name}': "
             f"New NOT NULL column without default may fail if table has data"

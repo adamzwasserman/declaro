@@ -76,9 +76,35 @@ class TestColumnTypes:
 
 
 class TestColumnWarnings:
-    def test_a_nullable_primary_key_warns(self):
+    def test_a_primary_key_needs_no_second_declaration(self):
+        """CHANGED ON PURPOSE 2026-08-17. This asserted the opposite.
+
+        It required a warning for `{"primary_key": True}` with no `nullable`
+        key, on the reasoning that `col_def.get("nullable", True)` reads the
+        omission as nullable. A PRIMARY KEY is NOT NULL on every engine this
+        package supports, by definition, so the warning asked the author to
+        say a thing twice -- and it fired on the schema this package ships:
+
+            declaro -s examples/todo_app_native/schema validate
+            Primary key column should be NOT NULL
+
+        The same `.get("nullable", True)` default sat in the differ and made a
+        PostgreSQL migration emit `nullable: {"from": false, "to": true}` on an
+        unchanged schema forever, an operation PostgreSQL refuses. One mistake,
+        two modules, one day. The question is `types.is_nullable` now.
+        """
         w, e = _validate_column(
             "users", "id", {"type": "integer", "primary_key": True}, {}
+        )
+        assert (w, e) == ([], [])
+
+    def test_a_primary_key_declared_nullable_still_warns(self):
+        """The floor. An explicit contradiction is the author's, not ours."""
+        w, e = _validate_column(
+            "users",
+            "id",
+            {"type": "integer", "primary_key": True, "nullable": True},
+            {},
         )
         assert e == []
         assert any("should be NOT NULL" in m for m in w)

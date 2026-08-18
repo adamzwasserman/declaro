@@ -243,6 +243,27 @@ async def cmd_snapshot(
     snapshot_path = Path(schema_dir) / "snapshot.toml"
 
     if snapshot_path.exists() and not force:
+        # NO TERMINAL MEANS NO PROMPT. `input()` raises EOFError on a pipe, in
+        # CI, in cron and in a container, and taking a snapshot after a deploy
+        # is exactly the automated case. Measured 2026-08-17:
+        #
+        #     $ declaro ... snapshot < /dev/null
+        #     Error: EOF when reading a line
+        #
+        # `cmd_diff` and `cmd_apply` already derive their behaviour from
+        # `sys.stdin.isatty()`; this command was the one that did not. It
+        # refuses rather than overwriting, and names the flag that proceeds,
+        # because a snapshot is the record of what the database looked like
+        # and replacing it unasked is how drift detection goes quiet.
+        if not sys.stdin.isatty():
+            print(
+                f"Error: a snapshot already exists at {snapshot_path} and "
+                f"there is no terminal to confirm overwriting it. "
+                f"Pass --force to overwrite.",
+                file=sys.stderr,
+            )
+            return 1
+
         confirm = input(f"Overwrite existing snapshot at {snapshot_path}? [y/N] ")
         if confirm.lower() != "y":
             print("Aborted.")

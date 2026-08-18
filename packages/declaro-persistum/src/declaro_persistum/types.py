@@ -371,6 +371,34 @@ class ConnectionConfig(TypedDict, total=False):
     token: str
 
 
+def is_nullable(column: dict[str, Any]) -> bool:
+    """Does this column accept NULL, including what the key already said?
+
+    A PRIMARY KEY column is NOT NULL on every engine this package supports, by
+    definition rather than by declaration, so a schema writes
+
+        "id": {"type": "text", "primary_key": True}
+
+    and never repeats `nullable: False`.
+
+    `column.get("nullable", True)` reads that omission as nullable, and it
+    produced the same defect twice in one day, in two modules:
+
+        differ     alter_column {"nullable": {"from": false, "to": true}}
+                   on an unchanged schema, forever, and PostgreSQL refuses to
+                   make a primary key nullable so it could never succeed
+
+        validator  "Primary key column should be NOT NULL" on the schema this
+                   package ships, asking the author to say it twice
+
+    Two instances of one mistake in two modules is the architecture talking:
+    the question was being re-derived by whoever needed it. It is asked here.
+    """
+    if column.get("primary_key"):
+        return False
+    return bool(column.get("nullable", True))
+
+
 def for_dialect(table: dict[str, Any], dialect: str, what: str) -> Any:
     """Read a dispatch table, naming what exists when the key does not.
 
