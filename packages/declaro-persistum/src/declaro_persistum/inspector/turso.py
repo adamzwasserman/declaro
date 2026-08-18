@@ -14,6 +14,7 @@ libSQL and not a libSQL fork, and the difference is the reason pragma_compat
 exists: SQLite compatibility is the aim, not a guarantee.
 """
 
+import re
 from typing import Any
 
 from declaro_persistum.abstractions.materialized_views import (
@@ -59,7 +60,7 @@ async def introspect(
     try:
         cursor = await _maybe_await(connection.execute(
             """
-            SELECT name FROM sqlite_master
+            SELECT name, sql FROM sqlite_master
             WHERE type = 'table'
               AND name NOT LIKE 'sqlite_%'
               AND name NOT LIKE '_litestream_%'
@@ -80,10 +81,11 @@ async def introspect(
         schema: Schema = {}
 
         for row in tables:
-            table_name = row[0]
-            if table_name in backing:
+            stored_name = row[0]
+            if stored_name in backing:
                 continue
-            schema[table_name] = await _introspect_table(connection, table_name)
+            table_name = declared_name(stored_name, row[1])
+            schema[table_name] = await _introspect_table(connection, stored_name)
 
         if include_views:
             return schema, views_
@@ -98,6 +100,61 @@ async def introspect(
                 dialect="turso",
             ) from e
         raise
+
+
+def declared_name(stored: str, ddl: str | None) -> str:
+    """Give back the name as it was written, which Turso does not store.
+
+    TURSO FOLDS `sqlite_master.name` AND KEEPS THE ORIGINAL IN `sql`.
+    Measured 2026-08-18 after `CREATE TABLE "UserProfile" (...)`:
+
+        name: 'userprofile'
+        sql : 'CREATE TABLE "UserProfile" (id INTEGER PRIMARY KEY, ...)'
+
+    So a table declared with a capital letter was introspected under a name
+    nobody declared, the differ saw the declared table as absent, and every
+    deploy after the first emitted `create_table` for a table that already
+    existed. It failed, the applier refused to call the migration successful,
+    and it did so again on the next deploy and every one after. Any table
+    whose name is not already lower case could never finish a migration.
+
+    Recovering the case here rather than comparing names case-insensitively
+    in the differ is deliberate. The declared name is what the whole package
+    quotes into SQL, so introspection has to hand back what was written; a
+    case-insensitive comparison would hide the difference and leave every
+    other caller holding the folded name.
+
+    Column names are not folded, so nothing else on this engine needs it.
+    """
+    if ddl is None:
+        return stored
+
+    match = _CREATE_TABLE_NAME.search(ddl)
+    if match is None:
+        return stored
+
+    # Whichever of the four quotings matched. Taking only `quoted` and `bare`
+    # would silently fall back to the folded name for a backtick or bracket
+    # name, which is the same defect one spelling further along.
+    written = next(
+        (g for g in match.groupdict().values() if g is not None), stored
+    )
+
+    # A DDL that names a different table is not this table's DDL. Fall back
+    # rather than trust a match that disagrees with the catalogue.
+    return written if written.lower() == stored.lower() else stored
+
+
+# `IF NOT EXISTS` is optional, the name may be quoted four ways, and the
+# capture stops at whitespace or the opening paren. Anchored at the start so
+# a `CREATE TABLE` inside a string literal later in the DDL cannot match.
+_CREATE_TABLE_NAME = re.compile(
+    r'^\s*CREATE\s+(?:TEMP\s+|TEMPORARY\s+)?TABLE\s+'
+    r'(?:IF\s+NOT\s+EXISTS\s+)?'
+    r'(?:"(?P<quoted>[^"]+)"|`(?P<btick>[^`]+)`|\[(?P<brack>[^\]]+)\]'
+    r'|(?P<bare>[^\s(]+))',
+    re.IGNORECASE,
+)
 
 
 async def _introspect_table(

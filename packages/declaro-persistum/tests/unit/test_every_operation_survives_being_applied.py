@@ -32,9 +32,13 @@ share a renderer with anything. `postgresql.OPERATION_SQL` is its own table of
 its own functions, and the matrix above says two of its sixteen entries had
 ever been applied. It skips, naming the URL it tried, when no server answers.
 
-WHAT THIS DOES NOT COVER: Turso. It shares `shared._SQL_GENERATORS` with
-SQLite, so the renderers here are the ones it uses; what it does not share is
-the applier, which rewrites stored DDL in ways SQLite does not.
+TURSO RUNS THEM TOO, and it is the engine most likely to fail them. It shares
+the renderers with SQLite, so what is untested there is not the SQL but what
+the engine does with it afterwards. Turso rewrites the DDL it stores, turning
+`c <> ''` into `c != ''` and `datetime('now')` into `datetime ('now')`, and it
+folds the case of a stored table name. Each of those has produced a migration
+that runs forever, and the table-name folding dropped and recreated a
+mixed-case table on every deploy, destroying its contents each time.
 """
 
 from __future__ import annotations
@@ -89,6 +93,15 @@ POSTS_FK = {
 # written for is reported rather than silently passing.
 CASES: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
     ("create a table", {}, _users()),
+    # NOT ALL LOWER CASE, and every other case here is. A uniform input space
+    # is how this matrix reached eleven operations on three engines while
+    # missing a defect that made any capitalised table fail its migration on
+    # Turso forever. See test_a_mixed_case_table_name_converges.py.
+    ("create a mixed-case table", {}, {"UserProfile": USERS}),
+    # Altering a mixed-case table still loops on Turso, because the engine
+    # rewrites the stored DDL and folds the name into it. Held as a strict
+    # xfail in test_a_mixed_case_table_name_converges.py rather than here, so
+    # this matrix stays a matrix of operations.
     ("drop a table", _users(), {}),
     ("add a column", _users(), WITH_EMAIL),
     ("drop a column", WITH_EMAIL, _users()),
@@ -341,4 +354,65 @@ async def test_the_change_leaves_the_declared_tables_present_on_postgresql(
         )
     finally:
         await _clean(connection)
+        await connection.close()
+
+
+# ---------------------------------------------------------------------------
+# The same cases on Turso, which rewrites what it stores
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.turso
+@pytest.mark.parametrize(
+    "label,current,target", CASES, ids=[c[0].replace(" ", "_") for c in CASES]
+)
+async def test_the_change_applies_and_converges_on_turso(
+    label: str, current: dict, target: dict
+) -> None:
+    """A local Turso file. No primary, so nothing here touches the network."""
+    import turso.aio
+
+    directory = tempfile.mkdtemp()
+    connection = await turso.aio.connect(os.path.join(directory, "ops.db"))
+    try:
+        await _apply_plan(connection, {}, current, "turso")
+        await _apply_plan(connection, current, target, "turso")
+
+        remaining = await _converged(connection, target, "turso")
+
+        assert remaining == [], (
+            f"{label} migrates on every deploy: "
+            f"{[(o['op'], o['table'], o['details']) for o in remaining]}"
+        )
+    finally:
+        await connection.close()
+
+
+@pytest.mark.turso
+@pytest.mark.parametrize(
+    "label,current,target", CASES, ids=[c[0].replace(" ", "_") for c in CASES]
+)
+async def test_the_change_leaves_the_declared_tables_present_on_turso(
+    label: str, current: dict, target: dict
+) -> None:
+    """The floor, and on this engine it is the one that has caught a defect.
+
+    Turso folds a stored table name, so a rename can converge while leaving
+    the table under a name the declaration never asked for.
+    """
+    import turso.aio
+
+    directory = tempfile.mkdtemp()
+    connection = await turso.aio.connect(os.path.join(directory, "present.db"))
+    try:
+        await _apply_plan(connection, {}, current, "turso")
+        await _apply_plan(connection, current, target, "turso")
+
+        actual = await introspect(connection, "turso")
+
+        assert set(target) <= set(actual), (
+            f"{label} left {sorted(set(target) - set(actual))} missing; "
+            f"the database holds {sorted(actual)}"
+        )
+    finally:
         await connection.close()
