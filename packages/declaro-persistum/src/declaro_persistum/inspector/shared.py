@@ -295,8 +295,11 @@ def checks_from_ddl(create_statement: str) -> dict[str, str]:
 
     checks: dict[str, str] = {}
     for clause in _split_top_level(body):
-        column = _leading_identifier(clause)
-        if column is None or column.upper() in (
+        leading = _leading_identifier(clause)
+        if leading is None:
+            continue
+        column, was_quoted = leading
+        if not was_quoted and column.upper() in (
             "CHECK",
             "PRIMARY",
             "FOREIGN",
@@ -317,11 +320,21 @@ def checks_from_ddl(create_statement: str) -> dict[str, str]:
 _CLOSING = {'"': '"', "`": "`", "[": "]"}
 
 
-def _leading_identifier(clause: str) -> str | None:
-    """The column name a clause opens with, however it is quoted.
+def _leading_identifier(clause: str) -> tuple[str, bool] | None:
+    """The column name a clause opens with, and whether it was quoted.
 
-    Returns None for a clause that starts with something other than a name,
-    which is how a table-level constraint is told from a column.
+    Returns None for an empty clause. The QUOTED flag matters: a bare leading
+    `CHECK` or `PRIMARY` starts a table-level constraint, and a quoted one is
+    a column called that.
+
+    FOUND BY FUZZING, with SQLite choosing the inputs:
+
+        CREATE TABLE t (id TEXT, "CHECK" INTEGER CHECK ("CHECK" > 0))
+
+    is a legal table with a column named CHECK, and treating the name as a
+    keyword dropped its constraint -- which means comparing it against None on
+    every deploy, the migration loop this scanner exists to avoid. I would not
+    have thought of that column name.
     """
     text = clause.lstrip()
     if not text:
@@ -330,12 +343,12 @@ def _leading_identifier(clause: str) -> str | None:
     closing = _CLOSING.get(text[0])
     if closing:
         end = text.find(closing, 1)
-        return text[1:end] if end != -1 else None
+        return (text[1:end], True) if end != -1 else None
 
     for position, char in enumerate(text):
         if char.isspace() or char in "(,":
-            return text[:position]
-    return text
+            return text[:position], False
+    return text, False
 
 
 def _table_body(create_statement: str) -> str | None:
