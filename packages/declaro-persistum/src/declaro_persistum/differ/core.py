@@ -145,6 +145,29 @@ def diff(
             }
         )
 
+        # AN INDEX DECLARED ON A NEW TABLE IS AN OPERATION OF ITS OWN.
+        # `create_table`'s details carry `indexes` and `create_table_sql` never
+        # looks at them, so a fresh migration created the table and none of its
+        # indexes. Measured 2026-08-17: two declared, zero created, and
+        # `declaro apply` reported success.
+        #
+        # It self-healed on the next deploy, which is what kept it quiet: the
+        # second diff noticed and emitted `add_index`. A deployment ran without
+        # the indexes it declared until somebody migrated again.
+        #
+        # Same fix as `insert_enum_values` got this morning, for the same
+        # reason: data the operation needed was sitting in the schema where the
+        # applier could not reach it. `add_index` already exists in the
+        # vocabulary and every applier already runs it.
+        for index_name, definition in (target_table.get("indexes") or {}).items():
+            operations.append(
+                {
+                    "op": "add_index",
+                    "table": table_name,
+                    "details": {"index": index_name, "definition": definition},
+                }
+            )
+
         # A lookup table that nothing fills rejects every value its column
         # declares. The values are in the schema and the applier only sees
         # operations, so the differ -- which holds both -- puts them in one.
