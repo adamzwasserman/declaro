@@ -431,3 +431,41 @@ def test_the_comparison_takes_a_dialect_like_its_neighbour() -> None:
 
     assert "dialect" in inspect.signature(same_default).parameters
     assert "dialect" in inspect.signature(same_type).parameters
+
+
+# ---------------------------------------------------------------------------
+# What the case fold must NOT reach
+# ---------------------------------------------------------------------------
+#
+# `same_default` folds the case of a BARE keyword, because PostgreSQL stores
+# `current_timestamp` as `CURRENT_TIMESTAMP` and comparing them literally
+# migrated on every deploy.
+#
+# FOUND BY A MUTATION CONTROL: widening that fold to every string left every
+# test passing, because nothing compared two quoted literals differing only in
+# case. `'Pending'` and `'pending'` are two different values, and a schema
+# changing one to the other is a change.
+
+
+@pytest.mark.parametrize("dialect", DIALECTS)
+def test_a_quoted_literal_keeps_its_case(dialect: str) -> None:
+    current = {"t": {"columns": {"c": {"type": "text", "default": "'Pending'"}}}}
+    target = {"t": {"columns": {"c": {"type": "text", "default": "'pending'"}}}}
+
+    ops = diff(current, target, dialect=dialect)["operations"]
+
+    assert [o["op"] for o in ops] == ["alter_column"], (
+        f"'Pending' and 'pending' are different values and the change was "
+        f"folded away: {ops}"
+    )
+
+
+@pytest.mark.parametrize("dialect", DIALECTS)
+def test_a_bare_keyword_still_folds(dialect: str) -> None:
+    """The floor. Removing the fold entirely would pass the test above."""
+    current = {"t": {"columns": {"c": {"type": "timestamptz",
+                                       "default": "CURRENT_TIMESTAMP"}}}}
+    target = {"t": {"columns": {"c": {"type": "timestamptz",
+                                      "default": "current_timestamp"}}}}
+
+    assert diff(current, target, dialect=dialect)["operations"] == []

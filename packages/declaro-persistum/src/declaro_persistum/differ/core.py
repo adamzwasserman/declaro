@@ -458,10 +458,30 @@ def _compute_column_alterations(
     # is not noticed on PostgreSQL, which is where it stood before today.
     compared = ("unique", "check") if dialect in ("sqlite", "turso") else ("unique",)
     for prop in compared:
-        if current.get(prop) != target.get(prop):
+        if not _same_constraint(prop, current.get(prop), target.get(prop)):
             changes[prop] = {"from": current.get(prop), "to": target.get(prop)}
 
     return changes if changes else None
+
+
+def _same_constraint(prop: str, current: Any, target: Any) -> bool:
+    """Do these two spellings declare the same constraint?
+
+    `unique: False` AND NO `unique` KEY ARE THE SAME FACT. Introspection omits
+    the key for a column that is not unique, and a schema may write it out, so
+    comparing them directly proposed an alter_column on every deploy:
+
+        alter_column {"unique": {"from": None, "to": False}}
+
+    Measured 2026-08-17 on SQLite and PostgreSQL, by a gate that tries every
+    compared property against a real database rather than by anybody noticing.
+
+    A CHECK is different: absent means no constraint and a string means one,
+    so there is nothing to fold.
+    """
+    if prop == "unique":
+        return bool(current) == bool(target)
+    return bool(current == target)
 
 
 def _as_number(value: Any) -> float | None:
@@ -542,9 +562,18 @@ def same_default(current: Any, target: Any, dialect: Dialect) -> bool:
         return current_number == target_number
 
     if isinstance(current, str) and isinstance(target, str):
-        pair = {current.strip().lower(), target.strip().lower()}
-        if pair <= {"true", "false"} and len(pair) == 1:
-            return True
+        # A BARE KEYWORD IS CASE-INSENSITIVE, and this folded only booleans.
+        # PostgreSQL stores `current_timestamp` as `CURRENT_TIMESTAMP`, so a
+        # schema declaring the lowercase form migrated on every deploy:
+        #
+        #     alter_column {"default": {"from": "CURRENT_TIMESTAMP",
+        #                               "to": "current_timestamp"}}
+        #
+        # A quoted literal is left alone -- `'Pending'` and `'pending'` are two
+        # different values -- so this folds only a bare word.
+        left, right = current.strip(), target.strip()
+        if left.replace("_", "").isalnum() and right.replace("_", "").isalnum():
+            return left.lower() == right.lower()
 
     return bool(current == target)
 
