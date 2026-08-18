@@ -11,7 +11,10 @@ can promise which the SQLite and Turso ones cannot.
 from collections.abc import Callable
 from typing import Any
 
-from declaro_persistum.applier.shared import column_definition
+from declaro_persistum.applier.shared import (
+    column_definition,
+    insert_enum_values_sql,
+)
 from declaro_persistum.exceptions import MigrationError
 from declaro_persistum.types import ApplyResult, Column, Operation, View
 
@@ -39,7 +42,9 @@ async def apply(
     PostgreSQL's transactional DDL means we can safely roll back
     all changes if any operation fails.
     """
-    sql_statements = generate_sql(operations, execution_order)
+    sql_statements = [
+        generate_operation_sql(operations[i]) for i in execution_order
+    ]
 
     if dry_run:
         return {
@@ -86,12 +91,13 @@ async def apply(
         ) from e
 
 
-def generate_sql(
-    operations: list[Operation],
-    execution_order: list[int],
-) -> list[str]:
-    """Generate SQL statements in execution order."""
-    return [generate_operation_sql(operations[i]) for i in execution_order]
+# `generate_sql` was here and nowhere else, so `declaro generate` worked on
+# PostgreSQL and raised AttributeError on SQLite and Turso. The loop it ran is
+# dialect-independent, so it now lives once in `applier/__init__.py` beside the
+# `SQL_GENERATORS` table, and this module keeps only what varies:
+# `generate_operation_sql`.
+
+
 
 
 def generate_operation_sql(operation: Operation) -> str:
@@ -100,27 +106,12 @@ def generate_operation_sql(operation: Operation) -> str:
     table = operation["table"]
     details = operation["details"]
 
-    generators: dict[str, SQLGenerator] = {
-        "create_table": _create_table_sql,
-        "drop_table": _drop_table_sql,
-        "rename_table": _rename_table_sql,
-        "add_column": _add_column_sql,
-        "drop_column": _drop_column_sql,
-        "rename_column": _rename_column_sql,
-        "alter_column": _alter_column_sql,
-        "add_index": _add_index_sql,
-        "drop_index": _drop_index_sql,
-        "add_constraint": _add_constraint_sql,
-        "drop_constraint": _drop_constraint_sql,
-        "add_foreign_key": _add_foreign_key_sql,
-        "drop_foreign_key": _drop_foreign_key_sql,
-        "create_view": _create_view_sql,
-        "drop_view": _drop_view_sql,
-    }
-
-    generator = generators.get(op_type)
+    generator = OPERATION_SQL.get(op_type)
     if not generator:
-        raise ValueError(f"Unknown operation type: {op_type}")
+        raise ValueError(
+            f"Unknown operation type: {op_type}. "
+            f"Handled: {', '.join(sorted(OPERATION_SQL))}"
+        )
 
     return generator(table, details)
 
@@ -359,5 +350,29 @@ def generate_drop_view(name: str, materialized: bool = False) -> str:
         return f"DROP VIEW IF EXISTS {name}"
 
 
-
-
+# HOISTED OUT OF THE FUNCTION. This table was a local variable rebuilt on
+# every call, so no gate could read it and it silently fell one operation
+# behind the table in `shared.py`. `declaro` emitted `insert_enum_values`, this
+# module answered `Unknown operation type`, and the SQLite tests were green.
+#
+# `insert_enum_values` renders identically on every engine -- it is an INSERT
+# of literal values into a two-column table -- so the entry points at the one
+# in `shared.py` rather than at a fourth copy.
+OPERATION_SQL: dict[str, SQLGenerator] = {
+    "create_table": _create_table_sql,
+    "drop_table": _drop_table_sql,
+    "rename_table": _rename_table_sql,
+    "add_column": _add_column_sql,
+    "drop_column": _drop_column_sql,
+    "rename_column": _rename_column_sql,
+    "alter_column": _alter_column_sql,
+    "add_index": _add_index_sql,
+    "drop_index": _drop_index_sql,
+    "add_constraint": _add_constraint_sql,
+    "drop_constraint": _drop_constraint_sql,
+    "add_foreign_key": _add_foreign_key_sql,
+    "drop_foreign_key": _drop_foreign_key_sql,
+    "create_view": _create_view_sql,
+    "drop_view": _drop_view_sql,
+    "insert_enum_values": insert_enum_values_sql,
+}

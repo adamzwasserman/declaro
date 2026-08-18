@@ -120,6 +120,77 @@ def map_type(type_str: str, dialect: Dialect) -> str:
 # =============================================================================
 
 
+# How each engine spells the expression defaults a portable schema may declare.
+#
+# A DEFAULT USED TO BE PASSED THROUGH VERBATIM, so a schema written for one
+# engine emitted text another cannot parse. Measured 2026-08-17, running
+# `declaro generate` against the schema this package ships:
+#
+#     "created_at" TEXT DEFAULT now()
+#     sqlite3.OperationalError: near "(": syntax error
+#
+# and the command exited 0. The renderer wrapped parentheses and otherwise
+# copied the string, which is a translation table with no entries.
+#
+# The keys are lowercased and stripped of spaces before lookup, so `NOW()` and
+# `now ()` find the same row.
+EXPRESSION_DEFAULTS: dict[str, dict[str, str]] = {
+    "sqlite": {
+        "now()": "(datetime('now'))",
+        "current_timestamp": "CURRENT_TIMESTAMP",
+        "true": "1",
+        "false": "0",
+    },
+    "turso": {
+        "now()": "(datetime('now'))",
+        "current_timestamp": "CURRENT_TIMESTAMP",
+        "true": "1",
+        "false": "0",
+    },
+    "postgresql": {},  # PostgreSQL is the language these are written in.
+}
+
+# Expressions an engine has NO equivalent for, and what to tell the reader.
+#
+# THIS IS NOT AN OVERSIGHT IN THE TABLE ABOVE, it is the reason the table has a
+# companion. SQLite can produce `lower(hex(randomblob(16)))`, a 32-character
+# random hex string that LOOKS like a UUID and is not one -- the version and
+# variant bits are wrong, so it is not v4, and anything that parses or
+# validates it is being lied to. Translating it would replace a loud syntax
+# error with a quiet wrong value.
+NO_EQUIVALENT: dict[str, dict[str, str]] = {
+    "sqlite": {
+        "gen_random_uuid()": (
+            "SQLite has no UUID generator, and a random hex string is not a "
+            "v4 UUID. Have the application supply the id"
+        ),
+        "uuid_generate_v4()": (
+            "SQLite has no UUID generator, and a random hex string is not a "
+            "v4 UUID. Have the application supply the id"
+        ),
+    },
+}
+NO_EQUIVALENT["turso"] = NO_EQUIVALENT["sqlite"]
+NO_EQUIVALENT["postgresql"] = {}
+
+
+def _translate_default(value: Any, dialect: str, column: str) -> Any:
+    """The declared default, spelled for `dialect`, or a refusal naming both."""
+    if not isinstance(value, str):
+        return value
+
+    key = value.strip().lower().replace(" ", "")
+
+    refusal = NO_EQUIVALENT.get(dialect, {}).get(key)
+    if refusal is not None:
+        raise ValueError(
+            f"column {column!r} defaults to {value}, which {dialect} cannot "
+            f"spell. {refusal}."
+        )
+
+    return EXPRESSION_DEFAULTS.get(dialect, {}).get(key, value)
+
+
 def sqlite_default(value: Any) -> str:
     """SQLite strips one layer of parens from an expression default.
 
@@ -174,7 +245,7 @@ def column_definition(name: str, col: Column, dialect: Dialect) -> str:
         parts.append("UNIQUE")
 
     if "default" in col:
-        parts.append(render_default(col["default"]))
+        parts.append(render_default(_translate_default(col["default"], dialect, name)))
 
     if "check" in col:
         parts.append(f"CHECK ({col['check']})")
@@ -197,6 +268,25 @@ def column_definition(name: str, col: Column, dialect: Dialect) -> str:
 # =============================================================================
 # DDL generators — all take (table, details) and return SQL string
 # =============================================================================
+
+
+def insert_enum_values_sql(table: str, details: dict[str, Any]) -> str:
+    """Fill a `_dp_enum_` lookup table with the values its column declares.
+
+    ONE STATEMENT PER VALUE, joined with `;`, because the SQLite and Turso
+    appliers already split a generated string on `;`, and asyncpg accepts a
+    multi-statement string in `execute`. Verified against all three engines.
+
+    THE VALUES ARE QUOTED BY DOUBLING THE APOSTROPHE, which is SQL's own
+    escape. They come from a `Literal[...]` in a models file, so they are
+    developer-authored rather than user input, but `it's live` is ordinary
+    English and would end the string literal early.
+    """
+    values = details["values"]
+    return ";\n".join(
+        f"""INSERT INTO "{table}" (value) VALUES ('{value.replace("'", "''")}')"""
+        for value in values
+    )
 
 
 def create_table_sql(table: str, details: dict[str, Any]) -> str:
@@ -267,10 +357,7 @@ def rename_column_sql(table: str, details: dict[str, Any]) -> str:
 
 def alter_column_sql(_table: str, _details: dict[str, Any]) -> str:
     """ALTER COLUMN not supported — requires table reconstruction."""
-    raise NotImplementedError(
-        "ALTER COLUMN not supported in SQLite-compatible databases. "
-        "Use table reconstruction instead."
-    )
+    raise NotImplementedError("CODE NOT WRITTEN")
 
 
 def add_index_sql(table: str, details: dict[str, Any]) -> str:
@@ -302,26 +389,17 @@ def add_constraint_sql(_table: str, details: dict[str, Any]) -> str:
 
 def drop_constraint_sql(_table: str, _details: dict[str, Any]) -> str:
     """DROP CONSTRAINT not supported — requires table reconstruction."""
-    raise NotImplementedError(
-        "DROP CONSTRAINT not supported in SQLite-compatible databases. "
-        "Requires table reconstruction."
-    )
+    raise NotImplementedError("CODE NOT WRITTEN")
 
 
 def add_foreign_key_sql(_table: str, _details: dict[str, Any]) -> str:
     """ADD FOREIGN KEY not supported — requires table reconstruction."""
-    raise NotImplementedError(
-        "Adding foreign keys after table creation not supported in SQLite-compatible databases. "
-        "Use table reconstruction instead."
-    )
+    raise NotImplementedError("CODE NOT WRITTEN")
 
 
 def drop_foreign_key_sql(_table: str, _details: dict[str, Any]) -> str:
     """DROP FOREIGN KEY not supported — requires table reconstruction."""
-    raise NotImplementedError(
-        "Dropping foreign keys not supported in SQLite-compatible databases. "
-        "Use table reconstruction instead."
-    )
+    raise NotImplementedError("CODE NOT WRITTEN")
 
 
 def create_view_sql(_table: str, details: dict[str, Any]) -> str:
@@ -345,6 +423,10 @@ def drop_view_sql(_table: str, details: dict[str, Any]) -> str:
 # Maps operation type to pure SQL generator function
 _SQL_GENERATORS: dict[str, Any] = {
     "create_table": create_table_sql,
+    # THE SIXTEENTH. A `Literal` column becomes a lookup table plus a foreign
+    # key, and nothing filled the lookup table, so every declared value was
+    # rejected by the constraint that exists to permit exactly those values.
+    "insert_enum_values": insert_enum_values_sql,
     "drop_table": drop_table_sql,
     "rename_table": rename_table_sql,
     "add_column": add_column_sql,
@@ -498,23 +580,13 @@ def single_change_property(operation: Operation) -> tuple[str, Any] | None:
     return None
 
 
-def enum_population_sql(
-    operation: Operation, target_schema: Any
-) -> list[str]:
-    """Generate INSERT SQL for enum lookup table population (pure)."""
-    if operation["op"] != "create_table" or not target_schema:
-        return []
-
-    table_name = operation["table"]
-    if not table_name.startswith("_dp_enum_"):
-        return []
-
-    table_def = target_schema.get(table_name, {})
-    enum_values = table_def.get("_enum_values", [])
-
-    sqls = []
-    for value in enum_values:
-        escaped_value = value.replace("'", "''")
-        sqls.append(f'INSERT INTO "{table_name}" (value) VALUES (\'{escaped_value}\')')
-
-    return sqls
+# `enum_population_sql(operation, target_schema)` stood here. It was called
+# from one place, `turso.apply`, which received `target_schema` as a keyword
+# argument that NO CALLER EVER PASSED, so it was `None` on every run and the
+# function's first line returned `[]`. Measured 2026-08-17: the lookup table
+# was created empty and rejected every value its column declared.
+#
+# It is gone rather than wired up, because passing the schema beside the
+# operations makes one operation's meaning depend on an argument the others
+# ignore. `insert_enum_values` carries its own values and every applier runs
+# it the way it runs everything else.

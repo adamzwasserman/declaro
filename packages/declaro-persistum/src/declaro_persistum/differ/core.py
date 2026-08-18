@@ -73,7 +73,7 @@ def diff(
     Example:
         >>> current = {"users": {"columns": {"id": {"type": "integer"}}}}
         >>> target = {"users": {"columns": {"id": {"type": "integer"}, "email": {"type": "text"}}}}
-        >>> result = diff(current, target)
+        >>> result = diff(current, target, dialect="postgresql")
         >>> print(result["operations"][0]["op"])
         'add_column'
     """
@@ -143,6 +143,19 @@ def diff(
                 },
             }
         )
+
+        # A lookup table that nothing fills rejects every value its column
+        # declares. The values are in the schema and the applier only sees
+        # operations, so the differ -- which holds both -- puts them in one.
+        enum_values = target_table.get("_enum_values")
+        if enum_values:
+            operations.append(
+                {
+                    "op": "insert_enum_values",
+                    "table": table_name,
+                    "details": {"values": list(enum_values)},
+                }
+            )
 
     # Process modified tables
     for table_name in modified_tables:
@@ -333,36 +346,104 @@ def _compute_column_alterations(
         changes["type"] = {"from": current.get("type"), "to": target.get("type")}
 
     # Nullability change
-    current_nullable = current.get("nullable", True)
-    target_nullable = target.get("nullable", True)
+    current_nullable = _is_nullable(current)
+    target_nullable = _is_nullable(target)
     if current_nullable != target_nullable:
         changes["nullable"] = {"from": current_nullable, "to": target_nullable}
 
     # Default change
     current_default = current.get("default")
     target_default = target.get("default")
-    if _normalize_default(current_default) != _normalize_default(target_default):
+    if not same_default(current_default, target_default):
         changes["default"] = {"from": current_default, "to": target_default}
 
     return changes if changes else None
 
 
-def _normalize_default(value: Any) -> Any:
-    """Fold boolean-literal defaults to a canonical spelling — pure.
+def _is_nullable(column: Column) -> bool:
+    """Whether this column accepts NULL, including what the key already said.
 
-    Boolean literals are spelled inconsistently across the two sides of the
-    diff: the loader emits "TRUE"/"FALSE" for a Python bool default, while
-    PostgreSQL normalises the same default to "false" on the way back out of
-    introspection. Compared verbatim those never match, so every migration
-    re-emits an alter_column that changes nothing.
+    A PRIMARY KEY column is NOT NULL on every engine this package supports, by
+    definition rather than by declaration. So a schema writes
 
-    Only boolean literals are folded. Every other default is an opaque SQL
-    expression where case can carry meaning (string literals, quoted
-    identifiers, collations), so those are compared verbatim.
+        "id": {"type": "text", "primary_key": True}
+
+    and never repeats `nullable: False`, while introspection reads the
+    constraint off the database and reports it. Taking the missing key as
+    `True` made those two disagree on a column nobody had touched.
+
+    MEASURED 2026-08-17 against a real PostgreSQL server:
+
+        alter_column widgets {"column": "id",
+                              "changes": {"nullable": {"from": false, "to": true}}}
+
+    on the round trip immediately after creating the table. Every deploy
+    emitted it, and PostgreSQL refuses to make a primary key nullable, so the
+    operation could never succeed and never stopped being proposed.
     """
-    if isinstance(value, str) and value.strip().lower() in ("true", "false"):
-        return value.strip().lower()
-    return value
+    if column.get("primary_key"):
+        return False
+    return bool(column.get("nullable", True))
+
+
+def _as_number(value: Any) -> float | None:
+    """The number this default denotes, or None if it does not denote one.
+
+    A bare `0` is a number. `'0'` WITH QUOTES is the one-character string and
+    must not fold into it, which is why this parses rather than strips.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    if not isinstance(value, str):
+        return None
+    try:
+        return float(value.strip())
+    except ValueError:
+        return None
+
+
+def same_default(current: Any, target: Any) -> bool:
+    """Do these two spellings mean the same default?
+
+    ONE QUESTION, RATHER THAN A LIST OF THE LITERALS SOMEBODY HAS BEEN BITTEN
+    BY. This began as `_normalize_default`, which folded boolean literals
+    because the loader emits "TRUE" for a Python bool and PostgreSQL hands back
+    "false", so every migration re-emitted an alter_column that changed
+    nothing. On 2026-08-17 the identical symptom arrived for numbers:
+
+        default: {"from": "0", "to": 0}
+
+    measured on a round trip against a real server. The schema declares the
+    integer, the database returns the expression as text, and comparing them by
+    identity proposes a change forever.
+
+    Two instances of one bug in one place is the architecture talking. The
+    cause is not that booleans and numbers were forgotten; it is that a default
+    is a VALUE on one side and an EXPRESSION on the other, and identity is the
+    wrong question to ask across that boundary. So this asks whether they
+    denote the same thing, and falls back to verbatim comparison for the
+    opaque case, which is where an expression like `now()` belongs.
+
+    WHAT IT DOES NOT DECIDE, stated so its silence is not read as agreement:
+    whether `true` and `1` are the same default on SQLite, which stores
+    booleans as integers. Not measured, so not folded.
+    """
+    if current is None or target is None:
+        return current is target
+
+    current_number = _as_number(current)
+    target_number = _as_number(target)
+    if current_number is not None and target_number is not None:
+        return current_number == target_number
+
+    if isinstance(current, str) and isinstance(target, str):
+        pair = {current.strip().lower(), target.strip().lower()}
+        if pair <= {"true", "false"} and len(pair) == 1:
+            return True
+
+    return bool(current == target)
 
 
 def _diff_foreign_keys(

@@ -36,7 +36,7 @@ async def test_applier_handles_alter_column_nullability():
         ]
 
         # Apply operation
-        result = await apply(conn, operations, [0], "sqlite")
+        result = await apply(conn, operations, [0], "sqlite", dry_run=False)
 
         # Verify success
         assert result["success"] is True
@@ -75,7 +75,7 @@ async def test_applier_handles_alter_column_type():
         ]
 
         # Apply operation
-        result = await apply(conn, operations, [0], "sqlite")
+        result = await apply(conn, operations, [0], "sqlite", dry_run=False)
 
         # Verify success
         assert result["success"] is True
@@ -107,7 +107,7 @@ async def test_applier_handles_alter_column_default():
         ]
 
         # Apply operation
-        result = await apply(conn, operations, [0], "sqlite")
+        result = await apply(conn, operations, [0], "sqlite", dry_run=False)
 
         # Verify success
         assert result["success"] is True
@@ -174,7 +174,7 @@ async def test_applier_rollback_on_reconstruction_error():
         # import -- so it cannot fail for the right reason, and the assertion
         # below would then be checking a table nothing had touched.
         with pytest.raises(MigrationError, match="alter_column on posts"):
-            await apply(conn, operations, [0], "sqlite")
+            await apply(conn, operations, [0], "sqlite", dry_run=False)
 
         # Verify table unchanged (original schema preserved)
         rows = await pragma_table_info(conn, "posts")
@@ -211,7 +211,7 @@ async def test_applier_multiple_operations_with_reconstruction():
         ]
 
         # Apply operations
-        result = await apply(conn, operations, [0, 1], "sqlite")
+        result = await apply(conn, operations, [0, 1], "sqlite", dry_run=False)
 
         # Verify success
         assert result["success"] is True

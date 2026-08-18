@@ -30,7 +30,7 @@ def detect_ambiguities(
     Example:
         >>> current = {"users": {"columns": {"name": {"type": "text"}}}}
         >>> target = {"users": {"columns": {"full_name": {"type": "text"}}}}
-        >>> ambiguities = detect_ambiguities(current, target)
+        >>> ambiguities = detect_ambiguities(current, target, dialect="postgresql")
         >>> print(ambiguities[0]["type"])
         'possible_rename'
     """

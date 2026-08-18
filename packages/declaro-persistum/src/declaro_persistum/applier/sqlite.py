@@ -25,7 +25,7 @@ from declaro_persistum.applier.shared import (
 from declaro_persistum.applier.shared import (
     map_type as _map_type_shared,
 )
-from declaro_persistum.exceptions import MigrationError
+from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, MigrationError
 from declaro_persistum.types import ApplyResult, Enum, Operation, Trigger, View
 
 
@@ -37,6 +37,20 @@ def get_dialect() -> str:
 def get_transaction_mode() -> Literal["all_or_nothing", "per_operation"]:
     """SQLite supports transactional DDL."""
     return "all_or_nothing"
+
+
+
+async def _restore_enforcement(connection: Any, enforced: int) -> None:
+    """Put `PRAGMA foreign_keys` back to what the caller had.
+
+    RESTORING MEANS PUTTING IT BACK, NOT TURNING IT ON. A caller who disabled
+    enforcement deliberately before migrating has not asked for it to be
+    switched on underneath them.
+
+    Only meaningful outside a transaction. Every call site below is after a
+    commit or a rollback for that reason.
+    """
+    await connection.execute(f"PRAGMA foreign_keys = {'ON' if enforced else 'OFF'}")
 
 
 async def apply(
@@ -57,8 +71,17 @@ async def apply(
 
     executed: list[str] = []
 
+    # WHAT THE CALLER HAD, so it can be given back. Read BEFORE anything else
+    # runs, because the first statement of the loop opens a transaction and
+    # SQLite then ignores every write to this pragma until it closes.
+    cursor = await connection.execute("PRAGMA foreign_keys")
+    row = await cursor.fetchone()
+    entry_enforcement = row[0] if row else 1
+
     try:
-        # Enable foreign keys and start transaction
+        # Enforce during the migration, whatever the caller had. A
+        # reconstruction turns this off around its table swap and the value is
+        # restored after the commit below.
         await connection.execute("PRAGMA foreign_keys = ON")
 
         # Per-operation execution
@@ -79,6 +102,21 @@ async def apply(
                             await connection.execute(statement)
                     executed.append(sql)
 
+            except A_BUG_IN_THIS_PACKAGE:
+                # OURS, AND THE ENGINE WAS NEVER ASKED. A KeyError here means
+                # the operation does not match what the differ emits, so the
+                # bug is in whoever built it. Wrapping it as
+                # "Failed to execute operation" sends an operator to look at a
+                # database that is fine.
+                #
+                # Measured 2026-08-17 with an operation missing its `changes`
+                # key: `MigrationError: Failed to execute operation`, cause
+                # `KeyError: 'changes'`, and no statement ever ran.
+                #
+                # The rollback still happens first: raising must not leave a
+                # transaction open behind it.
+                await connection.rollback()
+                raise
             except Exception as e:
                 await connection.rollback()
                 raise MigrationError(
@@ -89,6 +127,24 @@ async def apply(
 
         await connection.commit()
 
+        # RESTORE HERE, BECAUSE HERE IS WHERE IT LANDS. A reconstruction turns
+        # enforcement off to drop a table other rows reference, and its own
+        # attempt to put it back runs inside this transaction where SQLite
+        # IGNORES the pragma. It does not raise, so the `try/except` around it
+        # catches nothing and the code reads as though it worked.
+        #
+        # Measured 2026-08-17 through this function: enforcement 1 before,
+        # success True, enforcement 0 after. Every later write on the
+        # connection was then accepted against constraints nobody was
+        # checking, silently, because the migration had succeeded.
+        #
+        #     inside an open transaction   PRAGMA foreign_keys = ON -> still 0
+        #     after the transaction ends   -> 1
+        #
+        # `applier/turso.py` already did this correctly on its FAILURE path by
+        # rolling back first. The success path did not.
+        await _restore_enforcement(connection, entry_enforcement)
+
         return {
             "success": True,
             "executed_sql": executed,
@@ -98,9 +154,22 @@ async def apply(
         }
 
     except MigrationError:
+        # A per-operation failure already rolled back. Restore here too: the
+        # caller catches this and its connection must not be left enforcing
+        # nothing, which is the state a half-done reconstruction leaves.
+        await _restore_enforcement(connection, entry_enforcement)
+        raise
+    except A_BUG_IN_THIS_PACKAGE:
+        # The outer twin of the guard inside the loop. Without it the KeyError
+        # escapes the per-operation wrapper and is caught here instead, coming
+        # back as `MigrationError: Migration failed: 'changes'` -- the same
+        # misattribution one frame further out.
+        await connection.rollback()
+        await _restore_enforcement(connection, entry_enforcement)
         raise
     except Exception as e:
         await connection.rollback()
+        await _restore_enforcement(connection, entry_enforcement)
         raise MigrationError(
             f"Migration failed: {e}",
             original_error=e,
@@ -161,63 +230,25 @@ async def _execute_with_reconstruction(
 # =============================================================================
 
 
-def generate_enum_check(column_name: str, enum: Enum) -> str:
-    """
-    Generate CHECK constraint for enum column (SQLite fallback).
-
-    Args:
-        column_name: Column name
-        enum: Enum definition
-
-    Returns:
-        CHECK constraint SQL
-    """
-    values = ", ".join(f"'{v}'" for v in enum["values"])
-    return f"CHECK ({column_name} IN ({values}))"
-
-
-def generate_column_sql(
-    col_name: str, col_def: dict[str, Any], enums: dict[str, Enum] | None = None
-) -> str:
-    """
-    Generate column definition, handling enum types with CHECK constraints.
-
-    Args:
-        col_name: Column name
-        col_def: Column definition
-        enums: Dict of known enum definitions
-
-    Returns:
-        Column SQL definition
-    """
-    enums = enums or {}
-    col_type = col_def.get("type", "text")
-
-    parts = [f'"{col_name}"']
-
-    # Handle enum type reference - SQLite uses TEXT + CHECK
-    if col_type.startswith("enum:"):
-        enum_name = col_type[5:]  # Remove "enum:" prefix
-        parts.append("TEXT")
-
-        if enum_name in enums:
-            check_sql = generate_enum_check(col_name, enums[enum_name])
-            parts.append(check_sql)
-    else:
-        parts.append(_map_type(col_type, "sqlite"))
-
-    if col_def.get("nullable") is False:
-        parts.append("NOT NULL")
-
-    if "default" in col_def:
-        parts.append(f"DEFAULT {col_def['default']}")
-
-    return " ".join(parts)
-
-
-_map_type = _map_type_shared
-
-
+# `generate_enum_check(column, enum)` and `generate_column_sql(name, col,
+# enums=None)` stood here, 57 lines implementing a CHECK-constraint enum:
+#
+#     CHECK (status IN ('active', 'inactive', 'pending'))
+#
+# THAT IS THE DESIGN THIS PACKAGE ABANDONED. A `Literal[...]` column becomes a
+# `_dp_enum_` lookup table plus a foreign key precisely to avoid the CHECK
+# portability problems, and adding a value to a CHECK means rebuilding the
+# table on SQLite.
+#
+# Both were unreachable. `generate_column_sql` had no caller anywhere in
+# `src/`, `generate_enum_check` was called only by it, and no loader has ever
+# produced the `enum:name` column type they both keyed on. The only thing
+# holding them alive was two tests in `test_enums.py`, a file the hollow-file
+# ratchet listed as empty -- so the tests could not run and the code could not
+# be reached, and each looked like the other's justification.
+#
+# The live enum path is `insert_enum_values`, tested in
+# `test_a_declared_enum_value_is_accepted.py` against all three engines.
 def generate_create_trigger(table: str, trigger: Trigger) -> str:
     """
     Generate SQLite CREATE TRIGGER SQL.

@@ -115,6 +115,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-v --tb=short"
 markers = [
+    "integration: runs against a real database server",
     "precommit: fast sanity checks (30s max total)",
     "stress: full stress testing with real databases",
     "bdd: BDD feature tests",

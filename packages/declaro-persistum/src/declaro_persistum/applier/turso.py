@@ -15,6 +15,7 @@ a valid one such as ADD COLUMN. The cost is that a partly-applied batch is a
 real outcome here, which it is not on PostgreSQL.
 """
 
+import contextlib
 import logging
 from typing import Any, Literal
 
@@ -22,14 +23,13 @@ from declaro_persistum.applier.shared import (
     apply_reconstruction_changes,
     columns_from_pragma_rows,
     dry_run_preview,
-    enum_population_sql,
     generate_operation_sql,
     requires_reconstruction,
 )
 
 # Turso uses identical view generation to SQLite.
 from declaro_persistum.applier.sqlite import generate_create_view, generate_drop_view
-from declaro_persistum.exceptions import MigrationError
+from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, MigrationError
 from declaro_persistum.types import ApplyResult, Operation
 
 logger = logging.getLogger(__name__)
@@ -45,13 +45,52 @@ def get_transaction_mode() -> Literal["all_or_nothing", "per_operation"]:
     return "per_operation"
 
 
+
+async def _restore_enforcement(connection: Any, enforced: int) -> None:
+    """Put `PRAGMA foreign_keys` back to what the caller had.
+
+    Only meaningful outside a transaction, which is why every call site is
+    after a commit or a rollback.
+    """
+    await connection.execute(f"PRAGMA foreign_keys = {'ON' if enforced else 'OFF'}")
+
+
+
+def migration_succeeded(*, skipped: int) -> bool:
+    """A migration is all of it, or it is not done.
+
+    THIS WAS `len(executed) > 0 or len(skipped) == 0`, inline. Measured
+    2026-08-17 by evaluating that expression:
+
+        executed=3 skipped=0  -> True
+        executed=3 skipped=2  -> True    two operations did not happen
+        executed=1 skipped=5  -> True    five did not happen
+        executed=0 skipped=2  -> False
+
+    So one operation landing made the whole run a success, whatever else was
+    skipped. A caller reading `success` stamps the schema as current, and the
+    skip-if-clean check then makes that permanent: the next boot compares
+    hashes, matches, and never re-proposes the operations that never ran.
+
+    `skipped` is still returned, so a caller that wants to tolerate skips can
+    look and decide. What it must not do is have that decision made for it by
+    an expression it cannot see.
+
+    THERE IS NO `executed` PARAMETER, and its absence is the point. The old
+    rule consulted it and that is what made one landed operation excuse any
+    number of missing ones. Every operation either executes, is skipped, or
+    raises, so "nothing was skipped" is the whole question and a count of
+    successes cannot change the answer.
+    """
+    return skipped == 0
+
+
 async def apply(
     connection: Any,
     operations: list[Operation],
     execution_order: list[int],
     *,
     dry_run: bool = False,
-    target_schema: Any = None,
 ) -> ApplyResult:
     """
     Apply migration operations asynchronously.
@@ -66,7 +105,6 @@ async def apply(
         operations: List of operations to apply
         execution_order: Order to execute operations
         dry_run: If True, only generate SQL without executing
-        target_schema: Target schema (used for enum value population)
     """
     if dry_run:
         return dry_run_preview(operations, execution_order)
@@ -100,6 +138,20 @@ async def apply(
 
         try:
             if is_reconstruction:
+                # WHAT THE CALLER HAD, read before we change it. Restoring
+                # means putting this back, not turning enforcement on: a caller
+                # who disabled it to do a bulk load has not asked for it to
+                # come back underneath them.
+                #
+                # Measured 2026-08-17 against a local Turso database, before
+                # this was recorded:
+                #
+                #     started 1 -> success=True -> ended 1
+                #     started 0 -> success=True -> ended 1   <- not theirs
+                cursor = await connection.execute("PRAGMA foreign_keys")
+                row = await cursor.fetchone()
+                entry_enforcement = row[0] if row else 1
+
                 # PRAGMA foreign_keys must be set OUTSIDE a transaction —
                 # setting it inside implicitly commits, breaking atomicity.
                 await connection.execute("PRAGMA foreign_keys = OFF")
@@ -120,17 +172,27 @@ async def apply(
                         await connection.execute(statement)
                 executed.append(sql)
 
-                for insert_sql in enum_population_sql(operation, target_schema):
-                    await connection.execute(insert_sql)
-                    executed.append(insert_sql)
-
             await connection.commit()
 
             if is_reconstruction:
-                await connection.execute("PRAGMA foreign_keys = ON")
+                await _restore_enforcement(connection, entry_enforcement)
 
             logger.info(f"Applied: {op_desc}")
 
+        except A_BUG_IN_THIS_PACKAGE:
+            # OURS, AND NOTHING RAN. A KeyError here means the operation does
+            # not match what the differ emits, so no statement reached the
+            # engine and no tmp table was created. Reporting it as "Table
+            # reconstruction failed ... Check for orphaned _declaro_tmp tables"
+            # sends an operator hunting for tables that cannot exist.
+            #
+            # Measured 2026-08-17 with an operation missing its `changes` key.
+            # The bug we are re-raising matters more than a rollback that
+            # also failed, so this suppresses rather than masks: nothing here
+            # can replace the exception on its way out.
+            with contextlib.suppress(Exception):
+                await connection.rollback()
+            raise
         except Exception as e:
             try:
                 await connection.rollback()
@@ -142,7 +204,7 @@ async def apply(
                 )
             if is_reconstruction:
                 try:
-                    await connection.execute("PRAGMA foreign_keys = ON")
+                    await _restore_enforcement(connection, entry_enforcement)
                 except Exception as fk_exc:
                     # Leaving FK enforcement off silently is worse than the
                     # original failure: later writes would be accepted
@@ -166,7 +228,7 @@ async def apply(
             skipped.append(skip_msg)
             logger.warning(f"Skipped unsupported operation: {skip_msg}")
 
-    success = len(executed) > 0 or len(skipped) == 0
+    success = migration_succeeded(skipped=len(skipped))
     error_msg = None
     if skipped:
         error_msg = f"{len(skipped)} operation(s) skipped: {'; '.join(skipped)}"

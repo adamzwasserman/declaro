@@ -31,6 +31,7 @@ import pytest
 
 from declaro_persistum.applier import APPLIERS, apply
 from declaro_persistum.inspector import introspect
+from declaro_persistum.types import for_dialect
 
 DIALECTS = ["postgresql", "sqlite", "turso"]
 
@@ -44,8 +45,27 @@ def test_every_dialect_has_an_apply_function(dialect):
 
 
 def test_an_unknown_dialect_fails_loudly():
+    """The raise moved from `__missing__` to `for_dialect`, and this moved with it.
+
+    `APPLIERS` was `class _Appliers(dict)` whose one method turned a KeyError
+    into a ValueError naming the supported dialects. A dict wrapper is allowed
+    only with no methods, and that method was the reason the class existed, so
+    the table is a plain dict and the lookup is a function.
+
+    SUBSCRIPTING THE TABLE NO LONGER RAISES ValueError, which is why this test
+    had to change rather than merely pass. A plain dict raises KeyError, and a
+    KeyError names what was asked for and not what was available.
+    """
     with pytest.raises(ValueError, match="postgres"):
-        APPLIERS["mysql"]
+        for_dialect(APPLIERS, "mysql", "Appliers")
+
+
+def test_the_table_is_a_plain_dict():
+    """No wrapper class, so the table can be printed, merged and compared."""
+    assert type(APPLIERS) is dict, (
+        f"APPLIERS is {type(APPLIERS).__name__}; a subclass would mean the "
+        f"lookup behaviour crept back into the data"
+    )
 
 
 class TestAgainstARealSqliteDatabase:
@@ -71,7 +91,7 @@ class TestAgainstARealSqliteDatabase:
         ]
 
         async with aiosqlite.connect(tmp_path / "t.db") as conn:
-            await apply(conn, operations, [0], "sqlite")
+            await apply(conn, operations, [0], "sqlite", dry_run=False)
             schema = await introspect(conn, "sqlite")
 
         assert "widgets" in schema, schema
@@ -84,7 +104,7 @@ class TestAgainstARealSqliteDatabase:
         import aiosqlite
 
         async with aiosqlite.connect(tmp_path / "t.db") as conn:
-            await apply(conn, [], [], "sqlite")
+            await apply(conn, [], [], "sqlite", dry_run=False)
             assert await introspect(conn, "sqlite") == {}
 
     @pytest.mark.asyncio
@@ -95,6 +115,6 @@ class TestAgainstARealSqliteDatabase:
             await conn.execute("CREATE TABLE gone (id INTEGER PRIMARY KEY)")
             await conn.commit()
 
-            await apply(conn, [{"op": "drop_table", "table": "gone", "details": {}}], [0], "sqlite")
+            await apply(conn, [{"op": "drop_table", "table": "gone", "details": {}}], [0], "sqlite", dry_run=False)
 
             assert "gone" not in await introspect(conn, "sqlite")
