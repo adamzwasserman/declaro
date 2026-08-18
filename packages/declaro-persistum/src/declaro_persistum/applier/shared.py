@@ -135,17 +135,26 @@ def map_type(type_str: str, dialect: Dialect) -> str:
 # The keys are lowercased and stripped of spaces before lookup, so `NOW()` and
 # `now ()` find the same row.
 EXPRESSION_DEFAULTS: dict[str, dict[str, str]] = {
+    # NO BOOLEAN ROWS. They were here for one day and broke the round trip.
+    # Rewriting `false` as `0` meant the schema declared "false", the table was
+    # written `DEFAULT 0`, PRAGMA read back "0", and the differ emitted an
+    # alter_column on every deploy for a column nobody had touched.
+    #
+    # Measured on SQLite 3.50.4 and pyturso: both take the keyword.
+    #
+    #     DEFAULT false -> parses, PRAGMA returns 'false'   (sqlite)
+    #     DEFAULT false -> parses, PRAGMA returns 'FALSE'   (turso)
+    #
+    # Turso uppercases it, which is why `same_default` folds boolean spellings
+    # and has since before this table existed. Translating a value the engine
+    # already understands turns a working round trip into a migration loop.
     "sqlite": {
         "now()": "(datetime('now'))",
         "current_timestamp": "CURRENT_TIMESTAMP",
-        "true": "1",
-        "false": "0",
     },
     "turso": {
         "now()": "(datetime('now'))",
         "current_timestamp": "CURRENT_TIMESTAMP",
-        "true": "1",
-        "false": "0",
     },
     "postgresql": {},  # PostgreSQL is the language these are written in.
 }

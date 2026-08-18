@@ -229,3 +229,130 @@ def test_a_boolean_is_not_folded_into_the_number_one(dialect: str) -> None:
         f"a boolean folded into a number, which `same_default` says is "
         f"unmeasured and does not do: {ops}"
     )
+
+
+# ---------------------------------------------------------------------------
+# The round trip through a real database, not through my idea of one
+# ---------------------------------------------------------------------------
+#
+# Every test above hands the differ two dicts I wrote. That catches a
+# comparison bug and cannot catch a WRITE-then-READ bug, where the value the
+# engine stores is not the value the schema declared.
+#
+# MEASURED 2026-08-17, and this one is mine. Translating boolean defaults for
+# SQLite and Turso was added the same day, to stop `DEFAULT now()` reaching an
+# engine that cannot parse it. It also rewrote `false` as `0`:
+#
+#     declared   default: "false"
+#     written    DEFAULT 0
+#     read back  "0"
+#     diff       alter_column {"default": {"from": "0", "to": "false"}}
+#
+# so every deploy proposed a change to a column nobody had touched. The fix
+# for one engine broke a round trip on the same engine, and only running the
+# write and the read together could see it.
+#
+# THE TRANSLATION WAS NEVER NEEDED. Measured on SQLite 3.50.4 and pyturso:
+#
+#     DEFAULT false  -> parses, PRAGMA returns 'false', stores 0   (sqlite)
+#     DEFAULT false  -> parses, PRAGMA returns 'FALSE'             (turso)
+#
+# Both engines take the keyword. Turso uppercases it, which is exactly why
+# `same_default` folds boolean spellings and has since before today. `now()`
+# and `current_timestamp` still need translating; the booleans never did.
+
+import json  # noqa: E402
+import os  # noqa: E402
+import tempfile  # noqa: E402
+
+import pytest as _pytest  # noqa: E402
+
+VOCABULARY = {
+    "t": {
+        "columns": {
+            "id": {"type": "text", "primary_key": True},
+            "flag": {"type": "boolean", "default": "false"},
+            "n": {"type": "integer", "default": 0},
+            "amount": {"type": "numeric"},
+            "when_": {"type": "timestamptz"},
+            "blob_": {"type": "bytea"},
+            "ident": {"type": "uuid"},
+        }
+    }
+}
+
+
+@_pytest.mark.asyncio
+@_pytest.mark.sqlite
+async def test_a_sqlite_round_trip_emits_no_operations() -> None:
+    """Create from a schema, read it back, diff. Nothing may come out."""
+    import aiosqlite
+
+    from declaro_persistum.applier import apply
+    from declaro_persistum.inspector import introspect
+
+    path = tempfile.mktemp(suffix=".db")
+    conn = await aiosqlite.connect(path)
+    try:
+        plan = diff({}, VOCABULARY, dialect="sqlite")
+        await apply(
+            conn, plan["operations"], plan["execution_order"], "sqlite",
+            dry_run=False,
+        )
+        actual = await introspect(conn, "sqlite")
+        second = diff({"t": actual["t"]}, VOCABULARY, dialect="sqlite")
+
+        assert second["operations"] == [], (
+            "an unchanged schema migrates on every deploy: "
+            + json.dumps(
+                [(o["op"], o["details"]) for o in second["operations"]], default=str
+            )
+        )
+    finally:
+        await conn.close()
+        os.unlink(path)
+
+
+@_pytest.mark.asyncio
+@_pytest.mark.sqlite
+async def test_a_boolean_default_survives_the_write_and_the_read() -> None:
+    """The measured case, isolated, so the failure names itself."""
+    import aiosqlite
+
+    from declaro_persistum.applier import apply
+    from declaro_persistum.inspector import introspect
+
+    schema = {"t": {"columns": {"flag": {"type": "boolean", "default": "false"}}}}
+    path = tempfile.mktemp(suffix=".db")
+    conn = await aiosqlite.connect(path)
+    try:
+        plan = diff({}, schema, dialect="sqlite")
+        await apply(
+            conn, plan["operations"], plan["execution_order"], "sqlite",
+            dry_run=False,
+        )
+        actual = await introspect(conn, "sqlite")
+
+        assert diff({"t": actual["t"]}, schema, dialect="sqlite")["operations"] == [], (
+            f"declared {schema['t']['columns']['flag']['default']!r}, read back "
+            f"{actual['t']['columns']['flag'].get('default')!r}"
+        )
+    finally:
+        await conn.close()
+        os.unlink(path)
+
+
+def test_the_expression_table_translates_only_what_needs_it() -> None:
+    """`now()` needs translating on SQLite. `false` does not, and translating
+    it is what broke the round trip.
+    """
+    from declaro_persistum.applier.shared import EXPRESSION_DEFAULTS
+
+    for engine in ("sqlite", "turso"):
+        table = EXPRESSION_DEFAULTS[engine]
+        assert "now()" in table, engine
+        assert "true" not in table and "false" not in table, (
+            f"{engine} still rewrites boolean defaults, so a declared "
+            f"'false' is written as {table.get('false')!r} and read back as "
+            f"something the differ does not recognise as the same default"
+        )
