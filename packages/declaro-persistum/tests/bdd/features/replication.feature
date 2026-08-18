@@ -1,3 +1,4 @@
+@bdd
 Feature: Replication — one function, both directions, out of the way of real work
   A local copy and its cloud primary are brought into conformity. That is replication.
   "Sync" in this package means synchronous and nothing else.

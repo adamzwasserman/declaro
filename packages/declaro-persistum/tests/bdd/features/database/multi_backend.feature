@@ -47,6 +47,7 @@ Feature: Multi-Database Backend Support
     And a todos table with 1000 rows
     When I execute "SELECT COUNT(*) as count FROM todos"
     Then I should find exactly 1 result
+    And the count should be 1000
 
   @stress @postgresql
   Scenario: Large dataset on PostgreSQL
@@ -54,3 +55,18 @@ Feature: Multi-Database Backend Support
     And a todos table with 1000 rows
     When I execute "SELECT COUNT(*) as count FROM todos"
     Then I should find exactly 1 result
+    And the count should be 1000
+
+  # THE MATRIX WAS MISSING THIS ONE, and the step it uses had a comment saying
+  # so: "No scenario reaches it with Turso today ... a Turso large-dataset
+  # scenario would have seeded an empty table and asserted against it." The
+  # seeding arm was added; nothing reached it. This Feature's own title claims
+  # SQLite, PostgreSQL AND Turso, and Turso is the engine the replicated
+  # deployments run on.
+  @stress @turso
+  Scenario: Large dataset on Turso
+    Given a Turso database connection
+    And a todos table with 1000 rows
+    When I execute "SELECT COUNT(*) as count FROM todos"
+    Then I should find exactly 1 result
+    And the count should be 1000

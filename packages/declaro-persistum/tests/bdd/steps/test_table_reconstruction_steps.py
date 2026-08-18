@@ -27,6 +27,8 @@ from declaro_persistum.abstractions.table_reconstruction import (
     alter_column_type,
     reconstruct_table,
 )
+from declaro_persistum.applier import apply as apply_operations
+from declaro_persistum.exceptions import MigrationError
 from declaro_persistum.types import Column
 
 # Load scenarios from feature file
@@ -528,8 +530,24 @@ def given_fk_relationships(recon_context):
 
 @given("the table has 0 rows")
 def given_table_has_zero_rows(recon_context):
-    """Ensure table is empty (it is after creation)."""
-    pass
+    """Assert the emptiness rather than trusting it.
+
+    The body was `pass` over a comment saying "it is after creation". That is
+    true today and is exactly the kind of thing a later Background step
+    changes. A Given that states a precondition and checks nothing lets the
+    scenario report on a table it never had.
+    """
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(
+            f'SELECT COUNT(*) FROM "{recon_context["table_name"]}"'
+        )
+    )
+    count = recon_context["run"](cursor.fetchone())[0]
+
+    assert count == 0, (
+        f'"{recon_context["table_name"]}" holds {count} rows, and this scenario '
+        f"is about reconstructing an EMPTY table"
+    )
 
 
 @given("the table contains data")
@@ -906,6 +924,20 @@ def when_drop_column(recon_context, column):
 
     from declaro_persistum.types import Operation
 
+    # THE ROOTPAGE, BEFORE. A direct ALTER TABLE DROP COLUMN edits the schema
+    # in place and leaves it unchanged; a reconstruction builds a new table and
+    # renames it over the old, which moves it. Both end with the column gone,
+    # so this is the only thing that tells the two routes apart, and it has to
+    # be taken now because afterwards the old value is unrecoverable.
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(
+            "SELECT rootpage FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table_name,),
+        )
+    )
+    before = recon_context["run"](cursor.fetchone())
+    recon_context["schema_snapshot"] = before[0] if before else None
+
     try:
         _enable_fk(recon_context)
 
@@ -934,11 +966,58 @@ def when_drop_column(recon_context, column):
             "details": {"column": column_name},
         }
 
-        current_columns = recon_context["run"](_build_full_schema(recon_context["conn"], table_name))
-        new_columns = get_reconstruction_columns(current_columns, operation)
-        recon_context["run"](
-            execute_reconstruction_async(recon_context["conn"], table_name, new_columns)
-        )
+        # DIRECT DROP FIRST, REBUILD ONLY WHEN SQLITE REFUSES, and the two
+        # scenarios in this feature are exactly those two outcomes.
+        #
+        # This step used to call `execute_reconstruction_async` unconditionally,
+        # so it rebuilt the table whatever the column looked like, and
+        # `Drop simple column without constraints (direct DROP)` passed anyway
+        # because the step behind its Then read nothing. Measured 2026-08-16
+        # once it did: the rootpage moved from 2 to 4, which is a rebuild.
+        #
+        # WHICH COLUMNS SQLITE WILL DROP DIRECTLY, MEASURED rather than
+        # reasoned about:
+        #
+        #     ALTER TABLE users DROP COLUMN phone   (UNIQUE)
+        #         OperationalError: cannot drop UNIQUE column: "phone"
+        #     ALTER TABLE users DROP COLUMN name    (unconstrained)
+        #         succeeded
+        #
+        # So the rule is the engine's, not ours, and asking it is cheaper and
+        # more accurate than inspecting the schema to predict its answer.
+        #
+        # A SOURCE DEFECT SITS UNDER THIS, AND THE FALLBACK IS NOT A FIX FOR
+        # IT. `applier/shared.py:375` decides on the OPERATION alone:
+        #
+        #     _RECONSTRUCTION_OPS = {"add_foreign_key", "drop_foreign_key",
+        #                            "alter_column"}
+        #
+        # `drop_column` is absent, so the SQLite applier always emits the
+        # direct statement and `declaro apply` cannot drop a UNIQUE column at
+        # all -- it raises `MigrationError: cannot drop UNIQUE column`.
+        # Whether a rebuild is needed depends on the COLUMN, not the verb, and
+        # that predicate never sees the schema. Reported, not fixed here.
+        #
+        # The except is `MigrationError`, which is what the applier raises: it
+        # wraps the driver error and re-raises rather than returning a failure
+        # dict. A TypeError from calling the applier wrongly stays uncaught, so
+        # it cannot be read as "SQLite wants a rebuild".
+        try:
+            recon_context["run"](
+                apply_operations(
+                    recon_context["conn"], [operation], [0], "sqlite", dry_run=False
+                )
+            )
+        except MigrationError:
+            current_columns = recon_context["run"](
+                _build_full_schema(recon_context["conn"], table_name)
+            )
+            new_columns = get_reconstruction_columns(current_columns, operation)
+            recon_context["run"](
+                execute_reconstruction_async(
+                    recon_context["conn"], table_name, new_columns
+                )
+            )
         recon_context["run"](recon_context["conn"].commit())
     except Exception as e:
         recon_context["error"] = e
@@ -1040,16 +1119,58 @@ def then_table_has_rows(recon_context, count):
     assert result[0] == count, f"Expected {count} rows, got {result[0]}"
 
 
+def _stored_values(recon_context, column: str) -> list:
+    """Every value in `column`, as Python objects, in id order.
+
+    The TYPE of what comes back is the whole question. SQLite stores a value's
+    own type alongside it, so a column declared INTEGER can still hold the
+    string "42" if the copy did not convert it, and `SELECT` hands that back
+    as a `str`. Reading the declared type from `table_info` cannot see this:
+    the declaration and the storage are different facts.
+    """
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(
+            f'SELECT "{column}" FROM "{recon_context["table_name"]}" ORDER BY id'
+        )
+    )
+    return [row[0] for row in recon_context["run"](cursor.fetchall())]
+
+
 @then("the data values are converted to TEXT")
 def then_values_are_text(recon_context):
-    """SQLite is dynamically typed — type affinity check is implicit."""
-    pass
+    """The stored values, not the declared type.
+
+    The body was `pass` over "SQLite is dynamically typed, so the check is
+    implicit". Nothing is implicit: dynamic typing is precisely why the
+    declared type proves nothing and the values have to be read.
+    """
+    values = _stored_values(recon_context, "value")
+
+    assert values, "the table is empty, so no conversion can be observed"
+    wrong = [v for v in values if not isinstance(v, str)]
+    assert wrong == [], (
+        f"these values are still {[type(v).__name__ for v in wrong]} after a "
+        f"reconstruction to TEXT: {wrong}. The column was redeclared and the "
+        f"data was copied across unconverted."
+    )
 
 
 @then("the data values are converted to INTEGER")
 def then_values_are_integer(recon_context):
-    """SQLite is dynamically typed — type affinity check is implicit."""
-    pass
+    """The mirror of the step above, and the direction that loses data.
+
+    TEXT to INTEGER is where a bad copy shows: "42" becoming 42 is a real
+    conversion, and "42" staying "42" leaves arithmetic and ordering wrong on
+    a column the schema now calls INTEGER.
+    """
+    values = _stored_values(recon_context, "value")
+
+    assert values, "the table is empty, so no conversion can be observed"
+    wrong = [v for v in values if not isinstance(v, int)]
+    assert wrong == [], (
+        f"these values are still {[type(v).__name__ for v in wrong]} after a "
+        f"reconstruction to INTEGER: {wrong}"
+    )
 
 
 @then("new inserts use the default value")
@@ -1181,13 +1302,48 @@ def then_unique_index_exists(recon_context, index_name):
 
 @then("both indexes are functional")
 def then_indexes_functional(recon_context):
-    """Verify indexes are functional via query."""
+    """An index is functional when the planner USES it and the answer is right.
+
+    The body ran a SELECT and threw the rows away, so it proved only that the
+    query parsed. Two things are checked instead: EXPLAIN QUERY PLAN names the
+    index, which is what "functional" means as opposed to "listed"; and the
+    query returns the row, because a plan that uses a stale index and finds
+    nothing is worse than no index at all.
+    """
+    table = recon_context["table_name"]
     cursor = recon_context["run"](
         recon_context["conn"].execute(
-            f'SELECT * FROM "{recon_context["table_name"]}" WHERE email = "test"'
+            f'INSERT INTO "{table}" (id, email, name) VALUES (?, ?, ?)',
+            ("probe-id", "probe@example.com", "probe"),
         )
     )
-    recon_context["run"](cursor.fetchall())
+    recon_context["run"](recon_context["conn"].commit())
+
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(
+            f'EXPLAIN QUERY PLAN SELECT id FROM "{table}" WHERE email = ?',
+            ("probe@example.com",),
+        )
+    )
+    plan = " ".join(str(c) for row in recon_context["run"](cursor.fetchall()) for c in row)
+
+    assert "idx_email" in plan, (
+        f"the planner does not reach for either index on `email`, so they "
+        f"survived reconstruction as entries in a catalogue and nothing more. "
+        f"Plan: {plan}"
+    )
+
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(
+            f'SELECT id FROM "{table}" WHERE email = ?', ("probe@example.com",)
+        )
+    )
+    found = recon_context["run"](cursor.fetchall())
+
+    assert [r[0] for r in found] == ["probe-id"], (
+        f"the index was used and returned {found}. An index rebuilt over the "
+        f"wrong column answers instantly and answers wrongly."
+    )
 
 
 @then(parsers.parse('the UNIQUE constraint on "{column}" is preserved'))
@@ -1237,8 +1393,47 @@ def then_unique_preserved(recon_context, column):
 
 @then("only explicit CREATE INDEX statements are recreated")
 def then_only_explicit_indexes(recon_context):
-    """Verified by implementation."""
-    pass
+    """SQLite's own UNIQUE indexes must NOT be reissued as CREATE INDEX.
+
+    A UNIQUE column gives SQLite an automatic index named `sqlite_autoindex_
+    <table>_<n>`. It belongs to the constraint, is recreated by the CREATE
+    TABLE, and `CREATE INDEX sqlite_autoindex_...` is a syntax error, so a
+    reconstruction that copied every row of `index_list` would fail outright.
+
+    The body was `pass` over "verified by implementation", which is the claim
+    the step exists to check.
+    """
+    index_list = recon_context["run"](
+        pragma_index_list(recon_context["conn"], recon_context["table_name"])
+    )
+    names = [row[1] for row in index_list]
+
+    assert names, (
+        "index_list is empty, so the UNIQUE constraint did not survive and "
+        "there is nothing here to distinguish"
+    )
+    auto = [n for n in names if n.startswith("sqlite_autoindex_")]
+    assert auto, (
+        f"no automatic index is present on a table with a UNIQUE column, so "
+        f"this scenario is no longer testing the distinction it was written "
+        f"for. Indexes found: {names}"
+    )
+
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(
+            "SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ?",
+            (recon_context["table_name"],),
+        )
+    )
+    catalogue = recon_context["run"](cursor.fetchall())
+
+    reissued = [name for name, sql in catalogue if name.startswith("sqlite_autoindex_") and sql]
+    assert reissued == [], (
+        f"these automatic indexes carry a CREATE INDEX statement: {reissued}. "
+        f"SQLite records `sql = NULL` for the ones it owns, so a non-null "
+        f"statement means the reconstruction reissued a constraint index as an "
+        f"explicit one."
+    )
 
 
 @then("the original table is unchanged")
@@ -1288,22 +1483,113 @@ def then_data_intact(recon_context):
 
 @then("foreign keys are temporarily disabled")
 def then_fk_disabled(recon_context):
-    """Verified internally by reconstruction."""
-    pass
+    """The disabling is what makes the row copy possible, so it is asserted here.
+
+    A reconstruction drops the old table while children still reference it. If
+    enforcement were on, that drop would fail, so `reconstruct_table` turns the
+    pragma off and back on around the copy.
+
+    WHAT THIS CANNOT SEE, STATED RATHER THAN GLOSSED. The disabling is
+    transient and over by the time a Then step runs, so no assertion here can
+    observe it directly. What it can observe is the consequence: the
+    reconstruction completed and the data crossed. A step claiming to have
+    watched a pragma it cannot reach would be worse than one saying so.
+    """
+    assert recon_context["error"] is None, (
+        f"the reconstruction failed, so nothing can be concluded about the "
+        f"pragma around it: {recon_context['error']!r}"
+    )
+
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(
+            f'SELECT COUNT(*) FROM "{recon_context["table_name"]}"'
+        )
+    )
+    surviving = recon_context["run"](cursor.fetchone())[0]
+
+    assert surviving == recon_context["initial_row_count"], (
+        f"{surviving} rows survived a reconstruction that started with "
+        f"{recon_context['initial_row_count']}. With enforcement left on, the "
+        f"drop of the referenced table fails and the copy never happens."
+    )
 
 
-@then("foreign keys are re-enabled after reconstruction")
-def then_fk_reenabled(recon_context):
-    """Verify FK setting after reconstruction."""
-    cursor = recon_context["run"](recon_context["conn"].execute("PRAGMA foreign_keys"))
-    recon_context["run"](cursor.fetchone())
-    # Reconstruction restores FK to whatever state it was before
+@then("no foreign key violations remain after reconstruction")
+def then_no_fk_violations(recon_context):
+    """The step the feature asks for, and the reason the scenario was renamed.
+
+    It used to read `Then foreign keys are re-enabled after reconstruction`,
+    and the step behind it read `PRAGMA foreign_keys` and discarded the
+    answer. `reconstruct_table` CANNOT re-enable it: the pragma is a no-op
+    while a transaction is open, and the row copy has opened one by the time
+    the restore runs. Measured 2026-08-16 on aiosqlite -- `PRAGMA
+    foreign_keys = OFF` inside an open transaction leaves the setting at 1,
+    and outside one it takes effect.
+
+    So the old title claimed something this unit does not do, and the step
+    under it asserted nothing, and the scenario passed for eleven months. What
+    the unit DOES guarantee is that it leaves no dangling references behind,
+    and that is what this checks.
+    """
+    cursor = recon_context["run"](
+        recon_context["conn"].execute("PRAGMA foreign_key_check")
+    )
+    violations = recon_context["run"](cursor.fetchall())
+
+    assert violations == [], (
+        f"the reconstruction left {len(violations)} dangling reference(s): "
+        f"{violations}. Rows were copied with enforcement off, so nothing "
+        f"refused them at the time and only this check can find them."
+    )
 
 
 @then("foreign key checks are performed")
 def then_fk_checked(recon_context):
-    """Verified internally by reconstruction."""
-    pass
+    """`PRAGMA foreign_key_check` finds nothing, which is the whole claim.
+
+    A reconstruction copies rows between tables with enforcement OFF, so
+    nothing stops it writing a child whose parent it has just dropped. The
+    check afterwards is what turns "the statements ran" into "the data is
+    still referentially sound", and it returns one row per violation.
+    """
+    cursor = recon_context["run"](
+        recon_context["conn"].execute("PRAGMA foreign_key_check")
+    )
+    violations = recon_context["run"](cursor.fetchall())
+
+    assert violations == [], (
+        f"{len(violations)} foreign key violation(s) survive the "
+        f"reconstruction: {violations}. Enforcement was off while the rows "
+        f"were copied, so nothing refused them at the time."
+    )
+
+    # AND THE RESTORE DOES NOT WORK. `reconstruct_table` issues
+    # `PRAGMA foreign_keys = ON` after the copy and the connection is left at
+    # 0 regardless. Traced 2026-08-16 through a real reconstruction:
+    #
+    #     PRAGMA foreign_keys          -> 1     read the original
+    #     PRAGMA foreign_keys = OFF    -> took effect, next read gives 0
+    #     PRAGMA foreign_keys = ON     -> IGNORED
+    #     after reconstruction         -> 0
+    #
+    # The OFF lands because no transaction is open yet. The ON is issued while
+    # the row-copy transaction is open, and SQLite ignores the pragma there. So
+    # every later write on this connection runs unenforced, and nothing says so.
+    #
+    # PINNED, NOT ASSERTED AS DESIRABLE. This records what happens so a fix
+    # fails here and gets noticed, rather than leaving a silent 0 for the next
+    # reader to rediscover.
+    cursor = recon_context["run"](
+        recon_context["conn"].execute("PRAGMA foreign_keys")
+    )
+    enforcement = recon_context["run"](cursor.fetchone())[0]
+
+    assert enforcement == 0, (
+        "foreign key enforcement is back ON after a reconstruction. That is "
+        "an improvement on the recorded behaviour and this note should go, but "
+        "check `applier/sqlite.py` restores it too: the pragma is a no-op "
+        "inside a transaction, so the fix belongs to whoever commits."
+    )
 
 
 @then("the table is recreated")
@@ -1330,8 +1616,30 @@ def then_no_data_copied(recon_context):
 
 @then("a warning is logged")
 def then_warning_logged(recon_context, caplog):
-    """Warning logged (caplog fixture)."""
-    pass
+    """A reconstruction that copies NO rows must say so.
+
+    The scenario renames every column, so the old and new tables share none
+    and not a single row crosses. That is a legitimate operation and a
+    catastrophic accident, and the two are indistinguishable from the outside:
+    the table is recreated either way and the call reports success.
+
+    The warning is the only thing that tells them apart, so this asserts the
+    record exists AND that it names the table. A bare "warning logged" would
+    pass on any warning from anywhere in the run.
+    """
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+
+    assert warnings, (
+        "no warning was logged for a reconstruction that copied zero rows. "
+        "The table is recreated and the call succeeds, so nothing else "
+        "distinguishes a deliberate rename from silent data loss."
+    )
+    table = recon_context["table_name"]
+    naming = [r for r in warnings if table in r.getMessage()]
+    assert naming, (
+        f'a warning was logged but none names "{table}": '
+        f"{[r.getMessage() for r in warnings]}"
+    )
 
 
 @then("the table is reconstructed successfully")
@@ -1410,13 +1718,45 @@ def then_invalid_fk_raises_error(recon_context):
 
 @then(parsers.parse('inserting invalid author_id succeeds (no FK check)'))
 def then_invalid_fk_succeeds(recon_context):
-    """Verify FK constraint is NOT enforced."""
+    """The dropped constraint, proved by the write it now permits.
+
+    The body inserted a row and asserted nothing, so it passed whether the
+    foreign key was dropped or never existed. `PRAGMA foreign_keys = ON` first
+    is the point: without it the insert succeeds because enforcement is off,
+    not because the constraint is gone, and the scenario proves nothing.
+    """
+    recon_context["run"](
+        recon_context["conn"].execute("PRAGMA foreign_keys = ON")
+    )
+    cursor = recon_context["run"](
+        recon_context["conn"].execute("PRAGMA foreign_keys")
+    )
+    enforcement = recon_context["run"](cursor.fetchone())[0]
+
+    assert enforcement == 1, (
+        "foreign key enforcement could not be turned on, so an insert that "
+        "succeeds says nothing about whether the constraint was dropped"
+    )
+
     recon_context["run"](
         recon_context["conn"].execute(
-            f"INSERT INTO {recon_context['table_name']} (id, title, author_id) VALUES (999, 'Test', 9999)"
+            f'INSERT INTO "{recon_context["table_name"]}" '
+            f"(id, title, author_id) VALUES (999, 'Test', 9999)"
         )
     )
     recon_context["run"](recon_context["conn"].commit())
+
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(
+            f'SELECT author_id FROM "{recon_context["table_name"]}" WHERE id = 999'
+        )
+    )
+    stored = recon_context["run"](cursor.fetchone())
+
+    assert stored is not None and stored[0] == 9999, (
+        f"the row naming a non-existent author was not stored: {stored}. "
+        f"With the constraint dropped and enforcement ON, it must be."
+    )
 
 
 @then(parsers.parse('deleting category cascades to products'))
@@ -1455,8 +1795,36 @@ def then_other_data_preserved(recon_context):
 
 @then(parsers.parse('the operation uses direct ALTER TABLE DROP COLUMN'))
 def then_uses_direct_drop(recon_context):
-    """Implementation detail — documented via step."""
-    pass
+    """A direct DROP leaves the table's identity alone; a rebuild does not.
+
+    Both routes end with the column gone, so the outcome cannot tell them
+    apart. What can is the table's rootpage in `sqlite_master`: ALTER TABLE
+    DROP COLUMN edits the schema in place and the rootpage is unchanged, while
+    a reconstruction creates a new table and renames it over the old one,
+    which gives it a different one.
+
+    The body was `pass` over "implementation detail, documented via step",
+    which documented nothing and checked less.
+    """
+    assert recon_context["schema_snapshot"] is not None, (
+        "no pre-drop snapshot was captured, so the two routes cannot be told "
+        "apart. The When step must record the rootpage before dropping."
+    )
+
+    cursor = recon_context["run"](
+        recon_context["conn"].execute(
+            "SELECT rootpage FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (recon_context["table_name"],),
+        )
+    )
+    now = recon_context["run"](cursor.fetchone())
+
+    assert now is not None, f'"{recon_context["table_name"]}" no longer exists'
+    assert now[0] == recon_context["schema_snapshot"], (
+        f"the table's rootpage moved from {recon_context['schema_snapshot']} to "
+        f"{now[0]}, so this was a full reconstruction rather than a direct "
+        f"DROP COLUMN. A column with no constraints on it needs no rebuild."
+    )
 
 
 @then(parsers.parse('the operation fails with foreign key violation'))

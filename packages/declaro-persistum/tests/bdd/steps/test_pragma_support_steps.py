@@ -19,8 +19,14 @@ from declaro_persistum.abstractions.pragma_compat import (
     pragma_index_list,
     pragma_table_info,
 )
+from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE as OUR_OWN_BUG
 
 scenarios("../features/pragma_support.feature")
+
+# Imported now rather than written out. This block used to define the tuple
+# locally, with a note saying `declaro_persistum.exceptions` had no such thing
+# and that a memory of mine wrongly claimed it did. It has one now, added when
+# `bulk_transfer` needed the same distinction.
 
 
 class Ctx(TypedDict, total=False):
@@ -36,19 +42,8 @@ def ctx() -> Ctx:
     return {}
 
 
-class _SyncConn:
-    """A real sqlite3 connection behind the async shape the wrappers expect."""
-
-    def __init__(self, conn: sqlite3.Connection) -> None:
-        self._conn = conn
-
-    def execute(self, sql: str) -> Any:
-        return self._conn.execute(sql)
 
 
-class _Withdrawn:
-    def execute(self, sql: str) -> Any:
-        raise sqlite3.OperationalError(f"not supported: {sql}")
 
 
 @given("a real SQLite database with a table, an index and a foreign key")
@@ -63,12 +58,35 @@ def _given_real_db(ctx, tmp_path):
     )
     conn.execute("CREATE INDEX ix_child_parent ON child(parent_id)")
     conn.commit()
-    ctx["conn"] = _SyncConn(conn)
+    # THE CONNECTION GOES IN RAW. It was wrapped in a hand-written `_SyncConn`
+    # adapter, which was ceremony: `pragma_compat._rows` already calls
+    # `_maybe_await` on both `execute` and `fetchall`, so a synchronous
+    # sqlite3 connection satisfies it unchanged. Measured 2026-08-16 --
+    # `pragma_table_info(sqlite3.connect(...), "child")` returns the rows.
+    #
+    # An adapter here would also be the exact failure this suite has recorded
+    # twice: a double whose contract differs from the driver's either invents
+    # a defect or hides one, and only the second leaves a passing suite.
+    ctx["conn"] = conn
 
 
 @given("a connection whose PRAGMA support has been withdrawn")
-def _given_withdrawn(ctx):
-    ctx["conn"] = _Withdrawn()
+def _given_withdrawn(ctx, tmp_path):
+    """A real SQLite connection, closed. Not a hand-written raiser.
+
+    `_Withdrawn` was a class whose every method raised, which tests that our
+    code propagates whatever a double chose to throw. A CLOSED connection is a
+    backend that genuinely cannot answer, and the error is the driver's own:
+
+        sqlite3.ProgrammingError: Cannot operate on a closed database.
+
+    measured 2026-08-16. So the scenario now exercises a real failure mode a
+    consumer can actually hit, and asserts on the type the real engine raises
+    rather than on a type we invented.
+    """
+    conn = sqlite3.connect(tmp_path / "withdrawn.db")
+    conn.close()
+    ctx["conn"] = conn
 
 
 @when("each PRAGMA persistum depends on is asked of it")
@@ -92,18 +110,40 @@ def _then_all_native(ctx):
 
 @when("a PRAGMA is asked of it")
 def _when_pragma_on_withdrawn(ctx):
+    """Narrowed from `except Exception`, which is why this scenario is worth running.
+
+    A broad catch here made the `then` below pass on ANY exception, including a
+    TypeError from calling `pragma_table_info` with the wrong arguments. The
+    scenario would have reported "the error reaches the caller" while the error
+    was ours and the PRAGMA never ran.
+
+    `sqlite3.ProgrammingError` is what a closed connection raises, measured.
+    `OUR_OWN_BUG` goes first so a mistake of ours still crashes here instead of
+    being recorded as the engine's answer.
+    """
     try:
         asyncio.run(pragma_table_info(ctx["conn"], "anything"))
         ctx["error"] = None
-    except Exception as e:  # noqa: BLE001 - the raise IS the behaviour
+    except OUR_OWN_BUG:
+        raise
+    except sqlite3.ProgrammingError as e:
         ctx["error"] = e
 
 
 @then("the error reaches the caller")
 def _then_raises(ctx):
+    """Asserts the TYPE, not merely that something was thrown.
+
+    `assert error is not None` is satisfied by a TypeError from our own call,
+    which is how a step can report an engine failure it never provoked.
+    """
     assert ctx["error"] is not None, (
         "a backend that cannot answer a PRAGMA was silently absorbed, so the "
         "caller cannot tell an answer from a substitute"
+    )
+    assert isinstance(ctx["error"], sqlite3.ProgrammingError), (
+        f"the caller got {type(ctx['error']).__name__}, not the engine's own "
+        f"ProgrammingError. Something between us and the driver replaced it."
     )
 
 

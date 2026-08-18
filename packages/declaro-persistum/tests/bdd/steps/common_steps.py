@@ -90,3 +90,40 @@ def then_error_with_message(bdd_context, message: str):
 def then_no_error(bdd_context):
     """Verify no error was raised."""
     assert bdd_context["error"] is None, f"Unexpected error: {bdd_context['error']}"
+
+
+@then(parsers.parse("the count should be {expected:d}"))
+def then_count_is(bdd_context, expected: int):
+    """The VALUE a COUNT(*) returned, which nothing else in this suite checks.
+
+    `Then I should find exactly 1 result` sits directly above this in every
+    scenario that uses it, and it passes whatever the count says: COUNT(*)
+    always returns exactly one row. A scenario seeding 1000 rows and inserting
+    3 would satisfy it.
+
+    So this is the only assertion in the large-dataset scenarios that can tell
+    a working bulk insert from a broken one. It reads the column by name and
+    raises if it is absent, rather than reaching for `.get("count", 0)` --
+    a missing column and a count of zero are different failures and a default
+    would report the first as the second.
+
+    THE THREE ENGINES AGREE HERE BY CONSTRUCTION, NOT BY LUCK. SQLite and
+    PostgreSQL return the `AS count` alias in a dict; Turso returns a tuple and
+    `when_execute_sql` maps it to the same key. One step, three engines, and a
+    drift in any of them fails here.
+    """
+    results = bdd_context["results"]
+
+    assert len(results) == 1, (
+        f"a COUNT query returned {len(results)} rows, not 1. The count cannot "
+        f"be read, so this scenario proves nothing about how many rows exist."
+    )
+    row = results[0]
+    assert "count" in row, (
+        f"the result has keys {sorted(row)} and no 'count'. The query aliases "
+        f"it `AS count` and the Turso branch maps its tuple to that key, so a "
+        f"missing one means an engine's result shape has drifted."
+    )
+    assert row["count"] == expected, (
+        f"the table holds {row['count']} rows, not {expected}"
+    )

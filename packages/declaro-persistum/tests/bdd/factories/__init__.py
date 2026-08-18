@@ -38,13 +38,10 @@ from tests.bdd.factories.data_factory import (
     EDGE_CASE_STRINGS,
     any_todo,
     any_user,
-    order,
     order_with_items,
     orders,
-    todo,
     todos,
     todos_with_edge_case_titles,
-    user,
     users,
 )
 from tests.bdd.factories.schema_factory import (
@@ -58,14 +55,11 @@ from tests.bdd.factories.schema_factory import (
 
 __all__ = [
     # data
-    "todo",
     "todos",
     "todos_with_edge_case_titles",
     "any_todo",
-    "user",
     "users",
     "any_user",
-    "order",
     "orders",
     "order_with_items",
     "EDGE_CASE_STRINGS",

@@ -18,6 +18,7 @@ import asyncio
 import inspect
 import logging
 import signal
+from types import SimpleNamespace
 from typing import Any, TypedDict
 
 import pytest
@@ -52,67 +53,137 @@ def ctx() -> Ctx:
     return {}
 
 
-class _Recorder:
-    """Records the ORDER of both directions, which is the property under test."""
-
-    def __init__(self, *, batches: int = 0, failures: int = 0) -> None:
-        self.calls: list[str] = []
-        self.batches = batches
-        self.failures = failures
-        self.closed = False
-
-    async def commit(self) -> None:
-        # `writing(db)` finishes a block by committing, so a stand-in for a
-        # connection has to be able to. Deliberately NOT recorded: `calls` is
-        # what these scenarios read to detect REMOTE I/O on a caller path, and
-        # a commit is local. Recording it here made "no read or write waits
-        # for replication" fail on a local commit.
-        return None
-
-    async def rollback(self) -> None:
-        return None
-
-    async def push(self) -> None:
-        if self.failures > 0:
-            self.failures -= 1
-            raise ConnectionResetError("primary unreachable")
-        self.calls.append("up")
-
-    async def pull(self) -> bool:
-        self.calls.append("down")
-        if self.batches > 0:
-            self.batches -= 1
-            return True
-        return False
-
-    async def close(self) -> None:
-        self.closed = True
 
 
 async def _write_one(conn, sql, params):
     await conn.execute(sql, params)
 
 
-def _make(tmp_path, *, replicated=True, recorder=None, shutdown="exit_immediately"):
-    """A Database whose replication callables are the recorder, and nothing else."""
-    rec = recorder or _Recorder()
+def new_recorder(*, batches: int, failures: int) -> dict:
+    """What a replication pass did, as data.
 
-    async def connect(db: Database) -> Any:
-        return rec
+    THIS WAS `class _Recorder`, AND IT WAS TWO THINGS AT ONCE. It stood in for
+    a CONNECTION -- commit, rollback, close -- and it scripted the replication
+    push and pull. The connection half is now a real aiosqlite connection to
+    the local copy, which already had a real path; only the scripting is
+    injected, and injection is this package's own design: `replicate_once` and
+    `refresh_once` are fields of `Database`, not something patched over it.
 
-    async def close_connection(conn: Any) -> None:
+    So a commit is now the driver's commit and a close is the driver's close.
+    The old double had to explain in a comment why its `commit` recorded
+    nothing -- "a commit is local" -- because recording it broke `no read or
+    write waits for replication`. A real connection cannot make that mistake.
+
+    `batches` and `failures` are required, not defaulted. A scenario that
+    wants a clean pass says `batches=0, failures=0` rather than leaving the
+    reader to find out what zero arguments means.
+    """
+    return {"calls": [], "batches": batches, "failures": failures, "closed": False}
+
+
+def new_replica_stand_in(rec: dict) -> SimpleNamespace:
+    """What `turso.aio.sync.connect` returns, as closures over `rec`.
+
+    EVERY METHOD AND ITS AWAITABILITY MEASURED AGAINST A LIVE REPLICA on
+    2026-08-16, opened with TEST_TURSO_URL and TEST_TURSO_AUTH_TOKEN:
+
+        push  pull  close  commit  rollback  execute     all present
+        all of them coroutine functions
+
+    so this stand-in is `async` throughout, matching. A stand-in that is MORE
+    permissive than the driver is the quiet half of a known failure mode here:
+    the loud half invents a defect that does not exist, this half hides a real
+    one, and only the second leaves a passing suite.
+
+    `test_the_replica_stand_in_matches_the_real_driver` compares the two
+    surfaces, so a driver that adds or tightens a method fails there rather
+    than at a customer.
+    """
+
+    async def push() -> None:
+        if rec["failures"] > 0:
+            rec["failures"] -= 1
+            raise ConnectionResetError("primary unreachable")
+        rec["calls"].append("up")
+
+    async def pull() -> bool:
+        rec["calls"].append("down")
+        if rec["batches"] > 0:
+            rec["batches"] -= 1
+            return True
+        return False
+
+    async def close() -> None:
+        rec["closed"] = True
+
+    async def commit() -> None:
+        """Deliberately NOT recorded. `calls` is what the scenarios read to
+        detect REMOTE I/O on a caller path, and a commit is local."""
+
+    async def rollback() -> None:
         return None
 
+    return SimpleNamespace(
+        push=push, pull=pull, close=close, commit=commit, rollback=rollback
+    )
+
+
+def new_sync_connect(rec: dict, made: list[str]):
+    """`turso.aio.sync.connect`, with pyturso's own signature.
+
+    AT MODULE LEVEL SO A TEST CAN IMPORT IT. It was a closure inside the step,
+    and the contract test that was supposed to police it defined its own copy
+    inline -- so relaxing the real one changed nothing and the test stayed
+    green. A companion that reimplements the thing it checks is a second
+    implementation with nobody checking the first.
+
+    The signature is lifted from `inspect.signature(turso.aio.sync.connect)`:
+    `remote_url` REQUIRED, `auth_token` KEYWORD-ONLY. The previous version
+    defaulted both, so it accepted two call shapes the driver refuses.
+    """
+
+    async def connect(path, remote_url, *, auth_token=None, **_rest):
+        made.append(path)
+        return new_replica_stand_in(rec)
+
+    return connect
+
+
+def _make(tmp_path, *, replicated=True, recorder=None, shutdown="exit_immediately"):
+    """A Database whose local copy is real and whose replication is recorded."""
+    import aiosqlite
+
+    rec = recorder if recorder is not None else new_recorder(batches=0, failures=0)
+
+    async def connect(db: Database) -> Any:
+        """A real connection to a real file, so commit and rollback are real."""
+        return await aiosqlite.connect(db["path"])
+
+    async def close_connection(conn: Any) -> None:
+        rec["closed"] = True
+        await conn.close()
+
     async def replicate_once(db: Database) -> bool:
-        try:
-            await rec.push()
-            return True
-        except Exception:
+        """One push. `False` means the primary refused, which is a real answer.
+
+        The old version raised `ConnectionResetError` and caught it under
+        `except Exception: return False`, so a scripted failure and a genuine
+        bug in the push both became the same `False`. Returning it directly
+        removes the swallow: there is nothing left to catch.
+        """
+        if rec["failures"] > 0:
+            rec["failures"] -= 1
             return False
+        rec["calls"].append("up")
+        return True
 
     async def refresh_once(db: Database) -> None:
-        while await rec.pull():
-            pass
+        """Pull until the primary has nothing more. Each attempt is recorded."""
+        while True:
+            rec["calls"].append("down")
+            if rec["batches"] <= 0:
+                return
+            rec["batches"] -= 1
 
     async def release(db: Database) -> None:
         return None
@@ -166,9 +237,9 @@ def _given_context(ctx, tmp_path):
 @when("replicate runs")
 def _when_replicate_runs(ctx):
     async def run():
-        db, rec = _make(ctx["tmp_path"], recorder=_Recorder(batches=2))
+        db, rec = _make(ctx["tmp_path"], recorder=new_recorder(batches=2, failures=0))
         await replicate(db)
-        ctx["calls"] = list(rec.calls)
+        ctx["calls"] = list(rec["calls"])
 
     asyncio.run(run())
 
@@ -202,22 +273,29 @@ def _then_converges(ctx):
     """
     from declaro_persistum.turso_database import _pull_until_level
 
-    class _Batched:
-        def __init__(self, batches):
-            self.remaining = batches
-            self.calls = 0
 
-        async def pull(self):
-            self.calls += 1
-            if self.remaining:
-                self.remaining -= 1
-                return True
-            return False
+    # A CLOSURE, NOT A CLASS. `_pull_until_level` is control flow over an
+    # injected `pull`, so its stand-in needs one attribute and a dict.
+    #
+    # THE REAL DRIVER CANNOT EXERCISE THIS, AND THAT IS MEASURED. A live
+    # replica was opened against TEST_TURSO_URL on 2026-08-16 and `pull()`
+    # returned False twice: the copy was already current, so there were no
+    # batches to loop over. Making some means writing to a remote primary,
+    # which a test run has no business doing. The CONTRACT is pinned against
+    # the real driver separately, below.
+    state = {"remaining": 2, "calls": 0}
 
-    conn = _Batched(2)
+    async def pull() -> bool:
+        state["calls"] += 1
+        if state["remaining"]:
+            state["remaining"] -= 1
+            return True
+        return False
+
+    conn = SimpleNamespace(pull=pull)
     assert asyncio.run(_pull_until_level(conn)) is True
-    assert conn.calls == 3, (
-        f"two batches were offered and pull was called {conn.calls} time(s); "
+    assert state["calls"] == 3, (
+        f"two batches were offered and pull was called {state['calls']} time(s); "
         f"convergence needs one per batch plus the one that reports empty. A "
         f"copy more than one batch behind is otherwise left part-way and "
         f"reported current."
@@ -268,10 +346,10 @@ def _when_pass_considered(ctx):
     async def run():
         db, rec = _make(ctx["tmp_path"])
         ctx["ran_free"] = await replicate_if_idle(db)
-        rec.calls.clear()
+        rec["calls"].clear()
         db["serialise"]["waiting"] = 1
         ctx["ran_busy"] = await replicate_if_idle(db)
-        ctx["calls_busy"] = list(rec.calls)
+        ctx["calls_busy"] = list(rec["calls"])
         ctx["db"] = db
 
     asyncio.run(run())
@@ -338,10 +416,10 @@ def _when_ten_passes(ctx):
         db["serialise"]["waiting"] = 1
         for _ in range(10):
             await replicate_if_idle(db)
-        ctx["under_load"] = list(rec.calls)
+        ctx["under_load"] = list(rec["calls"])
         db["serialise"]["waiting"] = 0
         await replicate_if_idle(db)
-        ctx["after_load"] = list(rec.calls)
+        ctx["after_load"] = list(rec["calls"])
 
     asyncio.run(run())
 
@@ -381,12 +459,12 @@ def _then_no_clock(ctx):
 def _when_read_and_write(ctx):
     async def run():
         db, rec = _make(ctx["tmp_path"])
-        rec.calls.clear()
+        rec["calls"].clear()
         async with db_mod.reading(db):
             pass
         async with writing(db):
             pass
-        ctx["calls"] = list(rec.calls)
+        ctx["calls"] = list(rec["calls"])
 
     asyncio.run(run())
 
@@ -527,12 +605,12 @@ def _then_no_default(ctx):
 @when("the process is killed before replication completes")
 def _when_shutdown(ctx, caplog):
     async def run():
-        db, rec = _make(ctx["tmp_path"], recorder=_Recorder(failures=1))
+        db, rec = _make(ctx["tmp_path"], recorder=new_recorder(batches=0, failures=1))
         db["serialise"]["waiting"] = 5  # heavy load: must be ignored
         clock = iter([0.0, 1.5, 3.0, 4.5, 6.0, 7.5, 9.0])
         with caplog.at_level(logging.INFO):
             await replicate_on_shutdown(db, now=lambda: next(clock))
-        ctx["calls"] = list(rec.calls)
+        ctx["calls"] = list(rec["calls"])
         ctx["logs"] = [r.getMessage() for r in caplog.records]
         ctx["path"] = db["path"]
 
@@ -597,7 +675,7 @@ def _when_flush(ctx):
         db, rec = _make(ctx["tmp_path"])
         db["serialise"]["waiting"] = 3  # an explicit call ignores load
         await db_mod.flush(db)
-        ctx["calls"] = list(rec.calls)
+        ctx["calls"] = list(rec["calls"])
 
     asyncio.run(run())
 
@@ -619,28 +697,24 @@ def _given_no_copy(ctx, tmp_path):
 
 @when("replicate is asked for on that path")
 def _when_replicate_path(ctx, monkeypatch):
-    rec = _Recorder()
+    rec = new_recorder(batches=0, failures=0)
     made: list[str] = []
 
-    class _FakeSync:
-        @staticmethod
-        async def connect(path, remote_url=None, auth_token=None):
-            made.append(path)
-            return rec
+    fake_sync = SimpleNamespace(connect=new_sync_connect(rec, made))
 
     import turso.aio
 
-    monkeypatch.setattr(turso.aio, "sync", _FakeSync, raising=False)
+    monkeypatch.setattr(turso.aio, "sync", fake_sync, raising=False)
     import sys
 
-    monkeypatch.setitem(sys.modules, "turso.aio.sync", _FakeSync)
+    monkeypatch.setitem(sys.modules, "turso.aio.sync", fake_sync)
 
     asyncio.run(
         replicate_path(ctx["path"], primary="https://example.turso.io", token="t")
     )
     ctx["made"] = made
-    ctx["calls"] = list(rec.calls)
-    ctx["closed"] = rec.closed
+    ctx["calls"] = list(rec["calls"])
+    ctx["closed"] = rec["closed"]
 
 
 @then("the local copy is created and filled from the primary, and the call succeeds")

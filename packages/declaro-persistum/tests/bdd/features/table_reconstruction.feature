@@ -1,3 +1,4 @@
+@bdd
 Feature: Table Reconstruction for SQLite/Turso ALTER COLUMN
   As a developer using declaro-persistum with SQLite/Turso
   I want ALTER COLUMN operations to work via table reconstruction
@@ -195,12 +196,22 @@ Feature: Table Reconstruction for SQLite/Turso ALTER COLUMN
     And the original table is unchanged
     And the original data is intact
 
-  Scenario: Re-enable foreign keys after reconstruction
+  # RENAMED, BECAUSE THE OLD TITLE CLAIMED SOMETHING THIS UNIT CANNOT DO.
+  # `reconstruct_table` cannot re-enable the pragma: `PRAGMA foreign_keys` is a
+  # no-op inside a transaction, and the row copy has opened one by the time the
+  # restore runs. Its own comment records `ENTER fk=1 / EXIT fk=0` and says the
+  # restore belongs to whoever owns the COMMIT — `applier/sqlite.py`, covered by
+  # `tests/unit/test_a_failed_turso_migration_leaves_the_keys_on.py`.
+  #
+  # The step under the old title read the pragma and discarded the answer, so
+  # the scenario passed for eleven months while asserting nothing. Made to
+  # assert, it fails: enforcement reads 0.
+  Scenario: A reconstruction leaves no foreign key violations
     Given foreign keys are enabled
     And a table requiring reconstruction
     When I perform table reconstruction
     Then foreign keys are temporarily disabled
-    And foreign keys are re-enabled after reconstruction
+    And no foreign key violations remain after reconstruction
     And foreign key checks are performed
 
   # ============================================

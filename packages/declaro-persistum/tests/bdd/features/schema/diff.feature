@@ -1,3 +1,4 @@
+@bdd
 Feature: Diffing two schemas into an ordered list of operations
   The differ decides what DDL runs against somebody else's database: what is created,
   what is altered, what is DROPPED, and in what order. It is 1,653 lines and it had

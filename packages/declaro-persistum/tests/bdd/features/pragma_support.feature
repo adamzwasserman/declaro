@@ -1,3 +1,4 @@
+@bdd
 Feature: PRAGMA support is required of a backend
   persistum reads a database's shape through PRAGMA: what columns a table has, what
   indexes are on it, what those indexes cover, and what foreign keys it declares. The

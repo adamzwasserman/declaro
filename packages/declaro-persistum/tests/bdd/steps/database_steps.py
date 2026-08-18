@@ -9,6 +9,7 @@ import asyncio
 
 from pytest_bdd import given, parsers, then, when
 
+from declaro_persistum.types import for_dialect
 from tests.bdd.factories.connection_factory import (
     BACKENDS,
     apply_step,
@@ -62,9 +63,68 @@ def given_empty_todos_table(bdd_context):
     asyncio.run(_setup())
 
 
+# =============================================================================
+# Seeding rows, one function per engine, chosen by a table (Rule 1)
+# =============================================================================
+#
+# THIS WAS AN if/elif WITH NO TURSO ARM, AND THE SUITE COULD NOT SEE IT.
+# `Scenario: Large dataset on Turso` seeded zero rows and passed, because the
+# only assertion above it was `Then I should find exactly 1 result` and a
+# COUNT(*) always returns exactly one row whatever the count says.
+#
+# Measured 2026-08-16 once `Then the count should be 1000` existed:
+#
+#     sqlite      1000 rows
+#     postgresql  1000 rows
+#     turso          0 rows
+#
+# The feature file predicted it in a comment and nothing could act on the
+# prediction, because a chain that runs out of branches does nothing and says
+# nothing. A table cannot run out of branches: an engine that is not in it
+# raises, naming the ones that are.
+
+
+async def _seed_sqlite(conn, rows: list[dict]) -> None:
+    for row in rows:
+        await conn.execute(
+            "INSERT INTO todos (id, title, completed) VALUES (?, ?, ?)",
+            (row["id"], row["title"], int(row["completed"])),
+        )
+    await conn.commit()
+
+
+async def _seed_postgresql(conn, rows: list[dict]) -> None:
+    for row in rows:
+        await conn.execute(
+            "INSERT INTO todos (id, title, completed) VALUES ($1, $2, $3)",
+            row["id"], row["title"], row["completed"],
+        )
+
+
+async def _seed_turso(conn, rows: list[dict]) -> None:
+    """Synchronous driver, so nothing here is awaited but the function is async.
+
+    One signature for all three keeps the caller from asking which kind it got,
+    which is the dispatch the table exists to remove.
+    """
+    for row in rows:
+        conn.execute(
+            "INSERT INTO todos (id, title, completed) VALUES (?, ?, ?)",
+            (row["id"], row["title"], int(row["completed"])),
+        )
+    conn.commit()
+
+
+SEEDERS = {
+    "sqlite": _seed_sqlite,
+    "postgresql": _seed_postgresql,
+    "turso": _seed_turso,
+}
+
+
 @given(parsers.parse("a todos table with {count:d} rows"))
 def given_todos_with_rows(bdd_context, count: int, todo_factory):
-    """Create todos table with specified number of rows."""
+    """Create the todos table and seed it with `count` generated rows."""
     schema = simple_todos_schema()
     bdd_context["schema"] = schema
     rows = todo_factory(count)   # the fixture IS the builder now
@@ -73,20 +133,8 @@ def given_todos_with_rows(bdd_context, count: int, todo_factory):
         async with bdd_context["backend"]['connect']() as conn:
             await apply_step(bdd_context["backend"]['teardown'], conn, schema)
             await apply_step(bdd_context["backend"]['setup'], conn, schema)
-
-            # Insert todos
-            for todo in rows:
-                if bdd_context["dialect"] == "sqlite":
-                    await conn.execute(
-                        "INSERT INTO todos (id, title, completed) VALUES (?, ?, ?)",
-                        (todo["id"], todo["title"], int(todo["completed"]))
-                    )
-                    await conn.commit()
-                elif bdd_context["dialect"] == "postgresql":
-                    await conn.execute(
-                        "INSERT INTO todos (id, title, completed) VALUES ($1, $2, $3)",
-                        todo["id"], todo["title"], todo["completed"]
-                    )
+            seed = for_dialect(SEEDERS, bdd_context["dialect"], "Seeders")
+            await seed(conn, rows)
 
     asyncio.run(_setup())
 
@@ -297,4 +345,4 @@ def then_sqlite_params(bdd_context):
 def then_turso_params(bdd_context):
     """Verify Turso parameter style."""
     # Turso uses ? placeholders
-    pass
+    raise NotImplementedError("CODE NOT WRITTEN")

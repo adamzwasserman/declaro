@@ -143,25 +143,89 @@ sql_in_list = st.lists(st.integers(), min_size=0, max_size=100)
 # asking for a thousand want different return types and should say so.
 
 
-def todo(**overrides: Any) -> dict[str, Any]:
-    """One todo. Any field can be pinned; the rest are generated."""
+
+# TWO FUNCTIONS PER ROW, BECAUSE THERE ARE TWO QUESTIONS.
+#
+# This was one function per row with `**overrides`:
+#
+#     def todo(**overrides):
+#         return {"id": overrides.get("id", str(uuid.uuid4())), ...}
+#
+# which answered "give me a row with this exact id" and "give me any row" with
+# the same call. A misspelled key took the generated branch and said nothing:
+# `todo(titel="x")` returned a random title, and the scenario asserting on "x"
+# failed somewhere else entirely.
+#
+# `a_todo(...)` takes every field and generates nothing, so a missing or
+# misspelled key is a TypeError at the call site. `some_todo()` generates
+# every field and takes nothing, so there is no key to misspell.
+#
+# The fields are the columns `schema_factory` declares. A test asserts that,
+# because a builder and a schema that drift apart produce rows no INSERT can
+# take, and every scenario using them fails for the wrong reason.
+
+
+def a_todo(*, id: str, title: str, completed: Any, created_at: Any) -> dict[str, Any]:
+    """A todo with every field specified. Generates nothing."""
+    return {"id": id, "title": title, "completed": completed, "created_at": created_at}
+
+
+def some_todo() -> dict[str, Any]:
+    """A todo with every field generated. Takes nothing."""
+    return a_todo(
+        id=str(uuid.uuid4()),
+        title=fake.sentence(nb_words=5),
+        completed=fake.boolean(),
+        created_at=fake.date_time_this_year(tzinfo=UTC),
+    )
+
+
+def a_user(
+    *, id: str, email: str, name: str, status: str, age: int, created_at: Any
+) -> dict[str, Any]:
+    """A user with every field specified. Generates nothing."""
     return {
-        "id": overrides.get("id", str(uuid.uuid4())),
-        "title": overrides.get("title", fake.sentence(nb_words=5)),
-        "completed": overrides.get("completed", fake.boolean()),
-        "created_at": overrides.get(
-            "created_at", fake.date_time_this_year(tzinfo=UTC)
-        ),
+        "id": id,
+        "email": email,
+        "name": name,
+        "status": status,
+        "age": age,
+        "created_at": created_at,
     }
 
 
-def todos(count: int, **overrides: Any) -> list[dict[str, Any]]:
-    return [todo(**overrides) for _ in range(count)]
+def some_user() -> dict[str, Any]:
+    """A user with every field generated. `email` is UNIQUE in the schema."""
+    return a_user(
+        id=str(uuid.uuid4()),
+        email=fake.unique.email(),
+        name=fake.name(),
+        status=fake.random_element(["active", "inactive", "pending"]),
+        age=fake.random_int(min=18, max=100),
+        created_at=fake.date_time_this_year(tzinfo=UTC),
+    )
+
+
+
+def todos(count: int) -> list[dict[str, Any]]:
+    """`count` generated todos, every one distinct.
+
+    NO `**overrides`. It used to pass the same overrides to every row, so
+    `todos(5, id="x")` returned five rows sharing a primary key and the second
+    INSERT failed with a constraint violation that named the table rather than
+    the builder.
+    """
+    return [some_todo() for _ in range(count)]
 
 
 def todos_with_edge_case_titles() -> list[dict[str, Any]]:
-    """One todo per hostile string. The empty one is skipped — title is NOT NULL."""
-    return [todo(title=t) for t in EDGE_CASE_STRINGS if t]
+    """One todo per hostile string. The empty one is skipped, title is NOT NULL.
+
+    The title is the field under test, so it is specified and the rest is
+    generated. Written out rather than through an override, because that is
+    the distinction the two builders exist to keep.
+    """
+    return [{**some_todo(), "title": t} for t in EDGE_CASE_STRINGS if t]
 
 
 @st.composite
@@ -182,24 +246,12 @@ def any_todo(draw: st.DrawFn) -> dict[str, Any]:
     }
 
 
-def user(**overrides: Any) -> dict[str, Any]:
-    return {
-        "id": overrides.get("id", str(uuid.uuid4())),
-        "email": overrides.get("email", fake.unique.email()),
-        "name": overrides.get("name", fake.name()),
-        "status": overrides.get(
-            "status", fake.random_element(["active", "inactive", "pending"])
-        ),
-        "age": overrides.get("age", fake.random_int(min=18, max=100)),
-        "created_at": overrides.get(
-            "created_at", fake.date_time_this_year(tzinfo=UTC)
-        ),
-    }
 
 
-def users(count: int, **overrides: Any) -> list[dict[str, Any]]:
+def users(count: int) -> list[dict[str, Any]]:
+    """`count` generated users, every one distinct. See `todos` for why no overrides."""
     fake.unique.clear()  # the unique email generator is per-run state
-    return [user(**overrides) for _ in range(count)]
+    return [some_user() for _ in range(count)]
 
 
 @st.composite
@@ -213,30 +265,40 @@ def any_user(draw: st.DrawFn) -> dict[str, Any]:
     }
 
 
-def order(**overrides: Any) -> dict[str, Any]:
+
+
+def an_order(
+    *, id: str, user_id: str, total: Any, status: str, created_at: Any
+) -> dict[str, Any]:
+    """An order with every field specified. Generates nothing."""
     return {
-        "id": overrides.get("id", str(uuid.uuid4())),
-        "user_id": overrides.get("user_id", str(uuid.uuid4())),
-        "total": overrides.get(
-            "total", round(fake.pyfloat(min_value=0.01, max_value=10000.00), 2)
-        ),
-        "status": overrides.get(
-            "status",
-            fake.random_element(["pending", "confirmed", "shipped", "delivered"]),
-        ),
-        "created_at": overrides.get(
-            "created_at", fake.date_time_this_year(tzinfo=UTC)
-        ),
+        "id": id,
+        "user_id": user_id,
+        "total": total,
+        "status": status,
+        "created_at": created_at,
     }
 
 
-def orders(count: int, **overrides: Any) -> list[dict[str, Any]]:
-    return [order(**overrides) for _ in range(count)]
+def some_order() -> dict[str, Any]:
+    """An order with every field generated. Takes nothing."""
+    return an_order(
+        id=str(uuid.uuid4()),
+        user_id=str(uuid.uuid4()),
+        total=round(fake.pyfloat(min_value=0.01, max_value=10000.00), 2),
+        status=fake.random_element(["pending", "confirmed", "shipped", "delivered"]),
+        created_at=fake.date_time_this_year(tzinfo=UTC),
+    )
 
 
-def order_with_items(item_count: int, **overrides: Any) -> dict[str, Any]:
-    """An order and its lines. `item_count` is required — see Rule 14."""
-    parent = order(**overrides)
+def orders(count: int) -> list[dict[str, Any]]:
+    """`count` generated orders, every one distinct."""
+    return [some_order() for _ in range(count)]
+
+
+def order_with_items(item_count: int) -> dict[str, Any]:
+    """An order and its lines. `item_count` is required, see Rule 14."""
+    parent = some_order()
     parent["items"] = [
         {
             "id": str(uuid.uuid4()),

@@ -57,12 +57,6 @@ def new_context() -> ScenarioContext:
 
 
 
-from tests.bdd.factories.connection_factory import (
-    get_postgresql_connection,
-    get_sqlite_connection,
-    postgresql_backend,
-    sqlite_backend,
-)
 from tests.bdd.factories.data_factory import todos, users
 from tests.bdd.factories.schema_factory import (
     complex_ecommerce_schema,
@@ -104,30 +98,12 @@ def ecommerce_schema() -> Schema:
 # =============================================================================
 
 
-@pytest.fixture
-def todo_factory():
-    """The `todos(n)` builder, for steps that take a factory by name.
-
-    pytest_bdd steps receive fixtures positionally, so a step written as
-    `given_todos_with_rows(bdd_context, count, todo_factory)` needs a fixture
-    of that name. It is now the FUNCTION, not a class to call methods on.
-    """
-    return todos
 
 
-@pytest.fixture
-def user_factory():
-    return users
 
 
-@pytest.fixture
-def sample_todos() -> list[dict[str, Any]]:
-    return todos(10)
 
 
-@pytest.fixture
-def sample_users() -> list[dict[str, Any]]:
-    return users(10)
 
 
 # =============================================================================
@@ -135,29 +111,12 @@ def sample_users() -> list[dict[str, Any]]:
 # =============================================================================
 
 
-@pytest.fixture
-def sqlite_factory():
-    """The SQLite backend, as data — connect, setup and teardown callables."""
-    return sqlite_backend()
 
 
-@pytest.fixture
-def postgresql_factory():
-    return postgresql_backend()
 
 
-@pytest.fixture
-async def sqlite_connection():
-    """Get an SQLite connection."""
-    async with get_sqlite_connection() as conn:
-        yield conn
 
 
-@pytest.fixture
-async def postgresql_connection(require_postgresql):
-    """Get a PostgreSQL connection (requires real database)."""
-    async with get_postgresql_connection() as conn:
-        yield conn
 
 
 # =============================================================================
@@ -174,11 +133,22 @@ def bdd_context() -> ScenarioContext:
 
 
 # =============================================================================
-# Scenario Hooks
+# Row builders, as fixtures
 # =============================================================================
+#
+# pytest_bdd hands a step its fixtures by name, so a step written as
+# `given_todos_with_rows(bdd_context, count, todo_factory)` needs a fixture
+# called `todo_factory`. It is the batch FUNCTION, not a class to call methods
+# on and not a row: the step asks for `count` rows and calls it with that.
 
 
-@pytest.fixture(autouse=True)
-def reset_schema_between_tests():
-    """Reset state between tests."""
-    yield
+@pytest.fixture
+def todo_factory():
+    """`todos(n)` — n generated todos, every one distinct."""
+    return todos
+
+
+@pytest.fixture
+def user_factory():
+    """`users(n)` — n generated users, every email distinct."""
+    return users
