@@ -249,49 +249,16 @@ async def _execute_with_reconstruction(
 #
 # The live enum path is `insert_enum_values`, tested in
 # `test_a_declared_enum_value_is_accepted.py` against all three engines.
-def generate_create_trigger(table: str, trigger: Trigger) -> str:
-    """
-    Generate SQLite CREATE TRIGGER SQL.
-
-    Args:
-        table: Table name
-        trigger: Trigger definition
-
-    Returns:
-        SQL statement
-    """
-    name = trigger["name"]
-    timing = trigger.get("timing", "before").upper()
-    event = trigger.get("event", "insert")
-    for_each = trigger.get("for_each", "row").upper()
-    body = trigger.get("body", "")
-
-    # SQLite trigger name convention
-    trigger_name = f"{table}_{name}"
-
-    # Handle single event only - SQLite doesn't support multiple events per trigger
-    if isinstance(event, list):
-        event = event[0]  # Take first event
-
-    event_sql = event.upper()
-
-    sql = f"""CREATE TRIGGER {trigger_name}
-{timing} {event_sql}
-ON {table}
-FOR EACH {for_each}
-BEGIN
-    {body}
-END"""
-
-    return sql
-
-
-
-
-
-
-
-
+# `generate_create_trigger(table, trigger)` stood here. Nothing in `src/`
+# called it -- the only other mention is the line in this module's own
+# docstring listing what the class used to hold -- and triggers are not a
+# feature of this package: `types.Trigger` is declared, nothing exports it,
+# the loader cannot read one, the differ emits no trigger operation, and
+# `_SQL_GENERATORS` has none of the 16 either.
+#
+# It and `tests/unit/test_triggers.py` were each other's only reason to exist,
+# the same pair `generate_enum_check` formed with `test_enums.py` earlier
+# today, and a hollow test file is what kept both invisible.
 def generate_create_view(view: View) -> str:
     """
     Generate SQLite CREATE VIEW SQL.

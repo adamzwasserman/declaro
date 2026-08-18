@@ -1,6 +1,6 @@
 r"""A file named `test_*.py` must contain a test.
 
-TWO STILL DO NOT. Twenty-four did. Each was a docstring, its imports,
+ONE STILL DOES. Twenty-four did. Each was a docstring, its imports,
 sometimes a helper, and then blank space where the tests had been, and the
 suite total said nothing about the gap.
 
@@ -11,10 +11,39 @@ also the evidence that restoring them was safe. The suite went from 299 to 774.
 
 WHAT IS LEFT, AND WHY EACH IS LEFT. Measured by restoring it and running it:
 
-    test_procedures.py        20 tests    9 pass, 11 fail
-    test_triggers.py          20 tests    8 pass, 12 fail
 
-50 tests.
+0 tests. `tests/integration/test_sqlite.py` is the only entry left, and it is
+a different thing from the six: it is an empty integration file, not a suite
+that lost its tests. SQLite is exercised by 74 marked tests elsewhere.
+
+`test_triggers.py` and `test_procedures.py` are the last two, RESOLVED BY
+DELETION. Each held 20 tests; restored, every failure was an ImportError for a
+function that is not there -- `diff_triggers`, `generate_create_trigger`,
+`generate_drop_trigger`, `diff_procedures`, `generate_create_function`,
+`parse_procedure`.
+
+Both features are gone end to end rather than renamed:
+
+    types.py           `Trigger` and `Procedure` are declared
+    __init__.py        exports neither
+    pydantic_loader    cannot declare one; the `trigger_sources` there
+                       belongs to materialized-view refresh
+    differ             emits no trigger or procedure operation
+    _SQL_GENERATORS    16 operations, none of them either
+
+A user cannot declare one, the differ cannot notice one, and no applier could
+render one. The TypedDicts are the last trace.
+
+Deleting the files rather than leaving a docstring in them is the point of
+this gate: a file named `test_triggers.py` holding only prose still reads as
+coverage to every tool that counts files, which is the defect this ratchet
+exists to catch. The record belongs here, where a reader of the list will find
+it.
+
+`applier/sqlite.py::generate_create_trigger` went with them. Nothing in src
+called it, and it and `test_triggers.py` were each other's only reason to
+exist -- the same pair `generate_enum_check` formed with `test_enums.py`
+earlier the same day. A hollow test file is what kept both invisible, twice.
 
 `test_views.py` is the fourth RESOLVED BY FILLING, 2026-08-17. Restored it ran
 47 tests, 23 passing, and the 24 failures sorted into three kinds.
@@ -162,10 +191,15 @@ TESTS = UNIT.parent
 #
 # `test_sqlite.py` stays listed. SQLite is exercised by 74 marked tests
 # elsewhere, so an integration file is not the gap there that it was here.
-KNOWN_HOLLOW = {
+# DOWN FROM SIX TO ONE, AND THAT IS THE POINT OF A RATCHET. Each was resolved
+# on purpose -- filled, or deleted with the measurement that said why -- and
+# the assertion below fails in BOTH directions, so the list cannot quietly
+# refill and cannot quietly shrink either.
+#
+# The remaining entry is an empty integration file rather than a suite that
+# lost its tests.
+KNOWN_HOLLOW: set[str] = {
     "test_sqlite.py",
-    "test_procedures.py",
-    "test_triggers.py",
 }
 
 
