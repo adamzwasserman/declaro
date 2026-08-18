@@ -84,6 +84,32 @@ async def apply(
         # restored after the commit below.
         await connection.execute("PRAGMA foreign_keys = ON")
 
+        # AN EXPLICIT TRANSACTION, AFTER THE PRAGMA AND BEFORE THE DDL.
+        #
+        # SQLite's DDL is transactional; Python's `sqlite3` driver does not
+        # put it in a transaction. Its default `isolation_level` is `""`,
+        # which opens one implicitly before DML and NOT before DDL, so every
+        # CREATE and DROP here ran in autocommit and the `rollback()` on the
+        # failure paths below had nothing to undo.
+        #
+        # Measured 2026-08-17. Two operations where the second is refused:
+        #
+        #     apply raised MigrationError
+        #     tables after the failed migration: ['good']
+        #
+        # and the same probe with a `BEGIN` leaves none. A failed migration
+        # was leaving the database in a shape nobody designed, while the
+        # applier believed it had rolled back and its docstring said "SQLite
+        # DDL is transactional, allowing safe rollback on failure" -- true of
+        # the engine, false of the driver in its default mode.
+        #
+        # `applier/turso.py` has issued its own BEGIN all along. This module
+        # is the one that did not.
+        #
+        # It goes AFTER the pragma because `PRAGMA foreign_keys` is a silent
+        # no-op inside an open transaction.
+        await connection.execute("BEGIN")
+
         # Per-operation execution
         for op_idx in execution_order:
             operation = operations[op_idx]

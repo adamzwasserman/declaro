@@ -1,6 +1,6 @@
 r"""A file named `test_*.py` must contain a test.
 
-ONE STILL DOES. Twenty-four did. Each was a docstring, its imports,
+NONE DO, AS OF 2026-08-17. Twenty-four did. Each was a docstring, its imports,
 sometimes a helper, and then blank space where the tests had been, and the
 suite total said nothing about the gap.
 
@@ -12,9 +12,28 @@ also the evidence that restoring them was safe. The suite went from 299 to 774.
 WHAT IS LEFT, AND WHY EACH IS LEFT. Measured by restoring it and running it:
 
 
-0 tests. `tests/integration/test_sqlite.py` is the only entry left, and it is
-a different thing from the six: it is an empty integration file, not a suite
-that lost its tests. SQLite is exercised by 74 marked tests elsewhere.
+0 tests.
+
+`tests/integration/test_sqlite.py` was the last entry and is FILLED. It was 24
+lines: a docstring, an `aiosqlite` fixture yielding `:memory:`, and nothing
+else. It holds 12 tests now, on a real file rather than in memory, because
+several of the properties cannot be observed in memory at all -- a file
+survives being closed and reopened, which is the whole case a migrate-twice
+test exists for.
+
+Filling it found the worst defect of the day. A failed migration did not roll
+back on SQLite:
+
+    apply raised MigrationError
+    tables after the failed migration: ['good']
+
+SQLite's DDL is transactional; Python's `sqlite3` driver does not put it in a
+transaction. Its default `isolation_level` is `""`, which opens one implicitly
+before DML and NOT before DDL, so every CREATE and DROP ran in autocommit and
+the `rollback()` on the failure paths had nothing to undo. `applier/turso.py`
+has issued its own BEGIN all along; `applier/sqlite.py` did not. A half-applied
+migration was leaving the database in a shape nobody designed while the applier
+believed it had rolled back.
 
 `test_triggers.py` and `test_procedures.py` are the last two, RESOLVED BY
 DELETION. Each held 20 tests; restored, every failure was an ImportError for a
@@ -191,16 +210,11 @@ TESTS = UNIT.parent
 #
 # `test_sqlite.py` stays listed. SQLite is exercised by 74 marked tests
 # elsewhere, so an integration file is not the gap there that it was here.
-# DOWN FROM SIX TO ONE, AND THAT IS THE POINT OF A RATCHET. Each was resolved
+# EMPTY, AND THAT IS THE POINT OF A RATCHET. Each was resolved
 # on purpose -- filled, or deleted with the measurement that said why -- and
 # the assertion below fails in BOTH directions, so the list cannot quietly
-# refill and cannot quietly shrink either.
-#
-# The remaining entry is an empty integration file rather than a suite that
-# lost its tests.
-KNOWN_HOLLOW: set[str] = {
-    "test_sqlite.py",
-}
+# refill and an empty one cannot quietly grow.
+KNOWN_HOLLOW: set[str] = set()
 
 
 def _holds_a_test(path: pathlib.Path) -> bool:

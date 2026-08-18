@@ -356,3 +356,78 @@ def test_the_expression_table_translates_only_what_needs_it() -> None:
             f"'false' is written as {table.get('false')!r} and read back as "
             f"something the differ does not recognise as the same default"
         )
+
+
+# ---------------------------------------------------------------------------
+# A default that IS translated, and the comparison that has to know it
+# ---------------------------------------------------------------------------
+#
+# The boolean rows came out of `EXPRESSION_DEFAULTS` earlier today because
+# SQLite takes the keyword and translating it broke the round trip. `now()` is
+# different: SQLite genuinely cannot parse it, so the translation must stay.
+#
+#     declared   now()
+#     written    (datetime('now'))
+#     read back  (datetime('now'))
+#     diff       alter_column {"default": {"from": "(datetime('now'))",
+#                                          "to": "now()"}}
+#
+# Measured 2026-08-17 on a real SQLite file, the second migration loop of the
+# day from the same cause: a value translated on the way in, and a comparison
+# that does not know the translation happened.
+#
+# `same_type` has had the right shape all along -- it takes a dialect and asks
+# `map_type` whether two declared types name the same column ON THIS ENGINE.
+# `same_default` took no dialect and could not ask anything. It does now, and
+# the asymmetry between two functions doing the same job one line apart is
+# what should have been noticed the first time.
+
+
+TRANSLATED = {
+    "t": {"columns": {"made_at": {"type": "timestamptz", "default": "now()"}}}
+}
+
+
+@pytest.mark.parametrize("dialect", ["sqlite", "turso"])
+def test_a_translated_default_matches_what_the_engine_stored(dialect: str) -> None:
+    """The declared spelling and the stored spelling are one default."""
+    from declaro_persistum.applier.shared import EXPRESSION_DEFAULTS
+
+    stored = EXPRESSION_DEFAULTS[dialect]["now()"]
+    current = {"t": {"columns": {"made_at": {"type": "timestamptz",
+                                            "default": stored}}}}
+
+    assert diff(current, TRANSLATED, dialect=dialect)["operations"] == []
+
+
+def test_postgresql_needs_no_translation_and_still_matches() -> None:
+    """The engine whose language these are written in."""
+    current = {"t": {"columns": {"made_at": {"type": "timestamptz",
+                                            "default": "now()"}}}}
+
+    assert diff(current, TRANSLATED, dialect="postgresql")["operations"] == []
+
+
+def test_a_real_default_change_survives_the_translation() -> None:
+    """The floor. Translating both sides into equality would hide a change."""
+    current = {"t": {"columns": {"made_at": {"type": "timestamptz",
+                                            "default": "'2020-01-01'"}}}}
+
+    ops = diff(current, TRANSLATED, dialect="sqlite")["operations"]
+
+    assert [o["op"] for o in ops] == ["alter_column"], ops
+
+
+def test_the_comparison_takes_a_dialect_like_its_neighbour() -> None:
+    """`same_type` and `same_default` answer the same kind of question.
+
+    One took a dialect and one did not, and the one that did not produced two
+    migration loops in a day.
+    """
+    import inspect
+
+    from declaro_persistum.applier.shared import same_type
+    from declaro_persistum.differ.core import same_default
+
+    assert "dialect" in inspect.signature(same_default).parameters
+    assert "dialect" in inspect.signature(same_type).parameters

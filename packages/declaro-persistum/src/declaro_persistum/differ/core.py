@@ -355,7 +355,7 @@ def _compute_column_alterations(
     # Default change
     current_default = current.get("default")
     target_default = target.get("default")
-    if not same_default(current_default, target_default):
+    if not same_default(current_default, target_default, dialect):
         changes["default"] = {"from": current_default, "to": target_default}
 
     return changes if changes else None
@@ -379,7 +379,7 @@ def _as_number(value: Any) -> float | None:
         return None
 
 
-def same_default(current: Any, target: Any) -> bool:
+def same_default(current: Any, target: Any, dialect: Dialect) -> bool:
     """Do these two spellings mean the same default?
 
     ONE QUESTION, RATHER THAN A LIST OF THE LITERALS SOMEBODY HAS BEEN BITTEN
@@ -401,12 +401,37 @@ def same_default(current: Any, target: Any) -> bool:
     denote the same thing, and falls back to verbatim comparison for the
     opaque case, which is where an expression like `now()` belongs.
 
+    `dialect` IS REQUIRED, AND ITS ABSENCE COST TWO MIGRATION LOOPS IN A DAY.
+    A default declared `now()` is WRITTEN to SQLite as `(datetime('now'))`,
+    because SQLite cannot parse the first, and read back as what was written.
+    Comparing the stored spelling against the declared one without knowing the
+    translation happened proposes an `alter_column` on every deploy:
+
+        alter_column {"default": {"from": "(datetime('now'))", "to": "now()"}}
+
+    `same_type` one screen away has taken a dialect from the beginning and
+    asks `map_type` whether two declared types name the same column ON THIS
+    ENGINE. This is the same question about defaults, and the asymmetry
+    between two functions doing one job is what should have been noticed the
+    first time.
+
     WHAT IT DOES NOT DECIDE, stated so its silence is not read as agreement:
     whether `true` and `1` are the same default on SQLite, which stores
     booleans as integers. Not measured, so not folded.
     """
     if current is None or target is None:
         return current is target
+
+    # The declared default, spelled the way this engine stores it. The applier
+    # uses the same table on the way in, so the two sides are asking one
+    # question rather than two.
+    from declaro_persistum.applier.shared import EXPRESSION_DEFAULTS
+
+    spelled = EXPRESSION_DEFAULTS.get(dialect, {})
+    if isinstance(target, str):
+        target = spelled.get(target.strip().lower().replace(" ", ""), target)
+    if isinstance(current, str):
+        current = spelled.get(current.strip().lower().replace(" ", ""), current)
 
     current_number = _as_number(current)
     target_number = _as_number(target)
