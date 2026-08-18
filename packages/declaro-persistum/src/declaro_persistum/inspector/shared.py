@@ -239,3 +239,148 @@ def views_from_rows(
             "refresh": refresh,
         }
     return views
+
+
+def normalize_check(expression: str) -> str:
+    """A CHECK expression, in one spelling.
+
+    The two engines answer differently for the same declaration:
+
+        SQLite      n > 0
+        PostgreSQL  CHECK ((n > 0))
+
+    so both are reduced to the expression alone before anything compares them,
+    the same way a declared type is spelled per engine before `same_type`
+    asks. Comparing the raw answers would propose a change on every deploy.
+
+    THE OUTER PARENS COME OFF ONLY WHEN THEY WRAP THE WHOLE THING.
+    `(a OR b) AND c` opens and closes before the end, so stripping by position
+    would turn it into `a OR b) AND c` and change what it means.
+    """
+    text = " ".join(expression.split())
+    if text.upper().startswith("CHECK"):
+        text = text[len("CHECK") :].strip()
+
+    while text.startswith("(") and text.endswith(")"):
+        depth = 0
+        for position, char in enumerate(text):
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0 and position != len(text) - 1:
+                    return text
+        text = text[1:-1].strip()
+    return text
+
+
+def checks_from_ddl(create_statement: str) -> dict[str, str]:
+    """The column-level CHECK constraints a CREATE TABLE declares.
+
+    SQLite keeps no catalogue of these: the only record is the text of the
+    statement in `sqlite_master`, so this reads it. Without it a CHECK is
+    created, enforced, and invisible to the differ, which is how comparing
+    one produced a migration loop.
+
+    A TABLE-LEVEL CHECK BELONGS TO NO COLUMN and is skipped. `CHECK (n > 0)`
+    written as its own clause constrains the row; attributing it to `n` would
+    have the differ propose removing a column constraint nobody declared.
+
+    Scanning respects string literals and nested parentheses, because a
+    default of `'CHECK (x > 1)'` is a value and `s IN ('x', 'y')` closes twice.
+    """
+    body = _table_body(create_statement)
+    if body is None:
+        return {}
+
+    checks: dict[str, str] = {}
+    for clause in _split_top_level(body):
+        words = clause.split()
+        if not words or words[0].upper() in ("CHECK", "PRIMARY", "FOREIGN", "UNIQUE", "CONSTRAINT"):
+            continue
+        column = words[0].strip('"`[]')
+        expression = _check_in(clause)
+        if expression is not None:
+            checks[column] = expression
+    return checks
+
+
+def _table_body(create_statement: str) -> str | None:
+    """What sits between the outermost parentheses of a CREATE TABLE."""
+    start = create_statement.find("(")
+    if start == -1:
+        return None
+    depth = 0
+    for position in range(start, len(create_statement)):
+        char = create_statement[position]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return create_statement[start + 1 : position]
+    return None
+
+
+def _split_top_level(body: str) -> list[str]:
+    """Split on commas that are not inside parentheses or a string literal."""
+    parts: list[str] = []
+    current: list[str] = []
+    depth = 0
+    quote: str | None = None
+    for char in body:
+        if quote:
+            current.append(char)
+            if char == quote:
+                quote = None
+            continue
+        if char in "'\"":
+            quote = char
+        elif char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        elif char == "," and depth == 0:
+            parts.append("".join(current).strip())
+            current = []
+            continue
+        current.append(char)
+    if current:
+        parts.append("".join(current).strip())
+    return parts
+
+
+def _check_in(clause: str) -> str | None:
+    """The CHECK expression in one column clause, or None.
+
+    Finds the KEYWORD, not the substring: `checksum TEXT` names no constraint,
+    and a default of `'CHECK (x > 1)'` is a value.
+    """
+    depth = 0
+    quote: str | None = None
+    position = 0
+    while position < len(clause):
+        char = clause[position]
+        if quote:
+            if char == quote:
+                quote = None
+            position += 1
+            continue
+        if char in "'\"":
+            quote = char
+            position += 1
+            continue
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        elif depth == 0 and clause[position : position + 5].upper() == "CHECK":
+            before = clause[position - 1] if position else " "
+            after = clause[position + 5 : position + 6]
+            if not before.isalnum() and before != "_" and (after in (" ", "(")):
+                rest = clause[position + 5 :].lstrip()
+                if rest.startswith("("):
+                    inner = _table_body(rest)
+                    return normalize_check(inner) if inner is not None else None
+        position += 1
+    return None

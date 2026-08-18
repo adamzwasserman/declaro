@@ -10,6 +10,7 @@ a rewrite, so nothing about what PostgreSQL is asked has changed.
 from typing import Any
 
 from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionError
+from declaro_persistum.inspector.shared import normalize_check
 from declaro_persistum.inspector.shared import normalize_fk_action as _normalize_fk_action
 from declaro_persistum.types import Column, Index, Schema, Table, View
 
@@ -115,6 +116,22 @@ async def _introspect_table(
             on_update = _normalize_fk_action(fk.get("update_rule"))
             if on_update:
                 columns[col_name]["on_update"] = on_update
+
+    # A CHECK, which nothing read back until 2026-08-17. PostgreSQL keeps
+    # these in `pg_constraint`, and `pg_get_constraintdef` returns them as
+    # `CHECK ((n > 0))` -- wrapped twice and prefixed -- where SQLite reports
+    # the bare expression, so both go through `normalize_check` before anyone
+    # compares them.
+    #
+    # Only a single-column check is attached to its column. One over two
+    # columns constrains the ROW, and hanging it on whichever column came
+    # first would have the differ propose removing a constraint nobody
+    # declared on it.
+    for column_name, expression in (
+        await _get_column_checks(connection, table_name, schema_name)
+    ).items():
+        if column_name in columns:
+            columns[column_name]["check"] = expression
 
     table: Table = {"columns": columns}
 
@@ -410,6 +427,40 @@ async def table_exists(
     return bool(result)
 
 
+
+
+async def _get_column_checks(
+    connection: Any, table_name: str, schema_name: str
+) -> dict[str, str]:
+    """Column-level CHECK constraints, by column name.
+
+    `conkey` holds the columns a constraint covers. A check over more than one
+    is a table constraint and is skipped; a NOT NULL is stored as a check on
+    some versions and is skipped by the same rule that its definition is not
+    an expression this package declares.
+    """
+    rows = await connection.fetch(
+        """
+        SELECT
+            att.attname AS column_name,
+            pg_get_constraintdef(con.oid) AS definition
+        FROM pg_constraint con
+        JOIN pg_class rel ON rel.oid = con.conrelid
+        JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+        JOIN unnest(con.conkey) AS k(attnum) ON TRUE
+        JOIN pg_attribute att
+          ON att.attrelid = rel.oid AND att.attnum = k.attnum
+        WHERE rel.relname = $1
+          AND nsp.nspname = $2
+          AND con.contype = 'c'
+          AND array_length(con.conkey, 1) = 1
+        """,
+        table_name,
+        schema_name,
+    )
+    return {
+        row["column_name"]: normalize_check(row["definition"]) for row in rows
+    }
 
 
 async def introspect_views(

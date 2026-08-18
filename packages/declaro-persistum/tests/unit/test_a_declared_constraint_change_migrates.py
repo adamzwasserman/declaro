@@ -89,43 +89,133 @@ def test_an_unchanged_unique_emits_nothing(dialect: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# check, which is NOT compared, and the reason is measured
+# check, compared again, and only because all three engines can read one
 # ---------------------------------------------------------------------------
 #
-# These three tests asserted that a CHECK change emits an operation. I wrote
-# them, made them pass, shipped it, and it was a migration loop: see the
-# section at the bottom of this file. A CHECK is created and enforced and no
-# inspector reads it back, so the declared value was compared against None on
-# every deploy and `alter_column` rebuilt the table each time.
+# Comparing `check` was added, shipped and removed within an hour today: a
+# CHECK was created and enforced and invisible to introspection, so the
+# declared value was compared against None on every deploy and `alter_column`
+# rebuilt the table each time to apply a constraint already there.
 #
-# What is true today is written here instead of being left as a passing test
-# for behaviour the package does not have.
+# What made it safe was not a better comparison. Each inspector learned to
+# report a CHECK, and the round trip was MEASURED on each engine before this
+# was turned back on:
+#
+#     SQLite      introspected 'n > 0'   second diff []
+#     PostgreSQL  introspected 'n > 0'   second diff []
+#     Turso       introspected 'n > 0'   second diff []
+#
+# Turso is the reason that mattered. SQLite had just learned to read one and
+# Turso had not, so enabling this after checking SQLite alone would have
+# repeated the identical mistake on a different engine.
 
 
 @pytest.mark.parametrize("dialect", DIALECTS)
-def test_a_check_change_still_migrates_nothing(dialect: str) -> None:
-    """RECORDED, NOT ENDORSED. This is a gap, and the fix is in the inspector.
-
-    A changed CHECK emits no operation, so a schema that tightens `n > 0` to
-    `n > 10` is told the migration succeeded and the old constraint stands.
-
-    Closing it means teaching the inspectors to read a CHECK back, out of
-    `sqlite_master` for SQLite and `pg_constraint` for PostgreSQL. Comparing it
-    without that is what produced the loop.
-    """
+def test_a_check_constraint_change_emits_an_operation(dialect: str) -> None:
     assert _ops({"type": "integer", "check": "c > 0"},
-                {"type": "integer", "check": "c > 10"}, dialect) == []
+                {"type": "integer", "check": "c > 10"}, dialect) != []
 
 
 @pytest.mark.parametrize("dialect", DIALECTS)
-def test_a_declared_check_still_reaches_the_database(dialect: str) -> None:
-    """The half that works: a CHECK on a NEW table is created."""
-    plan = diff({}, _table({"type": "integer", "check": "c > 0"}), dialect=dialect)
+def test_removing_a_check_emits_an_operation(dialect: str) -> None:
+    assert _ops({"type": "integer", "check": "c > 0"}, {"type": "integer"}, dialect) != []
 
-    from declaro_persistum.applier import generate_sql
 
-    sql = "\n".join(generate_sql(plan["operations"], plan["execution_order"], dialect))
-    assert "CHECK" in sql.upper(), sql
+@pytest.mark.parametrize("dialect", DIALECTS)
+def test_an_unchanged_check_emits_nothing(dialect: str) -> None:
+    """The loop, pinned. This is the assertion that was false for an hour."""
+    same = {"type": "integer", "check": "c > 0"}
+    assert _ops(same, dict(same), dialect) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.sqlite
+async def test_a_declared_check_survives_the_round_trip() -> None:
+    """The loop again, through a real database rather than two dicts.
+
+    Both spellings of the property agreeing in my head is what let the loop
+    ship; only a write followed by a read can see it.
+    """
+    path = tempfile.mktemp(suffix=".db")
+    conn = await aiosqlite.connect(path)
+    try:
+        declared = _table({"type": "integer", "check": "c > 0"})
+        plan = diff({}, declared, dialect="sqlite")
+        await apply(conn, plan["operations"], plan["execution_order"], "sqlite",
+                    dry_run=False)
+        await conn.commit()
+
+        actual = await introspect(conn, "sqlite")
+
+        assert actual["t"]["columns"]["c"].get("check") == "c > 0"
+        assert diff({"t": actual["t"]}, declared, dialect="sqlite")["operations"] == []
+    finally:
+        await conn.close()
+        os.unlink(path)
+
+
+@pytest.mark.asyncio
+@pytest.mark.sqlite
+async def test_a_tightened_check_is_enforced_afterwards() -> None:
+    """An operation is not a changed database, and a CHECK is not a column."""
+    path = tempfile.mktemp(suffix=".db")
+    conn = await aiosqlite.connect(path)
+    try:
+        plan = diff({}, _table({"type": "integer", "check": "c > 0"}), dialect="sqlite")
+        await apply(conn, plan["operations"], plan["execution_order"], "sqlite",
+                    dry_run=False)
+        await conn.execute("INSERT INTO t VALUES ('1', 50)")
+        await conn.commit()
+
+        actual = await introspect(conn, "sqlite")
+        plan = diff({"t": actual["t"]}, _table({"type": "integer", "check": "c > 10"}),
+                    dialect="sqlite")
+        await apply(conn, plan["operations"], plan["execution_order"], "sqlite",
+                    dry_run=False)
+        await conn.commit()
+
+        cursor = await conn.execute("SELECT c FROM t")
+        assert await cursor.fetchall() == [(50,)], "the rows did not survive"
+
+        with pytest.raises(aiosqlite.IntegrityError):
+            await conn.execute("INSERT INTO t VALUES ('2', 5)")
+    finally:
+        await conn.close()
+        os.unlink(path)
+
+
+@pytest.mark.asyncio
+@pytest.mark.sqlite
+async def test_tightening_onto_data_that_violates_it_fails_loudly() -> None:
+    """The reconstruction copies the rows through the new constraint.
+
+    A migration that cannot hold must fail rather than drop the rows or the
+    constraint, and this is where that is decided.
+    """
+    path = tempfile.mktemp(suffix=".db")
+    conn = await aiosqlite.connect(path)
+    try:
+        plan = diff({}, _table({"type": "integer", "check": "c > 0"}), dialect="sqlite")
+        await apply(conn, plan["operations"], plan["execution_order"], "sqlite",
+                    dry_run=False)
+        await conn.execute("INSERT INTO t VALUES ('1', 5)")
+        await conn.commit()
+
+        actual = await introspect(conn, "sqlite")
+        plan = diff({"t": actual["t"]}, _table({"type": "integer", "check": "c > 10"}),
+                    dialect="sqlite")
+
+        from declaro_persistum.exceptions import MigrationError
+
+        with pytest.raises(MigrationError, match="CHECK"):
+            await apply(conn, plan["operations"], plan["execution_order"], "sqlite",
+                        dry_run=False)
+
+        cursor = await conn.execute("SELECT c FROM t")
+        assert await cursor.fetchall() == [(5,)], "the row was lost"
+    finally:
+        await conn.close()
+        os.unlink(path)
 
 
 # ---------------------------------------------------------------------------
@@ -339,62 +429,7 @@ def test_a_primary_key_is_not_marked_unique_by_its_own_index() -> None:
     assert "unique" not in _with_unique_folded(table)["id"]
 
 
-# ---------------------------------------------------------------------------
-# The half of that change that had to come back out
-# ---------------------------------------------------------------------------
-#
-# I ADDED A MIGRATION LOOP AND SHIPPED IT. Comparing `check` alongside `unique`
-# looked like one change and was two, because introspection cannot see a CHECK:
-#
-#     DDL created         CREATE TABLE "t" (... "n" INTEGER CHECK (n > 0))
-#     a violating row     refused, IntegrityError
-#     introspected check  None
-#     second diff         alter_column {"check": {"from": None, "to": "n > 0"}}
-#
-# The constraint IS created and IS enforced. The inspector does not read it
-# back, so every table declaring a CHECK migrated on every deploy -- and
-# `alter_column` routes through table reconstruction on SQLite, so each of
-# those deploys copied the table, dropped it and renamed the copy.
-#
-# That is worse than what it replaced. The old behaviour ignored a CHECK
-# change silently; this rebuilt a table forever to apply a change that was
-# already applied.
-#
-# So `check` is not compared, and this file says why rather than the code
-# quietly going back to how it was. Closing it properly means teaching the
-# inspectors to read a CHECK back -- out of `sqlite_master` for SQLite, out of
-# `pg_constraint` for PostgreSQL -- and until then a changed CHECK still
-# migrates nothing.
-
-
-def test_a_declared_check_does_not_migrate_on_every_deploy() -> None:
-    """The loop I introduced, pinned so it cannot come back."""
-    introspected = {
-        "t": {"columns": {"id": {"type": "text", "primary_key": True},
-                          "n": {"type": "integer"}}}
-    }
-    declared = {
-        "t": {"columns": {"id": {"type": "text", "primary_key": True},
-                          "n": {"type": "integer", "check": "n > 0"}}}
-    }
-
-    assert diff(introspected, declared, dialect="sqlite")["operations"] == [], (
-        "a CHECK the inspector cannot see is proposed on every deploy, and "
-        "alter_column rebuilds the table to apply it"
-    )
-
-
-def test_the_inspector_still_cannot_see_a_check() -> None:
-    """The reason the comparison is out, asserted rather than remembered.
-
-    When an inspector learns to read a CHECK back, this fails, and that is the
-    signal to compare it again.
-    """
-    import inspect
-
-    from declaro_persistum.inspector import shared
-
-    assert "check" not in inspect.getsource(shared.columns_from_pragma_rows), (
-        "the SQLite inspector now reads CHECK constraints, so `check` can "
-        "join the compared properties in _compute_column_alterations"
-    )
+# The section that stood here recorded `check` as a gap, after I shipped the
+# comparison as a migration loop and took it back out. It is closed: all three
+# inspectors read a CHECK now, the round trip is measured on each above, and
+# the comparison is back on.

@@ -21,6 +21,7 @@ from declaro_persistum.abstractions.materialized_views import (
 from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionError
 from declaro_persistum.inspector.shared import (
     assemble_table,
+    checks_from_ddl,
     columns_from_pragma_rows,
     fk_list_from_pragma_rows,
     indexes_from_rows,
@@ -77,6 +78,21 @@ async def columns_of(connection: Any, table: str) -> dict[str, Column]:
     for name in unique_cols_from_index_rows(index_rows, index_info):
         if name in columns:
             columns[name]["unique"] = True
+
+    # A CHECK IS IN NO PRAGMA. SQLite keeps no catalogue of them: the only
+    # record is the text of the CREATE TABLE in `sqlite_master`, so it is read
+    # and parsed. Without this a CHECK is created, enforced and invisible to
+    # the differ, which is how comparing one produced a migration loop earlier
+    # today -- the declared value against None, forever.
+    ddl_rows = await _rows(
+        connection,
+        f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{table}'",
+    )
+    if ddl_rows and ddl_rows[0][0]:
+        for name, expression in checks_from_ddl(ddl_rows[0][0]).items():
+            if name in columns:
+                columns[name]["check"] = expression
+
     return columns
 
 

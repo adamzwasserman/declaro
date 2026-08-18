@@ -424,12 +424,21 @@ def _compute_column_alterations(
     # to drop a UNIQUE column, so the way through is to drop the constraint
     # first and the column second -- and step one did nothing, so step two
     # went on failing forever.
-    # `check` IS NOT HERE, AND ITS ABSENCE IS DELIBERATE. Comparing it added a
-    # migration loop: the constraint is created and enforced, and no inspector
-    # reads it back, so the differ saw None against the declared value on every
-    # deploy -- and `alter_column` rebuilds the table on SQLite to apply it.
-    # See `test_a_declared_check_does_not_migrate_on_every_deploy`.
-    for prop in ("unique",):
+    # `check` IS BACK, AND ONLY BECAUSE ALL THREE INSPECTORS NOW READ ONE.
+    #
+    # It was added, shipped and removed within an hour earlier today. The
+    # constraint was created and enforced and invisible to introspection, so
+    # the differ saw None against the declared value on every deploy, and
+    # `alter_column` rebuilds the table on SQLite -- a loop that copied,
+    # dropped and renamed a table forever to apply a constraint already there.
+    #
+    # What made it safe was not a better comparison. It was teaching SQLite,
+    # PostgreSQL and Turso to report a CHECK, and MEASURING the round trip on
+    # each before turning this back on. Turso was the one that would have
+    # looped: SQLite had just learned to read one and Turso had not, and
+    # enabling this after checking only SQLite would have repeated the same
+    # mistake on a different engine.
+    for prop in ("unique", "check"):
         if current.get(prop) != target.get(prop):
             changes[prop] = {"from": current.get(prop), "to": target.get(prop)}
 

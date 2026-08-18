@@ -30,6 +30,7 @@ from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionErr
 from declaro_persistum.inspector.shared import (
     apply_unique_columns,
     assemble_table,
+    checks_from_ddl,
     columns_from_pragma_rows,
     fk_list_from_pragma_rows,
     indexes_from_rows,
@@ -122,6 +123,20 @@ async def _get_columns(
 
     unique_cols = await _get_unique_columns(connection, table_name)
     apply_unique_columns(columns, unique_cols)
+
+    # A CHECK is in no PRAGMA on this engine either. Turso reported None for
+    # one until 2026-08-17, which is why the differ could not compare a CHECK
+    # without looping on it: the SQLite inspector had just learned to read one
+    # and this one had not, so enabling the comparison would have rebuilt
+    # every Turso table with a CHECK on every deploy.
+    cursor = await connection.execute(
+        f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{table_name}'"
+    )
+    ddl_rows = await cursor.fetchall()
+    if ddl_rows and ddl_rows[0][0]:
+        for name, expression in checks_from_ddl(ddl_rows[0][0]).items():
+            if name in columns:
+                columns[name]["check"] = expression
 
     return columns
 
