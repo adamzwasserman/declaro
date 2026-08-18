@@ -128,3 +128,72 @@ def test_the_injected_names_are_the_ones_an_opener_fills() -> None:
             f"{field} is not a field of Database, so the record in this file "
             f"is testing a shape the package does not build"
         )
+
+
+# ---------------------------------------------------------------------------
+# The far side of the seam
+# ---------------------------------------------------------------------------
+#
+# The tests above record the injection points and assert they are fields of
+# `Database`. That verifies the seam and not what a real opener puts through
+# it, which I recorded as a gap. This closes the local half of it: a local
+# `open_turso` is opened for real and its injected callables are inspected.
+#
+# The replicated half stays open. Opening a replica reaches the remote, and a
+# fake primary answers `status=404, Host not found`.
+
+
+@pytest.mark.turso
+async def test_a_local_open_injects_callables_of_the_right_shape(tmp_path) -> None:
+    """A real `open_turso`, not a record I wrote."""
+    import inspect
+
+    from declaro_persistum import close as close_db
+    from declaro_persistum import open_turso
+
+    db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
+    try:
+        for field in ("replicate_once", "refresh_once"):
+            fn = db[field]
+            assert inspect.iscoroutinefunction(fn), f"{field} is not awaitable"
+            assert list(inspect.signature(fn).parameters) == ["_db"], (
+                f"{field} does not take a Database"
+            )
+    finally:
+        await close_db(db)
+
+
+@pytest.mark.turso
+async def test_a_local_database_never_consults_them(tmp_path) -> None:
+    """`nothing_to_replicate` returns True, which would read as success.
+
+    Every caller guards with `is_replicated` first -- `replicate` raises,
+    `flush` and the shutdown path return early -- so that True is never read.
+    This asserts the guard rather than the placeholder, because if a guard
+    were dropped the placeholder would report a replication that never
+    happened, on a local database, at shutdown.
+    """
+    from declaro_persistum import close as close_db
+    from declaro_persistum import open_turso
+    from declaro_persistum.database import flush, replicate
+
+    db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
+    consulted = False
+
+    async def _tripwire(_db):
+        nonlocal consulted
+        consulted = True
+        return True
+
+    db["replicate_once"] = _tripwire
+    try:
+        await flush(db)
+        with pytest.raises(ValueError, match="no primary"):
+            await replicate(db)
+
+        assert not consulted, (
+            "a local database consulted its replication callable, so the "
+            "placeholder's True would be read as a successful replication"
+        )
+    finally:
+        await close_db(db)
