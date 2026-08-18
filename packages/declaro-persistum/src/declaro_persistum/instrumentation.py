@@ -35,15 +35,66 @@ _SQL_OP_MAP: dict[str, str] = {
     "drop": "alter",
     "pragma": "other",
     "with": "select",
+    # SQLite's upsert. It was absent, so `REPLACE INTO` classified as "other"
+    # and `is_write_op` said False about a statement that rewrites rows.
+    "replace": "insert",
 }
 
 _WRITE_OPS = {"insert", "update", "delete"}
 
 
 def classify_sql(sql: str) -> str:
-    """Classify SQL statement into an op type via dict lookup on first keyword."""
-    first = sql.strip().split(None, 1)[0].lower() if sql.strip() else ""
+    """Classify SQL statement into an op type via dict lookup on first keyword.
+
+    A CTE IS CLASSIFIED BY THE STATEMENT IT LEADS TO, not by the `WITH`. A
+    data-modifying CTE is ordinary SQL -- `WITH x AS (...) DELETE FROM t ...`
+    on PostgreSQL, and the same for UPDATE and INSERT -- and reading the first
+    word called all of them `select`. Measured 2026-08-17:
+
+        REPLACE INTO t VALUES (1)          -> 'other'   write=False
+        WITH x AS (...) DELETE FROM t ...  -> 'select'  write=False
+
+    Both are writes. A consumer using `is_write_op` to decide what goes
+    through the write queue would have sent them down the read path.
+
+    An unrecognised statement is still "other" rather than a guess, and that
+    fallback is right here in a way it is not elsewhere in this package: SQL
+    has more verbs than this table will ever hold, so an unknown one is not a
+    caller error the way an unknown dialect is.
+    """
+    stripped = sql.strip()
+    if not stripped:
+        return "other"
+
+    first = stripped.split(None, 1)[0].lower()
+    if first == "with":
+        return _SQL_OP_MAP.get(_after_the_cte(stripped), "select")
     return _SQL_OP_MAP.get(first, "other")
+
+
+def _after_the_cte(sql: str) -> str:
+    """The keyword a `WITH ...` statement actually performs.
+
+    Scans past balanced parentheses so a SELECT inside the CTE body is not
+    mistaken for the statement's own verb.
+    """
+    depth = 0
+    token = ""
+    for char in sql[len("with"):]:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        elif depth == 0:
+            if char.isalpha():
+                token += char
+                continue
+            if token:
+                lowered = token.lower()
+                if lowered in _SQL_OP_MAP and lowered != "with":
+                    return lowered
+                token = ""
+    return token.lower()
 
 
 def is_write_op(op: str) -> bool:
