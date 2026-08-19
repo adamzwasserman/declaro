@@ -136,6 +136,13 @@ def test_there_is_one_way_in_and_the_second_door_is_gone() -> None:
         sqlite       no generate_sql
         turso        no generate_sql
 
+    All three holes are closed as of 2026-08-19, by different routes.
+    `generate_sql` moved to the package with a dispatch table, and the copy
+    left behind in `applier/shared.py` was removed once coverage showed it
+    dark. `get_transaction_mode` was added to the PostgreSQL applier, because
+    `usage.md` documents importing it from there and that import raised
+    ImportError for as long as the note above stood.
+
     A Protocol nothing satisfies constrains nothing, so `generate_sql` could go
     missing from two of three modules and be noticed by nobody until a user ran
     the command. Every caller of the factory used exactly three names, all of

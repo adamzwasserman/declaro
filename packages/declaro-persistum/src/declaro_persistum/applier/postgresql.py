@@ -27,6 +27,25 @@ def get_dialect() -> str:
     return "postgresql"
 
 
+def get_transaction_mode() -> str:
+    """One failure ends the batch, and the whole batch is rolled back.
+
+    THE OTHER TWO APPLIERS HAVE DECLARED THIS ALL ALONG AND THIS ONE DID NOT.
+    `usage.md` documents importing it from here, and that import raised
+    ImportError. A note in `test_every_cli_command_can_be_called` recorded the
+    absence on 2026-08-17, alongside `generate_sql` missing from the other
+    two: a five-member Protocol that no module satisfied, deleted rather than
+    filled. Deleting it left this hole documented and open.
+
+    `all_or_nothing` is what this module already does. `apply` runs inside
+    `connection.transaction()` and re-raises, so an operation that fails takes
+    the batch with it and leaves nothing behind. Turso is the odd one and says
+    `per_operation`, because it cannot perform several operations the differ
+    emits and refusing a batch for one of them would block the rest forever.
+    """
+    return "all_or_nothing"
+
+
 
 
 async def apply(
