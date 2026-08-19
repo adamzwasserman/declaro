@@ -493,9 +493,25 @@ async def bulk_transfer(
                             })
                         continue
 
-                    if status and status["status"] == "in_progress":
+                    # `failed` MEANS WHAT `in_progress` MEANS: PARTLY COPIED.
+                    # A table is marked failed after batches have already been
+                    # written, so the rows that landed before the failure are
+                    # still there. Only `in_progress` used to be cleared, so a
+                    # retry collided with its own first attempt and failed
+                    # again, for good. Measured 2026-08-18 with three rows and
+                    # a colliding row in the target:
+                    #
+                    #     first run    UNIQUE constraint failed: widgets.id
+                    #     status left  ('failed', 0), two rows landed
+                    #     the colliding row is removed, and the run resumed
+                    #     resumed run  UNIQUE constraint failed: widgets.id
+                    #
+                    # The operator removed the cause and the retry failed
+                    # identically, which made resume useless for the one case
+                    # it exists to serve.
+                    if status and status["status"] in ("in_progress", "failed"):
                         logger.info(
-                            f"Restarting {table}: was in_progress, "
+                            f"Restarting {table}: was {status['status']}, "
                             f"deleting existing rows"
                         )
                         await target_loader["delete_rows"](target_conn, table)
