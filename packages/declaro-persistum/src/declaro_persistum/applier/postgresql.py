@@ -147,7 +147,7 @@ def _column_definition(name: str, col: Column) -> str:
     """
     return column_definition(name, col, "postgresql")
 
-def _drop_table_sql(table: str, details: dict[str, Any]) -> str:
+def _drop_table_sql(table: str, _details: dict[str, Any]) -> str:
     """Generate DROP TABLE statement."""
     return f'DROP TABLE "{table}"'
 

@@ -278,17 +278,24 @@ def _handle_drop_view(
     return deps
 
 
-# Dict-based dispatch table for operation types
+# Dict-based dispatch table for operation types.
+#
+# EVERY LAMBDA TAKES THE SAME FOUR THINGS whether it reads them or not, which
+# is what lets the dispatch be a lookup instead of an if/elif chain (Rule 1).
+# The ones a given handler ignores carry a leading underscore, the same
+# convention `_details` uses in the applier and `_dialect` in the condition
+# renderer, so an argument that is deliberately unread reads differently from
+# one that was forgotten.
 OP_DEPENDENCY_HANDLERS: dict = {
     "drop_table": lambda op, op_idx, all_ops, **kw: _handle_drop_table(op, op_idx, all_ops, kw["dropped_fks"]),
-    "drop_column": lambda op, op_idx, all_ops, **kw: _handle_drop_column(op, all_ops, kw["dropped_fks"], kw["dropped_indexes"]),
-    "create_table": lambda op, op_idx, all_ops, **kw: _handle_create_table(op, kw["created_tables"]),
-    "add_column": lambda op, op_idx, all_ops, **kw: _handle_add_column(op, kw["created_tables"]),
-    "add_foreign_key": lambda op, op_idx, all_ops, **kw: _handle_add_foreign_key(op, all_ops, kw["created_tables"]),
-    "add_index": lambda op, op_idx, all_ops, **kw: _handle_add_index(op, all_ops, kw["created_tables"]),
-    "alter_column": lambda op, op_idx, all_ops, **kw: _handle_alter_column(op, all_ops, kw["dropped_indexes"]),
-    "create_view": lambda op, op_idx, all_ops, **kw: _handle_create_view(op, kw["created_tables"], kw["created_views"]),
-    "drop_view": lambda op, op_idx, all_ops, **kw: _handle_drop_view(op, op_idx, all_ops),
+    "drop_column": lambda op, _op_idx, all_ops, **kw: _handle_drop_column(op, all_ops, kw["dropped_fks"], kw["dropped_indexes"]),
+    "create_table": lambda op, _op_idx, _all_ops, **kw: _handle_create_table(op, kw["created_tables"]),
+    "add_column": lambda op, _op_idx, _all_ops, **kw: _handle_add_column(op, kw["created_tables"]),
+    "add_foreign_key": lambda op, _op_idx, all_ops, **kw: _handle_add_foreign_key(op, all_ops, kw["created_tables"]),
+    "add_index": lambda op, _op_idx, all_ops, **kw: _handle_add_index(op, all_ops, kw["created_tables"]),
+    "alter_column": lambda op, _op_idx, all_ops, **kw: _handle_alter_column(op, all_ops, kw["dropped_indexes"]),
+    "create_view": lambda op, _op_idx, _all_ops, **kw: _handle_create_view(op, kw["created_tables"], kw["created_views"]),
+    "drop_view": lambda op, op_idx, all_ops, **_kw: _handle_drop_view(op, op_idx, all_ops),
 }
 
 
