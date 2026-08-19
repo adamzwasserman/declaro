@@ -113,6 +113,17 @@ def _handle_drop_table(
             view_deps = view_op["details"].get("depends_on", [])
             if table_name in view_deps:
                 deps.append(view_idx)
+
+    # A TABLE THAT REFERENCES THIS ONE MUST GO FIRST. PostgreSQL refuses to
+    # drop a table another still points at, so a plan that dropped the parent
+    # first failed halfway. There is no drop_foreign_key operation to hang the
+    # edge on when both tables are going: the key leaves with the table.
+    for other_idx, other_op in enumerate(all_operations):
+        if other_op["op"] != "drop_table" or other_idx == op_idx:
+            continue
+        if table_name in (other_op["details"].get("references") or []):
+            deps.append(other_idx)
+
     return deps
 
 

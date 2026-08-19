@@ -110,12 +110,37 @@ def diff(
             actual_drops.add(dropped_table)
 
     # Generate DROP TABLE operations
+    #
+    # THE REFERENCES GO WITH IT, because the sort cannot order two drops
+    # without them. `create_table` has always carried its columns, so
+    # `_handle_create_table` can put a parent before its child. `drop_table`
+    # carried an empty dict, so dropping two related tables produced no edge
+    # between them and the order was whatever Kahn's algorithm happened to
+    # emit. Measured 2026-08-18:
+    #
+    #     sqlite      parent first  ok        child first  ok
+    #     postgresql  parent first  FAILS     child first  ok
+    #
+    # So removing two related tables from the models broke the migration on
+    # PostgreSQL, or did not, depending on an order nothing decided. A test
+    # asserting the order passed alone and failed in the suite for that
+    # reason, which is how this was found.
     for table_name in actual_drops:
         operations.append(
             {
                 "op": "drop_table",
                 "table": table_name,
-                "details": {},
+                "details": {
+                    "references": sorted(
+                        {
+                            str(column["references"]).split(".")[0]
+                            for column in (
+                                (current.get(table_name) or {}).get("columns") or {}
+                            ).values()
+                            if column.get("references")
+                        }
+                    )
+                },
             }
         )
 
