@@ -258,9 +258,21 @@ async def table_exists(
     connection: Any,
     table_name: str,
 ) -> bool:
-    """Check if a table exists."""
+    """Does the engine consider a table of this name to be there?
+
+    `lower()` ON BOTH SIDES. Turso folds `sqlite_master.name`, so `= ?` with
+    the name as declared answered False for a table that was there:
+    `table_exists(conn, "turso", "UserProfile")` said no while
+    `SELECT FROM "UserProfile"` returned rows. Same folding as the migration
+    loop `declared_name` fixes above, in a second place the fix did not reach.
+
+    Turso treats the two spellings as one table -- `CREATE TABLE
+    "userprofile"` after `"UserProfile"` is refused as already existing -- so
+    either spelling has to answer True.
+    """
     cursor = await _maybe_await(connection.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+        "AND lower(name) = lower(?)",
         (table_name,),
     ))
     result = await _maybe_await(cursor.fetchone())

@@ -216,8 +216,23 @@ async def introspect(
 
 
 async def table_exists(connection: Any, table: str) -> bool:
-    rows = await _rows(
-        connection,
-        f"SELECT 1 FROM sqlite_master WHERE type='table' AND name='{table}'",
+    """Does the engine consider a table of this name to be there?
+
+    THE NAME IS BOUND, NOT INTERPOLATED. It used to arrive inside an f-string
+    literal, so `od\'d` -- a legal table name -- raised OperationalError
+    instead of answering, and a caller passing a name it did not choose was
+    injectable. The Turso and PostgreSQL implementations both bound theirs.
+
+    `lower()` ON BOTH SIDES, because SQLite treats table names
+    case-insensitively and `=` does not. Measured 2026-08-18: after
+    `CREATE TABLE "UserProfile"`, `SELECT FROM "userprofile"` succeeds and
+    `CREATE TABLE "userprofile"` is refused as already existing. They are one
+    table, so this has to answer True for either spelling. PostgreSQL is the
+    opposite and its implementation is right to compare exactly.
+    """
+    cursor = await connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+        "AND lower(name) = lower(?)",
+        (table,),
     )
-    return bool(rows)
+    return bool(await cursor.fetchall())
