@@ -368,11 +368,34 @@ def pydantic_model_to_table(model_cls: type) -> tuple[str, Table] | None:
     # string annotations to actual types using the model's module globals.
     try:
         annotations = get_type_hints(model_cls)
-    except (NameError, TypeError):
-        # Fall back if a forward reference is unresolvable. Caller will see
-        # the same wrong-but-consistent behavior as pre-0.1.3 — better than
-        # crashing during schema load.
-        annotations = getattr(model_cls, "__annotations__", {})
+    except (NameError, TypeError) as unresolvable:
+        # THE FALLBACK HERE BLAMED THE WRONG FIELD. It read
+        # `annotations = getattr(model_cls, "__annotations__", {})`, with the
+        # comment: "Fall back if a forward reference is unresolvable. Caller
+        # will see the same wrong-but-consistent behavior as pre-0.1.3 --
+        # better than crashing during schema load."
+        #
+        # Two things moved under it. `declared_type` was taught on 2026-08-17
+        # to raise on an annotation it does not recognise rather than quietly
+        # emitting `text`, so the load crashes anyway. And under
+        # `from __future__ import annotations` the raw `__annotations__` holds
+        # every annotation as a STRING, so the first field fails and the field
+        # that actually broke resolution is never reached. Measured
+        # 2026-08-19 on a model whose second field named a type that does not
+        # exist:
+        #
+        #     LoaderError: cannot tell what column type 'int' means.
+        #
+        # `int` is the first field and is fine. An author told that changes a
+        # line that was never wrong.
+        #
+        # "Better than crashing" was the trade and it is not on offer, so what
+        # is left is crashing with the right name.
+        raise LoaderError(
+            f"Cannot resolve the annotations on {model_cls.__name__}: "
+            f"{unresolvable}. Every field is read as a string until this is "
+            f"fixed, so the type of no column can be determined."
+        ) from unresolvable
     model_fields = getattr(model_cls, "model_fields", {})
 
     columns: dict[str, Column] = {}
