@@ -36,24 +36,40 @@ async def _rows(conn: Any, query: str) -> list[tuple]:
     return list(await _maybe_await(cursor.fetchall()) or [])
 
 
+def as_identifier(name: str) -> str:
+    """An identifier as a quoted name, double quotes doubled.
+
+    DEFINED HERE RATHER THAN BESIDE `as_literal` IN `inspector/shared`,
+    because importing the inspector from an abstraction is a cycle: the
+    inspector imports this module.
+
+    Every PRAGMA below drops a name into a double-quoted string, so a legal
+    name holding a double quote closes it and the engine reports a syntax
+    error naming a fragment. The sibling `as_literal` escapes for the single
+    quoting the sqlite_master lookups use. Two quotings, two escapes, and
+    using either for both leaves half the names broken.
+    """
+    return name.replace('"', '""')
+
+
 async def pragma_table_info(conn: Any, table: str) -> list[tuple]:
     """Columns of `table`."""
-    return await _rows(conn, f'PRAGMA table_info("{table}")')
+    return await _rows(conn, f'PRAGMA table_info("{as_identifier(table)}")')
 
 
 async def pragma_index_list(conn: Any, table: str) -> list[tuple]:
     """Indexes on `table`."""
-    return await _rows(conn, f'PRAGMA index_list("{table}")')
+    return await _rows(conn, f'PRAGMA index_list("{as_identifier(table)}")')
 
 
 async def pragma_index_info(conn: Any, index_name: str) -> list[tuple]:
     """Columns covered by `index_name`."""
-    return await _rows(conn, f'PRAGMA index_info("{index_name}")')
+    return await _rows(conn, f'PRAGMA index_info("{as_identifier(index_name)}")')
 
 
 async def pragma_foreign_key_list(conn: Any, table: str) -> list[tuple]:
     """Foreign keys declared on `table`."""
-    return await _rows(conn, f'PRAGMA foreign_key_list("{table}")')
+    return await _rows(conn, f'PRAGMA foreign_key_list("{as_identifier(table)}")')
 
 
 # =============================================================================

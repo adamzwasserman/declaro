@@ -119,10 +119,10 @@ async def _deploy(connection: Any, declared: dict[str, Any]) -> None:
 
 
 @pytest.mark.parametrize(
-    "label,before,after", STEPS, ids=[s[0].replace(" ", "_") for s in STEPS]
+    "_label,before,after", STEPS, ids=[s[0].replace(" ", "_") for s in STEPS]
 )
 async def test_the_change_applies(
-    label: str, before: dict[str, Any], after: dict[str, Any]
+    _label: str, before: dict[str, Any], after: dict[str, Any]
 ) -> None:
     """The floor. A statement the server refuses cannot converge."""
     connection = await _connection()

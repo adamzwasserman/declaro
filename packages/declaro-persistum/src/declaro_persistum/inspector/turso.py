@@ -30,6 +30,7 @@ from declaro_persistum.abstractions.pragma_compat import (
 from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionError
 from declaro_persistum.inspector.shared import (
     apply_unique_columns,
+    as_literal,
     assemble_table,
     checks_from_ddl,
     columns_from_pragma_rows,
@@ -238,7 +239,8 @@ async def _get_columns(
     # and this one had not, so enabling the comparison would have rebuilt
     # every Turso table with a CHECK on every deploy.
     cursor = await connection.execute(
-        f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{table_name}'"
+        f"SELECT sql FROM sqlite_master WHERE type='table' "
+        f"AND name='{as_literal(table_name)}'"
     )
     ddl_rows = await cursor.fetchall()
     if ddl_rows and ddl_rows[0][0]:

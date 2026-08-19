@@ -169,6 +169,32 @@ def fk_list_from_pragma_rows(rows: list[tuple]) -> list[dict[str, str]]:
     ]
 
 
+def as_literal(name: str) -> str:
+    """An identifier as a SQL string literal, apostrophes doubled.
+
+    A PRAGMA takes no bound parameters, and neither does the `name = '...'`
+    of a `sqlite_master` lookup as it was written, so an identifier reaches
+    those queries as text. A legal table named `od\'d` closed the literal and
+    the engine reported `near "d": syntax error` for the whole introspection,
+    not merely for that table. Measured 2026-08-18 on SQLite and on Turso.
+
+    Doubling the apostrophe is the SQL escape for a string literal and it is
+    the whole of the fix. `as_identifier` below does the other quoting, which
+    needs the other escape.
+    """
+    return name.replace("\'", "\'\'")
+
+
+def as_identifier(name: str) -> str:
+    """An identifier as a quoted name, double quotes doubled.
+
+    The PRAGMAs in `pragma_compat` quote with `"` rather than `\'`, so a name
+    holding a double quote closes that one instead. Two quotings, two escapes,
+    and using either escape for both leaves half the names broken.
+    """
+    return name.replace('"', '""')
+
+
 def assemble_table(
     columns: dict[str, Column],
     indexes: dict[str, Index],

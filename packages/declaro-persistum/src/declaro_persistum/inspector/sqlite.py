@@ -20,6 +20,7 @@ from declaro_persistum.abstractions.materialized_views import (
 )
 from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionError
 from declaro_persistum.inspector.shared import (
+    as_literal,
     assemble_table,
     checks_from_ddl,
     columns_from_pragma_rows,
@@ -63,16 +64,16 @@ async def columns_of(connection: Any, table: str) -> dict[str, Column]:
     Uniqueness is not in table_info — it lives in index_list — so the two are
     read together here rather than leaving a caller to remember.
     """
-    info = await _rows(connection, f"PRAGMA table_info('{table}')")
+    info = await _rows(connection, f"PRAGMA table_info('{as_literal(table)}')")
     columns = columns_from_pragma_rows(info)
 
     # `unique_cols_from_index_rows` needs the columns of each index as well as
     # the index list, because a UNIQUE index over two columns is a table
     # constraint and NOT a unique column — only single-column ones set the
     # flag. So index_info is read per index before the pure function decides.
-    index_rows = await _rows(connection, f"PRAGMA index_list('{table}')")
+    index_rows = await _rows(connection, f"PRAGMA index_list('{as_literal(table)}')")
     index_info = {
-        row[1]: await _rows(connection, f"PRAGMA index_info('{row[1]}')")
+        row[1]: await _rows(connection, f"PRAGMA index_info('{as_literal(row[1])}')")
         for row in index_rows
     }
     for name in unique_cols_from_index_rows(index_rows, index_info):
@@ -86,7 +87,8 @@ async def columns_of(connection: Any, table: str) -> dict[str, Column]:
     # today -- the declared value against None, forever.
     ddl_rows = await _rows(
         connection,
-        f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{table}'",
+        f"SELECT sql FROM sqlite_master WHERE type='table' "
+        f"AND name='{as_literal(table)}'",
     )
     if ddl_rows and ddl_rows[0][0]:
         for name, expression in checks_from_ddl(ddl_rows[0][0]).items():
@@ -108,22 +110,22 @@ async def indexes_of(connection: Any, table: str) -> dict[str, Any]:
     consequences of a column definition, not objects a caller declared, and
     reporting them would make the differ try to recreate them.
     """
-    index_rows = await _rows(connection, f"PRAGMA index_list('{table}')")
+    index_rows = await _rows(connection, f"PRAGMA index_list('{as_literal(table)}')")
     index_info = {
-        row[1]: await _rows(connection, f"PRAGMA index_info('{row[1]}')")
+        row[1]: await _rows(connection, f"PRAGMA index_info('{as_literal(row[1])}')")
         for row in index_rows
     }
     sql_rows = await _rows(
         connection,
         f"SELECT name, sql FROM sqlite_master "
-        f"WHERE type = 'index' AND tbl_name = '{table}'",
+        f"WHERE type = 'index' AND tbl_name = '{as_literal(table)}'",
     )
-    index_sql = {name: sql for name, sql in sql_rows}
+    index_sql = dict(sql_rows)
     return indexes_from_rows(index_rows, index_info, index_sql)
 
 
 async def foreign_keys_of(connection: Any, table: str) -> list[dict[str, str]]:
-    rows = await _rows(connection, f"PRAGMA foreign_key_list('{table}')")
+    rows = await _rows(connection, f"PRAGMA foreign_key_list('{as_literal(table)}')")
     return fk_list_from_pragma_rows(rows)
 
 
