@@ -538,6 +538,11 @@ def dry_run_preview(
 
 
 
+# Properties a declaration can simply stop mentioning. Everything else the
+# differ compares can only change value, never be removed.
+REMOVABLE_PROPERTIES = frozenset(("default", "unique", "check"))
+
+
 def apply_reconstruction_changes(
     columns: dict[str, Column], operation: Operation
 ) -> dict[str, Column]:
@@ -559,7 +564,32 @@ def apply_reconstruction_changes(
         for key, value in changes.items():
             if isinstance(value, dict) and "to" in value:
                 value = value["to"]
-            columns[column][key] = value  # type: ignore
+
+            # A `to: None` MEANS THE PROPERTY IS GONE. Assigning it instead
+            # put None into the column definition, and the reconstruction
+            # renderer tests for the KEY rather than the value, so a CHECK
+            # removed from the models became `CHECK (None)` and SQLite read
+            # None as a column name:
+            #
+            #     alter_column widgets
+            #       {'check': {'from': 'length(name) < 3', 'to': None}}
+            #     OperationalError: no such column: None
+            #
+            # The message names the table and says reconstruction failed, so
+            # it reads as the engine refusing a rebuild rather than as a None
+            # this package put in its own SQL. Measured 2026-08-18 on SQLite
+            # and Turso, for a removed CHECK and a removed UNIQUE alike.
+            #
+            # `drop_foreign_key` below has always popped rather than assigned.
+            # The same idea, three branches away, for the same reason.
+            #
+            # `type` and `nullable` are absent from REMOVABLE deliberately:
+            # neither can be taken off a column, only changed, so a None
+            # there is a defect to surface rather than an absence to honour.
+            if value is None and key in REMOVABLE_PROPERTIES:
+                columns[column].pop(key, None)  # type: ignore[misc]
+            else:
+                columns[column][key] = value  # type: ignore
 
     elif op_type == "add_foreign_key":
         column = details["column"]
