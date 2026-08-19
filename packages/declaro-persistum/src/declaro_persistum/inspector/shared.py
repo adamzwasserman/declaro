@@ -179,20 +179,12 @@ def as_literal(name: str) -> str:
     not merely for that table. Measured 2026-08-18 on SQLite and on Turso.
 
     Doubling the apostrophe is the SQL escape for a string literal and it is
-    the whole of the fix. `as_identifier` below does the other quoting, which
-    needs the other escape.
+    the whole of the fix. `as_identifier`, in `abstractions/pragma_compat`,
+    does the other quoting, which needs the other escape. It lives there
+    rather than here because importing the inspector from an abstraction is a
+    cycle, and this one is beside its callers for the same reason.
     """
     return name.replace("\'", "\'\'")
-
-
-def as_identifier(name: str) -> str:
-    """An identifier as a quoted name, double quotes doubled.
-
-    The PRAGMAs in `pragma_compat` quote with `"` rather than `\'`, so a name
-    holding a double quote closes that one instead. Two quotings, two escapes,
-    and using either escape for both leaves half the names broken.
-    """
-    return name.replace('"', '""')
 
 
 def assemble_table(
