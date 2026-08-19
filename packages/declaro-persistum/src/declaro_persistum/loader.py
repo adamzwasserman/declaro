@@ -99,22 +99,25 @@ def _load_toml_file(path: Path) -> Schema:
         if key.startswith("_"):
             continue
         if isinstance(value, dict) and "columns" in value:
-            schema[key] = _normalize_table(value)
+            schema[key] = _normalize_table(value, key)
         elif isinstance(value, dict) and any(isinstance(v, dict) and "type" in v for v in value.values()):
             # Might be a table without explicit columns section
             # Check if it has column-like structure
             # It's columns directly
-            schema[key] = {"columns": _normalize_columns(value)}
+            schema[key] = {"columns": _normalize_columns(value, key)}
 
     return schema
 
 
-def _normalize_table(table_data: dict[str, Any]) -> Table:
-    """Normalize table data from TOML to Table type."""
+def _normalize_table(table_data: dict[str, Any], table_name: str) -> Table:
+    """Normalize table data from TOML to Table type.
+
+    The name is carried through only so a refusal below can name the table.
+    """
     table: Table = {}
 
     if "columns" in table_data:
-        table["columns"] = _normalize_columns(table_data["columns"])
+        table["columns"] = _normalize_columns(table_data["columns"], table_name)
 
     if "primary_key" in table_data:
         pk = table_data["primary_key"]
@@ -135,19 +138,44 @@ def _normalize_table(table_data: dict[str, Any]) -> Table:
     return table
 
 
-def _normalize_columns(columns_data: dict[str, Any]) -> dict[str, Column]:
-    """Normalize column definitions from TOML."""
+def _normalize_columns(
+    columns_data: dict[str, Any], table_name: str
+) -> dict[str, Column]:
+    """Normalize column definitions from TOML.
+
+    THE TABLE NAME IS PASSED SO A REFUSAL CAN SAY WHERE. It was not needed
+    while a missing type was answered with a default, which is the point: a
+    function that never refuses never needs to say which line to look at.
+    """
     columns: dict[str, Column] = {}
 
     for col_name, col_data in columns_data.items():
         if isinstance(col_data, dict):
             col: Column = {}
 
-            # Required field
-            if "type" in col_data:
-                col["type"] = col_data["type"]
-            else:
-                col["type"] = "text"  # Default
+            # A MISSING TYPE IS A BROKEN SCHEMA, NOT A TEXT COLUMN. This read
+            # `col["type"] = "text"  # Default`, and the comment was accurate.
+            #
+            # It is the same fallback three BDD schema helpers were deleted
+            # for on 2026-08-16, recorded in
+            # `test_the_bdd_schema_builder_refuses_a_broken_schema`: "A schema
+            # missing a type is a broken schema, and answering it with TEXT
+            # means every scenario built on that schema tests a table nobody
+            # declared." The helper was fixed and the loader it was helping to
+            # test was not.
+            #
+            # TEXT is the one type that accepts every value, so a typo -- `typ`
+            # for `type` -- produced a column that stores integers as strings
+            # and complains about none of it. Nothing later can tell that from
+            # a column the author meant to be TEXT.
+            if "type" not in col_data:
+                raise LoaderError(
+                    f"Column '{col_name}' in table '{table_name}' declares no "
+                    f"type. It carries {sorted(col_data)}; a column needs "
+                    f"`type`, either as `{col_name} = {{ type = \"text\" }}` "
+                    f"or the short form `{col_name} = \"text\"`."
+                )
+            col["type"] = col_data["type"]
 
             # Optional fields
             if "nullable" in col_data:
@@ -219,7 +247,7 @@ def load_snapshot(schema_dir: str | Path) -> Schema:
         if key == "_meta":
             continue
         if isinstance(value, dict):
-            schema[key] = _normalize_table(value)
+            schema[key] = _normalize_table(value, key)
 
     return schema
 
@@ -286,8 +314,22 @@ def load_decisions(schema_dir: str | Path) -> dict[str, Decision]:
     try:
         content = pending_path.read_text()
         data = tomllib.loads(content)
-    except (tomllib.TOMLDecodeError, OSError):
-        return {}
+    except tomllib.TOMLDecodeError as broken:
+        # AN UNREADABLE FILE IS NOT AN EMPTY ONE. This returned `{}`, which is
+        # also what a directory with no pending decisions returns, so the two
+        # opposite situations had one answer.
+        #
+        # Decisions are how a rename is told from a drop. Discarding them
+        # silently means every ambiguity is asked again, or resolved the other
+        # way, and the other way drops the column and its rows.
+        raise LoaderError(
+            f"Cannot read the pending decisions: {broken}", path=str(pending_path)
+        ) from broken
+    except OSError as unreadable:
+        raise LoaderError(
+            f"Cannot read the pending decisions: {unreadable}",
+            path=str(pending_path),
+        ) from unreadable
 
     decisions: dict[str, Decision] = {}
 
