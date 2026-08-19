@@ -122,6 +122,7 @@ async def cmd_apply(
         load_snapshot,
         save_snapshot,
     )
+    from declaro_persistum.validator import validate_schema
 
     # Determine interactive mode
     is_tty = sys.stdin.isatty() and sys.stdout.isatty()
@@ -134,6 +135,32 @@ async def cmd_apply(
         print(f"Loading schema from {schema_dir}...", file=sys.stderr)
 
     target = load_schema(schema_dir)
+
+    # THE VALIDATOR IS ASKED BEFORE ANY DDL IS WRITTEN, and was asked nowhere
+    # in this command before. `validate_schema` was called from `cmd_validate`
+    # and from no other CLI path, so `declaro apply` wrote DDL to a live
+    # database without consulting a single rule.
+    #
+    # `apply_migrations_async` was given this check the same day and the CLI
+    # does not go through it: it diffs and applies directly. So the command an
+    # operator runs against production was the one still unchecked.
+    #
+    # A foreign key pointing at a table nobody declared is the clearest case.
+    # The validator catches it by comparing the schema against itself; SQLite
+    # accepts the DDL because it does not check a reference at creation time,
+    # so the command printed its operations, applied them, exited 0, and left
+    # a column pointing at nothing.
+    #
+    # Errors only. An unknown type and a circular reference are warnings,
+    # because the first may be a custom type or an enum and the second may
+    # want deferrable constraints, and refusing those would reject schemas
+    # that work.
+    invalid = validate_schema(target)["errors"]
+    if invalid:
+        print("Schema is not valid, and nothing has been applied:", file=sys.stderr)
+        for message in invalid:
+            print(f"  {message}", file=sys.stderr)
+        return 1
 
     if verbose:
         print(f"Loaded {len(target)} tables from schema files", file=sys.stderr)
