@@ -85,6 +85,41 @@ class ValidationResult(TypedDict):
     errors: list[str]
 
 
+# WHAT THE RENDERERS CANNOT CARRY, and why each one breaks.
+#
+#     "   the appliers write an identifier as `"{name}"` at 65 places and
+#         none escapes it, so `quo"ted` renders `"quo"ted"` and the engine
+#         reads three tokens. Both SQLite and PostgreSQL refuse it.
+#
+#     ;   the SQLite and Turso appliers split rendered SQL on `;` before
+#         executing, so a name holding one is torn in half. PostgreSQL runs
+#         the statement whole and takes it without complaint.
+#
+# Measured 2026-08-18 by declaring one table per name and migrating. Refusing
+# here rather than escaping at 65 render sites is deliberate: the boundary is
+# one place, and an author hears about the name while writing it rather than
+# during a deploy. `column_definition` already makes the same trade for a
+# default it cannot spell.
+#
+# `'`, a space, mixed case and non-ASCII are all rendered correctly and are
+# NOT refused. A check that rejected anything unusual would be worse than the
+# defect, because it would reject working schemas.
+UNRENDERABLE_IN_A_NAME = {
+    '"': 'the appliers do not escape a double quote inside a quoted name',
+    ";": "the SQLite and Turso appliers split rendered SQL on a semicolon",
+}
+
+
+def _unrenderable(kind: str, owner: str, name: str) -> list[str]:
+    """Every character in `name` this package cannot write into SQL."""
+    return [
+        f"{kind} '{name}' in '{owner}' cannot be migrated: it contains "
+        f"'{character}', and {reason}. Rename it."
+        for character, reason in UNRENDERABLE_IN_A_NAME.items()
+        if character in name
+    ]
+
+
 def validate_schema(schema: Schema) -> ValidationResult:
     """
     Validate a schema for correctness.
@@ -107,10 +142,13 @@ def validate_schema(schema: Schema) -> ValidationResult:
     errors: list[str] = []
 
     for table_name, table in schema.items():
+        errors.extend(_unrenderable("Table", table_name, table_name))
+
         # Validate columns
         columns = table.get("columns", {})
 
         for col_name, col_def in columns.items():
+            errors.extend(_unrenderable("Column", table_name, col_name))
             column = _validate_column(table_name, col_name, col_def, schema)
             col_warnings, col_errors = column["warnings"], column["errors"]
             warnings.extend(col_warnings)
