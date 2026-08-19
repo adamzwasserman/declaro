@@ -76,8 +76,28 @@ class TestColumnTypes:
         w = _validate_column("users", "tags", {"type": "customtype[]"}, {})["warnings"]
         assert w == [], "the [] suffix is accepted on its own"
 
-    def test_a_column_with_no_type_defaults_to_text_and_does_not_warn(self):
-        assert _validate_column("users", "id", {}, {}) == {"warnings": [], "errors": []}
+    def test_a_column_with_no_type_is_an_error(self):
+        """CHANGED ON PURPOSE 2026-08-19. This asserted the opposite.
+
+        It was named `..._defaults_to_text_and_does_not_warn` and required
+        `{}` to validate clean, which pinned the fallback it was named for:
+        `col_def.get("type", "text")` in the validator, matching the same
+        guess in three renderers.
+
+        A column with no type is rendered TEXT by every engine, and TEXT
+        accepts every value, so the column takes integers and timestamps and
+        stores each as a string. The first sign is a comparison behaving
+        oddly in production, and nothing before that can tell it from a
+        column the author meant to be TEXT.
+
+        The same fallback was removed from the TOML loader the same day, and
+        three BDD schema helpers were deleted for it three days before that.
+        This is the fourth place it lived and the last one that defended it.
+        """
+        result = _validate_column("users", "id", {}, {})
+
+        assert result["errors"], result
+        assert result["warnings"] == [], result
 
 
 class TestColumnWarnings:
