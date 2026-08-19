@@ -35,14 +35,12 @@ added column the original case is gone from `name` AND from `sql`:
     after CREATE TABLE "MixedCase" (...)     sql holds "MixedCase"
     after ALTER TABLE ... ADD COLUMN         sql holds  mixedcase
 
-Index names fold the same way and are worse, because that loop is silent. A
-declared index `IxUserName` reads back as `ixusername`, so every deploy emits
-`drop_index ixusername` then `add_index IxUserName`, both succeed, and the
-migration reports success forever while doing the same work every time.
+That one is held below as a strict xfail. Recovering the case from the
+catalogue cannot fix it, because the engine no longer holds it, and that
+needs a decision about where the declared name is kept.
 
-Both are held below as strict xfails. Recovering the case from the catalogue
-cannot fix either one: the engine no longer holds it. That needs a decision
-about where the declared name is kept, and it is Adam's to make.
+Index and view names fold identically and ARE recoverable, because their own
+DDL is never regenerated. Both are fixed and tested below.
 
 WHY NO GATE CAUGHT IT. The operation matrix beside this file applies eleven
 operations on three engines and every case named its tables `users`, `posts`,
@@ -269,45 +267,6 @@ async def test_a_mixed_case_table_survives_being_altered() -> None:
         await connection.close()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Turso folds a stored index name, and this loop is silent: "
-    "drop_index then add_index every deploy, both reporting success",
-)
-async def test_a_mixed_case_index_name_converges() -> None:
-    """The silent half, and the more dangerous one.
-
-    The table defect announces itself: the operation fails and the applier
-    refuses to call the migration successful. This one does not. Both
-    operations succeed, so every deploy drops and recreates the index and
-    reports success, forever.
-    """
-    import turso.aio
-
-    declared = {
-        "users": {
-            **DECLARED,
-            "indexes": {"IxUserName": {"columns": ["name"]}},
-        }
-    }
-    connection = await turso.aio.connect(
-        os.path.join(tempfile.mkdtemp(), "index.db")
-    )
-    try:
-        await _deploy(connection, "turso", declared)
-
-        actual = await introspect(connection, "turso")
-        remaining = diff(
-            {n: actual[n] for n in declared if n in actual},
-            declared,
-            dialect="turso",
-        )["operations"]
-
-        assert remaining == [], [(o["op"], o["table"]) for o in remaining]
-    finally:
-        await connection.close()
-
-
 # ---------------------------------------------------------------------------
 # A foreign key pointing at a capitalised table
 # ---------------------------------------------------------------------------
@@ -394,5 +353,96 @@ async def test_a_lower_case_reference_is_unaffected(dialect: str) -> None:
         actual = await introspect(connection, dialect)
 
         assert actual["posts"]["columns"]["uid"]["references"] == "users.id"
+    finally:
+        await connection.close()
+
+
+# ---------------------------------------------------------------------------
+# The law, and the two object kinds it still catches
+# ---------------------------------------------------------------------------
+
+# EVERY PLACE A NAME COMES BACK OUT OF TURSO, enumerated 2026-08-18 rather
+# than found one at a time, after three separate fixes for what turned out to
+# be one thing:
+#
+#     sqlite_master.name (table)   FOLDS
+#     sqlite_master.name (index)   FOLDS
+#     sqlite_master.name (view)    FOLDS
+#     PRAGMA foreign_key_list      FOLDS
+#     PRAGMA index_list            FOLDS
+#     sqlite_master.sql            keeps
+#     PRAGMA table_info            keeps
+#     PRAGMA index_info            keeps
+#
+# SQLite folds none of the eight. The rule is not a list: Turso folds every
+# OBJECT name and keeps every COLUMN name and the DDL text. So a column is
+# safe everywhere, and a table, an index and a view are not.
+#
+# The DDL keeps the original, which is what makes all three recoverable by the
+# same reading `declared_name` already does for tables.
+
+INDEXED = {
+    "users": {
+        **DECLARED,
+        "indexes": {"IxUserName": {"columns": ["name"]}},
+    }
+}
+
+
+@pytest.mark.parametrize("dialect", sorted(ENGINES))
+async def test_an_index_reads_back_under_the_name_it_was_given(
+    dialect: str,
+) -> None:
+    """The silent loop: drop_index then add_index forever, reporting success."""
+    connection = await ENGINES[dialect]()
+    try:
+        await _deploy(connection, dialect, INDEXED)
+
+        actual = await introspect(connection, dialect)
+
+        assert "IxUserName" in actual["users"].get("indexes", {}), (
+            f"{dialect} introspected "
+            f"{sorted(actual['users'].get('indexes', {}))}"
+        )
+    finally:
+        await connection.close()
+
+
+@pytest.mark.parametrize("dialect", sorted(ENGINES))
+async def test_a_capitalised_index_converges(dialect: str) -> None:
+    connection = await ENGINES[dialect]()
+    try:
+        await _deploy(connection, dialect, INDEXED)
+
+        actual = await introspect(connection, dialect)
+        remaining = diff(
+            {n: actual[n] for n in INDEXED if n in actual},
+            INDEXED,
+            dialect=dialect,
+        )["operations"]
+
+        assert remaining == [], [(o["op"], o["table"]) for o in remaining]
+    finally:
+        await connection.close()
+
+
+@pytest.mark.parametrize("dialect", sorted(ENGINES))
+async def test_a_view_reads_back_under_the_name_it_was_given(
+    dialect: str,
+) -> None:
+    """Views are the fifth site and nothing had asked what folding costs there."""
+    from declaro_persistum.inspector import introspect_with_views
+
+    connection = await ENGINES[dialect]()
+    try:
+        await _deploy(connection, dialect, {"users": DECLARED})
+        await connection.execute(
+            'CREATE VIEW "ActiveUsers" AS SELECT id FROM "users"'
+        )
+        await connection.commit()
+
+        _tables, views = await introspect_with_views(connection, dialect)
+
+        assert "ActiveUsers" in views, f"{dialect} introspected {sorted(views)}"
     finally:
         await connection.close()

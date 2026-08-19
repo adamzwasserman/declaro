@@ -139,8 +139,24 @@ def restore_reference_case(schema: Schema) -> None:
 def declared_name(stored: str, ddl: str | None) -> str:
     """Give back the name as it was written, which Turso does not store.
 
-    TURSO FOLDS `sqlite_master.name` AND KEEPS THE ORIGINAL IN `sql`.
-    Measured 2026-08-18 after `CREATE TABLE "UserProfile" (...)`:
+    TURSO FOLDS EVERY OBJECT NAME AND KEEPS EVERY COLUMN NAME. All eight
+    places a name comes back out of this engine, measured 2026-08-18 rather
+    than found one at a time, after three separate fixes for one thing:
+
+        sqlite_master.name (table)   FOLDS
+        sqlite_master.name (index)   FOLDS
+        sqlite_master.name (view)    FOLDS
+        PRAGMA foreign_key_list      FOLDS
+        PRAGMA index_list            FOLDS
+        sqlite_master.sql            keeps
+        PRAGMA table_info            keeps
+        PRAGMA index_info            keeps
+
+    SQLite folds none of the eight. So this reads a CREATE of any kind, not
+    only a table: an index and a view fold in exactly the same way and are
+    recovered from exactly the same place.
+
+    Measured after `CREATE TABLE "UserProfile" (...)`:
 
         name: 'userprofile'
         sql : 'CREATE TABLE "UserProfile" (id INTEGER PRIMARY KEY, ...)'
@@ -183,7 +199,8 @@ def declared_name(stored: str, ddl: str | None) -> str:
 # capture stops at whitespace or the opening paren. Anchored at the start so
 # a `CREATE TABLE` inside a string literal later in the DDL cannot match.
 _CREATE_TABLE_NAME = re.compile(
-    r'^\s*CREATE\s+(?:TEMP\s+|TEMPORARY\s+)?TABLE\s+'
+    r'^\s*CREATE\s+(?:TEMP\s+|TEMPORARY\s+)?(?:UNIQUE\s+)?'
+    r'(?:TABLE|INDEX|VIEW)\s+'
     r'(?:IF\s+NOT\s+EXISTS\s+)?'
     r'(?:"(?P<quoted>[^"]+)"|`(?P<btick>[^`]+)`|\[(?P<brack>[^\]]+)\]'
     r'|(?P<bare>[^\s(]+))',
@@ -276,7 +293,18 @@ async def _get_indexes(
         sql_row = await _maybe_await(sql_cursor.fetchone())
         index_sql[idx_name] = sql_row[0] if sql_row else None
 
-    return indexes_from_rows(index_rows, index_info, index_sql)
+    indexes = indexes_from_rows(index_rows, index_info, index_sql)
+
+    # `PRAGMA index_list` folds the index name exactly as `sqlite_master`
+    # folds a table's, so a declared `IxUserName` came back as `ixusername`
+    # and every deploy emitted drop_index then add_index. Both succeeded, so
+    # the migration reported success while doing the same work forever. The
+    # index's own DDL keeps the original, and that is what `declared_name`
+    # reads.
+    return {
+        declared_name(name, index_sql.get(name)): index
+        for name, index in indexes.items()
+    }
 
 
 async def _get_foreign_keys(
@@ -370,4 +398,9 @@ async def introspect_views(
             for name, query, refresh in await _maybe_await(cursor.fetchall())
         }
 
-    return views_from_rows(rows, matviews)
+    # The fifth folding site. A view's name comes back from
+    # `sqlite_master.name` like a table's, and its `sql` keeps the original
+    # the same way, so the same reading recovers it.
+    named = [(declared_name(row[0], row[1]), *row[1:]) for row in rows]
+
+    return views_from_rows(named, matviews)
