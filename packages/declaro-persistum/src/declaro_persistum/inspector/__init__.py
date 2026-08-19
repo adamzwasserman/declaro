@@ -71,6 +71,26 @@ async def introspect_with_views(
     return cast(tuple[Schema, dict[str, View]], result)
 
 
+# THE SAME SHAPE AS `TABLE_EXISTS`, and for the same reason. `usage.md` has
+# documented `get_table_columns` as the inspector's since before it existed on
+# more than one engine: it was defined in `turso.py` alone, so the documented
+# call worked on one of three backends and could not be written portably. That
+# is exactly how `declaro generate` came to raise on SQLite.
+TABLE_COLUMNS: dict[str, Any] = {
+    "postgresql": postgresql.get_table_columns,
+    "sqlite": sqlite.get_table_columns,
+    "turso": turso.get_table_columns,
+}
+
+
+async def get_table_columns(
+    connection: Any, dialect: Dialect, table: str
+) -> dict[str, Any]:
+    """One table's columns, or a refusal naming the table."""
+    reader = for_dialect(TABLE_COLUMNS, dialect, "Table-column readers")
+    return cast(dict[str, Any], await reader(connection, table))
+
+
 async def table_exists(connection: Any, dialect: Dialect, table: str) -> bool:
     exists = for_dialect(TABLE_EXISTS, dialect, "Table-exists checks")
     return cast(bool, await exists(connection, table))
@@ -78,7 +98,9 @@ async def table_exists(connection: Any, dialect: Dialect, table: str) -> bool:
 
 __all__ = [
     "INSPECTORS",
+    "TABLE_COLUMNS",
     "TABLE_EXISTS",
+    "get_table_columns",
     "introspect",
     "introspect_with_views",
     "table_exists",

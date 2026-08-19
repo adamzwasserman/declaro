@@ -10,6 +10,7 @@ a rewrite, so nothing about what PostgreSQL is asked has changed.
 from typing import Any
 
 from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionError
+from declaro_persistum.exceptions import DeclaroError
 from declaro_persistum.inspector.shared import normalize_check
 from declaro_persistum.inspector.shared import normalize_fk_action as _normalize_fk_action
 from declaro_persistum.types import Column, Index, Schema, Table, View
@@ -402,6 +403,21 @@ async def _get_foreign_keys(
     )
 
     return [dict(row) for row in rows]
+
+
+async def get_table_columns(
+    connection: Any,
+    table_name: str,
+) -> dict[str, Column]:
+    """One table's columns, or a refusal naming the table.
+
+    See the note on the SQLite twin: this was documented as the inspector's
+    and defined on Turso alone.
+    """
+    if not await table_exists(connection, table_name):
+        raise DeclaroError(f"Table '{table_name}' does not exist")
+
+    return await _get_columns(connection, table_name, "public")
 
 
 async def table_exists(

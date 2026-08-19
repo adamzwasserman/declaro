@@ -752,7 +752,10 @@ All inspectors provide these utility methods:
 exists = await inspector.table_exists(conn, "users")
 
 # Get columns for a specific table (raises DeclaroError if table doesn't exist)
-columns = await inspector.get_table_columns(conn, "users")
+# Takes the dialect, like every other entry point here: until 2026-08-19 this
+# function existed on the Turso inspector alone, so the call below worked on
+# one backend of three and could not be written portably.
+columns = await get_table_columns(conn, "sqlite", "users")
 for col_name, col in columns.items():
     print(f"{col_name}: {col['type']}")
 

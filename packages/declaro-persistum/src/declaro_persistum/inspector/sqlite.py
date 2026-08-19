@@ -19,6 +19,7 @@ from declaro_persistum.abstractions.materialized_views import (
     MATVIEW_METADATA_TABLE,
 )
 from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionError
+from declaro_persistum.exceptions import DeclaroError
 from declaro_persistum.inspector.shared import (
     as_literal,
     assemble_table,
@@ -122,6 +123,23 @@ async def indexes_of(connection: Any, table: str) -> dict[str, Any]:
     )
     index_sql = dict(sql_rows)
     return indexes_from_rows(index_rows, index_info, index_sql)
+
+
+async def get_table_columns(connection: Any, table: str) -> dict[str, Column]:
+    """One table's columns, or a refusal naming the table.
+
+    `columns_of` beside this returns an empty dict for a table that is not
+    there, and an empty dict is also what a table with no columns would look
+    like. Only one of those is possible, so the two answers have to differ.
+
+    `usage.md` has documented this function as the inspector's since before it
+    existed on more than one engine. It was defined in `inspector/turso.py`
+    alone, which is the shape that made `declaro generate` raise on SQLite.
+    """
+    if not await table_exists(connection, table):
+        raise DeclaroError(f"Table '{table}' does not exist")
+
+    return await columns_of(connection, table)
 
 
 async def foreign_keys_of(connection: Any, table: str) -> list[dict[str, str]]:

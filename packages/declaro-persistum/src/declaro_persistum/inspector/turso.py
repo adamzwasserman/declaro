@@ -28,6 +28,7 @@ from declaro_persistum.abstractions.pragma_compat import (
     pragma_table_info,
 )
 from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionError
+from declaro_persistum.exceptions import DeclaroError
 from declaro_persistum.inspector.shared import (
     apply_unique_columns,
     as_literal,
@@ -349,8 +350,6 @@ async def get_table_columns(
 ) -> dict[str, Any]:
     """Get column definitions for a specific table."""
     if not await table_exists(connection, table_name):
-        from declaro_persistum.exceptions import DeclaroError
-
         raise DeclaroError(f"Table '{table_name}' does not exist")
 
     return await _get_columns(connection, table_name)
