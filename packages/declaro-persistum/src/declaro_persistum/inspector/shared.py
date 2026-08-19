@@ -134,11 +134,33 @@ def indexes_from_rows(
         is_unique = bool(idx_row[2])
         origin = idx_row[3]
 
-        if origin in ("pk", "u"):
-            continue
-
         idx_cols = index_info_rows.get(idx_name, [])
         columns = [row[2] for row in idx_cols]
+
+        # A `pk` INDEX IS ALWAYS A CONSEQUENCE; A `u` INDEX IS ONLY SOMETIMES.
+        # This skipped both, with the note: "they are consequences of a column
+        # definition, not objects a caller declared, and reporting them would
+        # make the differ try to recreate them."
+        #
+        # True of a single-column unique. SQLite creates the index itself for
+        # `"email" TEXT UNIQUE`, and `apply_unique_columns` folds it back onto
+        # the column as `unique: True`, so the fact lives on the column and
+        # the index does not need to carry it.
+        #
+        # A MULTI-COLUMN UNIQUE HAS NO COLUMN TO FOLD ONTO. It is a
+        # table-level constraint somebody wrote by hand, and skipping it lost
+        # the fact rather than moving it. Measured 2026-08-19 against a table
+        # this package did not create:
+        #
+        #     CREATE TABLE "t" (..., UNIQUE ("c","d"))
+        #     introspect -> indexes: None, and nothing on either column
+        #
+        # Invisible, so a rebuild wrote the table back without it and the
+        # duplicates it was refusing started being accepted.
+        if origin == "pk":
+            continue
+        if origin == "u" and len(columns) <= 1:
+            continue
 
         index: Index = {"columns": columns}
 

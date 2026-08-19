@@ -284,7 +284,15 @@ async def _get_indexes(
         idx_name = idx_row[1]
         origin = idx_row[3]
 
-        if origin in ("pk", "u"):
+        # ONLY `pk` IS SKIPPED HERE NOW. This skipped `u` as well, so a
+        # multi-column unique never had its columns fetched and
+        # `indexes_from_rows` could not decide anything about it: the index
+        # arrived with an empty column list and was dropped for looking like
+        # a single-column one.
+        #
+        # The SQLite inspector does not filter here at all, which is why the
+        # same fix landed in `indexes_from_rows` and worked there first.
+        if origin == "pk":
             continue
 
         index_info[idx_name] = await pragma_index_info(connection, idx_name)
