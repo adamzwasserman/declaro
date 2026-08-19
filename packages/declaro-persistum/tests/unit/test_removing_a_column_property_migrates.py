@@ -102,10 +102,10 @@ async def _migrate(connection: Any, dialect: str) -> None:
     )
 
 
-@pytest.mark.parametrize("prop,ddl", STORED, ids=[s[0] for s in STORED])
+@pytest.mark.parametrize("_prop,ddl", STORED, ids=[s[0] for s in STORED])
 @pytest.mark.parametrize("dialect", sorted(ENGINES))
 async def test_removing_it_from_the_model_migrates(
-    dialect: str, prop: str, ddl: str
+    dialect: str, _prop: str, ddl: str
 ) -> None:
     """The measured crash, for every property that can be taken away."""
     connection = await ENGINES[dialect]()
@@ -146,10 +146,10 @@ async def test_the_property_is_actually_gone_afterwards(
         await connection.close()
 
 
-@pytest.mark.parametrize("prop,ddl", STORED, ids=[s[0] for s in STORED])
+@pytest.mark.parametrize("_prop,ddl", STORED, ids=[s[0] for s in STORED])
 @pytest.mark.parametrize("dialect", sorted(ENGINES))
 async def test_the_rows_survive_the_rebuild(
-    dialect: str, prop: str, ddl: str
+    dialect: str, _prop: str, ddl: str
 ) -> None:
     """Removing a constraint rebuilds the table, and a rebuild can lose rows."""
     connection = await ENGINES[dialect]()
@@ -168,9 +168,9 @@ async def test_the_rows_survive_the_rebuild(
         await connection.close()
 
 
-@pytest.mark.parametrize("prop,ddl", STORED, ids=[s[0] for s in STORED])
+@pytest.mark.parametrize("_prop,ddl", STORED, ids=[s[0] for s in STORED])
 @pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_the_removal_converges(dialect: str, prop: str, ddl: str) -> None:
+async def test_the_removal_converges(dialect: str, _prop: str, ddl: str) -> None:
     """A second deploy has no work left."""
     connection = await ENGINES[dialect]()
     try:
