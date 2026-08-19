@@ -496,9 +496,20 @@ def generate_operation_sql(operation: Operation) -> str:
     return generator(table, details)
 
 
-def generate_sql(operations: list[Operation], execution_order: list[int]) -> list[str]:
-    """Generate SQL statements in execution order."""
-    return [generate_operation_sql(operations[i]) for i in execution_order]
+# `generate_sql` WAS HERE AND IS NOW ONLY IN `applier/__init__.py`. This copy
+# took no dialect and rendered through `generate_operation_sql` below, which
+# is the SQLite and Turso renderer, so a caller who imported it and passed
+# PostgreSQL operations got SQLite SQL and no error. `_alter_column_sql`
+# differs entirely between the two: PostgreSQL emits ALTER TABLE ALTER COLUMN,
+# this module emits a reconstruction comment.
+#
+# Nothing called it and coverage reported it dark. The surviving function's
+# docstring records what a copy cost last time: the loop lived in
+# `applier/postgresql.py` alone, so `declaro generate` worked on PostgreSQL
+# and raised AttributeError on the two backends a developer is likeliest to
+# be running. It was moved up and given a dispatch table so the copies could
+# not drift, and this one was left behind. Guarded by
+# `test_no_second_generate_sql_without_a_dialect.py`.
 
 
 # =============================================================================
