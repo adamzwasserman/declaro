@@ -1,0 +1,203 @@
+"""Changing a PostgreSQL table that already exists had never been done.
+
+MEASURED 2026-08-18 with `coverage json` over the whole suite. Unrun in
+`applier/postgresql.py`:
+
+    ALTER COLUMN ... DROP NOT NULL   and   SET NOT NULL
+    ALTER COLUMN ... DROP DEFAULT    and   SET DEFAULT
+    ADD CONSTRAINT ... UNIQUE
+    ON DELETE and ON UPDATE on an added foreign key
+
+Every gate before this one created its tables from nothing. Creating is not
+altering: a CREATE TABLE renders one statement and an ALTER renders a
+different one per property, and only the create side had ever run against a
+server.
+
+These are the ordinary migrations. Making a column nullable, giving it a
+default, taking the default away, adding a unique constraint to a table with
+rows in it: that is what a schema change usually is, and none of it had been
+executed.
+
+CONVERGENCE IS THE ORACLE, and the rows are checked beside it. An ALTER that
+rewrites a table can succeed and lose what was in it, which no diff would
+show.
+"""
+
+from __future__ import annotations
+
+import os
+from typing import Any
+
+import pytest
+
+from declaro_persistum.applier import apply
+from declaro_persistum.differ.core import diff
+from declaro_persistum.inspector import introspect
+
+pytestmark = [pytest.mark.precommit, pytest.mark.postgresql, pytest.mark.integration]
+
+PROBE_URL = os.environ.get(
+    "TEST_POSTGRESQL_URL", "postgresql://postgres:postgres@localhost/declaro_probe"
+)
+
+TOUCHED = ("children", "widgets", "parents")
+
+
+def _widgets(**column_overrides: Any) -> dict[str, Any]:
+    columns: dict[str, Any] = {
+        "id": {"type": "integer", "primary_key": True},
+        "name": {"type": "text"},
+    }
+    columns["name"] = {**columns["name"], **column_overrides}
+    return {"widgets": {"columns": columns}}
+
+
+# (label, the schema to arrive at first, the schema to change to)
+STEPS: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
+    ("make a column NOT NULL", _widgets(), _widgets(nullable=False)),
+    ("make a column nullable", _widgets(nullable=False), _widgets()),
+    ("give a column a default", _widgets(), _widgets(default="'unnamed'")),
+    ("take a default away", _widgets(default="'unnamed'"), _widgets()),
+    ("change a default", _widgets(default="'a'"), _widgets(default="'b'")),
+    ("make a column unique", _widgets(), _widgets(unique=True)),
+    (
+        "add a foreign key with ON DELETE",
+        {
+            "parents": {"columns": {"id": {"type": "integer", "primary_key": True}}},
+            "children": {
+                "columns": {
+                    "id": {"type": "integer", "primary_key": True},
+                    "pid": {"type": "integer"},
+                }
+            },
+        },
+        {
+            "parents": {"columns": {"id": {"type": "integer", "primary_key": True}}},
+            "children": {
+                "columns": {
+                    "id": {"type": "integer", "primary_key": True},
+                    "pid": {
+                        "type": "integer",
+                        "references": "parents.id",
+                        "on_delete": "cascade",
+                    },
+                }
+            },
+        },
+    ),
+]
+
+
+async def _connection() -> Any:
+    import asyncpg
+
+    try:
+        return await asyncpg.connect(PROBE_URL)
+    except (OSError, asyncpg.PostgresError) as unreachable:
+        pytest.skip(f"no server at {PROBE_URL}: {unreachable}")
+
+
+async def _clean(connection: Any) -> None:
+    for name in TOUCHED:
+        await connection.execute(f'DROP TABLE IF EXISTS "{name}" CASCADE')
+
+
+async def _deploy(connection: Any, declared: dict[str, Any]) -> None:
+    actual = await introspect(connection, "postgresql")
+    plan = diff(
+        {n: actual[n] for n in declared if n in actual},
+        declared,
+        dialect="postgresql",
+    )
+    await apply(
+        connection,
+        plan["operations"],
+        plan["execution_order"],
+        "postgresql",
+        dry_run=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "label,before,after", STEPS, ids=[s[0].replace(" ", "_") for s in STEPS]
+)
+async def test_the_change_applies(
+    label: str, before: dict[str, Any], after: dict[str, Any]
+) -> None:
+    """The floor. A statement the server refuses cannot converge."""
+    connection = await _connection()
+    try:
+        await _clean(connection)
+        await _deploy(connection, before)
+
+        await _deploy(connection, after)
+    finally:
+        await _clean(connection)
+        await connection.close()
+
+
+@pytest.mark.parametrize(
+    "label,before,after", STEPS, ids=[s[0].replace(" ", "_") for s in STEPS]
+)
+async def test_the_change_converges(
+    label: str, before: dict[str, Any], after: dict[str, Any]
+) -> None:
+    connection = await _connection()
+    try:
+        await _clean(connection)
+        await _deploy(connection, before)
+        await _deploy(connection, after)
+
+        actual = await introspect(connection, "postgresql")
+        remaining = diff(
+            {n: actual[n] for n in after if n in actual},
+            after,
+            dialect="postgresql",
+        )["operations"]
+
+        assert remaining == [], (
+            f"{label} migrates on every deploy: "
+            f"{[(o['op'], o['table'], o['details']) for o in remaining]}"
+        )
+    finally:
+        await _clean(connection)
+        await connection.close()
+
+
+@pytest.mark.parametrize(
+    "label,before,after", STEPS, ids=[s[0].replace(" ", "_") for s in STEPS]
+)
+async def test_the_rows_are_still_there_afterwards(
+    label: str, before: dict[str, Any], after: dict[str, Any]
+) -> None:
+    """An ALTER that rewrites a table can succeed and empty it.
+
+    No diff would show that, because a diff compares shapes.
+    """
+    connection = await _connection()
+    try:
+        await _clean(connection)
+        await _deploy(connection, before)
+        # EVERY COLUMN GETS A VALUE. Inserting only `id` leaves `name` NULL,
+        # and a migration to NOT NULL then fails for the right reason: the
+        # engine is protecting rows that would violate the new constraint.
+        # The first version of this test did that and reported the engine's
+        # correct refusal as a defect.
+        for table in after:
+            columns = after[table]["columns"]
+            names = ", ".join(f'"{c}"' for c in columns)
+            values = ", ".join(
+                "1" if columns[c]["type"] == "integer" else "'x'" for c in columns
+            )
+            await connection.execute(
+                f'INSERT INTO "{table}" ({names}) VALUES ({values})'
+            )
+
+        await _deploy(connection, after)
+
+        for table in after:
+            count = await connection.fetchval(f'SELECT count(*) FROM "{table}"')
+            assert count == 1, f"{label} left {count} rows in {table}"
+    finally:
+        await _clean(connection)
+        await connection.close()

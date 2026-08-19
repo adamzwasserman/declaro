@@ -207,6 +207,43 @@ def _alter_column_sql(table: str, details: dict[str, Any]) -> str:
                 f'ALTER TABLE "{table}" ALTER COLUMN "{col_name}" SET DEFAULT {new_default}'
             )
 
+    # UNIQUE IS NOT AN ALTER COLUMN ON THIS ENGINE, it is a table constraint,
+    # and it was not handled at all. The differ compares `unique` on every
+    # dialect, so making a column unique produced an alter_column whose
+    # changes this function did not recognise, it returned "", and asyncpg
+    # crashed inside its own protocol:
+    #
+    #     rendered ''
+    #     AttributeError: 'NoneType' object has no attribute 'decode'
+    #
+    # The constraint is named for the table and column so that dropping it
+    # later can find it, which is the same convention `_add_constraint_sql`
+    # uses below.
+    if "unique" in changes:
+        constraint = f"{table}_{col_name}_key"
+        if changes["unique"]["to"]:
+            statements.append(
+                f'ALTER TABLE "{table}" ADD CONSTRAINT "{constraint}" '
+                f'UNIQUE ("{col_name}")'
+            )
+        else:
+            statements.append(
+                f'ALTER TABLE "{table}" DROP CONSTRAINT IF EXISTS "{constraint}"'
+            )
+
+    # AN OPERATION THAT RENDERS NOTHING IS A BUG, NOT A NO-OP. Returning ""
+    # sent an empty string to `connection.execute`, and asyncpg does not
+    # refuse it: it fails deep inside the protocol with an AttributeError
+    # about `decode`, which names nothing an operator could act on. Saying
+    # which change was not recognised turns a driver crash into a sentence.
+    if not statements:
+        raise ValueError(
+            f"No PostgreSQL statement for an alter_column on "
+            f"{table!r}.{col_name!r}: this renderer handles "
+            f"{['type', 'nullable', 'default', 'unique']} and the operation "
+            f"asked for {sorted(changes)}."
+        )
+
     return "; ".join(statements)
 
 
