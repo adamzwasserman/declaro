@@ -26,16 +26,19 @@ from __future__ import annotations
 
 import pytest
 
+from declaro_persistum.bulk_loader import BulkLoader
+
 pytestmark = pytest.mark.precommit
 
-OPERATIONS = {
-    "read_rows",
-    "load_rows",
-    "count_rows",
-    "delete_rows",
-    "disable_fk_checks",
-    "enable_fk_checks",
-}
+# READ FROM THE TYPE, NOT LISTED HERE. This was a literal set of six, and
+# adding four more to `BulkLoader` on 2026-08-19 failed it with "postgresql is
+# missing []" -- an empty list, because the set differed in the other
+# direction and the message only knew how to report one of them.
+#
+# The gate is still a gate: the type declares what a loader must carry, and
+# this asserts every dialect carries all of it. Taking the vocabulary from the
+# type is what stops the two drifting, which is the whole point of the file.
+OPERATIONS = set(BulkLoader.__annotations__)
 
 
 def test_every_supported_dialect_has_every_operation() -> None:
@@ -47,7 +50,9 @@ def test_every_supported_dialect_has_every_operation() -> None:
     )
     for dialect, loader in BULK_LOADERS.items():
         assert set(loader) == OPERATIONS, (
-            f"{dialect} is missing {sorted(OPERATIONS - set(loader))}"
+            f"{dialect} is missing {sorted(OPERATIONS - set(loader))} and "
+            f"carries {sorted(set(loader) - OPERATIONS)} the type does not "
+            f"declare"
         )
         for name, fn in loader.items():
             assert callable(fn), f"{dialect}[{name!r}] is not callable"

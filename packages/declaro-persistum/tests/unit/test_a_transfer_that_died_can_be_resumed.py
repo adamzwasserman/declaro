@@ -343,3 +343,39 @@ async def test_progress_is_reported_for_a_skipped_table(
     finally:
         await close(source)
         await close(target)
+
+
+async def test_the_rows_are_durable_from_a_second_connection(
+    schema_path: str,
+) -> None:
+    """A batch commit is what makes a transfer resumable at all.
+
+    AND THIS DOES NOT CATCH A MISSING COMMIT EITHER, which is worth saying
+    rather than implying. Turning `dbapi_commit` into a no-op survives every
+    test in this file including this one, because `bulk_transfer` closes its
+    target connection before returning and closing commits. The per-batch
+    commit matters only when the process dies MID-transfer, and nothing here
+    kills a process mid-transfer.
+
+    What this does check is that the rows are durable rather than merely
+    visible to the connection that wrote them, which no other test here
+    asserts. The batch-commit itself is covered by nothing, and saying so is
+    better than a comment claiming it is covered by this.
+    """
+    import aiosqlite
+
+    source, target = await _seeded_pair()
+    try:
+        await _transfer(source, target, schema_path, resume=False, on_progress=None)
+
+        reader = await aiosqlite.connect(target["path"])
+        try:
+            cursor = await reader.execute('SELECT id, name FROM "widgets" ORDER BY id')
+            landed = [tuple(r) for r in await cursor.fetchall()]
+        finally:
+            await reader.close()
+
+        assert landed == ROWS, landed
+    finally:
+        await close(source)
+        await close(target)

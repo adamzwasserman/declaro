@@ -22,7 +22,11 @@ from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 from declaro_persistum.abstractions.enums import is_enum_table
-from declaro_persistum.bulk_loader import BULK_LOADERS, BulkLoader
+from declaro_persistum.bulk_loader import (
+    BULK_LOADERS,
+    TRANSFER_STATE_TABLE,
+    BulkLoader,
+)
 from declaro_persistum.database import Database, reading
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, TransferError
 from declaro_persistum.inspector import introspect
@@ -32,7 +36,6 @@ from declaro_persistum.types import Dialect
 logger = logging.getLogger(__name__)
 
 # Internal table used to track transfer progress
-TRANSFER_STATE_TABLE = "_dp_transfer_state"
 
 
 # ---------------------------------------------------------------------------
@@ -144,111 +147,57 @@ def _toposort_tables(
 # Progress table management
 # ---------------------------------------------------------------------------
 
-_CREATE_PROGRESS_TABLE_SQL = f"""
-CREATE TABLE IF NOT EXISTS "{TRANSFER_STATE_TABLE}" (
-    table_name TEXT PRIMARY KEY,
-    status TEXT NOT NULL DEFAULT 'pending',
-    rows_transferred INTEGER NOT NULL DEFAULT 0,
-    total_rows INTEGER NOT NULL DEFAULT 0,
-    started_at TEXT,
-    completed_at TEXT,
-    error TEXT
-)
-"""
 
 
-async def _ensure_progress_table(conn: Any, _loader: BulkLoader) -> None:
-    """Create the transfer progress table if it doesn't exist.
+async def _ensure_progress_table(conn: Any, loader: BulkLoader) -> None:
+    """Create the transfer progress table if it is not there.
 
-    THE UNDERSCORE MARKS IT UNREAD, NOT SETTLED. The loader is handed to this
-    function precisely so it need not ask what kind of connection it has, and
-    three sites in this module ask anyway, with `hasattr(conn, "fetch")`. That
-    is dispatch on type wearing a duck-typing coat, in a package built on
-    dispatch tables.
+    THE LOADER ANSWERS THIS NOW, AND THE CONNECTION USED TO. All three of
+    these functions asked `hasattr(conn, "fetch")` to decide between asyncpg
+    and the DB-API drivers, which is a dispatch on type in a package built on
+    dispatch tables. The dialect is known at the top of `bulk_transfer`, the
+    loader is resolved from it there, and it was passed into this function and
+    ignored.
 
-    It is not a defect: the sniff gives the right answer on all three engines,
-    measured 2026-08-18. It is a Rule 1 violation whose fix is a seventh
-    BulkLoader operation covering these three statements, implemented once per
-    family, which is a change to a published TypedDict and not one to make in
-    passing.
+    The sniff was not wrong: asyncpg has `fetch`, aiosqlite and pyturso do
+    not, measured on all three. What it cost is that the correlation was
+    asserted nowhere, so a driver that grew a `fetch` method would have sent a
+    connection down the wrong branch, and every one of these three writes to
+    the table that decides whether a resumed transfer skips or repeats work.
     """
-    # Detect connection type by checking for asyncpg-style execute
-    if hasattr(conn, "fetch"):
-        # asyncpg
-        await conn.execute(_CREATE_PROGRESS_TABLE_SQL)
-    else:
-        # DB-API 2.0 style (aiosqlite, turso)
-        await conn.execute(_CREATE_PROGRESS_TABLE_SQL, ())
-        await conn.commit()
+    await loader["ensure_progress"](conn)
 
 
 async def _get_table_status(
-    conn: Any, table_name: str
+    conn: Any, loader: BulkLoader, table_name: str
 ) -> dict[str, Any] | None:
-    """Get transfer status for a table. Returns None if no record."""
-    if hasattr(conn, "fetch"):
-        # asyncpg
-        row = await conn.fetchrow(
-            f'SELECT * FROM "{TRANSFER_STATE_TABLE}" WHERE table_name = $1',
-            table_name,
-        )
-        if row:
-            return dict(row)
-    else:
-        cursor = await conn.execute(
-            f'SELECT table_name, status, rows_transferred, total_rows, '
-            f'started_at, completed_at, error FROM "{TRANSFER_STATE_TABLE}" '
-            f'WHERE table_name = ?',
-            (table_name,),
-        )
-        row = await cursor.fetchone()
-        if row:
-            return {
-                "table_name": row[0],
-                "status": row[1],
-                "rows_transferred": row[2],
-                "total_rows": row[3],
-                "started_at": row[4],
-                "completed_at": row[5],
-                "error": row[6],
-            }
-    return None
+    """One table's transfer status, or None if it has none."""
+    return await loader["read_progress"](conn, table_name)
 
 
 async def _upsert_progress(
     conn: Any,
+    loader: BulkLoader,
     table_name: str,
     status: str,
     rows_transferred: int = 0,
     total_rows: int = 0,
     error: str | None = None,
 ) -> None:
-    """Insert or update transfer progress for a table."""
-    now = datetime.now(UTC).isoformat()
+    """Record where a table's transfer got to.
 
-    if hasattr(conn, "fetch"):
-        # asyncpg - use INSERT ON CONFLICT
-        await conn.execute(
-            f'INSERT INTO "{TRANSFER_STATE_TABLE}" '
-            f"(table_name, status, rows_transferred, total_rows, started_at, error) "
-            f"VALUES ($1, $2, $3, $4, $5, $6) "
-            f"ON CONFLICT (table_name) DO UPDATE SET "
-            f"status = $2, rows_transferred = $3, total_rows = $4, error = $6"
-            + (", completed_at = $5" if status in ("completed", "failed") else ""),
-            table_name, status, rows_transferred, total_rows, now, error,
-        )
-    else:
-        await conn.execute(
-            f'INSERT INTO "{TRANSFER_STATE_TABLE}" '
-            f"(table_name, status, rows_transferred, total_rows, started_at, error) "
-            f"VALUES (?, ?, ?, ?, ?, ?) "
-            f"ON CONFLICT (table_name) DO UPDATE SET "
-            f"status = excluded.status, rows_transferred = excluded.rows_transferred, "
-            f"total_rows = excluded.total_rows, error = excluded.error"
-            + (", completed_at = excluded.started_at" if status in ("completed", "failed") else ""),
-            (table_name, status, rows_transferred, total_rows, now, error),
-        )
-        await conn.commit()
+    The clock is read here and passed down, so both families stamp the same
+    instant rather than each calling `now()` for itself.
+    """
+    await loader["write_progress"](
+        conn,
+        table_name,
+        status,
+        rows_transferred,
+        total_rows,
+        error,
+        datetime.now(UTC).isoformat(),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +231,9 @@ async def _transfer_table(
         "error": None,
     }
 
-    await _upsert_progress(target_conn, table, "in_progress", 0, total_rows)
+    await _upsert_progress(
+        target_conn, target_loader, table, "in_progress", 0, total_rows
+    )
 
     if on_progress:
         on_progress(progress)
@@ -297,15 +248,16 @@ async def _transfer_table(
 
         await target_loader["load_rows"](target_conn, table, columns, batch)
 
-        # Commit after each batch for resumability
-        if hasattr(target_conn, "commit"):
-            await target_conn.commit()
+        # Commit after each batch for resumability. The loader knows whether
+        # its engine needs the call; asyncpg owns its own transaction.
+        await target_loader["commit"](target_conn)
 
         rows_transferred += len(batch)
         offset += len(batch)
 
         await _upsert_progress(
-            target_conn, table, "in_progress", rows_transferred, total_rows
+            target_conn, target_loader, table, "in_progress",
+            rows_transferred, total_rows,
         )
 
         progress["rows_transferred"] = rows_transferred
@@ -315,7 +267,8 @@ async def _transfer_table(
     progress["status"] = "completed"
     progress["rows_transferred"] = rows_transferred
     await _upsert_progress(
-        target_conn, table, "completed", rows_transferred, total_rows
+        target_conn, target_loader, table, "completed",
+        rows_transferred, total_rows,
     )
 
     if on_progress:
@@ -491,7 +444,7 @@ async def bulk_transfer(
 
                 # Check resume status
                 if resume:
-                    status = await _get_table_status(target_conn, table)
+                    status = await _get_table_status(target_conn, target_loader, table)
                     if status and status["status"] == "completed":
                         logger.info(f"Skipping {table}: already completed")
                         tables_skipped += 1
@@ -528,8 +481,7 @@ async def bulk_transfer(
                             f"deleting existing rows"
                         )
                         await target_loader["delete_rows"](target_conn, table)
-                        if hasattr(target_conn, "commit"):
-                            await target_conn.commit()
+                        await target_loader["commit"](target_conn)
 
                 # Transfer the table
                 try:
@@ -565,7 +517,8 @@ async def bulk_transfer(
                     logger.error(f"Failed to transfer {table}: {error_msg}")
 
                     await _upsert_progress(
-                        target_conn, table, "failed", error=error_msg
+                        target_conn, target_loader, table, "failed",
+                        error=error_msg,
                     )
                     if on_progress:
                         on_progress({

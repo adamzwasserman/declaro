@@ -34,7 +34,7 @@ from typing import Any, Protocol, TypedDict
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["BULK_LOADERS", "BulkLoader"]
+__all__ = ["BULK_LOADERS", "TRANSFER_STATE_TABLE", "BulkLoader"]
 
 
 class ReadRows(Protocol):
@@ -80,6 +80,93 @@ class SetFkChecks(Protocol):
         raise NotImplementedError("CODE NOT WRITTEN")
 
 
+class Commit(Protocol):
+    # POSITIONAL-ONLY, and the only Protocol here that is. A Protocol's
+    # `__call__` matches on parameter NAMES as well as types, so an
+    # implementation that ignores its argument cannot use the `_conn` spelling
+    # this codebase uses for exactly that: mypy reads the rename as an
+    # incompatible signature. The PostgreSQL commit is a genuine no-op,
+    # because asyncpg owns its transaction, so it is the one implementation
+    # that has nothing to read. Every caller passes positionally.
+    async def __call__(self, conn: Any, /) -> None:
+        """Make the work so far durable.
+
+        asyncpg owns its transaction and has nothing to do here; the DB-API
+        drivers need the call. `hasattr(conn, "commit")` answered this at two
+        sites, which is the same dispatch-on-type as the three progress
+        functions and is right for the same reason and asserted nowhere.
+        """
+        raise NotImplementedError("CODE NOT WRITTEN")
+
+
+class EnsureProgress(Protocol):
+    async def __call__(self, conn: Any) -> None:
+        """Create the transfer progress table if it is not there."""
+        raise NotImplementedError("CODE NOT WRITTEN")
+
+
+class ReadProgress(Protocol):
+    async def __call__(self, conn: Any, table: str) -> dict[str, Any] | None:
+        """One table's transfer status, or None if it has none."""
+        raise NotImplementedError("CODE NOT WRITTEN")
+
+
+class WriteProgress(Protocol):
+    async def __call__(
+        self,
+        conn: Any,
+        table: str,
+        status: str,
+        rows_transferred: int,
+        total_rows: int,
+        error: str | None,
+        now: str,
+    ) -> None:
+        """Record where a table's transfer got to.
+
+        `now` is passed rather than read, so the caller decides the clock and
+        both families stamp the same instant.
+        """
+        raise NotImplementedError("CODE NOT WRITTEN")
+
+
+# THE PROGRESS TABLE IS PART OF THE TRANSFER, so reading and writing it is
+# part of what an engine has to know how to do. `transfer.py` used to answer
+# `hasattr(conn, "fetch")` at three sites to decide between asyncpg and the
+# DB-API drivers, which is a dispatch on type in a package built on dispatch
+# tables. The dialect was already known and the loader was already passed in
+# and ignored.
+#
+# THREE THINGS DIFFER AND NONE OF THEM IS COSMETIC. asyncpg takes `$1`
+# positionally, returns rows from `fetchrow`, and owns its transaction; the
+# DB-API drivers take `?` as a tuple, return a cursor from `execute`, and need
+# an explicit commit. The row also comes back as a mapping from one and a
+# plain tuple from the other.
+TRANSFER_STATE_TABLE = "_dp_transfer_state"
+
+_CREATE_PROGRESS_TABLE_SQL = f"""
+CREATE TABLE IF NOT EXISTS "{TRANSFER_STATE_TABLE}" (
+    table_name TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'pending',
+    rows_transferred INTEGER NOT NULL DEFAULT 0,
+    total_rows INTEGER NOT NULL DEFAULT 0,
+    started_at TEXT,
+    completed_at TEXT,
+    error TEXT
+)
+"""
+
+_PROGRESS_COLUMNS = (
+    "table_name",
+    "status",
+    "rows_transferred",
+    "total_rows",
+    "started_at",
+    "completed_at",
+    "error",
+)
+
+
 class BulkLoader(TypedDict):
     """Six operations, as data.
 
@@ -94,6 +181,10 @@ class BulkLoader(TypedDict):
     delete_rows: DeleteRows
     disable_fk_checks: SetFkChecks
     enable_fk_checks: SetFkChecks
+    commit: Commit
+    ensure_progress: EnsureProgress
+    read_progress: ReadProgress
+    write_progress: WriteProgress
 
 
 # ------------------------------------------------------------- PostgreSQL
@@ -148,6 +239,49 @@ async def postgres_delete_rows(conn: Any, table: str) -> int:
     # asyncpg returns the tag "DELETE N".
     result = await conn.execute(f'DELETE FROM "{table}"')
     return int(result.split()[-1]) if result else 0
+
+
+async def postgres_commit(_conn: Any) -> None:
+    """Nothing to do. asyncpg's transaction context commits on exit."""
+    return None
+
+
+async def postgres_ensure_progress(conn: Any) -> None:
+    await conn.execute(_CREATE_PROGRESS_TABLE_SQL)
+
+
+async def postgres_read_progress(conn: Any, table: str) -> dict[str, Any] | None:
+    row = await conn.fetchrow(
+        f'SELECT * FROM "{TRANSFER_STATE_TABLE}" WHERE table_name = $1',
+        table,
+    )
+    return dict(row) if row else None
+
+
+async def postgres_write_progress(
+    conn: Any,
+    table: str,
+    status: str,
+    rows_transferred: int,
+    total_rows: int,
+    error: str | None,
+    now: str,
+) -> None:
+    completed = ", completed_at = $5" if status in ("completed", "failed") else ""
+    await conn.execute(
+        f'INSERT INTO "{TRANSFER_STATE_TABLE}" '
+        f"(table_name, status, rows_transferred, total_rows, started_at, error) "
+        f"VALUES ($1, $2, $3, $4, $5, $6) "
+        f"ON CONFLICT (table_name) DO UPDATE SET "
+        f"status = $2, rows_transferred = $3, total_rows = $4, error = $6"
+        + completed,
+        table,
+        status,
+        rows_transferred,
+        total_rows,
+        now,
+        error,
+    )
 
 
 async def postgres_disable_fk_checks(conn: Any) -> None:
@@ -208,6 +342,53 @@ async def dbapi_delete_rows(conn: Any, table: str) -> int:
     return count
 
 
+async def dbapi_commit(conn: Any) -> None:
+    await conn.commit()
+
+
+async def dbapi_ensure_progress(conn: Any) -> None:
+    await conn.execute(_CREATE_PROGRESS_TABLE_SQL, ())
+    await conn.commit()
+
+
+async def dbapi_read_progress(conn: Any, table: str) -> dict[str, Any] | None:
+    """A cursor and a tuple, where asyncpg gives a row that is already a map."""
+    cursor = await conn.execute(
+        f'SELECT {", ".join(_PROGRESS_COLUMNS)} FROM "{TRANSFER_STATE_TABLE}" '
+        f"WHERE table_name = ?",
+        (table,),
+    )
+    row = await cursor.fetchone()
+    return dict(zip(_PROGRESS_COLUMNS, row, strict=True)) if row else None
+
+
+async def dbapi_write_progress(
+    conn: Any,
+    table: str,
+    status: str,
+    rows_transferred: int,
+    total_rows: int,
+    error: str | None,
+    now: str,
+) -> None:
+    completed = (
+        ", completed_at = excluded.started_at"
+        if status in ("completed", "failed")
+        else ""
+    )
+    await conn.execute(
+        f'INSERT INTO "{TRANSFER_STATE_TABLE}" '
+        f"(table_name, status, rows_transferred, total_rows, started_at, error) "
+        f"VALUES (?, ?, ?, ?, ?, ?) "
+        f"ON CONFLICT (table_name) DO UPDATE SET "
+        f"status = excluded.status, "
+        f"rows_transferred = excluded.rows_transferred, "
+        f"total_rows = excluded.total_rows, error = excluded.error" + completed,
+        (table, status, rows_transferred, total_rows, now, error),
+    )
+    await conn.commit()
+
+
 async def dbapi_disable_fk_checks(conn: Any) -> None:
     await conn.execute("PRAGMA foreign_keys = OFF", ())
 
@@ -223,6 +404,10 @@ POSTGRESQL: BulkLoader = {
     "delete_rows": postgres_delete_rows,
     "disable_fk_checks": postgres_disable_fk_checks,
     "enable_fk_checks": postgres_enable_fk_checks,
+    "commit": postgres_commit,
+    "ensure_progress": postgres_ensure_progress,
+    "read_progress": postgres_read_progress,
+    "write_progress": postgres_write_progress,
 }
 
 DBAPI: BulkLoader = {
@@ -232,6 +417,10 @@ DBAPI: BulkLoader = {
     "delete_rows": dbapi_delete_rows,
     "disable_fk_checks": dbapi_disable_fk_checks,
     "enable_fk_checks": dbapi_enable_fk_checks,
+    "commit": dbapi_commit,
+    "ensure_progress": dbapi_ensure_progress,
+    "read_progress": dbapi_read_progress,
+    "write_progress": dbapi_write_progress,
 }
 
 # SQLite and Turso share one entry rather than holding two copies that can drift.
