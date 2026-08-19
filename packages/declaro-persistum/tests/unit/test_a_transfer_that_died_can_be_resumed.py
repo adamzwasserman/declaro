@@ -350,17 +350,23 @@ async def test_the_rows_are_durable_from_a_second_connection(
 ) -> None:
     """A batch commit is what makes a transfer resumable at all.
 
-    AND THIS DOES NOT CATCH A MISSING COMMIT EITHER, which is worth saying
-    rather than implying. Turning `dbapi_commit` into a no-op survives every
-    test in this file including this one, because `bulk_transfer` closes its
-    target connection before returning and closing commits. The per-batch
-    commit matters only when the process dies MID-transfer, and nothing here
-    kills a process mid-transfer.
+    TWO COMMITS DO THIS JOB AND EITHER ONE SUFFICES, which is why removing
+    one of them fails nothing. Measured 2026-08-19:
 
-    What this does check is that the rows are durable rather than merely
-    visible to the connection that wrote them, which no other test here
-    asserts. The batch-commit itself is covered by nothing, and saying so is
-    better than a comment claiming it is covered by this.
+        dbapi_commit -> no-op                    11 passed
+        dbapi_write_progress commit removed      11 passed
+        both removed                              8 failed
+
+    `_transfer_table` commits the batch and then writes the progress row,
+    which commits again, so each covers the other. A second commit is
+    harmless on these engines and `writers.py` records that measurement, so
+    this is redundancy rather than a defect. It does mean a mutation of
+    either one is survivable, and no test here can tell them apart.
+
+    That the commit is needed AT ALL is not in doubt. `bulk_transfer` writes
+    through `reading(target)`, and a write through that scope with no commit
+    is gone: measured directly, 0 rows to a second connection without one and
+    1 with.
     """
     import aiosqlite
 
@@ -376,6 +382,63 @@ async def test_the_rows_are_durable_from_a_second_connection(
             await reader.close()
 
         assert landed == ROWS, landed
+    finally:
+        await close(source)
+        await close(target)
+
+
+async def test_the_batches_before_a_failure_are_already_durable(
+    schema_path: str,
+) -> None:
+    """The per-batch commit, which a completed transfer cannot measure.
+
+    A transfer that runs to the end commits by closing its connection, so
+    removing the batch commit passes every other test here. The commit exists
+    for the run that STOPS part way, and this is that run: batch size one, a
+    row already in the target that collides with the source's third, so two
+    batches land and the third raises.
+
+    A fresh connection then sees the two that landed. Without the batch
+    commit it sees none of them, and the resume that follows would start over
+    rather than continue, which is the whole reason the progress table is
+    written as the transfer goes rather than at the end.
+    """
+    import aiosqlite
+
+    source, target = await _seeded_pair()
+    try:
+        async with writing(target) as connection:
+            await connection.execute(
+                'INSERT INTO "widgets" (id, name) VALUES (?, ?)', (3, "squatter")
+            )
+            await connection.commit()
+
+        result = await bulk_transfer(
+            source,
+            target,
+            "sqlite",
+            "sqlite",
+            schema_path,
+            batch_size=1,
+            tables=["widgets"],
+            expand_enums=False,
+            on_progress=None,
+            resume=True,
+        )
+        assert not result["success"], "the setup was meant to stop part way"
+
+        reader = await aiosqlite.connect(target["path"])
+        try:
+            cursor = await reader.execute(
+                'SELECT id FROM "widgets" WHERE name != ? ORDER BY id', ("squatter",)
+            )
+            landed = [row[0] for row in await cursor.fetchall()]
+        finally:
+            await reader.close()
+
+        assert landed == [1, 2], (
+            f"the batches before the failure were not committed: {landed}"
+        )
     finally:
         await close(source)
         await close(target)
