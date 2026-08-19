@@ -87,6 +87,20 @@ async def introspect(
             table_name = declared_name(stored_name, row[1])
             schema[table_name] = await _introspect_table(connection, stored_name)
 
+        # A FOREIGN KEY NAMES ITS TARGET, AND THE PRAGMA FOLDS THAT TOO.
+        # `PRAGMA foreign_key_list("Post")` gives back `userprofile` for a
+        # column declared `references: UserProfile.id`, so the differ saw a
+        # change and emitted drop_foreign_key then add_foreign_key on every
+        # deploy. Both go through table reconstruction on this engine, so
+        # every deploy copied the whole table into a new one and reported
+        # success. SQLite's PRAGMA returns `UserProfile` and needs none of
+        # this. Measured 2026-08-18.
+        #
+        # The names recovered above are the answer, so this runs after the
+        # loop rather than inside it: a table may reference one introspected
+        # later.
+        restore_reference_case(schema)
+
         if include_views:
             return schema, views_
 
@@ -100,6 +114,26 @@ async def introspect(
                 dialect="turso",
             ) from e
         raise
+
+
+def restore_reference_case(schema: Schema) -> None:
+    """Point every `references` at the table name as it was declared.
+
+    Mutates in place because it is finishing a dict this function just built
+    and nobody else has seen. A table that the schema does not hold is left
+    exactly as the engine gave it: guessing at a name for a table nobody
+    declared would turn a readable mismatch into an invented one.
+    """
+    declared = {name.lower(): name for name in schema}
+
+    for table in schema.values():
+        for column in table.get("columns", {}).values():
+            reference = column.get("references")
+            if not reference or "." not in reference:
+                continue
+            target, _, target_column = reference.partition(".")
+            if target.lower() in declared:
+                column["references"] = f"{declared[target.lower()]}.{target_column}"
 
 
 def declared_name(stored: str, ddl: str | None) -> str:

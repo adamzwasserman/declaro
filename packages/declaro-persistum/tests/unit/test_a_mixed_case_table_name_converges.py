@@ -306,3 +306,93 @@ async def test_a_mixed_case_index_name_converges() -> None:
         assert remaining == [], [(o["op"], o["table"]) for o in remaining]
     finally:
         await connection.close()
+
+
+# ---------------------------------------------------------------------------
+# A foreign key pointing at a capitalised table
+# ---------------------------------------------------------------------------
+
+# THE FOLD HAS MORE THAN ONE CONSEQUENCE and this is the third found. Measured
+# 2026-08-18 after creating `Post` with a reference to `UserProfile`:
+#
+#     turso   PRAGMA foreign_key_list -> ('userprofile', 'uid', 'id', ...)
+#     sqlite  PRAGMA foreign_key_list -> ('UserProfile', 'uid', 'id', ...)
+#
+# So on Turso the column reads back as `references: userprofile.id` against a
+# declaration of `UserProfile.id`, the differ sees a change, and every deploy
+# emits drop_foreign_key then add_foreign_key. Both go through table
+# reconstruction on this engine, so every deploy copies the whole table into a
+# new one. It reports success each time.
+
+FK_SCHEMA = {
+    "UserProfile": DECLARED,
+    "Post": {
+        "columns": {
+            "id": {"type": "integer", "primary_key": True},
+            "uid": {"type": "integer", "references": "UserProfile.id"},
+        }
+    },
+}
+
+
+@pytest.mark.parametrize("dialect", sorted(ENGINES))
+async def test_a_reference_to_a_capitalised_table_converges(dialect: str) -> None:
+    """A rebuild of the whole table on every deploy, reported as success."""
+    connection = await ENGINES[dialect]()
+    try:
+        await _deploy(connection, dialect, FK_SCHEMA)
+
+        actual = await introspect(connection, dialect)
+        remaining = diff(
+            {n: actual[n] for n in FK_SCHEMA if n in actual},
+            FK_SCHEMA,
+            dialect=dialect,
+        )["operations"]
+
+        assert remaining == [], (
+            f"{dialect} rebuilds Post on every deploy: "
+            f"{[(o['op'], o['table']) for o in remaining]}"
+        )
+    finally:
+        await connection.close()
+
+
+@pytest.mark.parametrize("dialect", sorted(ENGINES))
+async def test_the_reference_reads_back_as_it_was_declared(dialect: str) -> None:
+    """The cause, so a fix in the differ cannot mask it.
+
+    `references` is a string this package writes into SQL. Introspection has
+    to hand back the name that was declared, not the name the catalogue holds.
+    """
+    connection = await ENGINES[dialect]()
+    try:
+        await _deploy(connection, dialect, FK_SCHEMA)
+
+        actual = await introspect(connection, dialect)
+
+        assert actual["Post"]["columns"]["uid"]["references"] == "UserProfile.id"
+    finally:
+        await connection.close()
+
+
+@pytest.mark.parametrize("dialect", sorted(ENGINES))
+async def test_a_lower_case_reference_is_unaffected(dialect: str) -> None:
+    """The control."""
+    schema = {
+        "users": DECLARED,
+        "posts": {
+            "columns": {
+                "id": {"type": "integer", "primary_key": True},
+                "uid": {"type": "integer", "references": "users.id"},
+            }
+        },
+    }
+    connection = await ENGINES[dialect]()
+    try:
+        await _deploy(connection, dialect, schema)
+
+        actual = await introspect(connection, dialect)
+
+        assert actual["posts"]["columns"]["uid"]["references"] == "users.id"
+    finally:
+        await connection.close()
