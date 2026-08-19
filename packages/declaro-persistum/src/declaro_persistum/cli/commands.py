@@ -421,6 +421,34 @@ async def cmd_migrate_remote(
         if verbose:
             print("Stripped FK constraints from target schema (--no-fks)")
 
+    # ASKED BEFORE THE NETWORK, WHICH IS THE POINT OF PUTTING IT HERE. This
+    # command writes to a production cloud database, and it reached that
+    # database before checking the schema at all: a dangling reference was
+    # answered by `sync engine operation failed ... status=404`, after an auth
+    # token had been used, rather than by the validator on the developer's
+    # machine.
+    #
+    # It is the last of the three paths that migrate. `apply_migrations_async`
+    # and `cmd_apply` were given the same check the same day.
+    #
+    # AFTER the enum expansion and the FK strip on purpose: `--no-fks` removes
+    # references, so validating before it would refuse a schema the command
+    # was told not to send those references for.
+    #
+    # Errors only, as elsewhere. An unknown type is a warning because it may
+    # be a custom type or an enum.
+    from declaro_persistum.validator import validate_schema
+
+    invalid = validate_schema(target_schema)["errors"]
+    if invalid:
+        print(
+            "Schema is not valid, and nothing has been sent to the remote:",
+            file=sys.stderr,
+        )
+        for message in invalid:
+            print(f"  {message}", file=sys.stderr)
+        return 1
+
     if verbose:
         print(f"Loaded {len(target_schema)} tables from {schema_file}")
 
