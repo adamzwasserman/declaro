@@ -235,9 +235,28 @@ def _validate_column(
 
     if base_type not in KNOWN_TYPES and not base_type.endswith("[]"):
         # Could be a custom type or enum
+        # THE OLD TEXT WAS "may be custom type or enum", WHICH READ AS
+        # REASSURANCE. It is still a warning rather than an error, because a
+        # custom PostgreSQL type is legitimate and this function is not told
+        # which engine it is validating for. What it did not say is what an
+        # unrecognised name costs on the other two.
+        #
+        # SQLite assigns column affinity by matching substrings of the
+        # declared name, and a name it recognises nothing in gets NUMERIC.
+        # Measured 2026-08-19 with `text` mistyped as `txet`:
+        #
+        #     CREATE TABLE t (good TEXT, typo TXET)
+        #     INSERT INTO t VALUES ('007', '007')
+        #     good  '007' as text
+        #     typo  7     as integer
+        #
+        # The string written was '007' and the value stored is the number 7.
+        # The leading zeros are gone and the sort order changes with them.
         warnings.append(
-            f"Table '{table_name}', column '{col_name}': "
-            f"Unknown type '{col_type}' (may be custom type or enum)"
+            f"Table '{table_name}', column '{col_name}': unknown type "
+            f"'{col_type}'. It may be a custom type or an enum, and if it is "
+            f"a typo SQLite and Turso will give the column NUMERIC affinity "
+            f"and store '007' as the number 7."
         )
 
     # Check foreign key reference

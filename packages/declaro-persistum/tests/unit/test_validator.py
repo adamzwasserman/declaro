@@ -54,9 +54,14 @@ class TestColumnTypes:
         _result = _validate_column("users", "id", {"type": "wat"}, {})
         w = _result["warnings"]
         e = _result["errors"]
+        _lower = " ".join(w).lower()
         assert e == [], "an unknown type may be a custom type or enum"
         assert len(w) == 1
-        assert "Unknown type 'wat'" in w[0]
+        # ASSERTED CASE-INSENSITIVELY AND BY SUBSTANCE. This pinned the
+        # capital U of "Unknown type 'wat'", so rewriting the warning to say
+        # what an unrecognised name costs on SQLite failed it for the one
+        # reason that does not matter.
+        assert "unknown type 'wat'" in _lower
 
     def test_a_type_is_matched_case_insensitively(self):
         assert _validate_column("users", "id", {"type": "INTEGER"}, {}) == {
@@ -374,7 +379,7 @@ class TestValidateSchema:
         _result = validate_schema(schema)
         warnings = _result["warnings"]
         errors = _result["errors"]
-        assert len(warnings) == 1 and "Unknown type" in warnings[0]
+        assert len(warnings) == 1 and "unknown type" in warnings[0].lower()
         assert len(errors) == 1 and "non-existent table" in errors[0]
 
 
