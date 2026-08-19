@@ -83,21 +83,21 @@ async def test_a_drainer_runs_whatever_writer_it_was_given() -> None:
     seen: list[str] = []
 
     def _recording(label: str):
-        async def write_one(conn, sql, params):
+        async def write_one(_conn, sql, _params):
             seen.append(f"{label}:{sql}")
 
         return write_one
 
-    async def connect(db):
+    async def connect(_db):
         return object()
 
-    async def close_connection(conn):
+    async def close_connection(_conn):
         return None
 
-    async def noop(db):
+    async def noop(_db):
         return True
 
-    async def noop_none(db):
+    async def noop_none(_db):
         return None
 
     def _db(label: str) -> Database:

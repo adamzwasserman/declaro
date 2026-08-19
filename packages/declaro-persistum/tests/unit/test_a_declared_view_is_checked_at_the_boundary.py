@@ -68,8 +68,8 @@ BAD_VIEWS = [
 ]
 
 
-@pytest.mark.parametrize(("label", "literal"), BAD_VIEWS, ids=[b[0] for b in BAD_VIEWS])
-def test_a_malformed_view_is_refused(tmp_path, label: str, literal: str) -> None:
+@pytest.mark.parametrize(("_label", "literal"), BAD_VIEWS, ids=[b[0] for b in BAD_VIEWS])
+def test_a_malformed_view_is_refused(tmp_path, _label: str, literal: str) -> None:
     """Every one of these has both required keys and is still not a view."""
     with pytest.raises(LoaderError):
         load_views_from_models(_dir(tmp_path, f"v = {literal}\n"))

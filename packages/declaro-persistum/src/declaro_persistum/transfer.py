@@ -157,7 +157,7 @@ CREATE TABLE IF NOT EXISTS "{TRANSFER_STATE_TABLE}" (
 """
 
 
-async def _ensure_progress_table(conn: Any, loader: BulkLoader) -> None:
+async def _ensure_progress_table(conn: Any, _loader: BulkLoader) -> None:
     """Create the transfer progress table if it doesn't exist."""
     # Detect connection type by checking for asyncpg-style execute
     if hasattr(conn, "fetch"):

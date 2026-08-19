@@ -64,19 +64,19 @@ def _database(conn: _Conn):
     """
     from declaro_persistum.database import new_database, writing
 
-    async def connect(db):
+    async def connect(_db):
         return conn
 
-    async def close_connection(c):
+    async def close_connection(_c):
         return None
 
-    async def nothing(db):
+    async def nothing(_db):
         return True
 
-    async def nothing_down(db):
+    async def nothing_down(_db):
         return None
 
-    async def release(db):
+    async def release(_db):
         return None
 
     async def sleep(_s):

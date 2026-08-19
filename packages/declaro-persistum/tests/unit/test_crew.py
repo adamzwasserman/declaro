@@ -133,7 +133,7 @@ async def test_a_crew_refuses_a_replicated_database(tmp_path):
     """
     from declaro_persistum.database import new_database
 
-    async def unused(*a, **k):
+    async def unused(*_a, **_k):
         raise AssertionError("a refused crew must not touch the database")
 
     replicated = new_database(

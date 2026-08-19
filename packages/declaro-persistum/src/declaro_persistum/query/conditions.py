@@ -144,7 +144,7 @@ def _between(column: str, operand: tuple[Any, Any], path: str) -> Rendered:
 
 
 def _null(sql: str) -> Renderer:
-    def render_null(column: str, operand: Any, path: str) -> Rendered:
+    def render_null(column: str, _operand: Any, _path: str) -> Rendered:
         # The operand is ignored on purpose: `{"col": {"is_null": True}}` and
         # `{"col": {"is_null": False}}` would otherwise mean opposite things
         # while looking alike. Use `is_not_null` for the negation.
