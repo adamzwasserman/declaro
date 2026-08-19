@@ -331,8 +331,28 @@ class TestValidateSchema:
         assert len(errors) == 1
         assert "Primary key column 'nope' does not exist" in errors[0]
 
-    def test_a_table_with_no_columns_key_is_tolerated(self):
-        assert validate_schema({"t": {}}) == {"warnings": [], "errors": []}
+    def test_a_table_with_no_columns_key_is_an_error(self):
+        """CHANGED ON PURPOSE 2026-08-19. This asserted the opposite.
+
+        It was named `..._is_tolerated` and required `{"t": {}}` to validate
+        clean, which pinned `table.get("columns", {})`: the absence was
+        accepted, the differ emitted `create_table`, and the renderer produced
+        `CREATE TABLE "t" (\n    \n)`, which SQLite answers with
+        `near ")": syntax error`.
+
+        Tolerating it bought nothing. A table with no columns cannot be
+        created on any engine this package supports, so the only thing the
+        tolerance did was move the complaint from the validator, which can
+        name the table, to the engine, which names a parenthesis.
+
+        Second of the three fallbacks three BDD schema helpers were deleted
+        for on 2026-08-16. The first was fixed here and in the TOML loader
+        earlier the same day.
+        """
+        result = validate_schema({"t": {}})
+
+        assert result["errors"], result
+        assert "t" in result["errors"][0], result
 
     def test_index_errors_are_collected_across_tables(self):
         schema = {

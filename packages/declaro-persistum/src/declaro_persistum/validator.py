@@ -144,8 +144,28 @@ def validate_schema(schema: Schema) -> ValidationResult:
     for table_name, table in schema.items():
         errors.extend(_unrenderable("Table", table_name, table_name))
 
-        # Validate columns
+        # A TABLE WITH NO COLUMNS IS NOT AN EMPTY TABLE, IT IS A BROKEN ONE.
+        # `table.get("columns", {})` accepted the absence and the schema
+        # validated clean, then the differ emitted `create_table` and the
+        # renderer produced `CREATE TABLE "empty" (\n    \n)`, which SQLite
+        # answers with `near ")": syntax error`. Measured 2026-08-19.
+        #
+        # This is the second of the three fallbacks three BDD schema helpers
+        # were deleted for on 2026-08-16. The first, a column with no type
+        # becoming TEXT, was removed from the TOML loader and from this
+        # function earlier today.
+        #
+        # A TOML section whose `[users.columns]` header is misspelt, or
+        # columns nested one level wrong, produces a table the author never
+        # described, and nothing objects until the engine names a parenthesis.
         columns = table.get("columns", {})
+        if not columns:
+            errors.append(
+                f"Table '{table_name}': no columns. A table needs at least "
+                f"one, and this renders as `CREATE TABLE \"{table_name}\" ()`, "
+                f"which no engine accepts."
+            )
+            continue
 
         for col_name, col_def in columns.items():
             errors.extend(_unrenderable("Column", table_name, col_name))
