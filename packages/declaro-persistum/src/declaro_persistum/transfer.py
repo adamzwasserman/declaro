@@ -158,7 +158,20 @@ CREATE TABLE IF NOT EXISTS "{TRANSFER_STATE_TABLE}" (
 
 
 async def _ensure_progress_table(conn: Any, _loader: BulkLoader) -> None:
-    """Create the transfer progress table if it doesn't exist."""
+    """Create the transfer progress table if it doesn't exist.
+
+    THE UNDERSCORE MARKS IT UNREAD, NOT SETTLED. The loader is handed to this
+    function precisely so it need not ask what kind of connection it has, and
+    three sites in this module ask anyway, with `hasattr(conn, "fetch")`. That
+    is dispatch on type wearing a duck-typing coat, in a package built on
+    dispatch tables.
+
+    It is not a defect: the sniff gives the right answer on all three engines,
+    measured 2026-08-18. It is a Rule 1 violation whose fix is a seventh
+    BulkLoader operation covering these three statements, implemented once per
+    family, which is a change to a published TypedDict and not one to make in
+    passing.
+    """
     # Detect connection type by checking for asyncpg-style execute
     if hasattr(conn, "fetch"):
         # asyncpg
