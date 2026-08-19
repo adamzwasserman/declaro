@@ -268,6 +268,30 @@ def _with_unique_folded(table: dict[str, Any]) -> dict[str, Column]:
         name = targets[0]
         if name in columns and not columns[name].get("primary_key"):
             columns[name]["unique"] = True
+
+    # A COMPOSITE PRIMARY KEY IS DECLARED ON THE TABLE AND FELT BY THE COLUMN.
+    # `is_nullable` answers from the column alone, so it could see
+    # `primary_key: True` on a single-column key and nothing at all on a
+    # composite one. The database makes every key column NOT NULL either way,
+    # so introspection returned `nullable: False` against a declaration that
+    # said nothing, and the differ proposed making a primary key nullable on
+    # every deploy. PostgreSQL refuses that, so the migration could never
+    # succeed. Measured 2026-08-18:
+    #
+    #     declared     primary_key: ['left', 'right']
+    #     introspected primary_key: ['left', 'right'], both nullable: False
+    #     every deploy alter_column left  nullable False -> True
+    #                  alter_column right nullable False -> True
+    #
+    # `is_nullable` records that this same mistake was made twice before, in
+    # the differ and the validator, and was fixed by asking the question in
+    # one place. This is the third: the question needs the TABLE when the key
+    # is composite, and the function is handed a column. Folding here gives it
+    # what it needs without every caller learning about composite keys.
+    for name in table.get("primary_key") or []:
+        if name in columns:
+            columns[name]["primary_key"] = True
+
     return columns
 
 

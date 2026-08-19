@@ -98,6 +98,23 @@ CASES: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
     # missing a defect that made any capitalised table fail its migration on
     # Turso forever. See test_a_mixed_case_table_name_converges.py.
     ("create a mixed-case table", {}, {"UserProfile": USERS}),
+    # A COMPOSITE KEY IS DECLARED ON THE TABLE AND FELT BY THE COLUMN, and
+    # every case above declares its key on a single column. Without the fold
+    # in the differ this proposes making a primary key nullable on every
+    # deploy, on all three engines, and PostgreSQL refuses it outright.
+    (
+        "create a table with a composite key",
+        {},
+        {
+            "pairs": {
+                "columns": {
+                    "left": {"type": "integer"},
+                    "right": {"type": "integer"},
+                },
+                "primary_key": ["left", "right"],
+            }
+        },
+    ),
     # Altering a mixed-case table still loops on Turso, because the engine
     # rewrites the stored DDL and folds the name into it. Held as a strict
     # xfail in test_a_mixed_case_table_name_converges.py rather than here, so
