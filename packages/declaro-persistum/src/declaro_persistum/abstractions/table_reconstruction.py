@@ -377,6 +377,26 @@ async def _get_full_table_schema(connection: Any, table_name: str) -> dict[str, 
             if on_update and on_update.upper() not in ("NO ACTION", "NONE", ""):
                 columns[from_col]["on_update"] = on_update.lower()
 
+    # A CHECK IS IN NO PRAGMA, so this function did not read one and every
+    # rebuild dropped it, on both engines. Measured 2026-08-19: a table with
+    # `"age" INTEGER CHECK (age > 0)` came back as `"age" INTEGER` after a
+    # rebuild triggered by an unrelated column.
+    #
+    # `checks_from_ddl` already exists for exactly this, and the inspectors
+    # have used it since 2026-08-17. It parses the stored CREATE TABLE, which
+    # is the only place a CHECK is recorded.
+    from declaro_persistum.inspector.shared import checks_from_ddl
+
+    cursor = await connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name = ?",
+        (table_name,),
+    )
+    ddl_rows = await cursor.fetchall()
+    if ddl_rows and ddl_rows[0][0]:
+        for name, expression in checks_from_ddl(ddl_rows[0][0]).items():
+            if name in columns:
+                columns[name]["check"] = expression
+
     return columns
 
 

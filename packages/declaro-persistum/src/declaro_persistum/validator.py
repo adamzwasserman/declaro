@@ -259,6 +259,39 @@ def _validate_column(
             f"and store '007' as the number 7."
         )
 
+    # THE FOUR ACTIONS THE TYPE DECLARES, AND NOTHING ELSE WAS CHECKED.
+    # `Column.on_delete` is Literal["cascade", "set null", "restrict",
+    # "no action"], and `validate_schema` accepted `set_null`, `CASCADE` and
+    # `nonsense` alike, with no error and no warning.
+    #
+    # An unrecognised value does not fail. The renderer writes it out after
+    # `.upper().replace("_", " ")`, so `set_null` reaches the engine as the
+    # correct SET NULL and the table is created properly. Introspection reads
+    # the engine's SET NULL back and normalises it to `set null`, which does
+    # not equal the declared `set_null`, so the differ sees a change:
+    #
+    #     second deploy  drop_foreign_key pid, add_foreign_key pid
+    #
+    # On SQLite and Turso both of those go through table reconstruction, so
+    # every deploy rebuilds the whole table, copies every row, and reports
+    # success. Measured 2026-08-19. It never converges and never complains.
+    #
+    # The vocabulary is read from the type rather than listed, because the
+    # whole failure is a declaration and a check disagreeing about what the
+    # values are.
+    for action_key in ("on_delete", "on_update"):
+        if action_key not in col_def:
+            continue
+        allowed = Column.__annotations__[action_key].__args__
+        if col_def[action_key] not in allowed:
+            errors.append(
+                f"Table '{table_name}', column '{col_name}': {action_key} "
+                f"{col_def[action_key]!r} is not one of {sorted(allowed)}. An "
+                f"unrecognised action still writes correct SQL and then never "
+                f"matches what is read back, so the table is rebuilt on every "
+                f"deploy."
+            )
+
     # Check foreign key reference
     if "references" in col_def:
         ref = col_def["references"]

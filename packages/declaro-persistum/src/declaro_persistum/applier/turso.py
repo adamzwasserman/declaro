@@ -21,7 +21,6 @@ from typing import Any, Literal
 
 from declaro_persistum.applier.shared import (
     apply_reconstruction_changes,
-    columns_from_pragma_rows,
     dry_run_preview,
     generate_operation_sql,
     requires_reconstruction,
@@ -255,10 +254,28 @@ async def _execute_coalesced_reconstruction(
     Introspects once, applies all column changes, reconstructs once.
     """
     from declaro_persistum.abstractions.reconstruction import execute_reconstruction_async
+    from declaro_persistum.abstractions.table_reconstruction import (
+        _get_full_table_schema,
+    )
 
-    cursor = await connection.execute(f"PRAGMA table_info('{table}')")
-    rows = await cursor.fetchall()
-    columns = columns_from_pragma_rows(rows)
+    # THE WHOLE TABLE, NOT ITS COLUMNS. This read `PRAGMA table_info` and
+    # built the new table from that alone, and `table_info` returns columns
+    # and nothing else, so every rebuild wrote back a table with its UNIQUE,
+    # its CHECK and its foreign keys gone. Measured 2026-08-19, changing one
+    # unrelated column's type:
+    #
+    #     before  "email" TEXT UNIQUE, "age" INTEGER CHECK (age > 0),
+    #             "pid" INTEGER REFERENCES "parents"("id") ON DELETE CASCADE
+    #     after   "email" TEXT, "age" INTEGER, "pid" INTEGER
+    #
+    # and the migration reported success. Changing a column's type on this
+    # engine silently removed the referential integrity and the validation
+    # from the whole table, and the next write that should have been refused
+    # was accepted.
+    #
+    # `_get_full_table_schema` is what the SQLite applier has always used for
+    # the same job, and it is why SQLite kept the unique and the foreign key.
+    columns = await _get_full_table_schema(connection, table)
 
     for op in ops:
         columns = apply_reconstruction_changes(columns, op)
