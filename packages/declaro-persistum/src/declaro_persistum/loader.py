@@ -383,7 +383,31 @@ def save_decisions(schema_dir: str | Path, decisions: dict[str, Any]) -> None:
         if isinstance(decision, dict) and "decided_at" not in decision:
             decision["decided_at"] = timestamp
 
-    data = {"decisions": decisions}
+    # TOML HAS NO NULL, AND THE PROMPT WRITES ONE ON EVERY DECISION.
+    # `_resolve_ambiguities_interactive` sets every key on every decision and
+    # fills the ones that do not apply with None -- a rename carries
+    # `column: None`, a drop carries `from_column: None` and `to_column:
+    # None`. `tomli_w` refuses them:
+    #
+    #     TypeError: Object of type 'NoneType' is not TOML serializable
+    #
+    # So the operator was asked whether a column was renamed or dropped, the
+    # question that decides whether that column's rows survive, answered it,
+    # and the process died while recording the answer. Nothing was saved, so
+    # the next run asked again. Measured 2026-08-20; recorded as declaro-p42.
+    #
+    # A key with no value is OMITTED rather than written, which is how TOML
+    # says the same thing, and `load_decisions` already reads an absent key
+    # back as None. Dropping them here is the format's own spelling of the
+    # value the writer meant.
+    data = {
+        "decisions": {
+            key: {k: v for k, v in decision.items() if v is not None}
+            if isinstance(decision, dict)
+            else decision
+            for key, decision in decisions.items()
+        }
+    }
 
     content = "# Ephemeral decisions - purged after migration applied\n\n"
     content += tomli_w.dumps(data)
