@@ -346,12 +346,35 @@ def _add_foreign_key_sql(table: str, details: dict[str, Any]) -> str:
 
 
 def _drop_foreign_key_sql(table: str, details: dict[str, Any]) -> str:
-    """Generate ALTER TABLE DROP FOREIGN KEY statement."""
+    """Drop a foreign key by both names it can have.
+
+    THE CONVENTION NAME IS ONLY HALF OF WHAT EXISTS. This dropped
+    `fk_{table}_{column}_{ref_table}`, which `_add_foreign_key_sql` writes, and
+    a key created INLINE by CREATE TABLE gets PostgreSQL's own auto-name,
+    `{table}_{column}_fkey`. So repointing a foreign key that had been there
+    since the table was made failed every time:
+
+        ALTER TABLE "children" DROP CONSTRAINT "fk_children_pid_parents"
+        UndefinedObjectError: constraint ... does not exist
+
+    Measured 2026-08-19. Both names are deterministic, so both are dropped
+    with IF EXISTS rather than one being guessed at. `IF EXISTS` is safe here
+    precisely because two names are tried: without it, the correct one would
+    still be dropped and the other would raise.
+
+    The create side names the constraint explicitly now, so new tables carry
+    the convention name; the second clause is for tables made before that.
+    """
     col_name = details["column"]
-    ref = details["references"]
-    ref_table = ref.split(".")[0]
-    fk_name = f"fk_{table}_{col_name}_{ref_table}"
-    return f'ALTER TABLE "{table}" DROP CONSTRAINT "{fk_name}"'
+    ref = details.get("references", "")
+    ref_table = ref.split(".")[0] if "." in ref else ref
+
+    convention = f"fk_{table}_{col_name}_{ref_table}"
+    postgres_default = f"{table}_{col_name}_fkey"
+    return (
+        f'ALTER TABLE "{table}" DROP CONSTRAINT IF EXISTS "{convention}"; '
+        f'ALTER TABLE "{table}" DROP CONSTRAINT IF EXISTS "{postgres_default}"'
+    )
 
 
 def _create_view_sql(_table: str, details: dict[str, Any]) -> str:
