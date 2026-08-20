@@ -298,6 +298,24 @@ def insert_enum_values_sql(table: str, details: dict[str, Any]) -> str:
     )
 
 
+def constraint_clause(name: str, definition: dict[str, Any]) -> str:
+    """One table-level constraint, as it appears inside a CREATE TABLE.
+
+    Shared by the renderer above and by the reconstruction that rewrites a
+    table, so a rebuild cannot spell a constraint differently from the create.
+    """
+    kind = definition.get("type")
+    if kind == "check":
+        return f'CONSTRAINT "{name}" CHECK ({definition["expression"]})'
+    if kind == "unique":
+        columns = ", ".join(f'"{c}"' for c in definition.get("columns", []))
+        return f'CONSTRAINT "{name}" UNIQUE ({columns})'
+    raise ValueError(
+        f"constraint {name!r} has type {kind!r}; this renderer writes "
+        f"{['check', 'unique']}."
+    )
+
+
 def create_table_sql(table: str, details: dict[str, Any]) -> str:
     """Generate CREATE TABLE statement."""
     columns = details.get("columns", {})
@@ -312,6 +330,27 @@ def create_table_sql(table: str, details: dict[str, Any]) -> str:
     if primary_key and len(primary_key) > 1:
         pk_cols = ", ".join(f'"{c}"' for c in primary_key)
         col_defs.append(f"PRIMARY KEY ({pk_cols})")
+
+    # A TABLE-LEVEL CONSTRAINT IS CARRIED HERE AND WAS DROPPED ON THE FLOOR.
+    # This function read `columns` and `primary_key` and ignored
+    # `constraints`, so a declared constraint was never created, the migration
+    # reported success, and every deploy afterwards saw it missing and emitted
+    # `add_constraint` -- which SQLite and Turso refuse by name, so every
+    # deploy after the first failed. Measured 2026-08-19.
+    #
+    # It is the same defect `add_index` had this morning, in the same
+    # function, on the next key along: details carried it and the renderer did
+    # not look.
+    #
+    # THE FIX IS DIFFERENT AND THAT IS THE POINT. An index became a separate
+    # `add_index` operation beside the create, because CREATE INDEX is a
+    # statement every engine has. A table-level constraint is not: these
+    # engines have no ADD CONSTRAINT, so inside the CREATE TABLE is the only
+    # moment one can exist.
+    #
+    # Named, because an unnamed constraint cannot be dropped by name later.
+    for name, definition in (details.get("constraints") or {}).items():
+        col_defs.append(constraint_clause(name, definition))
 
     columns_sql = ",\n    ".join(col_defs)
     return f'CREATE TABLE "{table}" (\n    {columns_sql}\n)'
