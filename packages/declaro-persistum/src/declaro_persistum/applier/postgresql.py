@@ -13,6 +13,7 @@ from typing import Any
 
 from declaro_persistum.applier.shared import (
     column_definition,
+    constraint_clause,
     insert_enum_values_sql,
 )
 from declaro_persistum.exceptions import MigrationError
@@ -150,6 +151,23 @@ def _create_table_sql(table: str, details: dict[str, Any]) -> str:
     if primary_key and len(primary_key) > 1:
         pk_cols = ", ".join(f'"{c}"' for c in primary_key)
         col_defs.append(f"PRIMARY KEY ({pk_cols})")
+
+    # THE TABLE-LEVEL CONSTRAINTS, WHICH THIS COPY ALSO IGNORED. The shared
+    # renderer was given them an hour before this one, and PostgreSQL keeps
+    # its own `_create_table_sql`, so the fix landed on two engines of three
+    # and this one still dropped a declared constraint on the floor.
+    #
+    # That is the shape this module's own comment records about `generate_sql`
+    # living here and nowhere else: a function copied per dialect goes missing
+    # from the copies. `constraint_clause` is shared so the two cannot spell
+    # a constraint differently.
+    #
+    # Unlike SQLite and Turso, PostgreSQL has ADD CONSTRAINT, so one could be
+    # added afterwards. Rendering it here keeps the three engines producing
+    # the same table from the same declaration, which is what makes a
+    # cross-engine transfer land the same shape.
+    for name, definition in (details.get("constraints") or {}).items():
+        col_defs.append(constraint_clause(name, definition))
 
     columns_sql = ",\n    ".join(col_defs)
     return f'CREATE TABLE "{table}" (\n    {columns_sql}\n)'

@@ -270,7 +270,7 @@ def _diff_table(
     operations.extend(index_ops)
 
     # Diff constraints
-    constraint_ops = _diff_constraints(table_name, current, target)
+    constraint_ops = _diff_constraints(table_name, current, target, dialect)
     operations.extend(constraint_ops)
 
     return operations
@@ -891,9 +891,38 @@ def _diff_constraints(
     table_name: str,
     current: Table,
     target: Table,
+    dialect: Dialect,
 ) -> list[Operation]:
-    """Diff named constraints."""
+    """Diff named constraints.
+
+    COMPARED ON THE ENGINES THAT STORE THE EXPRESSION AS IT WAS WRITTEN, which
+    is the same restriction `_compute_column_alterations` already puts on a
+    column-level CHECK, for the same reason and after the same mistake.
+
+    Measured 2026-08-19, declaring a constraint and reading it back:
+
+        sqlite      lo < hi, lo <> hi, lo > 0 AND hi > 0, lo IN (1,2,3)  all verbatim
+        turso       the same, except `<>` stored as `!=`
+        postgresql  lo > 0 AND hi > 0  ->  (lo > 0) AND (hi > 0)
+                    lo IN (1, 2, 3)    ->  not reported as a table constraint
+
+    Turso's one rewriting is folded by `_canonical_expression`. PostgreSQL
+    parenthesises each operand of an AND, rewrites IN into `= ANY (ARRAY[...])`
+    on some shapes, and classifies a single-column named constraint as a
+    column check, so comparing there proposed dropping and re-adding a
+    constraint that had not changed.
+
+    This package has shipped two CHECK migration loops already, both by
+    enabling a comparison after checking one engine. The constraints are read
+    back on all three so a rebuild can carry them; they are compared where the
+    comparison is known to converge, and a changed constraint migrates nothing
+    on PostgreSQL, which is the same standing limitation a changed column CHECK
+    has there.
+    """
     operations: list[Operation] = []
+
+    if dialect not in ("sqlite", "turso"):
+        return operations
 
     current_constraints = current.get("constraints", {})
     target_constraints = target.get("constraints", {})

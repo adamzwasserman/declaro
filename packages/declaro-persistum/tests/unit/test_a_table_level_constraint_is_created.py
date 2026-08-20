@@ -81,7 +81,31 @@ async def _turso() -> Any:
     return await turso.aio.connect(os.path.join(tempfile.mkdtemp(), "c.db"))
 
 
+PROBE_URL = os.environ.get(
+    "TEST_POSTGRESQL_URL", "postgresql://postgres:postgres@localhost/declaro_probe"
+)
+
+
+async def _postgresql() -> Any:
+    import asyncpg
+
+    try:
+        connection = await asyncpg.connect(PROBE_URL)
+    except (OSError, asyncpg.PostgresError) as unreachable:
+        pytest.skip(f"no server at {PROBE_URL}: {unreachable}")
+    await connection.execute('DROP TABLE IF EXISTS "t" CASCADE')
+    return connection
+
+
 ENGINES = {"sqlite": _sqlite, "turso": _turso}
+
+# PostgreSQL creates and reads the constraint back, and does not COMPARE it.
+# See `_diff_constraints`: that engine rewrites the expression in at least two
+# ways, so comparing there proposed dropping and re-adding a constraint that
+# had not changed. The tests that need a comparison run on the two engines
+# that store the expression verbatim; the ones that only need the constraint
+# to exist run on all three.
+ALL_ENGINES = {**ENGINES, "postgresql": _postgresql}
 
 
 def test_the_renderer_puts_the_constraint_in_the_create() -> None:
@@ -272,4 +296,93 @@ async def test_a_changed_constraint_is_still_noticed(dialect: str) -> None:
             changed
         )
     finally:
+        await connection.close()
+
+
+async def test_postgresql_creates_the_constraint_too() -> None:
+    """PostgreSQL keeps its own `_create_table_sql` and ignored the key.
+
+    The shared renderer was given the constraints an hour before this one, so
+    the fix landed on two engines of three and PostgreSQL still dropped a
+    declared constraint on the floor. That is the shape this module's own
+    comment records about `generate_sql` living in one dialect module: a
+    function copied per dialect goes missing from the copies.
+    """
+    from declaro_persistum.inspector import introspect
+
+    connection = await _postgresql()
+    try:
+        declared = {
+            "t": {
+                "columns": {
+                    "a": {"type": "integer", "primary_key": True},
+                    "lo": {"type": "integer"},
+                    "hi": {"type": "integer"},
+                },
+                "constraints": {
+                    "ck_order": {"type": "check", "expression": "lo < hi"}
+                },
+            }
+        }
+        plan = diff({}, declared, dialect="postgresql")
+        await apply(
+            connection,
+            plan["operations"],
+            plan["execution_order"],
+            "postgresql",
+            dry_run=False,
+        )
+
+        actual = await introspect(connection, "postgresql")
+        assert actual["t"].get("constraints"), actual["t"]
+
+        with pytest.raises(Exception):
+            await connection.execute('INSERT INTO "t" (a, lo, hi) VALUES (1, 9, 3)')
+    finally:
+        await connection.execute('DROP TABLE IF EXISTS "t" CASCADE')
+        await connection.close()
+
+
+async def test_postgresql_does_not_propose_a_constraint_it_already_has() -> None:
+    """The loop this restriction avoids, asserted rather than assumed.
+
+    Reading the constraint back is what stops `add_constraint` firing on every
+    deploy. Comparing it is what would fire drop and add instead, and that is
+    switched off there.
+    """
+    from declaro_persistum.inspector import introspect
+
+    connection = await _postgresql()
+    try:
+        declared = {
+            "t": {
+                "columns": {
+                    "a": {"type": "integer", "primary_key": True},
+                    "lo": {"type": "integer"},
+                    "hi": {"type": "integer"},
+                },
+                "constraints": {
+                    "ck_order": {"type": "check", "expression": "lo > 0 AND hi > 0"}
+                },
+            }
+        }
+        plan = diff({}, declared, dialect="postgresql")
+        await apply(
+            connection,
+            plan["operations"],
+            plan["execution_order"],
+            "postgresql",
+            dry_run=False,
+        )
+
+        actual = await introspect(connection, "postgresql")
+        remaining = diff(
+            {n: actual[n] for n in declared if n in actual},
+            declared,
+            dialect="postgresql",
+        )["operations"]
+
+        assert remaining == [], [(o["op"], o["details"]) for o in remaining]
+    finally:
+        await connection.execute('DROP TABLE IF EXISTS "t" CASCADE')
         await connection.close()

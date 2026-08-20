@@ -144,6 +144,16 @@ async def _introspect_table(
     if indexes:
         table["indexes"] = indexes
 
+    # THE MULTI-COLUMN CHECKS, WHICH THE LOOP ABOVE SKIPS BY DESIGN. Skipping
+    # them attached them nowhere, so a declared table-level constraint was
+    # created and then proposed again on every deploy, and the second add
+    # fails because the name is already taken. Measured 2026-08-19; the SQLite
+    # and Turso inspectors had the same hole and read theirs out of the stored
+    # CREATE TABLE, which is the only place those engines record it.
+    constraints = await _get_table_constraints(connection, table_name, schema_name)
+    if constraints:
+        table["constraints"] = constraints  # type: ignore[typeddict-item]
+
     return table
 
 
@@ -494,6 +504,46 @@ async def _get_column_checks(
     )
     return {
         row["column_name"]: normalize_check(row["definition"]) for row in rows
+    }
+
+
+async def _get_table_constraints(
+    connection: Any, table_name: str, schema_name: str
+) -> dict[str, dict[str, str]]:
+    """Named CHECK constraints covering more than one column.
+
+    `_get_column_checks` above takes the single-column ones and skips these,
+    because a check over two columns belongs to no column and attributing it
+    to one would propose removing a column constraint nobody declared.
+    Skipping left them invisible: a declared table-level constraint was
+    created and then proposed again on every deploy, and PostgreSQL refuses
+    the second add because the name is already taken.
+
+    The SQLite and Turso inspectors read the same thing out of the stored
+    CREATE TABLE, which is the only place those engines record it.
+    """
+    rows = await connection.fetch(
+        """
+        SELECT
+            con.conname AS name,
+            pg_get_constraintdef(con.oid) AS definition
+        FROM pg_constraint con
+        JOIN pg_class rel ON rel.oid = con.conrelid
+        JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+        WHERE rel.relname = $1
+          AND nsp.nspname = $2
+          AND con.contype = 'c'
+          AND array_length(con.conkey, 1) > 1
+        """,
+        table_name,
+        schema_name,
+    )
+    return {
+        row["name"]: {
+            "type": "check",
+            "expression": normalize_check(row["definition"]),
+        }
+        for row in rows
     }
 
 
