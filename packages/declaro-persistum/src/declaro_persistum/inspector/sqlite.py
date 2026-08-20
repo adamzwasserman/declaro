@@ -27,6 +27,7 @@ from declaro_persistum.inspector.shared import (
     columns_from_pragma_rows,
     fk_list_from_pragma_rows,
     indexes_from_rows,
+    table_constraints_from_ddl,
     unique_cols_from_index_rows,
     views_from_rows,
 )
@@ -147,11 +148,27 @@ async def foreign_keys_of(connection: Any, table: str) -> list[dict[str, str]]:
     return fk_list_from_pragma_rows(rows)
 
 
+async def constraints_of(connection: Any, table: str) -> dict[str, dict[str, str]]:
+    """The named table-level constraints, from the stored CREATE TABLE.
+
+    In no PRAGMA, like the column-level checks beside them.
+    """
+    rows = await _rows(
+        connection,
+        f"SELECT sql FROM sqlite_master WHERE type='table' "
+        f"AND name='{as_literal(table)}'",
+    )
+    if rows and rows[0][0]:
+        return table_constraints_from_ddl(rows[0][0])
+    return {}
+
+
 async def table_of(connection: Any, table: str) -> Table:
     return assemble_table(
         await columns_of(connection, table),
         await indexes_of(connection, table),
         await foreign_keys_of(connection, table),
+        await constraints_of(connection, table),
     )
 
 

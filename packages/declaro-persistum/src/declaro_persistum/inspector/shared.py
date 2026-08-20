@@ -213,6 +213,7 @@ def assemble_table(
     columns: dict[str, Column],
     indexes: dict[str, Index],
     foreign_keys: list[dict[str, str]],
+    constraints: dict[str, dict[str, str]],
 ) -> Table:
     """Merge FK info into columns and build Table dict (pure)."""
     for fk in foreign_keys:
@@ -236,6 +237,12 @@ def assemble_table(
 
     if indexes:
         table["indexes"] = indexes
+
+    # REQUIRED, NOT DEFAULTED. A caller that forgets them gets a TypeError
+    # rather than a table reported as having none, which is the state that
+    # made a declared constraint be proposed on every deploy.
+    if constraints:
+        table["constraints"] = constraints  # type: ignore[typeddict-item]
 
     return table
 
@@ -312,6 +319,48 @@ def normalize_check(expression: str) -> str:
                     return text
         text = text[1:-1].strip()
     return text
+
+
+def table_constraints_from_ddl(create_statement: str) -> dict[str, dict[str, str]]:
+    """The NAMED table-level constraints a CREATE TABLE declares.
+
+    `checks_from_ddl` below reads the column-level ones and skips these
+    deliberately: a table-level CHECK belongs to no column, and attributing it
+    to one would have the differ propose removing a column constraint nobody
+    declared. Skipping it left them invisible instead.
+
+    MEASURED 2026-08-19. A declared table-level constraint was not created at
+    all -- `create_table_sql` ignored the key -- and once that was fixed it was
+    created and still unseen, so every deploy emitted `add_constraint`, which
+    SQLite and Turso refuse. Creating it and not reading it back is a loop of
+    exactly the same shape as not creating it.
+
+    ONLY NAMED ONES. An anonymous `CHECK (lo < hi)` has nothing to key a
+    dict by, and the differ compares constraints by name. A declaration
+    written through this package always names them, because
+    `constraint_clause` writes `CONSTRAINT "<name>"`.
+    """
+    body = _table_body(create_statement)
+    if body is None:
+        return {}
+
+    constraints: dict[str, dict[str, str]] = {}
+    for clause in _split_top_level(body):
+        stripped = clause.strip()
+        if not stripped.upper().startswith("CONSTRAINT"):
+            continue
+        remainder = stripped[len("CONSTRAINT") :].strip()
+        leading = _leading_identifier(remainder)
+        if leading is None:
+            continue
+        name, _quoted = leading
+        rest = remainder[remainder.index(name) + len(name) :].lstrip('" ').strip()
+        if not rest.upper().startswith("CHECK"):
+            continue
+        expression = _check_in(rest)
+        if expression is not None:
+            constraints[name] = {"type": "check", "expression": expression}
+    return constraints
 
 
 def checks_from_ddl(create_statement: str) -> dict[str, str]:

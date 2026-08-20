@@ -850,6 +850,43 @@ def _diff_indexes(
     return operations
 
 
+def _same_constraint_definition(current: Any, target: Any) -> bool:
+    """Two constraint definitions, compared as the engine stores them.
+
+    A RAW DICT COMPARISON LOOPED ON TURSO. That engine rewrites `<>` to `!=`
+    in the DDL it stores, so a declared `lo <> hi` came back as `lo != hi`,
+    the two dicts differed, and every deploy emitted drop_constraint and
+    add_constraint -- which Turso then refuses, so every deploy failed.
+    Measured 2026-08-19 across four expression shapes; that was the only one
+    that differed, and finding it took running all four rather than one.
+    #
+    The same normalisation the column-level CHECK comparison uses, plus the
+    inequality fold. `_canonical_spacing` already strips the space-before-paren
+    Turso adds and the redundant outer parens PostgreSQL adds.
+    """
+    if not isinstance(current, dict) or not isinstance(target, dict):
+        return bool(current == target)
+    if current.get("type") != target.get("type"):
+        return False
+
+    keys = set(current) | set(target)
+    for key in keys - {"expression"}:
+        if current.get(key) != target.get(key):
+            return False
+
+    return bool(
+        _canonical_expression(current.get("expression"))
+        == _canonical_expression(target.get("expression"))
+    )
+
+
+def _canonical_expression(expression: Any) -> Any:
+    """One spelling for expressions the engines write differently."""
+    if not isinstance(expression, str):
+        return expression
+    return _canonical_spacing(expression).replace("<>", "!=")
+
+
 def _diff_constraints(
     table_name: str,
     current: Table,
@@ -886,7 +923,9 @@ def _diff_constraints(
 
     # Check for modified constraints
     for const_name in current_names & target_names:
-        if current_constraints[const_name] != target_constraints[const_name]:
+        if not _same_constraint_definition(
+            current_constraints[const_name], target_constraints[const_name]
+        ):
             operations.append(
                 {
                     "op": "drop_constraint",

@@ -25,6 +25,19 @@ statement every engine has. A table-level constraint is not: SQLite and Turso
 have no ADD CONSTRAINT at all, so the only moment one can exist is inside the
 CREATE TABLE. It is rendered inline.
 
+CREATING IT AND NOT READING IT BACK IS THE SAME LOOP. Once the renderer
+wrote it, the inspectors still reported no constraints, so the second deploy
+still emitted `add_constraint`. Both inspectors read the named table-level
+constraints out of the stored CREATE TABLE now, beside the column-level
+checks they already read from there.
+
+AND THE COMPARISON HAD TO BE NORMALISED. `_diff_constraints` compared the two
+definition dicts raw. Turso rewrites `<>` to `!=` in the DDL it stores, so a
+declared `lo <> hi` came back as `lo != hi` and every deploy proposed
+dropping and re-adding it. Measured across five expression shapes, and that
+was the only one that differed: running one shape would have missed it, which
+is how this package shipped two CHECK loops before.
+
 A COLUMN-LEVEL CHECK IS A DIFFERENT THING and already worked. `{"check":
 "lo > 0"}` on a column renders in that column's definition. What was lost is
 the table-level form, which is the only one that can span two columns.
@@ -157,3 +170,106 @@ async def test_a_table_with_no_constraints_is_unchanged() -> None:
     rendered = create_table_sql("t", {**plain, "primary_key": None})
 
     assert "CHECK" not in rendered.upper(), rendered
+
+
+# ---------------------------------------------------------------------------
+# Convergence, across the shapes the engines spell differently
+# ---------------------------------------------------------------------------
+
+# `lo <> hi` is the one that mattered: Turso stores it as `lo != hi`. The
+# others are here because finding it took running all of them.
+EXPRESSIONS = [
+    "lo < hi",
+    "lo <> hi",
+    "lo != hi",
+    "lo > 0 AND hi > 0",
+    "lo IN (1, 2, 3)",
+]
+
+
+@pytest.mark.parametrize("expression", EXPRESSIONS)
+@pytest.mark.parametrize("dialect", sorted(ENGINES))
+async def test_a_declared_constraint_converges(dialect: str, expression: str) -> None:
+    """Declare it, apply it, read it back, diff again. Zero operations."""
+    from declaro_persistum.inspector import introspect
+
+    declared = {
+        "t": {
+            "columns": {
+                "a": {"type": "integer", "primary_key": True},
+                "lo": {"type": "integer"},
+                "hi": {"type": "integer"},
+            },
+            "constraints": {"ck": {"type": "check", "expression": expression}},
+        }
+    }
+    connection = await ENGINES[dialect]()
+    try:
+        plan = diff({}, declared, dialect=dialect)
+        await apply(
+            connection,
+            plan["operations"],
+            plan["execution_order"],
+            dialect,
+            dry_run=False,
+        )
+
+        actual = await introspect(connection, dialect)
+        remaining = diff(
+            {n: actual[n] for n in declared if n in actual},
+            declared,
+            dialect=dialect,
+        )["operations"]
+
+        assert remaining == [], (
+            f"{expression!r} on {dialect} migrates on every deploy: "
+            f"{[(o['op'], o['details']) for o in remaining]}"
+        )
+    finally:
+        await connection.close()
+
+
+@pytest.mark.parametrize("dialect", sorted(ENGINES))
+async def test_a_changed_constraint_is_still_noticed(dialect: str) -> None:
+    """The control on the normalisation.
+
+    Folding `<>` to `!=` must not fold two genuinely different expressions
+    together, or a real change would migrate nothing and report success.
+    """
+    from declaro_persistum.inspector import introspect
+
+    def declared(expression: str) -> dict:
+        return {
+            "t": {
+                "columns": {
+                    "a": {"type": "integer", "primary_key": True},
+                    "lo": {"type": "integer"},
+                    "hi": {"type": "integer"},
+                },
+                "constraints": {"ck": {"type": "check", "expression": expression}},
+            }
+        }
+
+    connection = await ENGINES[dialect]()
+    try:
+        plan = diff({}, declared("lo < hi"), dialect=dialect)
+        await apply(
+            connection,
+            plan["operations"],
+            plan["execution_order"],
+            dialect,
+            dry_run=False,
+        )
+
+        actual = await introspect(connection, dialect)
+        changed = diff(
+            {n: actual[n] for n in actual},
+            declared("lo > hi"),
+            dialect=dialect,
+        )["operations"]
+
+        assert [o["op"] for o in changed] == ["drop_constraint", "add_constraint"], (
+            changed
+        )
+    finally:
+        await connection.close()

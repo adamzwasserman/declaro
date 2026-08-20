@@ -37,6 +37,7 @@ from declaro_persistum.inspector.shared import (
     columns_from_pragma_rows,
     fk_list_from_pragma_rows,
     indexes_from_rows,
+    table_constraints_from_ddl,
     unique_cols_from_index_rows,
     views_from_rows,
 )
@@ -218,8 +219,23 @@ async def _introspect_table(
     columns = await _get_columns(connection, table_name)
     indexes = await _get_indexes(connection, table_name)
     foreign_keys = await _get_foreign_keys(connection, table_name)
+    constraints = await _get_table_constraints(connection, table_name)
 
-    return assemble_table(columns, indexes, foreign_keys)
+    return assemble_table(columns, indexes, foreign_keys, constraints)
+
+
+async def _get_table_constraints(
+    connection: Any, table_name: str
+) -> dict[str, dict[str, str]]:
+    """The named table-level constraints, from the stored CREATE TABLE."""
+    cursor = await _maybe_await(connection.execute(
+        f"SELECT sql FROM sqlite_master WHERE type='table' "
+        f"AND name='{as_literal(table_name)}'"
+    ))
+    rows = await _maybe_await(cursor.fetchall())
+    if rows and rows[0][0]:
+        return table_constraints_from_ddl(rows[0][0])
+    return {}
 
 
 async def _get_columns(

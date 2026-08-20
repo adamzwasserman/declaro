@@ -176,24 +176,33 @@ def test_marking_unique_columns_leaves_a_primary_key_alone() -> None:
     assert columns["email"]["unique"] is True
 
 
-def test_a_table_is_assembled_from_its_three_parts() -> None:
+def test_a_table_is_assembled_from_its_four_parts() -> None:
+    """FOUR SINCE 2026-08-19. Named table-level constraints joined the three.
+
+    They live in no PRAGMA, so both inspectors read them out of the stored
+    CREATE TABLE, and until they did a declared constraint was proposed on
+    every deploy.
+    """
     columns = {"id": {"type": "text", "primary_key": True}}
     indexes = {"i": {"columns": ["id"]}}
     keys = [{"from": "id", "table": "u", "to": "id"}]
+    constraints = {"ck": {"type": "check", "expression": "id <> ''"}}
 
-    table = assemble_table(columns, indexes, keys)
+    table = assemble_table(columns, indexes, keys, constraints)
 
     assert table["columns"] == columns
     assert table["indexes"] == indexes
+    assert table["constraints"] == constraints
 
 
 def test_a_table_with_nothing_extra_carries_nothing_extra() -> None:
     """An empty `indexes` key that introspection would not report is a
     difference on every run."""
-    table = assemble_table({"id": {"type": "text"}}, {}, [])
+    table = assemble_table({"id": {"type": "text"}}, {}, [], {})
 
     assert table["columns"] == {"id": {"type": "text"}}
     assert not table.get("indexes")
+    assert not table.get("constraints")
 
 
 def test_a_view_is_read_with_its_query() -> None:
