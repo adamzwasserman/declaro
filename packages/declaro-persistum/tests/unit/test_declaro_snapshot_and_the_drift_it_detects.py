@@ -35,7 +35,6 @@ from __future__ import annotations
 import sqlite3
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
