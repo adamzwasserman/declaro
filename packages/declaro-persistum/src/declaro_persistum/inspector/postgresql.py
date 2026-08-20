@@ -343,7 +343,25 @@ async def _get_indexes(
           ON c.conindid = ix.indexrelid
           AND c.contype IN ('p', 'u', 'x')
         WHERE NOT ix.indisprimary
-          AND c.oid IS NULL
+          -- A CONSTRAINT-BACKED INDEX IS EXCLUDED, EXCEPT A MULTI-COLUMN
+          -- UNIQUE. This read `c.oid IS NULL` alone, so every UNIQUE
+          -- constraint's index was dropped whether it covered one column or
+          -- four, and a table carrying `UNIQUE ("c","d")` introspected with
+          -- no index and nothing on either column. Measured 2026-08-19.
+          --
+          -- The exclusion is right for a single-column unique: a model
+          -- declares that as `unique: True` on the column, and reporting the
+          -- index as well would put it in the differ's current-minus-target
+          -- set and schedule a drop_index for a constraint the model still
+          -- declares. A multi-column unique has no column to carry it, so
+          -- excluding it lost the fact rather than moving it.
+          --
+          -- The SQLite and Turso inspectors had the same hole for the same
+          -- reason, expressed through PRAGMA index_list's `origin` instead.
+          AND (
+            c.oid IS NULL
+            OR (c.contype = 'u' AND array_length(ix.indkey, 1) > 1)
+          )
           AND n.nspname = $1
           AND t.relname = $2
         GROUP BY i.relname, ix.indisunique, ix.indpred, ix.indrelid, am.amname

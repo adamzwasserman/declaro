@@ -71,14 +71,37 @@ async def _turso() -> Any:
     return await turso.aio.connect(os.path.join(tempfile.mkdtemp(), "u.db"))
 
 
-ENGINES = {"sqlite": _sqlite, "turso": _turso}
+PROBE_URL = os.environ.get(
+    "TEST_POSTGRESQL_URL", "postgresql://postgres:postgres@localhost/declaro_probe"
+)
+
+
+async def _postgresql() -> Any:
+    """PostgreSQL hides it for the same reason and by a different mechanism.
+
+    It has no `origin` column. `_get_indexes` excludes any index with an
+    owning constraint of type p, u or x, so a UNIQUE constraint's index is
+    dropped whether it covers one column or four.
+    """
+    import asyncpg
+
+    try:
+        connection = await asyncpg.connect(PROBE_URL)
+    except (OSError, asyncpg.PostgresError) as unreachable:
+        pytest.skip(f"no server at {PROBE_URL}: {unreachable}")
+    await connection.execute('DROP TABLE IF EXISTS "t" CASCADE')
+    return connection
+
+
+ENGINES = {"sqlite": _sqlite, "turso": _turso, "postgresql": _postgresql}
 
 
 async def _built(dialect: str, statements: list[str]) -> Any:
     connection = await ENGINES[dialect]()
     for statement in statements:
         await connection.execute(statement)
-    await connection.commit()
+    if dialect != "postgresql":
+        await connection.commit()
     return connection
 
 
