@@ -374,10 +374,24 @@ async def _execute_fetch_one(connection: Any, sql: str, params: Any) -> dict[str
         return dict(row) if row else None
 
     async def _fetch_one_aiosqlite() -> dict[str, Any] | None:
+        # BORROWED AND GIVEN BACK, the same way `_fetch_aiosqlite` does it and
+        # for the same reason. This assigned the factory and left it assigned,
+        # so after one `execute_one` every raw `conn.execute(...)` the CALLER
+        # made returned dicts instead of tuples, for the life of a connection
+        # this module does not own.
+        #
+        # The fix was written thirty lines above and did not reach here, which
+        # is how `row[0]` came to raise `KeyError: 0` on somebody else's query
+        # and read as a driver quirk: it depended on whether an `execute_one`
+        # had run first.
+        previous = connection.row_factory
         connection.row_factory = _dict_factory
-        cursor = await connection.execute(sql, params)
-        row = await cursor.fetchone()
-        return dict(row) if row else None
+        try:
+            cursor = await connection.execute(sql, params)
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+        finally:
+            connection.row_factory = previous
 
     async def _fetch_one_turso() -> dict[str, Any] | None:
         cursor = await connection.execute(sql, params if params else ())
