@@ -688,6 +688,23 @@ def same_default(current: Any, target: Any, dialect: Dialect) -> bool:
     return bool(current == target)
 
 
+def _same_fk_action(current: Any, target: Any) -> bool:
+    """Whether two referential actions are the same constraint.
+
+    NO ACTION IS WHAT SQL DOES WHEN NO CLAUSE IS WRITTEN, so `no action` and
+    absence are one constraint spelled two ways. The database can only ever
+    report the second: `PRAGMA foreign_key_list` gives `NO ACTION` for a plain
+    `REFERENCES author(id)` and for an explicit `ON DELETE NO ACTION` alike,
+    and the inspector drops it precisely because it cannot tell them apart.
+
+    Comparing them with `!=` meant a model that declared `on_delete="no
+    action"` proposed dropping and rebuilding its foreign key on every run,
+    forever, applying a change that left the schema exactly as it found it.
+    """
+    absent = (None, "no action")
+    return (current in absent and target in absent) or current == target
+
+
 def _diff_foreign_keys(
     table_name: str,
     current_columns: dict[str, Column],
@@ -709,7 +726,7 @@ def _diff_foreign_keys(
         # goes", so a schema that changed its mind was told it had migrated.
         if current_ref and target_ref and current_ref == target_ref:
             for prop in ("on_delete", "on_update"):
-                if current_col.get(prop) != target_col.get(prop):
+                if not _same_fk_action(current_col.get(prop), target_col.get(prop)):
                     operations.append(
                         {
                             "op": "drop_foreign_key",
