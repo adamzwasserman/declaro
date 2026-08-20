@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 def generate_create_table_sql(
     table_name: str,
     columns: dict[str, Column],
+    constraints: dict[str, dict[str, str]] | None = None,
 ) -> str:
     """
     Generate CREATE TABLE statement from column definitions.
@@ -128,6 +129,13 @@ def generate_create_table_sql(
     if len(pk_columns) > 1:
         pk_cols = ", ".join(f'"{c}"' for c in pk_columns)
         col_defs.append(f"PRIMARY KEY ({pk_cols})")
+
+    # Through the shared clause, so the two reconstruction modules and the
+    # two create renderers cannot spell a constraint four different ways.
+    from declaro_persistum.applier.shared import constraint_clause
+
+    for name, definition in (constraints or {}).items():
+        col_defs.append(constraint_clause(name, definition))
 
     columns_sql = ",\n    ".join(col_defs)
     return f'CREATE TABLE "{table_name}" (\n    {columns_sql}\n)'
@@ -335,7 +343,19 @@ async def execute_reconstruction_async(
         await connection.execute(f'DROP TABLE IF EXISTS "{temp_table}"')
 
         # 5. Create new table with updated schema
-        create_sql = generate_create_table_sql(temp_table, new_columns)
+        # THE SECOND RECONSTRUCTION MODULE, AND THE FIX LANDED ON THE FIRST.
+        # Turso rebuilds through here and SQLite through
+        # `table_reconstruction`, so teaching one of them to carry the
+        # table-level constraints left the other still dropping them. Fourth
+        # time in this session a fix has landed on one copy of a pair.
+        from declaro_persistum.abstractions.table_reconstruction import (
+            table_constraints_of,
+        )
+
+        table_constraints = await table_constraints_of(connection, table_name)
+        create_sql = generate_create_table_sql(
+            temp_table, new_columns, table_constraints
+        )
         logger.debug(f"Creating temp table: {create_sql}")
         await connection.execute(create_sql)
 

@@ -57,6 +57,13 @@ def _schema(note_type: str, **fk: Any) -> dict[str, Any]:
     return {
         "parents": {"columns": {"id": {"type": "integer", "primary_key": True}}},
         "children": {
+            # A TABLE-LEVEL CONSTRAINT TOO, added 2026-08-19. It was the third
+            # constraint kind this rebuild dropped, after the unique and the
+            # foreign key, and for the same reason: the rebuild is handed
+            # columns and a table-level constraint is not on a column.
+            "constraints": {
+                "ck_age": {"type": "check", "expression": "age > 0"}
+            },
             "columns": {
                 "id": {"type": "integer", "primary_key": True},
                 "pid": {"type": "integer", "references": "parents.id", **fk},
@@ -242,6 +249,44 @@ async def test_the_unique_is_still_enforced_after_a_rebuild() -> None:
             await connection.execute(
                 'INSERT INTO "children" (id, email, age, note) VALUES (2, ?, 5, 0)',
                 ("a@b.c",),
+            )
+            await connection.commit()
+    finally:
+        await connection.close()
+
+
+@pytest.mark.parametrize("dialect", sorted(ENGINES))
+async def test_a_table_level_constraint_survives_a_rebuild(dialect: str) -> None:
+    """The third kind. The rebuild reads the whole table now, not part of it."""
+    connection = await ENGINES[dialect]()
+    try:
+        await _apply(connection, dialect, {}, _schema("text", on_delete="cascade"))
+        actual = await introspect(connection, dialect)
+        await _apply(connection, dialect, actual, _schema("integer", on_delete="cascade"))
+
+        rebuilt = await introspect(connection, dialect)
+
+        assert rebuilt["children"].get("constraints", {}).get("ck_age"), (
+            rebuilt["children"]
+        )
+    finally:
+        await connection.close()
+
+
+@pytest.mark.parametrize("dialect", sorted(ENGINES))
+async def test_the_table_level_constraint_is_still_enforced(dialect: str) -> None:
+    """Declared is not enforced, the same floor the cascade and unique have."""
+    connection = await ENGINES[dialect]()
+    try:
+        await _apply(connection, dialect, {}, _schema("text", on_delete="cascade"))
+        actual = await introspect(connection, dialect)
+        await _apply(connection, dialect, actual, _schema("integer", on_delete="cascade"))
+
+        cursor = connection.cursor() if dialect == "turso" else connection
+        with pytest.raises(Exception):
+            await cursor.execute(
+                'INSERT INTO "children" (id, pid, email, age, note) '
+                "VALUES (1, NULL, 'a@b.c', -5, 0)"
             )
             await connection.commit()
     finally:

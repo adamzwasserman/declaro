@@ -123,7 +123,16 @@ async def reconstruct_table(
         await connection.execute(f'DROP TABLE IF EXISTS "{temp_table}"')
 
         # 4. Create new table with updated schema
-        create_sql = _generate_create_table_sql(temp_table, new_columns)
+        # THE TABLE-LEVEL CONSTRAINTS COME ALONG. A rebuild is handed
+        # columns, and a table-level constraint is not on a column, so the
+        # new table was created without it: declared, created, read back, and
+        # gone the moment an unrelated column changed type. Measured
+        # 2026-08-19, the third constraint kind this rebuild lost after the
+        # unique and the foreign key.
+        table_constraints = await table_constraints_of(connection, table_name)
+        create_sql = _generate_create_table_sql(
+            temp_table, new_columns, table_constraints
+        )
         logger.debug(f"Creating temp table: {create_sql}")
         await connection.execute(create_sql)
 
@@ -400,9 +409,37 @@ async def _get_full_table_schema(connection: Any, table_name: str) -> dict[str, 
     return columns
 
 
+async def table_constraints_of(connection: Any, table_name: str) -> dict[str, Any]:
+    """The named table-level constraints, for a rebuild to write back.
+
+    A REBUILD DROPPED THEM. `reconstruct_table` is handed columns, and a
+    table-level constraint is not on a column, so the new table was created
+    without it. Measured 2026-08-19: a constraint declared, created, read back
+    and then gone the moment an unrelated column changed type.
+
+    Same shape as the unique and the foreign key that this file already lost
+    on a rebuild, and the third time the answer is that the rebuild has to
+    read the whole table rather than part of it.
+    """
+    from declaro_persistum.inspector.shared import table_constraints_from_ddl
+
+    cursor = await connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name = ?",
+        (table_name,),
+    )
+    rows = await cursor.fetchall()
+    if rows and rows[0][0]:
+        return dict(table_constraints_from_ddl(rows[0][0]))
+    return {}
 
 
-def _generate_create_table_sql(table_name: str, columns: dict[str, Column]) -> str:
+
+
+def _generate_create_table_sql(
+    table_name: str,
+    columns: dict[str, Column],
+    constraints: dict[str, dict[str, str]] | None = None,
+) -> str:
     """
     Generate CREATE TABLE statement from column definitions.
 
@@ -472,6 +509,13 @@ def _generate_create_table_sql(table_name: str, columns: dict[str, Column]) -> s
     if len(pk_columns) > 1:
         pk_cols = ", ".join(f'"{c}"' for c in pk_columns)
         col_defs.append(f"PRIMARY KEY ({pk_cols})")
+
+    # Written through the shared clause so a rebuilt table cannot spell a
+    # constraint differently from the create that first made it.
+    from declaro_persistum.applier.shared import constraint_clause
+
+    for name, definition in (constraints or {}).items():
+        col_defs.append(constraint_clause(name, definition))
 
     columns_sql = ",\n    ".join(col_defs)
     return f'CREATE TABLE "{table_name}" (\n    {columns_sql}\n)'
