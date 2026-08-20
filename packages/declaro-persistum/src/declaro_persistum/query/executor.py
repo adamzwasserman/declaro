@@ -212,22 +212,79 @@ def _prepare_query(query: Query, connection: Any) -> tuple[str, Any]:
     return sql, params
 
 
+_PLACEHOLDER = re.compile(r":([a-zA-Z_][a-zA-Z0-9_]*)")
+
+
+def _placeholders(sql: str) -> list[tuple[int, int, str]]:
+    """Where the `:name` placeholders are, and only those.
+
+    A COLON IS NOT ALWAYS A PLACEHOLDER, and both converters used to assume it
+    was. Three things wear one and are not:
+
+        'time :name here'   a colon inside a string literal is DATA. Rewriting
+                            it changes the value the query compares against,
+                            so the statement still parses, still runs, and
+                            returns the wrong rows without raising.
+        "a:b"               a quoted identifier is one column called `a:b`.
+        n::text             a cast. A parameter named `text` turned this into
+                            `n:$1`, which no engine parses.
+
+    So the scan walks the statement rather than searching it, carrying whether
+    it stands inside a literal or a quoted name, and skipping a doubled colon
+    whole. Returned as spans so a caller can rewrite from the end and leave
+    every earlier offset valid.
+    """
+    spans: list[tuple[int, int, str]] = []
+    position = 0
+    while position < len(sql):
+        char = sql[position]
+        if char in "'\"":
+            closing = sql.find(char, position + 1)
+            position = len(sql) if closing == -1 else closing + 1
+            continue
+        if char == ":":
+            if sql.startswith("::", position):
+                position += 2
+                continue
+            match = _PLACEHOLDER.match(sql, position)
+            if match:
+                spans.append((match.start(), match.end(), match.group(1)))
+                position = match.end()
+                continue
+        position += 1
+    return spans
+
+
 def _convert_to_asyncpg(sql: str, params: dict[str, Any]) -> tuple[str, list[Any]]:
-    """Convert :name parameters to $N for asyncpg."""
-    # Find all :param_name occurrences and replace with $N
+    """Convert :name parameters to $N for asyncpg.
+
+    NUMBERED BY FIRST APPEARANCE IN THE SQL, not by the order the caller built
+    the dict in. `$N` is explicit, so a name written twice takes the same
+    number twice and its value is passed once.
+
+    This used `str.replace(f":{name}", ...)` under a comment claiming it
+    handled word boundaries. It did not: `:id` matched the front of `:id_2`
+    and produced `$1_2`, and whether it did depended on dictionary order, so
+    the same query worked or failed by how its parameters happened to be
+    written.
+    """
     param_list: list[Any] = []
-    param_map: dict[str, int] = {}
-    result_sql = sql
+    numbers: dict[str, int] = {}
+    pieces: list[str] = []
+    cursor = 0
 
-    for name, value in params.items():
-        if name not in param_map:
-            param_list.append(value)
-            param_map[name] = len(param_list)
+    for start, end, name in _placeholders(sql):
+        if name not in params:
+            continue
+        if name not in numbers:
+            param_list.append(params[name])
+            numbers[name] = len(param_list)
+        pieces.append(sql[cursor:start])
+        pieces.append(f"${numbers[name]}")
+        cursor = end
 
-        # Replace :name with $N (handle word boundaries)
-        result_sql = result_sql.replace(f":{name}", f"${param_map[name]}")
-
-    return result_sql, param_list
+    pieces.append(sql[cursor:])
+    return "".join(pieces), param_list
 
 
 def _convert_to_aiosqlite(sql: str, params: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -236,18 +293,31 @@ def _convert_to_aiosqlite(sql: str, params: dict[str, Any]) -> tuple[str, dict[s
 
 
 def _convert_to_turso(sql: str, params: dict[str, Any]) -> tuple[str, list[Any]]:
-    """Convert :name parameters to ? for turso/pyturso, in SQL occurrence order."""
+    """Convert :name parameters to ? for turso/pyturso, in SQL occurrence order.
+
+    ONE VALUE PER OCCURRENCE, which is where this differs from asyncpg and
+    must keep differing. A `?` carries no number, so a name written twice
+    needs its value passed twice; `$1` written twice does not.
+
+    The regex this used respected word boundaries, so it never had asyncpg's
+    prefix defect, but it searched the statement rather than walking it and so
+    rewrote a colon inside a string literal, appending a second value that
+    pushed every later bind one position out.
+    """
     param_list: list[Any] = []
+    pieces: list[str] = []
+    cursor = 0
 
-    def replace_param(match: re.Match) -> str:  # type: ignore[type-arg]
-        name = match.group(1)
-        if name in params:
-            param_list.append(params[name])
-            return "?"
-        return match.group(0)  # leave unknown :names as-is
+    for start, end, name in _placeholders(sql):
+        if name not in params:
+            continue
+        param_list.append(params[name])
+        pieces.append(sql[cursor:start])
+        pieces.append("?")
+        cursor = end
 
-    result_sql = re.sub(r":([a-zA-Z_][a-zA-Z0-9_]*)", replace_param, sql)
-    return result_sql, param_list
+    pieces.append(sql[cursor:])
+    return "".join(pieces), param_list
 
 
 async def _execute_fetch(connection: Any, sql: str, params: Any) -> list[dict[str, Any]]:
