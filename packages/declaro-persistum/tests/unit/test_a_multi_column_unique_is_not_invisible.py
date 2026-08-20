@@ -175,3 +175,57 @@ async def test_a_primary_key_index_is_still_not_reported(dialect: str) -> None:
         assert not (actual["t"].get("indexes") or {}), actual["t"]
     finally:
         await connection.close()
+
+
+# ---------------------------------------------------------------------------
+# The form this package writes, on every engine
+# ---------------------------------------------------------------------------
+
+DECLARED = {
+    "t": {
+        "columns": {
+            "id": {"type": "integer", "primary_key": True},
+            "c": {"type": "text"},
+            "d": {"type": "text"},
+        },
+        "indexes": {"ix_cd": {"columns": ["c", "d"], "unique": True}},
+    }
+}
+
+
+@pytest.mark.parametrize("dialect", sorted(ENGINES))
+async def test_a_declared_multi_column_unique_converges(dialect: str) -> None:
+    """The control on the whole change, run against a real engine.
+
+    Reporting a constraint-backed index that the model does not declare is
+    correct. Reporting one it DOES declare twice, or under a name the model
+    never used, would make every deploy propose dropping and recreating it.
+    Three engines, and the second diff has to be empty on each.
+    """
+    from declaro_persistum.applier import apply
+    from declaro_persistum.differ.core import diff
+
+    connection = await ENGINES[dialect]()
+    try:
+        plan = diff({}, DECLARED, dialect=dialect)
+        await apply(
+            connection,
+            plan["operations"],
+            plan["execution_order"],
+            dialect,
+            dry_run=False,
+        )
+
+        actual = await introspect(connection, dialect)
+        remaining = diff(
+            {n: actual[n] for n in DECLARED if n in actual},
+            DECLARED,
+            dialect=dialect,
+        )["operations"]
+
+        assert actual["t"]["indexes"]["ix_cd"]["columns"] == ["c", "d"]
+        assert remaining == [], [(o["op"], o["table"]) for o in remaining]
+    finally:
+        if dialect == "postgresql":
+            await connection.execute('DROP TABLE IF EXISTS "t" CASCADE')
+        await connection.close()
