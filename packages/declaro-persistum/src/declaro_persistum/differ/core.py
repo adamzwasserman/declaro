@@ -5,6 +5,7 @@ Implements the main diff() function that computes operations needed
 to transform current schema to target schema.
 """
 
+import re
 from typing import Any
 
 from declaro_persistum.applier.shared import same_type
@@ -15,6 +16,7 @@ from declaro_persistum.types import (
     Decision,
     Dialect,
     DiffResult,
+    Index,
     Operation,
     Schema,
     Table,
@@ -799,6 +801,87 @@ def _diff_foreign_keys(
     return operations
 
 
+_BARE_IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
+
+
+def _fold_predicate(expression: str) -> str:
+    """One SQL predicate, in the spelling every engine would agree on.
+
+    PostgreSQL does not keep the text an author wrote. It parses the clause and
+    renders it back through `pg_get_expr`, which wraps the whole thing in
+    parentheses and drops the quoting from any identifier that does not need
+    it, so `WHERE "deleted_at" IS NULL` reads back as `(deleted_at IS NULL)`.
+    Comparing those as strings proposed rebuilding the index on every run.
+
+    QUOTES COME OFF ONLY WHERE THEY CARRY NOTHING. A quoted name that is
+    already lower case and holds nothing but word characters means the same
+    column unquoted, and PostgreSQL will render it that way. `"Email"` and
+    `"my col"` keep theirs, because there the quoting is what makes the name
+    mean that column: unquoted, `Email` folds to `email` and is a different
+    column. Folding those would report a real difference as no change.
+
+    `_canonical_spacing` cannot do this job. It was written for a default like
+    `datetime ('now')` and deletes the space before an opening paren, which
+    turns `(a > 0) AND (b > 0)` into something no engine emits.
+    """
+    text = " ".join(expression.split())
+
+    out: list[str] = []
+    position = 0
+    while position < len(text):
+        char = text[position]
+        if char == '"':
+            closing = text.find('"', position + 1)
+            if closing == -1:
+                out.append(text[position:])
+                break
+            name = text[position + 1 : closing]
+            out.append(name if _BARE_IDENTIFIER.match(name) else f'"{name}"')
+            position = closing + 1
+            continue
+        if char == "'":
+            closing = text.find("'", position + 1)
+            if closing == -1:
+                out.append(text[position:])
+                break
+            out.append(text[position : closing + 1])
+            position = closing + 1
+            continue
+        out.append(char)
+        position += 1
+
+    folded = "".join(out).strip()
+    while folded.startswith("(") and folded.endswith(")"):
+        depth = 0
+        for index, char in enumerate(folded):
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0 and index != len(folded) - 1:
+                    return folded
+        folded = folded[1:-1].strip()
+    return folded
+
+
+def _same_index(current: Index, target: Index) -> bool:
+    """Do these two definitions declare the same index?
+
+    The whole dict was compared with `!=`, which made the WHERE clause of a
+    partial index a string comparison against whatever the engine chose to
+    render. Columns and uniqueness compare directly; the predicate folds.
+    """
+    if list(current.get("columns", [])) != list(target.get("columns", [])):
+        return False
+    if bool(current.get("unique")) != bool(target.get("unique")):
+        return False
+    current_where = current.get("where")
+    target_where = target.get("where")
+    if current_where is None or target_where is None:
+        return current_where == target_where
+    return _fold_predicate(current_where) == _fold_predicate(target_where)
+
+
 def _diff_indexes(
     table_name: str,
     current: Table,
@@ -848,7 +931,7 @@ def _diff_indexes(
         current_idx = current_indexes[idx_name]
         target_idx = target_indexes[idx_name]
 
-        if current_idx != target_idx:
+        if not _same_index(current_idx, target_idx):
             operations.append(
                 {
                     "op": "drop_index",
