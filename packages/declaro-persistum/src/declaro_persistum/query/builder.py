@@ -6,7 +6,10 @@ All functions are pure and return Query objects.
 """
 
 import re
+from collections.abc import Callable
 from typing import Any, TypedDict
+
+from declaro_persistum.types import written_as
 
 
 class Query(TypedDict):
@@ -48,7 +51,9 @@ def _clause(
     given = dict(params or {})
     if where is None:
         return "", given
-    if isinstance(where, str):
+    # A CLAUSE IS WRITTEN AS TEXT OR AS A MAPPING, and text brings no
+    # parameters of its own.
+    if written_as(str, where):
         return where, given
 
     from declaro_persistum.query.conditions import render
@@ -156,6 +161,25 @@ def select(
     }
 
 
+def _one_row(values: Any) -> list[Any]:
+    """A single mapping: one row, written without the surrounding list."""
+    return [values]
+
+
+def _many_rows(values: Any) -> list[Any]:
+    """Already a list of rows."""
+    return list(values)
+
+
+# WHETHER ONE ROW WAS WRITTEN OR SEVERAL, as a table rather than a
+# conditional expression.
+_ROWS: dict[bool, Callable[[Any], list[Any]]] = {
+    True: _one_row,
+    False: _many_rows,
+}
+
+
+
 def insert(
     into_table: str,
     values: dict[str, Any] | list[dict[str, Any]],
@@ -180,8 +204,9 @@ def insert(
         >>> print(q["sql"])
         INSERT INTO "users" ("email", "name") VALUES (:email, :name)
     """
-    # Normalize to list
-    values_list = [values] if isinstance(values, dict) else values
+    # ONE ROW OR SEVERAL, AND BOTH MEAN SEVERAL. Two spellings of one thing
+    # is a vocabulary, resolved here into the single form the rest reads.
+    values_list = _ROWS[written_as(dict, values)](values)
 
     if not values_list:
         raise ValueError("values cannot be empty")

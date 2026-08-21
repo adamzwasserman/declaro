@@ -47,6 +47,8 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from declaro_persistum.types import written_as
+
 __all__ = ["OPERATORS", "COMBINATORS", "Rendered", "Renderer", "render"]
 
 # WHAT EVERY OPERATOR IN THE TABLE IS. Fifteen entries built by four factories,
@@ -215,7 +217,8 @@ def render(
             continue
 
         column = key
-        if not isinstance(value, dict):
+        # A MAPPING NAMES OPERATORS; ANYTHING ELSE IS THE VALUE ITSELF.
+        if not written_as(dict, value):
             # `{"status": "active"}` — a bare value means equality, because
             # that is what a caller writing a plain value means.
             sql, p = OPERATORS["eq"](column, value, here)

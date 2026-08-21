@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import Any, TypeVar
 
 from declaro_persistum.query.builder import Query
+from declaro_persistum.types import written_as
 
 T = TypeVar("T")
 
@@ -413,6 +414,23 @@ async def _execute_fetch_one(connection: Any, sql: str, params: Any) -> dict[str
     raise ValueError(f"Unsupported connection type: {conn_type}")
 
 
+def _first_named_value(row: Any) -> Any:
+    """A mapping: the first value, whatever its column was called."""
+    return next(iter(row.values()), None)
+
+
+def _first_positional_value(row: Any) -> Any:
+    """A sequence: the value in the first column."""
+    return row[0]
+
+
+# HOW THE DRIVER WROTE THE ROW, as a table rather than a chain.
+_FIRST_VALUE: dict[bool, Callable[[Any], Any]] = {
+    True: _first_named_value,
+    False: _first_positional_value,
+}
+
+
 def _first_value(row: Any) -> Any:
     """The single value a scalar query selected, however the driver spells a row.
 
@@ -429,9 +447,11 @@ def _first_value(row: Any) -> Any:
     """
     if row is None:
         return None
-    if isinstance(row, dict):
-        return next(iter(row.values()), None)
-    return row[0]
+    # A DRIVER HANDS BACK A MAPPING OR A SEQUENCE, and either way the scalar
+    # is its first value. aiosqlite gives a Row that indexes by position,
+    # asyncpg a Record that also reads by name, and a row_factory can make it
+    # a plain dict.
+    return _FIRST_VALUE[written_as(dict, row)](row)
 
 
 async def _execute_fetch_scalar(connection: Any, sql: str, params: Any) -> Any:
