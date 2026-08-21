@@ -5,6 +5,7 @@ All data structures are TypedDict - no classes with state.
 This ensures serialization to/from TOML/JSON and compatibility with pure functions.
 """
 
+from collections.abc import Callable
 from typing import Any, Literal, Protocol, TypedDict, runtime_checkable
 
 # THE ENGINES, AS A VOCABULARY RATHER THAN A STRING.
@@ -135,6 +136,26 @@ def spelling_of(value: Any) -> type:
     declared and the caller refuses it by name.
     """
     return type(value)  # honest: ignore HC-P005: this IS the recognizer; reading the type of schemaless input is its whole job
+
+
+def _unchanged(value: Any) -> Any:
+    """Not text, so there is no second spelling to fold."""
+    return value
+
+
+def applied_to_text(rule: Callable[[str], Any], value: Any) -> Any:
+    """`rule` applied to text; every other spelling passes through unchanged.
+
+    ONLY TEXT CAN BE WRITTEN MORE THAN ONE WAY, so only text needs folding. A
+    number is a number in every dialect and nothing about it varies.
+
+    Five places had written this as a guard -- `if not isinstance(x, str):
+    return x` -- ahead of a normalisation, and each one was a separate chance
+    to forget it. `_comparable` had four such guards, two per rule and one per
+    argument, and the shape of all three bugs `same_default` has been fixed
+    for was a rule that reached one argument and not the other.
+    """
+    return _APPLIED[spelling_of(value) is str](rule, value)
 
 
 def changed_to(value: Any) -> Any:
@@ -564,3 +585,10 @@ def for_dialect(table: dict[str, Any], dialect: str, what: str) -> Any:
         f"Unsupported dialect: {dialect}. "
         f"{what} exist for: {', '.join(sorted(table))}"
     )
+
+
+# WHETHER THE VALUE IS TEXT, as a table rather than a guard.
+_APPLIED: dict[bool, Callable[[Callable[[str], Any], Any], Any]] = {
+    True: lambda rule, value: rule(value),
+    False: lambda _rule, value: _unchanged(value),
+}

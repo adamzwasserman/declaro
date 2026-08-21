@@ -6,9 +6,11 @@ to transform current schema to target schema.
 """
 
 import re
+from collections.abc import Callable
 from typing import Any
 
 from declaro_persistum.applier.shared import same_type
+from declaro_persistum.boundary import helper
 from declaro_persistum.differ.ambiguity import detect_ambiguities
 from declaro_persistum.differ.toposort import build_dependency_graph, topological_sort
 from declaro_persistum.types import (
@@ -20,11 +22,14 @@ from declaro_persistum.types import (
     Operation,
     Schema,
     Table,
+    applied_to_text,
     is_nullable,
     is_our_table,
+    spelling_of,
 )
 
 
+@helper
 def diff(
     current: Schema,
     target: Schema,
@@ -253,6 +258,7 @@ def diff(
     }
 
 
+@helper
 def _diff_table(
     table_name: str,
     current: Table,
@@ -288,6 +294,7 @@ def _diff_table(
     return operations
 
 
+@helper
 def _with_unique_folded(table: dict[str, Any]) -> dict[str, Column]:
     """A table's columns, with single-column unique indexes folded onto them.
 
@@ -332,6 +339,7 @@ def _with_unique_folded(table: dict[str, Any]) -> dict[str, Column]:
     return columns
 
 
+@helper
 def _diff_columns(
     table_name: str,
     current: Table,
@@ -444,6 +452,7 @@ def _diff_columns(
     return operations
 
 
+@helper
 def _compute_column_alterations(
     current: Column,
     target: Column,
@@ -536,6 +545,7 @@ def _compute_column_alterations(
     return changes if changes else None
 
 
+@helper
 def _canonical_spacing(expression: str) -> str:
     """An expression with its cosmetic whitespace and outer parens removed.
 
@@ -573,6 +583,7 @@ def _canonical_spacing(expression: str) -> str:
     return text
 
 
+@helper
 def _same_constraint(prop: str, current: Any, target: Any) -> bool:
     """Do these two spellings declare the same constraint?
 
@@ -599,6 +610,7 @@ def _same_constraint(prop: str, current: Any, target: Any) -> bool:
 _NUMERIC = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?\Z")
 
 
+@helper
 def _as_number(value: Any) -> float | None:
     """The number this default denotes, or None if it does not denote one.
 
@@ -619,6 +631,7 @@ def _as_number(value: Any) -> float | None:
     return float(value) if _NUMERIC.match(value.strip()) else None
 
 
+@helper
 def _comparable(value: Any, spelled: dict[str, str]) -> Any:
     """One default, in the form both sides can be compared in.
 
@@ -643,13 +656,50 @@ def _comparable(value: Any, spelled: dict[str, str]) -> Any:
     booleans, then numbers, then `now()`, and each fix added a guard. A rule
     that reaches one argument and not the other is the shape all three had.
     """
-    return (
-        _canonical_spacing(spelled.get(value.strip().lower().replace(" ", ""), value))
-        if isinstance(value, str)
-        else value
+    return applied_to_text(
+        lambda text: _canonical_spacing(
+            spelled.get(text.strip().lower().replace(" ", ""), text)
+        ),
+        value,
     )
 
 
+@helper
+def _lowered(text: str) -> str:
+    """A bare word, compared without regard to case."""
+    return text.lower()
+
+
+@helper
+def _as_written(text: str) -> str:
+    """A quoted literal: `'Pending'` and `'pending'` are two different values."""
+    return text
+
+
+# WHETHER THE TEXT IS A BARE WORD, as a table rather than a guard.
+_FOLD_KEYWORD: dict[bool, Callable[[str], str]] = {
+    True: _lowered,
+    False: _as_written,
+}
+
+
+@helper
+def _folded_keyword(text: str) -> str:
+    """A bare keyword folded to lower case, a quoted literal left alone.
+
+    A BARE KEYWORD IS CASE-INSENSITIVE, and this folded only booleans.
+    PostgreSQL stores `current_timestamp` as `CURRENT_TIMESTAMP`, so a schema
+    declaring the lowercase form migrated on every deploy:
+
+        alter_column {"default": {"from": "CURRENT_TIMESTAMP",
+                                  "to": "current_timestamp"}}
+    """
+    stripped = text.strip()
+    return _FOLD_KEYWORD[stripped.replace("_", "").isalnum()](stripped)
+
+
+
+@helper
 def same_default(current: Any, target: Any, dialect: Dialect) -> bool:
     """Do these two spellings mean the same default?
 
@@ -707,23 +757,17 @@ def same_default(current: Any, target: Any, dialect: Dialect) -> bool:
     if current_number is not None and target_number is not None:
         return current_number == target_number
 
-    if isinstance(current, str) and isinstance(target, str):
-        # A BARE KEYWORD IS CASE-INSENSITIVE, and this folded only booleans.
-        # PostgreSQL stores `current_timestamp` as `CURRENT_TIMESTAMP`, so a
-        # schema declaring the lowercase form migrated on every deploy:
-        #
-        #     alter_column {"default": {"from": "CURRENT_TIMESTAMP",
-        #                               "to": "current_timestamp"}}
-        #
-        # A quoted literal is left alone -- `'Pending'` and `'pending'` are two
-        # different values -- so this folds only a bare word.
-        left, right = current.strip(), target.strip()
-        if left.replace("_", "").isalnum() and right.replace("_", "").isalnum():
-            return left.lower() == right.lower()
-
-    return bool(current == target)
+    # EACH SIDE FOLDED ON ITS OWN, THEN COMPARED. This asked whether both were
+    # text and then whether both were bare words, so a rule that reached one
+    # argument and not the other was the shape of all three bugs this function
+    # has been fixed for.
+    return bool(
+        applied_to_text(_folded_keyword, current)
+        == applied_to_text(_folded_keyword, target)
+    )
 
 
+@helper
 def _same_fk_action(current: Any, target: Any) -> bool:
     """Whether two referential actions are the same constraint.
 
@@ -741,6 +785,7 @@ def _same_fk_action(current: Any, target: Any) -> bool:
     return (current in absent and target in absent) or current == target
 
 
+@helper
 def _diff_foreign_keys(
     table_name: str,
     current_columns: dict[str, Column],
@@ -838,6 +883,7 @@ def _diff_foreign_keys(
 _BARE_IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
 
 
+@helper
 def _fold_predicate(expression: str) -> str:
     """One SQL predicate, in the spelling every engine would agree on.
 
@@ -898,6 +944,7 @@ def _fold_predicate(expression: str) -> str:
     return folded
 
 
+@helper
 def _same_index(current: Index, target: Index) -> bool:
     """Do these two definitions declare the same index?
 
@@ -916,6 +963,7 @@ def _same_index(current: Index, target: Index) -> bool:
     return _fold_predicate(current_where) == _fold_predicate(target_where)
 
 
+@helper
 def _diff_indexes(
     table_name: str,
     current: Table,
@@ -984,6 +1032,7 @@ def _diff_indexes(
     return operations
 
 
+@helper
 def _same_constraint_definition(current: Any, target: Any) -> bool:
     """Two constraint definitions, compared as the engine stores them.
 
@@ -998,7 +1047,10 @@ def _same_constraint_definition(current: Any, target: Any) -> bool:
     inequality fold. `_canonical_spacing` already strips the space-before-paren
     Turso adds and the redundant outer parens PostgreSQL adds.
     """
-    if not isinstance(current, dict) or not isinstance(target, dict):
+    # A DEFINITION THAT IS NOT A MAPPING HAS NO FIELDS TO COMPARE, so the two
+    # are the same only if they are equal outright.
+    both = {spelling_of(current), spelling_of(target)}
+    if both != {dict}:
         return bool(current == target)
     if current.get("type") != target.get("type"):
         return False
@@ -1014,13 +1066,15 @@ def _same_constraint_definition(current: Any, target: Any) -> bool:
     )
 
 
+@helper
 def _canonical_expression(expression: Any) -> Any:
     """One spelling for expressions the engines write differently."""
-    if not isinstance(expression, str):
-        return expression
-    return _canonical_spacing(expression).replace("<>", "!=")
+    return applied_to_text(
+        lambda text: _canonical_spacing(text).replace("<>", "!="), expression
+    )
 
 
+@helper
 def _diff_constraints(
     table_name: str,
     current: Table,
