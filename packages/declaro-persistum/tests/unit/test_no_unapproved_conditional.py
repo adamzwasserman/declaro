@@ -38,9 +38,10 @@ _SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "declaro_persistum"
 
 # The count when the rule was given. LOWER THIS as conditionals are removed.
 # It must never be raised.
-# 720 after the differ's change record got one reader. Five sites asked
-# `isinstance(value, dict) and "to" in value` and four assumed the answer.
-BASELINE = 720
+# 715 after `same_default` stopped normalising its two arguments in four
+# separate places, and the column-type guess was removed from both
+# reconstruction builders.
+BASELINE = 715
 
 _MARKER = "APPROVED-IF"
 

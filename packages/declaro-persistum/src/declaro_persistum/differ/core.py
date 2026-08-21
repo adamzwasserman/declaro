@@ -619,6 +619,37 @@ def _as_number(value: Any) -> float | None:
     return float(value) if _NUMERIC.match(value.strip()) else None
 
 
+def _comparable(value: Any, spelled: dict[str, str]) -> Any:
+    """One default, in the form both sides can be compared in.
+
+    A default is a value on one side of the comparison and an expression on
+    the other, so each is put into one form before they meet. Only text needs
+    it: a number or a bool is already what it is.
+
+    THE ENGINE'S OWN SPELLING FIRST. A default declared `now()` is WRITTEN to
+    SQLite as `(datetime('now'))`, because SQLite cannot parse the first, and
+    read back as what was written. Comparing the stored spelling against the
+    declared one without knowing the translation happened proposed an
+    alter_column on every deploy.
+
+    THEN THE WHITESPACE. Turso inserts a space after a function name when it
+    stores DDL, so `(datetime('now'))` came back as `((datetime ('now')))`
+    and migrated on every deploy. Whitespace and redundant parentheses only:
+    an operator rewrite is not foldable, which is why the CHECK comparison is
+    SQLite-only.
+
+    WRITTEN ONCE AND APPLIED TO BOTH SIDES. This was four inline guards, two
+    per rule, one per argument. `same_default` has been fixed three times, for
+    booleans, then numbers, then `now()`, and each fix added a guard. A rule
+    that reaches one argument and not the other is the shape all three had.
+    """
+    return (
+        _canonical_spacing(spelled.get(value.strip().lower().replace(" ", ""), value))
+        if isinstance(value, str)
+        else value
+    )
+
+
 def same_default(current: Any, target: Any, dialect: Dialect) -> bool:
     """Do these two spellings mean the same default?
 
@@ -668,23 +699,8 @@ def same_default(current: Any, target: Any, dialect: Dialect) -> bool:
     from declaro_persistum.applier.shared import EXPRESSION_DEFAULTS
 
     spelled = EXPRESSION_DEFAULTS.get(dialect, {})
-    if isinstance(target, str):
-        target = spelled.get(target.strip().lower().replace(" ", ""), target)
-    if isinstance(current, str):
-        current = spelled.get(current.strip().lower().replace(" ", ""), current)
-
-    # `datetime ('now')` AND `datetime('now')` ARE ONE DEFAULT. Turso inserts
-    # a space after a function name when it stores DDL, so a declared `now()`
-    # -- translated to `(datetime('now'))` on the way in -- came back as
-    # `((datetime ('now')))` and migrated on every deploy. Measured by the
-    # round-trip gate; `now()` is in the schema this package ships.
-    #
-    # Whitespace and redundant parentheses only. An operator rewrite is not
-    # foldable and is why the CHECK comparison is SQLite-only.
-    if isinstance(current, str):
-        current = _canonical_spacing(current)
-    if isinstance(target, str):
-        target = _canonical_spacing(target)
+    current = _comparable(current, spelled)
+    target = _comparable(target, spelled)
 
     current_number = _as_number(current)
     target_number = _as_number(target)

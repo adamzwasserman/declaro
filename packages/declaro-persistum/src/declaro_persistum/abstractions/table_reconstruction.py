@@ -466,7 +466,10 @@ def _generate_create_table_sql(
         parts = [f'"{col_name}"']
 
         # Type
-        col_type = col_def.get("type", "TEXT")
+        # NO DEFAULT. A column that never said what it is does not become a
+        # TEXT column; the loader refuses one, so reaching here means a caller
+        # built the definition by hand and left the type out.
+        col_type = col_def["type"]
         parts.append(_map_type(col_type))
 
         # Primary key

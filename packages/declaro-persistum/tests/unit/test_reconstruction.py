@@ -213,22 +213,29 @@ class TestPureFunctions:
         assert new_columns["email"]["nullable"] is False
         assert new_columns["email"]["unique"] is True
 
-    def test_generate_create_table_sql_non_string_type_fallback(self):
-        """Test that _map_type handles non-string types gracefully.
+    def test_generate_create_table_sql_refuses_a_type_it_cannot_read(self):
+        """A column type it cannot read is refused, not guessed at.
 
-        If a column type is accidentally a dict (e.g., from unprocessed differ output),
-        it should default to TEXT rather than crashing with AttributeError.
+        REVERSED 2026-08-21, because the old assertion recorded the defect. It
+        read: "If a column type is accidentally a dict (e.g., from unprocessed
+        differ output), it should default to TEXT rather than crashing." TEXT
+        is a guess, and this function builds the CREATE TABLE for a REBUILD:
+        reconstruction drops the real table and recreates it from these
+        definitions, so a column silently typed TEXT holds text afterwards and
+        the original is gone. Raising loses nothing, because the table is
+        still there when it raises.
+
+        `table_reconstruction` always raised on the same input, and the two
+        disagreeing meant which builder a caller reached decided whether they
+        were told.
         """
         columns: dict[str, Column] = {
             "id": {"type": "INTEGER", "primary_key": True},
             "broken": {"type": {"from": "TEXT", "to": "INTEGER"}},  # type: ignore
         }
 
-        sql = generate_create_table_sql("test", columns)
-
-        # Should not crash; non-string type defaults to TEXT
-        assert "TEXT" in sql
-        assert '"broken"' in sql
+        with pytest.raises((TypeError, ValueError, AttributeError)):
+            generate_create_table_sql("test", columns)
 
     def test_get_reconstruction_columns_differ_format_changes(self):
         """Test that differ-format changes (from/to dicts) are handled correctly.

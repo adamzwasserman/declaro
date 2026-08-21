@@ -65,9 +65,9 @@ def extract_literal_values(annotation: Any) -> list[str]:
     values: list[str] = []
 
     for arg in args:
-        if not isinstance(arg, str):
+        if not isinstance(arg, str):  # honest: ignore HC-P005: refusing a Literal member the loader cannot render
             raise ValueError(
-                f"Literal enum values must be strings, got {type(arg).__name__}: {arg}"
+                f"Literal enum values must be strings, got {type(arg).__name__}: {arg}"  # honest: ignore HC-P005: the class name IS the message
             )
         values.append(arg)
 
@@ -85,7 +85,7 @@ def is_optional_type(annotation: Any) -> bool:
     origin_name = getattr(origin, "__name__", str(origin))
     if origin_name in ("Union", "UnionType"):
         args = get_args(annotation)
-        return type(None) in args
+        return type(None) in args  # honest: ignore HC-P005: type(None) is how an Optional is spelled
 
     return False
 
@@ -98,7 +98,7 @@ def unwrap_optional(annotation: Any) -> Any:
 
     args = get_args(annotation)
     for arg in args:
-        if arg is not type(None):
+        if arg is not type(None):  # honest: ignore HC-P005: type(None) is how an Optional is spelled
             return arg
 
     return annotation
@@ -190,7 +190,7 @@ def table(name: str) -> Callable[[type], type]:
 
     @helper
     def declare(cls: type) -> type:
-        if not (isinstance(cls, type) and issubclass(cls, BaseModel)):
+        if not (isinstance(cls, type) and issubclass(cls, BaseModel)):  # honest: ignore HC-P005: @table must refuse a class Pydantic did not make
             raise TypeError(
                 f"@table('{name}') expects a Pydantic BaseModel subclass; "
                 f"{cls.__name__} is not one. The loader reads `model_fields`, "
@@ -589,7 +589,7 @@ def _schema_of(module: Any) -> Schema:
             continue
 
         obj = getattr(module, name)
-        if not isinstance(obj, type):
+        if not isinstance(obj, type):  # honest: ignore HC-P005: reading a module's contents to find the tables
             continue
 
         if not hasattr(obj, "__tablename__"):
@@ -717,7 +717,7 @@ def _check_view(obj: dict[str, Any]) -> None:
         if not isinstance(value, expected):
             raise LoaderError(
                 f"view {described}: {field!r} is "
-                f"{type(value).__name__}, and a view's {field!r} must be "
+                f"{type(value).__name__}, and a view's {field!r} must be "  # honest: ignore HC-P005: the class name IS the message
                 f"{expected.__name__}."
             )
 

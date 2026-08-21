@@ -71,7 +71,10 @@ def generate_create_table_sql(
         parts = [f'"{col_name}"']
 
         # Type
-        col_type = col_def.get("type", "TEXT")
+        # NO DEFAULT. A column that never said what it is does not become a
+        # TEXT column; the loader refuses one, so reaching here means a caller
+        # built the definition by hand and left the type out.
+        col_type = col_def["type"]
         parts.append(_map_type(col_type))
 
         # Primary key (collect for potential composite key)
@@ -462,7 +465,10 @@ def _validate_columns(table_name: str, columns: dict[str, Column]) -> None:
         ValueError: If any column definition is invalid
     """
     for col_name, col_def in columns.items():
-        col_type = col_def.get("type", "TEXT")
+        # NO DEFAULT. A column that never said what it is does not become a
+        # TEXT column; the loader refuses one, so reaching here means a caller
+        # built the definition by hand and left the type out.
+        col_type = col_def["type"]
         if isinstance(col_type, dict):
             raise ValueError(
                 f"Invalid column type for '{table_name}'.'{col_name}': "
@@ -500,22 +506,21 @@ def _validate_columns(table_name: str, columns: dict[str, Column]) -> None:
 
 @helper
 def _map_type(type_str: str) -> str:
-    """SQLite spelling, with the non-string fallback this path is tested for.
+    """The SQLite spelling of a declared type.
 
-    The mapping itself now lives once, in `applier.shared.sqlite_type`. This
-    was a byte-for-byte copy of it plus the isinstance guard below.
+    THE NON-STRING FALLBACK IS GONE. This returned "TEXT" for anything that
+    was not a string, and `table_reconstruction` raises on the same input, so
+    which builder a caller reached decided whether they were told. The
+    docstring here recorded that disagreement rather than resolving it.
 
-    THE GUARD IS KEPT AND IT IS A SMELL. `_validate_columns` raises on a dict
-    type before reconstruction touches the database, so on that path this is
-    unreachable. `generate_create_table_sql` is also public and callable
-    directly, and `test_generate_create_table_sql_non_string_type_fallback`
-    asserts a dict yields TEXT rather than AttributeError. Removing it decides
-    what that public function promises, which is not a side effect of
-    consolidating a type map.
+    TEXT IS A GUESS, AND A REBUILD IS WHERE A GUESS COSTS MOST.
+    Reconstruction drops the real table and recreates it from these
+    definitions, so a column silently typed TEXT holds text afterwards and
+    the original is gone. Raising loses nothing: the table is still there.
 
-    `table_reconstruction._map_type` has no such guard and raises on the same
-    input. The two disagree, and that is recorded rather than resolved here.
+    The guard existed because the differ's {"from": x, "to": y} record used to
+    reach the renderer unwrapped. `changed_to` resolves that in one place now
+    and `_validate_columns` refuses a dict before the database is touched, so
+    what is left is a caller who passed something unreadable.
     """
-    if not isinstance(type_str, str):
-        return "TEXT"
     return sqlite_type(type_str)
