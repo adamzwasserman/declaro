@@ -5,6 +5,8 @@ Ensures operations are executed in an order that respects dependencies.
 For example, DROP FOREIGN KEY must happen before DROP TABLE.
 """
 
+from collections.abc import Callable
+
 from declaro_persistum.exceptions import CycleError
 from declaro_persistum.types import Operation
 
@@ -99,32 +101,35 @@ def _handle_drop_table(
     dropped_fks: list[tuple[int, str, str]],
 ) -> list[int]:
     """Handle DROP TABLE dependencies."""
-    deps: list[int] = []
     table_name = op["table"]
-    # DROP TABLE depends on all DROP FOREIGN KEY that reference this table
-    for fk_idx, _fk_table, _ in dropped_fks:
-        fk_op = all_operations[fk_idx]
-        ref = fk_op["details"].get("references", "")
-        if ref.startswith(f"{table_name}."):
-            deps.append(fk_idx)
-    # DROP TABLE depends on DROP VIEW for views that depend on this table
-    for view_idx, view_op in enumerate(all_operations):
-        if view_op["op"] == "drop_view":
-            view_deps = view_op["details"].get("depends_on", [])
-            if table_name in view_deps:
-                deps.append(view_idx)
 
+    # Keys pointing at this table go before it.
+    keys = [
+        fk_idx
+        for fk_idx, _fk_table, _ in dropped_fks
+        if all_operations[fk_idx]["details"]
+        .get("references", "")
+        .startswith(f"{table_name}.")
+    ]
+    # Views selecting from it go before it.
+    views = [
+        idx
+        for idx, other in enumerate(all_operations)
+        if other["op"] == "drop_view"
+        and table_name in other["details"].get("depends_on", [])
+    ]
     # A TABLE THAT REFERENCES THIS ONE MUST GO FIRST. PostgreSQL refuses to
     # drop a table another still points at, so a plan that dropped the parent
     # first failed halfway. There is no drop_foreign_key operation to hang the
     # edge on when both tables are going: the key leaves with the table.
-    for other_idx, other_op in enumerate(all_operations):
-        if other_op["op"] != "drop_table" or other_idx == op_idx:
-            continue
-        if table_name in (other_op["details"].get("references") or []):
-            deps.append(other_idx)
-
-    return deps
+    parents = [
+        idx
+        for idx, other in enumerate(all_operations)
+        if other["op"] == "drop_table"
+        and idx != op_idx
+        and table_name in (other["details"].get("references") or [])
+    ]
+    return keys + views + parents
 
 
 def _handle_drop_column(
@@ -134,19 +139,22 @@ def _handle_drop_column(
     dropped_indexes: list[tuple[int, str, str]],
 ) -> list[int]:
     """Handle DROP COLUMN dependencies."""
-    deps: list[int] = []
     table_name = op["table"]
     col_name = op["details"].get("column", "")
-    for fk_idx, fk_table, fk_col in dropped_fks:
-        if fk_table == table_name and fk_col == col_name:
-            deps.append(fk_idx)
-    for idx_idx, idx_table, _ in dropped_indexes:
-        if idx_table == table_name:
-            idx_op = all_operations[idx_idx]
-            idx_def = idx_op["details"].get("definition", {})
-            if col_name in idx_def.get("columns", []):
-                deps.append(idx_idx)
-    return deps
+
+    keys = [
+        fk_idx
+        for fk_idx, fk_table, fk_col in dropped_fks
+        if (fk_table, fk_col) == (table_name, col_name)
+    ]
+    indexes = [
+        idx_idx
+        for idx_idx, idx_table, _ in dropped_indexes
+        if idx_table == table_name
+        and col_name
+        in all_operations[idx_idx]["details"].get("definition", {}).get("columns", [])
+    ]
+    return keys + indexes
 
 
 def _handle_create_table(
@@ -154,16 +162,18 @@ def _handle_create_table(
     created_tables: dict[str, int],
 ) -> list[int]:
     """Handle CREATE TABLE dependencies."""
-    deps: list[int] = []
     table_name = op["table"]
-    columns = op["details"].get("columns", {})
-    for col_def in columns.values():
-        ref = col_def.get("references", "")
-        if ref:
-            ref_table = ref.split(".")[0]
-            if ref_table in created_tables and ref_table != table_name:
-                deps.append(created_tables[ref_table])
-    return deps
+
+    # A SELF-EDGE IS NOT AN EDGE. `- {table_name}` is the whole of it: a tree
+    # whose parent_id points at its own table does not wait for itself, and
+    # without this the sort reports a cycle in a schema that has none.
+    referenced = {
+        col.get("references", "").split(".")[0]
+        for col in op["details"].get("columns", {}).values()
+        if col.get("references")
+    } & set(created_tables) - {table_name}
+
+    return [created_tables[name] for name in sorted(referenced)]
 
 
 def _handle_add_column(
@@ -171,11 +181,9 @@ def _handle_add_column(
     created_tables: dict[str, int],
 ) -> list[int]:
     """Handle ADD COLUMN dependencies."""
-    deps: list[int] = []
     table_name = op["table"]
-    if table_name in created_tables:
-        deps.append(created_tables[table_name])
-    return deps
+
+    return [created_tables[name] for name in [table_name] if name in created_tables]
 
 
 def _handle_add_foreign_key(
@@ -184,24 +192,27 @@ def _handle_add_foreign_key(
     created_tables: dict[str, int],
 ) -> list[int]:
     """Handle ADD FOREIGN KEY dependencies."""
-    deps: list[int] = []
     ref = op["details"].get("references", "")
-    if ref:
-        ref_table = ref.split(".")[0]
-        if ref_table in created_tables:
-            deps.append(created_tables[ref_table])
-        # Also depends on ADD COLUMN for the referenced column
-        for j, other_op in enumerate(all_operations):
-            if other_op["op"] == "add_column":
-                ref_parts = ref.split(".")
-                if len(ref_parts) == 2:
-                    ref_table, ref_col = ref_parts
-                    if (
-                        other_op["table"] == ref_table
-                        and other_op["details"].get("column") == ref_col
-                    ):
-                        deps.append(j)
-    return deps
+    parts = ref.split(".")
+    ref_table = parts[0]
+
+    # The table it points at, when this migration is the one creating it.
+    table = [
+        created_tables[name]
+        for name in [ref_table]
+        if ref and name in created_tables
+    ]
+    # And the COLUMN it points at, when that arrives here too. A key emitted
+    # against a column one statement early is refused by every engine.
+    columns = [
+        idx
+        for idx, other in enumerate(all_operations)
+        if len(parts) == 2
+        and other["op"] == "add_column"
+        and other["table"] == parts[0]
+        and other["details"].get("column") == parts[1]
+    ]
+    return table + columns
 
 
 def _handle_add_index(
@@ -210,20 +221,18 @@ def _handle_add_index(
     created_tables: dict[str, int],
 ) -> list[int]:
     """Handle ADD INDEX dependencies."""
-    deps: list[int] = []
     table_name = op["table"]
-    if table_name in created_tables:
-        deps.append(created_tables[table_name])
-    idx_def = op["details"].get("definition", {})
-    idx_cols = idx_def.get("columns", [])
-    for j, other_op in enumerate(all_operations):
-        if (
-            other_op["op"] == "add_column"
-            and other_op["table"] == table_name
-            and other_op["details"].get("column") in idx_cols
-        ):
-            deps.append(j)
-    return deps
+    idx_cols = op["details"].get("definition", {}).get("columns", [])
+
+    table = [created_tables[name] for name in [table_name] if name in created_tables]
+    columns = [
+        idx
+        for idx, other in enumerate(all_operations)
+        if other["op"] == "add_column"
+        and other["table"] == table_name
+        and other["details"].get("column") in idx_cols
+    ]
+    return table + columns
 
 
 def _handle_alter_column(
@@ -232,18 +241,21 @@ def _handle_alter_column(
     dropped_indexes: list[tuple[int, str, str]],
 ) -> list[int]:
     """Handle ALTER COLUMN dependencies."""
-    deps: list[int] = []
     table_name = op["table"]
-    changes = op["details"].get("changes", {})
-    if "type" in changes:
-        col_name = op["details"].get("column", "")
-        for idx_idx, idx_table, _ in dropped_indexes:
-            if idx_table == table_name:
-                idx_op = all_operations[idx_idx]
-                idx_def = idx_op["details"].get("definition", {})
-                if col_name in idx_def.get("columns", []):
-                    deps.append(idx_idx)
-    return deps
+    col_name = op["details"].get("column", "")
+    # ONLY A TYPE CHANGE WAITS. Setting a default rewrites no data and
+    # invalidates no index, so ordering it behind a DROP INDEX would be a
+    # dependency the schema never asked for.
+    retyped = "type" in op["details"].get("changes", {})
+
+    return [
+        idx_idx
+        for idx_idx, idx_table, _ in dropped_indexes
+        if retyped
+        and idx_table == table_name
+        and col_name
+        in all_operations[idx_idx]["details"].get("definition", {}).get("columns", [])
+    ]
 
 
 def _handle_create_view(
@@ -252,14 +264,17 @@ def _handle_create_view(
     created_views: dict[str, int],
 ) -> list[int]:
     """Handle CREATE VIEW dependencies."""
-    deps: list[int] = []
-    view_deps = op["details"].get("depends_on", [])
-    for dep_name in view_deps:
-        if dep_name in created_tables:
-            deps.append(created_tables[dep_name])
-        if dep_name in created_views:
-            deps.append(created_views[dep_name])
-    return deps
+    named = op["details"].get("depends_on", [])
+
+    # A view waits for whatever it selects from, whether that is a table this
+    # migration creates or another view it creates.
+    return [
+        index
+        for name in named
+        for source in (created_tables, created_views)
+        for index in [source.get(name)]
+        if index is not None
+    ]
 
 
 def _handle_drop_view(
@@ -268,14 +283,16 @@ def _handle_drop_view(
     all_operations: list[Operation],
 ) -> list[int]:
     """Handle DROP VIEW dependencies."""
-    deps: list[int] = []
     view_name = op["details"]["name"]
-    for other_idx, other_op in enumerate(all_operations):
-        if other_op["op"] == "drop_view" and other_idx != op_idx:
-            other_deps = other_op["details"].get("depends_on", [])
-            if view_name in other_deps:
-                deps.append(other_idx)
-    return deps
+
+    # A view selecting from this one goes first.
+    return [
+        idx
+        for idx, other in enumerate(all_operations)
+        if other["op"] == "drop_view"
+        and idx != op_idx
+        and view_name in other["details"].get("depends_on", [])
+    ]
 
 
 # Dict-based dispatch table for operation types.
@@ -324,63 +341,72 @@ def _get_operation_dependencies(
     return []
 
 
+def _refuse_cycle(operations: list[Operation], stuck: set[int]) -> None:
+    """Nothing is ready and operations remain, so they wait on each other.
+
+    THE STUCK SET IS THE ANSWER, so no search is needed. `_find_cycle` used to
+    walk the graph depth-first to recover a path for the message; everything
+    that never became ready is either in a cycle or waiting behind one, and
+    naming all of it tells an operator more than naming one arbitrary loop.
+    """
+    tables = {operations[i]["table"] for i in stuck}
+    cycle_ops = [f"{operations[i]['op']} on {operations[i]['table']}" for i in sorted(stuck)]
+    raise CycleError(cycle_ops, tables)
+
+
+# WHETHER ANYTHING IS READY, AS A TABLE RATHER THAN A BRANCH. One key, two
+# entries, and the refusal is a value in the table rather than a path through
+# an `if`.
+def _proceed(_operations: list[Operation], _stuck: set[int]) -> None:
+    """Something is ready, so there is nothing to refuse."""
+
+
+_WHEN_READY: dict[bool, Callable[[list[Operation], set[int]], None]] = {
+    True: _proceed,
+    False: _refuse_cycle,
+}
+
+
 def topological_sort(
     operations: list[Operation],
     dependencies: dict[int, list[int]],
 ) -> list[int]:
-    """
-    Topologically sort operations based on dependencies.
+    """Operations in an order that runs every dependency first.
 
-    Uses Kahn's algorithm for cycle detection.
+    Kahn's algorithm, written with set algebra. Each round takes the ready
+    set, which is every remaining operation whose dependencies have all run,
+    and executes the highest-priority member of it.
 
-    Args:
-        operations: List of operations
-        dependencies: Dependency graph (op index -> dependency indices)
+    ONE AT A TIME RATHER THAN A LAYER AT A TIME, and the difference matters.
+    The old loop re-sorted its queue on every pop, so it always took the
+    highest-priority READY operation. Emitting a whole layer would order a
+    drop that becomes ready in the second round after a create from the
+    first, and `test_the_sort_holds_every_dependency.py` fails on exactly
+    that.
 
-    Returns:
-        List of operation indices in execution order
+    A SELF-EDGE IS NOT STRIPPED HERE, and it was in a first draft. An
+    operation that waits for itself is unsatisfiable and must be refused;
+    quietly dropping the edge made `{0: [0]}` sort cleanly. The exclusion
+    belongs where the graph is BUILT, and `_handle_create_table` does it with
+    `- {table_name}` so that a table whose key points at itself does not wait
+    for itself. That is the case worth handling, and handling it at the source
+    means the sort can stay honest about a genuine self-dependency.
 
     Raises:
-        CycleError: If dependencies form a cycle
+        CycleError: when operations remain and none of them can run.
     """
-    n = len(operations)
-    if n == 0:
-        return []
+    remaining = set(range(len(operations)))
+    deps = {i: frozenset(dependencies.get(i, ())) for i in remaining}
+    order: list[int] = []
 
-    # Build in-degree count and reverse adjacency
-    in_degree = [0] * n
-    reverse_deps: dict[int, list[int]] = {i: [] for i in range(n)}
+    while remaining:
+        ready = [i for i in remaining if not (deps[i] & remaining)]
+        _WHEN_READY[bool(ready)](operations, remaining)
+        chosen = min(ready, key=lambda i: (_operation_priority(operations[i]), i))
+        order.append(chosen)
+        remaining.discard(chosen)
 
-    for op_idx, deps in dependencies.items():
-        in_degree[op_idx] = len(deps)
-        for dep_idx in deps:
-            reverse_deps[dep_idx].append(op_idx)
-
-    # Start with operations that have no dependencies
-    queue = [i for i in range(n) if in_degree[i] == 0]
-    result: list[int] = []
-
-    while queue:
-        # Sort queue for deterministic ordering (by operation type priority)
-        queue.sort(key=lambda i: _operation_priority(operations[i]))
-
-        current = queue.pop(0)
-        result.append(current)
-
-        # Reduce in-degree of dependent operations
-        for dependent in reverse_deps[current]:
-            in_degree[dependent] -= 1
-            if in_degree[dependent] == 0:
-                queue.append(dependent)
-
-    if len(result) != n:
-        # Cycle detected - find it for error message
-        cycle = _find_cycle(dependencies, in_degree)
-        tables = {operations[i]["table"] for i in cycle}
-        cycle_ops = [f"{operations[i]['op']} on {operations[i]['table']}" for i in cycle]
-        raise CycleError(cycle_ops, tables)
-
-    return result
+    return order
 
 
 def _operation_priority(op: Operation) -> int:
@@ -412,32 +438,3 @@ def _operation_priority(op: Operation) -> int:
         "create_view": 14,  # Create views after all tables and indexes
     }
     return priorities.get(op["op"], 99)
-
-
-def _find_cycle(dependencies: dict[int, list[int]], in_degree: list[int]) -> list[int]:
-    """Find a cycle in the dependency graph for error reporting."""
-    # Start from a node with non-zero in-degree
-    start = next((i for i, d in enumerate(in_degree) if d > 0), 0)
-
-    visited: set[int] = set()
-    path: list[int] = []
-
-    def dfs(node: int) -> list[int] | None:
-        if node in visited:
-            # Found cycle
-            cycle_start = path.index(node)
-            return path[cycle_start:]
-
-        visited.add(node)
-        path.append(node)
-
-        for dep in dependencies.get(node, []):
-            result = dfs(dep)
-            if result:
-                return result
-
-        path.pop()
-        return None
-
-    result = dfs(start)
-    return result or [start]

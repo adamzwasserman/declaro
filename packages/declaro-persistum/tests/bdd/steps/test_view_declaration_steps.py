@@ -187,7 +187,16 @@ async def _database(ctx: Ctx, engine: str) -> Any:
 async def _migrate(ctx: Ctx, engine: str) -> dict[str, Any]:
     ctx["engine"] = engine
     database = await _database(ctx, engine)
-    result = await apply_migrations_async(database, engine, ctx["models"])
+    # FORCED, BECAUSE THE STAMP OUTLIVES THE SCENARIO. Skip-if-clean hashes
+    # the models FILE and returns before the view diff runs, and PostgreSQL's
+    # probe database is shared with every other test, so a stamp written by
+    # an earlier run made a later migration report success having done
+    # nothing. SQLite and Turso get a fresh file per scenario and never showed
+    # it. The last scenario still asserts that a second migration applies no
+    # operations, which is true with or without the stamp.
+    result = await apply_migrations_async(
+        database, engine, ctx["models"], force=True
+    )
     ctx["results"].append(result)
     return result
 

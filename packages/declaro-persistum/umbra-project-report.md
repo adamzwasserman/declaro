@@ -1,9 +1,9 @@
 # Umbra project audit
 
 Repository: `.`
-Full pytest suite: passed. 2770 passed, 0 failed, exit status 0. 182 test files discovered.
-Aggregate Silence index: 59.0% (higher = more blind spots) | 1719 closeable silences / 2915 closeable facets.
-By kind: unasserted_exception_path: 1, unasserted_return_contract: 61, unexercised_branch: 264, unexercised_input_region: 1393.
+Full pytest suite: completed with failures. 2774 passed, 3 failed, exit status 1. Coverage was produced, so the Silence index reflects the tests that ran. 184 test files discovered.
+Aggregate Silence index: 59.8% (higher = more blind spots) | 1696 closeable silences / 2836 closeable facets.
+By kind: unasserted_exception_path: 1, unasserted_return_contract: 61, unexercised_branch: 251, unexercised_input_region: 1383.
 
 ## Modules
 - src/declaro_persistum/__init__.py: unaudited. Umbra found no top-level functions or methods to audit in this module.
@@ -30,10 +30,10 @@ By kind: unasserted_exception_path: 1, unasserted_return_contract: 61, unexercis
 - src/declaro_persistum/cutover.py: Silence index 82.4% | 14 closeable silences / 17 closeable facets
 - src/declaro_persistum/database.py: Silence index 25.0% | 8 closeable silences / 32 closeable facets
 - src/declaro_persistum/differ/__init__.py: unaudited. Umbra found no top-level functions or methods to audit in this module.
-- src/declaro_persistum/differ/ambiguity.py: Silence index 67.8% | 59 closeable silences / 87 closeable facets
+- src/declaro_persistum/differ/ambiguity.py: Silence index 77.8% | 35 closeable silences / 45 closeable facets
 - src/declaro_persistum/differ/core.py: Silence index 32.4% | 47 closeable silences / 145 closeable facets
 - src/declaro_persistum/differ/extended.py: Silence index 0.0% | 0 closeable silences / 6 closeable facets
-- src/declaro_persistum/differ/toposort.py: Silence index 49.6% | 59 closeable silences / 119 closeable facets
+- src/declaro_persistum/differ/toposort.py: Silence index 72.0% | 59 closeable silences / 82 closeable facets
 - src/declaro_persistum/exceptions.py: Silence index 83.6% | 92 closeable silences / 110 closeable facets
 - src/declaro_persistum/fk_ordering.py: Silence index 37.8% | 17 closeable silences / 45 closeable facets
 - src/declaro_persistum/inspector/__init__.py: Silence index 77.8% | 7 closeable silences / 9 closeable facets
@@ -43,7 +43,7 @@ By kind: unasserted_exception_path: 1, unasserted_return_contract: 61, unexercis
 - src/declaro_persistum/inspector/turso.py: Silence index 67.2% | 39 closeable silences / 58 closeable facets
 - src/declaro_persistum/instrumentation.py: Silence index 62.2% | 28 closeable silences / 45 closeable facets
 - src/declaro_persistum/loader.py: Silence index 48.5% | 48 closeable silences / 99 closeable facets
-- src/declaro_persistum/migrations.py: Silence index 57.4% | 58 closeable silences / 101 closeable facets
+- src/declaro_persistum/migrations.py: Silence index 58.4% | 59 closeable silences / 101 closeable facets
 - src/declaro_persistum/mirror.py: Silence index 52.6% | 10 closeable silences / 19 closeable facets
 - src/declaro_persistum/postgres_database.py: Silence index 100.0% | 8 closeable silences / 8 closeable facets
 - src/declaro_persistum/pydantic_loader.py: Silence index 21.8% | 24 closeable silences / 110 closeable facets
