@@ -38,9 +38,9 @@ _SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "declaro_persistum"
 
 # The count when the rule was given. LOWER THIS as conditionals are removed.
 # It must never be raised.
-# 711 after the query layer read its kind tag once and dispatched on it,
-# and the rebuild stopped writing its own DEFAULT clause.
-BASELINE = 711
+# 709 after a Python default's SQL spelling became a lookup on the exact
+# type, instead of an if/elif chain whose order was load-bearing.
+BASELINE = 709
 
 _MARKER = "APPROVED-IF"
 

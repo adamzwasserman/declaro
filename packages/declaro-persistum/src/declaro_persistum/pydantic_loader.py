@@ -15,6 +15,7 @@ from typing import Any, Literal, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel
 from pydantic import Field as PydanticField
+from pydantic_core import PydanticUndefined
 
 from declaro_persistum.boundary import boundary, helper, recognizer
 from declaro_persistum.exceptions import LoaderError
@@ -270,6 +271,44 @@ def field(
     )
 
 
+# HOW A PYTHON VALUE IS SPELLED IN SQL, read by the value's exact type.
+#
+# THIS WAS AN if/elif CHAIN WHOSE ORDER WAS LOAD-BEARING. `isinstance(True,
+# int)` is True in Python, so testing int before bool spells `True` as `1`,
+# and a schema declaring a boolean default then migrates on every deploy
+# against an engine that stores it as TRUE. Nothing said the order mattered.
+# An exact-type lookup has no order to get wrong.
+_SQL_DEFAULT: dict[type, Any] = {
+    str: lambda value: f"'{value}'",
+    bool: lambda value: "TRUE" if value else "FALSE",
+    int: str,
+    float: str,
+}
+
+
+@helper
+def sql_default(value: Any) -> str:
+    """The SQL spelling of a Python default.
+
+    A value with no spelling is refused rather than dropped. Returning nothing
+    would give the column no default at all, which is a schema quietly
+    different from the one the author declared.
+    """
+    spell = _SQL_DEFAULT.get(type(value))
+    if spell is None:
+        raise LoaderError(
+            f"Cannot write {value!r} as a SQL default: a default may be a "
+            f"string, a bool, an int or a float, and this is "
+            f"{type(value).__name__}."
+        )
+    return spell(value)
+
+
+# THE THREE WAYS A FIELD SAYS IT HAS NO DEFAULT. `PydanticUndefined` is what
+# Pydantic puts there; `None` and `...` are what an author writes.
+_NO_DEFAULT = (None, ..., PydanticUndefined)
+
+
 @helper
 def extract_field_metadata(field_info: Any) -> dict[str, Any]:
     """Extract declaro-specific metadata from Pydantic field.
@@ -291,10 +330,15 @@ def extract_field_metadata(field_info: Any) -> dict[str, Any]:
             if isinstance(item, dict):
                 meta.update(item)
 
-    # Check default value
+    # EVERY SPELLING OF "NO DEFAULT", RESOLVED HERE. This knew two, `None`
+    # and `...`, and not Pydantic's own `PydanticUndefined`, which is what a
+    # field with no default actually carries. That sentinel was stored as
+    # though it were a value, and the chain that spelled a default for SQL had
+    # no branch matching it, so absence worked by falling through. It stopped
+    # working the moment that chain became a lookup that refuses what it
+    # cannot write, which is the right refusal reaching the wrong value.
     default = getattr(field_info, "default", None)
-    if default is not None and default is not ...:
-        # Store default for later processing
+    if default not in _NO_DEFAULT:
         meta["_default_value"] = default
 
     return meta
@@ -479,13 +523,7 @@ def pydantic_model_to_table(model_cls: type) -> tuple[str, Table] | None:
             col["default"] = meta["default"]
         elif "_default_value" in meta:
             # Convert Python default to SQL default
-            default_val = meta["_default_value"]
-            if isinstance(default_val, str):
-                col["default"] = f"'{default_val}'"
-            elif isinstance(default_val, bool):
-                col["default"] = "TRUE" if default_val else "FALSE"
-            elif isinstance(default_val, (int, float)):
-                col["default"] = str(default_val)
+            col["default"] = sql_default(meta["_default_value"])
 
         # Migration hints
         if meta.get("renamed_from"):
@@ -512,9 +550,12 @@ def pydantic_model_to_table(model_cls: type) -> tuple[str, Table] | None:
 
         indexes = getattr(meta_cls, "indexes", None)
         if indexes:
-            table["indexes"] = dict(
-                index_from_meta(idx) for idx in indexes if isinstance(idx, dict)
-            )
+            # EVERY DECLARED INDEX, OR A REFUSAL NAMING THE ONE THAT IS NOT
+            # ONE. This read `if isinstance(idx, dict)`, so an entry written
+            # wrongly was skipped: the author got a table without that index
+            # and no complaint, and found out when a query was slow or a
+            # uniqueness constraint did not hold.
+            table["indexes"] = dict(index_from_meta(idx) for idx in indexes)
 
         constraints = getattr(meta_cls, "constraints", None)
         if constraints:
