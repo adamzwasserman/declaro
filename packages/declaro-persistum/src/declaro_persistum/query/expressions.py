@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Protocol, TypedDict
 
+from declaro_persistum.boundary import helper, recognizer
 from declaro_persistum.types import Dialect
 
 
@@ -27,6 +28,7 @@ class RendersCondition(Protocol):
     """What a JOIN's `on` must be able to do. Structural, so this module
     names no class from `table.py` and the dependency stays one-way."""
 
+    @helper
     def to_sql(self, dialect: Dialect, path: str) -> tuple[str, dict[str, Any]]:
         raise NotImplementedError("CODE NOT WRITTEN")
 
@@ -54,6 +56,7 @@ class CaseExpression(TypedDict):
 
 
 
+@helper
 def render_case(
     expr: CaseExpression, path: str, *, with_alias: bool
 ) -> tuple[str, dict[str, Any]]:
@@ -119,6 +122,7 @@ class CaseOrderBy(TypedDict):
     direction: str
 
 
+@helper
 def _render_order_by(
     term: OrderBy, _dialect: str, _path: str
 ) -> tuple[str, dict[str, Any]]:
@@ -126,6 +130,7 @@ def _render_order_by(
     return f"{term['column']} {term['direction']}", {}
 
 
+@helper
 def _render_case_order_by(
     term: CaseOrderBy, _dialect: Dialect, path: str
 ) -> tuple[str, dict[str, Any]]:
@@ -151,6 +156,7 @@ to whichever branch happened to be last.
 """
 
 
+@helper
 def render_order_term(
     term: OrderBy | CaseOrderBy, dialect: Dialect, path: str
 ) -> tuple[str, dict[str, Any]]:
@@ -173,6 +179,7 @@ class SubqueryExpr(TypedDict):
     query: Any
 
 
+@helper
 def is_subquery(value: Any) -> bool:
     """True when a value is a subquery expression.
 
@@ -181,9 +188,24 @@ def is_subquery(value: Any) -> bool:
     the tag, not the type. A plain dict passed as a value has no `kind` and
     is correctly not a subquery.
     """
-    return isinstance(value, dict) and value.get("kind") == "subquery"
+    return kind_of(value) == "subquery"
 
 
+@recognizer
+def kind_of(value: Any) -> str | None:
+    """The tag a query expression carries, or None if it carries none.
+
+    A `case` and a `subquery` are TypedDicts, and `isinstance` cannot read
+    one, so what distinguishes them is the `kind` they declare. Three places
+    asked `isinstance(x, dict) and x.get("kind") == "..."`, which is this
+    question written three times with the answer hard-coded into each.
+
+    A plain dict passed as a value carries no tag and is correctly nothing.
+    """
+    return value.get("kind") if isinstance(value, dict) else None
+
+
+@helper
 def render_subquery(expr: SubqueryExpr, dialect: Dialect) -> tuple[str, dict[str, Any]]:
     """Render the inner SELECT."""
     return expr["query"].to_sql(dialect)

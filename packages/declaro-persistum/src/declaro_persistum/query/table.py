@@ -31,6 +31,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypedDict
 
+from declaro_persistum.boundary import helper
 from declaro_persistum.query.expressions import (  # noqa: F401
     CaseExpression,
     CaseOrderBy,
@@ -38,6 +39,7 @@ from declaro_persistum.query.expressions import (  # noqa: F401
     OrderBy,
     SubqueryExpr,
     is_subquery,
+    kind_of,
     render_case,
     render_order_term,
     render_subquery,
@@ -70,6 +72,7 @@ class SQLFunction(TypedDict):
     alias: str | None
 
 
+@helper
 def table(name: str, schema: Schema) -> dict[str, Any]:
     """Look a table up in the schema, failing loudly if it is absent.
 
@@ -85,34 +88,42 @@ def table(name: str, schema: Schema) -> dict[str, Any]:
     return schema[name]
 
 
+@helper
 def _function(name: str, *args: Any, alias: str | None) -> SQLFunction:
     return {"kind": "function", "name": name, "args": list(args), "alias": alias}
 
 
+@helper
 def count_(column: str = "*", alias: str | None = None) -> SQLFunction:
     return _function("COUNT", column, alias=alias)
 
 
+@helper
 def sum_(column: str, alias: str | None = None) -> SQLFunction:
     return _function("SUM", column, alias=alias)
 
 
+@helper
 def avg_(column: str, alias: str | None = None) -> SQLFunction:
     return _function("AVG", column, alias=alias)
 
 
+@helper
 def min_(column: str, alias: str | None = None) -> SQLFunction:
     return _function("MIN", column, alias=alias)
 
 
+@helper
 def max_(column: str, alias: str | None = None) -> SQLFunction:
     return _function("MAX", column, alias=alias)
 
 
+@helper
 def now_(alias: str | None = None) -> SQLFunction:
     return _function("NOW", alias=alias)
 
 
+@helper
 def case_(
     *whens: tuple[dict[str, Any], Any],
     else_: Any = None,
@@ -132,10 +143,51 @@ def case_(
     return {"kind": "case", "whens": list(whens), "else_": else_, "alias": alias}
 
 
+@helper
 def subquery(query: Any) -> SubqueryExpr:
     return {"kind": "subquery", "query": query}
 
 
+
+@helper
+def _render_case_argument(
+    arg: Any, path: str, _dialect: Dialect
+) -> tuple[str, dict[str, Any]]:
+    """A CASE used as a function argument carries no alias of its own."""
+    return render_case(arg, path, with_alias=False)
+
+
+@helper
+def _render_subquery_argument(
+    arg: Any, _path: str, dialect: Dialect
+) -> tuple[str, dict[str, Any]]:
+    """A subquery argument is wrapped, because it is one value here."""
+    sql, params = render_subquery(arg, dialect)
+    return f"({sql})", params
+
+
+@helper
+def _render_literal(
+    arg: Any, _path: str, _dialect: Dialect
+) -> tuple[str, dict[str, Any]]:
+    """Anything carrying no tag is written as it stands."""
+    return str(arg), {}
+
+
+# WHAT EACH TAGGED ARGUMENT RENDERS AS. This was an if/elif chain asking
+# `isinstance(arg, dict) and arg.get("kind") == "..."` twice, which is the tag
+# read once per branch with the answer hard-coded into each. `kind_of` reads
+# it; this says what each tag means.
+#
+# EVERY ENTRY TAKES THE SAME THREE THINGS whether it reads them or not, which
+# is what lets the dispatch be a lookup. An unread one carries the underscore.
+_RENDER_ARGUMENT: dict[str | None, Any] = {
+    "case": _render_case_argument,
+    "subquery": _render_subquery_argument,
+}
+
+
+@helper
 def render_function(
     fn: SQLFunction, dialect: Dialect, path: str
 ) -> tuple[str, dict[str, Any]]:
@@ -148,16 +200,10 @@ def render_function(
     params: dict[str, Any] = {}
 
     for i, arg in enumerate(fn["args"]):
-        if isinstance(arg, dict) and arg.get("kind") == "case":
-            sql, p = render_case(arg, f"{path}_a{i}", with_alias=False)
-            parts.append(sql)
-            params.update(p)
-        elif isinstance(arg, dict) and arg.get("kind") == "subquery":
-            sql, p = render_subquery(arg, dialect)
-            parts.append(f"({sql})")
-            params.update(p)
-        else:
-            parts.append(str(arg))
+        render = _RENDER_ARGUMENT.get(kind_of(arg), _render_literal)
+        sql, rendered_params = render(arg, f"{path}_a{i}", dialect)
+        parts.append(sql)
+        params.update(rendered_params)
 
     sql = f"{fn['name']}({', '.join(parts)})"
     if fn["alias"]:

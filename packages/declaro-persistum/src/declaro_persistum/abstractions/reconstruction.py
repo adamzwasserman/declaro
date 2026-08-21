@@ -26,7 +26,7 @@ from declaro_persistum.abstractions.pragma_compat import (
     create_index_statements,
     table_column_names,
 )
-from declaro_persistum.applier.shared import sqlite_type
+from declaro_persistum.applier.shared import sqlite_default, sqlite_type
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.types import Column, Operation, changed_to
 
@@ -94,17 +94,18 @@ def generate_create_table_sql(
         if col_def.get("unique"):
             parts.append("UNIQUE")
 
-        # DEFAULT
+        # DEFAULT, WRITTEN BY THE ONE RULE THAT KNOWS IT. This built the
+        # clause itself, including its own test for a leading parenthesis and
+        # its own double-wrap. `sqlite_default` in the applier carried the
+        # same rule, and a rebuild that writes a default differently from the
+        # applier is a rebuilt table without the default it was given.
+        #
+        # The double wrap is the part that must not drift: PRAGMA table_info
+        # strips one layer from an expression default, so two go in and one
+        # comes back, and that is what makes introspection agree with the
+        # schema.
         if "default" in col_def:
-            default_val = col_def["default"]
-            if default_val is None:
-                parts.append("DEFAULT NULL")
-            elif isinstance(default_val, str) and default_val.startswith("("):
-                # SQLite strips one layer of outer parens from expression defaults
-                # in PRAGMA table_info. Double-wrap so the round-trip preserves them.
-                parts.append(f"DEFAULT ({default_val})")
-            else:
-                parts.append(f"DEFAULT {default_val}")
+            parts.append(sqlite_default(col_def["default"]))
 
         # CHECK
         if "check" in col_def:

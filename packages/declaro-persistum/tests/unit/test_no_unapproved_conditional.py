@@ -38,10 +38,9 @@ _SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "declaro_persistum"
 
 # The count when the rule was given. LOWER THIS as conditionals are removed.
 # It must never be raised.
-# 715 after `same_default` stopped normalising its two arguments in four
-# separate places, and the column-type guess was removed from both
-# reconstruction builders.
-BASELINE = 715
+# 711 after the query layer read its kind tag once and dispatched on it,
+# and the rebuild stopped writing its own DEFAULT clause.
+BASELINE = 711
 
 _MARKER = "APPROVED-IF"
 
