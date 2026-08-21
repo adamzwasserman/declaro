@@ -79,7 +79,13 @@ async def test_the_sqlite_loader_round_trips_rows(tmp_path) -> None:
         await conn.commit()
 
         assert await loader["count_rows"](conn, "t") == 3
-        assert await loader["read_rows"](conn, "t", ["id", "name"]) == rows
+        # THE PAGE IS STATED. `offset` and `limit` used to default, so a
+        # caller that forgot them silently read from row zero to the
+        # end, and that reads exactly like a caller who asked for it.
+        assert (
+            await loader["read_rows"](conn, "t", ["id", "name"], offset=0, limit=None)
+            == rows
+        )
 
         page = await loader["read_rows"](
             conn, "t", ["id", "name"], offset=1, limit=1

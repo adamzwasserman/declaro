@@ -32,6 +32,8 @@ import uuid
 from collections.abc import Sequence
 from typing import Any, Protocol, TypedDict
 
+from declaro_persistum.types import DbapiConnection, FetchingConnection
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["BULK_LOADERS", "TRANSFER_STATE_TABLE", "BulkLoader"]
@@ -40,12 +42,12 @@ __all__ = ["BULK_LOADERS", "TRANSFER_STATE_TABLE", "BulkLoader"]
 class ReadRows(Protocol):
     async def __call__(
         self,
-        conn: Any,
+        conn: DbapiConnection | FetchingConnection,
         table: str,
         columns: list[str],
         *,
-        offset: int = 0,
-        limit: int | None = None,
+        offset: int,
+        limit: int | None,
     ) -> list[tuple[Any, ...]]:
         """Read rows in a STABLE order, so paging cannot repeat or skip one."""
         raise NotImplementedError("CODE NOT WRITTEN")
@@ -54,7 +56,7 @@ class ReadRows(Protocol):
 class LoadRows(Protocol):
     async def __call__(
         self,
-        conn: Any,
+        conn: DbapiConnection | FetchingConnection,
         table: str,
         columns: list[str],
         rows: Sequence[tuple[Any, ...]],
@@ -64,18 +66,18 @@ class LoadRows(Protocol):
 
 
 class CountRows(Protocol):
-    async def __call__(self, conn: Any, table: str) -> int:
+    async def __call__(self, conn: DbapiConnection | FetchingConnection, table: str) -> int:
         raise NotImplementedError("CODE NOT WRITTEN")
 
 
 class DeleteRows(Protocol):
-    async def __call__(self, conn: Any, table: str) -> int:
+    async def __call__(self, conn: DbapiConnection | FetchingConnection, table: str) -> int:
         """Empty the table. Returns how many rows went."""
         raise NotImplementedError("CODE NOT WRITTEN")
 
 
 class SetFkChecks(Protocol):
-    async def __call__(self, conn: Any) -> None:
+    async def __call__(self, conn: DbapiConnection | FetchingConnection) -> None:
         """Turn FK enforcement off or on for this connection."""
         raise NotImplementedError("CODE NOT WRITTEN")
 
@@ -88,7 +90,7 @@ class Commit(Protocol):
     # incompatible signature. The PostgreSQL commit is a genuine no-op,
     # because asyncpg owns its transaction, so it is the one implementation
     # that has nothing to read. Every caller passes positionally.
-    async def __call__(self, conn: Any, /) -> None:
+    async def __call__(self, conn: DbapiConnection | FetchingConnection, /) -> None:
         """Make the work so far durable.
 
         asyncpg owns its transaction and has nothing to do here; the DB-API
@@ -100,13 +102,13 @@ class Commit(Protocol):
 
 
 class EnsureProgress(Protocol):
-    async def __call__(self, conn: Any) -> None:
+    async def __call__(self, conn: DbapiConnection | FetchingConnection) -> None:
         """Create the transfer progress table if it is not there."""
         raise NotImplementedError("CODE NOT WRITTEN")
 
 
 class ReadProgress(Protocol):
-    async def __call__(self, conn: Any, table: str) -> dict[str, Any] | None:
+    async def __call__(self, conn: DbapiConnection | FetchingConnection, table: str) -> dict[str, Any] | None:
         """One table's transfer status, or None if it has none."""
         raise NotImplementedError("CODE NOT WRITTEN")
 
@@ -114,7 +116,7 @@ class ReadProgress(Protocol):
 class WriteProgress(Protocol):
     async def __call__(
         self,
-        conn: Any,
+        conn: DbapiConnection | FetchingConnection,
         table: str,
         status: str,
         rows_transferred: int,
@@ -200,12 +202,12 @@ def _portable(value: Any) -> Any:
 
 
 async def postgres_read_rows(
-    conn: Any,
+    conn: FetchingConnection,
     table: str,
     columns: list[str],
     *,
-    offset: int = 0,
-    limit: int | None = None,
+    offset: int,
+    limit: int | None,
 ) -> list[tuple[Any, ...]]:
     """ORDER BY ctid is the stable order: physical row position."""
     col_list = ", ".join(f'"{c}"' for c in columns)
@@ -219,7 +221,7 @@ async def postgres_read_rows(
 
 
 async def postgres_load_rows(
-    conn: Any,
+    conn: FetchingConnection,
     table: str,
     columns: list[str],
     rows: Sequence[tuple[Any, ...]],
@@ -231,26 +233,26 @@ async def postgres_load_rows(
     return len(rows)
 
 
-async def postgres_count_rows(conn: Any, table: str) -> int:
+async def postgres_count_rows(conn: FetchingConnection, table: str) -> int:
     return int(await conn.fetchval(f'SELECT COUNT(*) FROM "{table}"'))
 
 
-async def postgres_delete_rows(conn: Any, table: str) -> int:
+async def postgres_delete_rows(conn: FetchingConnection, table: str) -> int:
     # asyncpg returns the tag "DELETE N".
     result = await conn.execute(f'DELETE FROM "{table}"')
     return int(result.split()[-1]) if result else 0
 
 
-async def postgres_commit(_conn: Any) -> None:
+async def postgres_commit(_conn: FetchingConnection) -> None:
     """Nothing to do. asyncpg's transaction context commits on exit."""
     return None
 
 
-async def postgres_ensure_progress(conn: Any) -> None:
+async def postgres_ensure_progress(conn: FetchingConnection) -> None:
     await conn.execute(_CREATE_PROGRESS_TABLE_SQL)
 
 
-async def postgres_read_progress(conn: Any, table: str) -> dict[str, Any] | None:
+async def postgres_read_progress(conn: FetchingConnection, table: str) -> dict[str, Any] | None:
     row = await conn.fetchrow(
         f'SELECT * FROM "{TRANSFER_STATE_TABLE}" WHERE table_name = $1',
         table,
@@ -259,7 +261,7 @@ async def postgres_read_progress(conn: Any, table: str) -> dict[str, Any] | None
 
 
 async def postgres_write_progress(
-    conn: Any,
+    conn: FetchingConnection,
     table: str,
     status: str,
     rows_transferred: int,
@@ -284,11 +286,11 @@ async def postgres_write_progress(
     )
 
 
-async def postgres_disable_fk_checks(conn: Any) -> None:
+async def postgres_disable_fk_checks(conn: FetchingConnection) -> None:
     await conn.execute("SET session_replication_role = 'replica'")
 
 
-async def postgres_enable_fk_checks(conn: Any) -> None:
+async def postgres_enable_fk_checks(conn: FetchingConnection) -> None:
     await conn.execute("SET session_replication_role = 'origin'")
 
 
@@ -296,12 +298,12 @@ async def postgres_enable_fk_checks(conn: Any) -> None:
 
 
 async def dbapi_read_rows(
-    conn: Any,
+    conn: DbapiConnection,
     table: str,
     columns: list[str],
     *,
-    offset: int = 0,
-    limit: int | None = None,
+    offset: int,
+    limit: int | None,
 ) -> list[tuple[Any, ...]]:
     """ORDER BY rowid is the stable order here."""
     col_list = ", ".join(f'"{c}"' for c in columns)
@@ -315,7 +317,7 @@ async def dbapi_read_rows(
 
 
 async def dbapi_load_rows(
-    conn: Any,
+    conn: DbapiConnection,
     table: str,
     columns: list[str],
     rows: Sequence[tuple[Any, ...]],
@@ -329,29 +331,29 @@ async def dbapi_load_rows(
     return len(rows)
 
 
-async def dbapi_count_rows(conn: Any, table: str) -> int:
+async def dbapi_count_rows(conn: DbapiConnection, table: str) -> int:
     cursor = await conn.execute(f'SELECT COUNT(*) FROM "{table}"', ())
     row = await cursor.fetchone()
     return int(row[0]) if row else 0
 
 
-async def dbapi_delete_rows(conn: Any, table: str) -> int:
+async def dbapi_delete_rows(conn: DbapiConnection, table: str) -> int:
     # Counted first: DELETE without a WHERE reports no row count here.
     count = await dbapi_count_rows(conn, table)
     await conn.execute(f'DELETE FROM "{table}"', ())
     return count
 
 
-async def dbapi_commit(conn: Any) -> None:
+async def dbapi_commit(conn: DbapiConnection) -> None:
     await conn.commit()
 
 
-async def dbapi_ensure_progress(conn: Any) -> None:
+async def dbapi_ensure_progress(conn: DbapiConnection) -> None:
     await conn.execute(_CREATE_PROGRESS_TABLE_SQL, ())
     await conn.commit()
 
 
-async def dbapi_read_progress(conn: Any, table: str) -> dict[str, Any] | None:
+async def dbapi_read_progress(conn: DbapiConnection, table: str) -> dict[str, Any] | None:
     """A cursor and a tuple, where asyncpg gives a row that is already a map."""
     cursor = await conn.execute(
         f'SELECT {", ".join(_PROGRESS_COLUMNS)} FROM "{TRANSFER_STATE_TABLE}" '
@@ -363,7 +365,7 @@ async def dbapi_read_progress(conn: Any, table: str) -> dict[str, Any] | None:
 
 
 async def dbapi_write_progress(
-    conn: Any,
+    conn: DbapiConnection,
     table: str,
     status: str,
     rows_transferred: int,
@@ -389,11 +391,11 @@ async def dbapi_write_progress(
     await conn.commit()
 
 
-async def dbapi_disable_fk_checks(conn: Any) -> None:
+async def dbapi_disable_fk_checks(conn: DbapiConnection) -> None:
     await conn.execute("PRAGMA foreign_keys = OFF", ())
 
 
-async def dbapi_enable_fk_checks(conn: Any) -> None:
+async def dbapi_enable_fk_checks(conn: DbapiConnection) -> None:
     await conn.execute("PRAGMA foreign_keys = ON", ())
 
 
