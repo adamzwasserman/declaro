@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 from declaro_persistum.abstractions.enums import is_enum_table
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.bulk_loader import (
     BULK_LOADERS,
     TRANSFER_STATE_TABLE,
@@ -70,6 +71,7 @@ class BulkTransferResult(TypedDict):
 # ---------------------------------------------------------------------------
 
 
+@helper
 def _build_table_fk_graph(
     schema: dict[str, Any],
     tables: list[str],
@@ -102,6 +104,7 @@ def _build_table_fk_graph(
     return graph
 
 
+@helper
 def _toposort_tables(
     schema: dict[str, Any],
     tables: list[str],
@@ -149,6 +152,7 @@ def _toposort_tables(
 
 
 
+@boundary
 async def _ensure_progress_table(conn: Any, loader: BulkLoader) -> None:
     """Create the transfer progress table if it is not there.
 
@@ -168,6 +172,7 @@ async def _ensure_progress_table(conn: Any, loader: BulkLoader) -> None:
     await loader["ensure_progress"](conn)
 
 
+@helper
 async def _get_table_status(
     conn: Any, loader: BulkLoader, table_name: str
 ) -> dict[str, Any] | None:
@@ -175,6 +180,7 @@ async def _get_table_status(
     return await loader["read_progress"](conn, table_name)
 
 
+@boundary
 async def _upsert_progress(
     conn: Any,
     loader: BulkLoader,
@@ -205,6 +211,7 @@ async def _upsert_progress(
 # ---------------------------------------------------------------------------
 
 
+@boundary
 async def _transfer_table(
     source_conn: Any,
     target_conn: Any,
@@ -282,6 +289,7 @@ async def _transfer_table(
 # ---------------------------------------------------------------------------
 
 
+@boundary
 async def bulk_transfer(
     source: Database,
     target: Database,

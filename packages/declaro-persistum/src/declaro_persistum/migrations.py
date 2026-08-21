@@ -24,6 +24,7 @@ from typing import Any, cast
 
 from declaro_persistum.abstractions.enums import expand_schema_enums
 from declaro_persistum.applier import apply as apply_operations
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.database import (
     Database,
     is_replicated,
@@ -45,6 +46,7 @@ META_TABLE = "_declaro_meta"
 logger = logging.getLogger(__name__)
 
 
+@boundary
 def _for_ddl(db: Database) -> Any:
     """The database's own DDL door. Never a read, and not always a write.
 
@@ -84,6 +86,7 @@ def _for_ddl(db: Database) -> Any:
 # ---------------------------------------------------------------------------
 
 
+@boundary
 def _compute_schema_hash(schema_path: Path, version: str) -> str:
     """Compute SHA-256 hex digest of (schema file bytes, NUL, version) — pure.
 
@@ -122,6 +125,7 @@ def _compute_schema_hash(schema_path: Path, version: str) -> str:
     return h.hexdigest()
 
 
+@helper
 def _dialect_needs_orphan_recovery(dialect: Dialect) -> bool:
     """True iff this dialect uses the sqlite_master-based temp-table scheme
     that `_recover_orphaned_tmp_tables` was written for.
@@ -133,6 +137,7 @@ def _dialect_needs_orphan_recovery(dialect: Dialect) -> bool:
     return dialect in ("sqlite", "turso")
 
 
+@helper
 def partition_replica_operations(
     operations: list[dict[str, Any]], execution_order: list[int]
 ) -> tuple[list[int], list[dict[str, Any]]]:
@@ -191,10 +196,12 @@ def partition_replica_operations(
 _PLACEHOLDER = {"sqlite": "?", "postgresql": "$1"}
 
 
+@helper
 def _placeholder(dialect: str) -> str:
     return cast(str, for_dialect(_PLACEHOLDER, dialect, "Statement builders"))
 
 
+@helper
 def meta_table_sql() -> str:
     """The stamp table. One statement, both engines take it unchanged.
 
@@ -211,11 +218,13 @@ def meta_table_sql() -> str:
     )
 
 
+@helper
 def stored_hash_sql(dialect: str) -> str:
     """Read one stamp by key. The engines differ only in the placeholder."""
     return f'SELECT value FROM "{META_TABLE}" WHERE key = {_placeholder(dialect)}'
 
 
+@helper
 def store_hash_sql(dialect: str) -> str:
     """Write one stamp, updating it if the key is already there.
 
@@ -243,6 +252,7 @@ def store_hash_sql(dialect: str) -> str:
     )
 
 
+@helper
 def user_tables_sql(dialect: str) -> str:
     """Any table that is not ours. The one query that genuinely differs.
 
@@ -265,6 +275,7 @@ def user_tables_sql(dialect: str) -> str:
     )
 
 
+@boundary
 def _dialect_of(conn: Any) -> str:
     """asyncpg or not, decided once rather than in every statement.
 
@@ -277,6 +288,7 @@ def _dialect_of(conn: Any) -> str:
     return "postgresql" if hasattr(conn, "fetch") else "sqlite"
 
 
+@boundary
 async def _ensure_meta_table(conn: Any) -> None:
     """Run `meta_table_sql`. The statement is asserted in its own test."""
     sql = meta_table_sql()
@@ -287,6 +299,7 @@ async def _ensure_meta_table(conn: Any) -> None:
         await conn.commit()
 
 
+@helper
 def _stamp_key(schema_name: str, schema_hash: str) -> str:
     """Build the skip-if-clean stamp key — pure.
 
@@ -310,6 +323,7 @@ def _stamp_key(schema_name: str, schema_hash: str) -> str:
     return f"schema_hash:{schema_name}:{schema_hash}"
 
 
+@boundary
 async def _get_stored_hash(conn: Any, schema_name: str, schema_hash: str) -> str | None:
     """Return the stored stamp for this exact schema and version, else None."""
     key = _stamp_key(schema_name, schema_hash)
@@ -323,6 +337,7 @@ async def _get_stored_hash(conn: Any, schema_name: str, schema_hash: str) -> str
     return row[0] if row else None
 
 
+@boundary
 async def _store_hash(conn: Any, schema_name: str, schema_hash: str) -> None:
     """Store (upsert) the schema hash in _declaro_meta."""
     key = _stamp_key(schema_name, schema_hash)
@@ -336,6 +351,7 @@ async def _store_hash(conn: Any, schema_name: str, schema_hash: str) -> None:
         await conn.commit()
 
 
+@boundary
 async def _schema_is_clean(
     conn: Any, schema_path: Path, schema_hash: str
 ) -> bool:
@@ -387,6 +403,7 @@ async def _schema_is_clean(
     return len(target) == 0
 
 
+@boundary
 async def _has_user_tables(conn: Any) -> bool:
     """Return True if the database has at least one table besides _declaro_meta."""
     dialect = _dialect_of(conn)
@@ -409,6 +426,7 @@ TMP_PREFIX = "_declaro_tmp_"
 _SUFFIX_WIDTH = 9
 
 
+@boundary
 def temp_table_name(table: str) -> str:
     """The name a reconstruction copies rows into. Pure.
 
@@ -418,6 +436,7 @@ def temp_table_name(table: str) -> str:
     return f"{TMP_PREFIX}{table}_{uuid.uuid4().hex[:8]}"
 
 
+@helper
 def original_table_name(tmp_name: str) -> str:
     """The table a tmp name was made from. Pure, and the inverse of the above.
 
@@ -443,6 +462,7 @@ def original_table_name(tmp_name: str) -> str:
     return remainder
 
 
+@helper
 def orphaned_tmp_tables_sql() -> str:
     """Every tmp table this package wrote. Returns SQL, runs nothing.
 
@@ -469,6 +489,7 @@ def orphaned_tmp_tables_sql() -> str:
     )
 
 
+@boundary
 async def _recover_orphaned_tmp_tables(db: Database) -> int:
     """Detect and recover orphaned temp tables from failed reconstruction.
 
@@ -580,6 +601,7 @@ async def _recover_orphaned_tmp_tables(db: Database) -> int:
     return recovered
 
 
+@boundary
 async def apply_migrations_async(
     db: Database,
     dialect: Dialect,

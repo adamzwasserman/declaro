@@ -27,6 +27,7 @@ from declaro_persistum.abstractions.pragma_compat import (
     table_column_names,
 )
 from declaro_persistum.applier.shared import sqlite_type
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.types import Column, Operation
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 
+@helper
 def generate_create_table_sql(
     table_name: str,
     columns: dict[str, Column],
@@ -141,6 +143,7 @@ def generate_create_table_sql(
     return f'CREATE TABLE "{table_name}" (\n    {columns_sql}\n)'
 
 
+@helper
 def generate_data_copy_sql(
     table_from: str,
     table_to: str,
@@ -173,6 +176,7 @@ def generate_data_copy_sql(
     )
 
 
+@helper
 def get_reconstruction_columns(
     current_columns: dict[str, Column],
     operation: Operation,
@@ -213,6 +217,7 @@ def get_reconstruction_columns(
     return new_columns
 
 
+@helper
 def _apply_alter_column(columns: dict[str, Column], details: dict[str, Any]) -> dict[str, Column]:
     """Apply alter_column changes to column definitions."""
     column_name = details["column"]
@@ -236,6 +241,7 @@ def _apply_alter_column(columns: dict[str, Column], details: dict[str, Any]) -> 
     return columns
 
 
+@helper
 def _apply_drop_column(columns: dict[str, Column], details: dict[str, Any]) -> dict[str, Column]:
     """Remove column from schema."""
     column_name = details["column"]
@@ -244,6 +250,7 @@ def _apply_drop_column(columns: dict[str, Column], details: dict[str, Any]) -> d
     return columns
 
 
+@helper
 def _apply_add_foreign_key(columns: dict[str, Column], details: dict[str, Any]) -> dict[str, Column]:
     """Add FK reference to column definition."""
     column_name = details["column"]
@@ -260,6 +267,7 @@ def _apply_add_foreign_key(columns: dict[str, Column], details: dict[str, Any]) 
     return columns
 
 
+@helper
 def _apply_drop_foreign_key(columns: dict[str, Column], details: dict[str, Any]) -> dict[str, Column]:
     """Remove FK reference from column definition."""
     column_name = details["column"]
@@ -278,6 +286,7 @@ def _apply_drop_foreign_key(columns: dict[str, Column], details: dict[str, Any])
 # =============================================================================
 
 
+@boundary
 async def execute_reconstruction_async(
     connection: Any,
     table_name: str,
@@ -442,6 +451,7 @@ async def execute_reconstruction_async(
 # =============================================================================
 
 
+@helper
 def _validate_columns(table_name: str, columns: dict[str, Column]) -> None:
     """
     Validate column definitions before starting reconstruction.
@@ -481,6 +491,7 @@ def _validate_columns(table_name: str, columns: dict[str, Column]) -> None:
 
 
 
+@helper
 def _map_type(type_str: str) -> str:
     """SQLite spelling, with the non-string fallback this path is tested for.
 

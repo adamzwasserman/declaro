@@ -23,6 +23,7 @@ import time
 from collections.abc import Callable
 from types import FrameType
 
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.database import Database, replicate_on_shutdown
 
 # WHAT THE OS HANDS A SIGNAL HANDLER, AND WHAT WE HAND IT BACK. `_handler` took
@@ -37,10 +38,12 @@ __all__ = ["trap_shutdown"]
 logger = logging.getLogger(__name__)
 
 
+@helper
 def _noop() -> None:
     return None
 
 
+@boundary
 def trap_shutdown(db: Database) -> Callable[[], None]:
     """Install SIGTERM/SIGINT handlers that replicate before the process exits.
 

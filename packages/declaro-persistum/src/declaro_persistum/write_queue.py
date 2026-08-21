@@ -117,6 +117,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any, TypedDict
 
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE
 from declaro_persistum.retry import Retry, delay_before, is_contention
 
@@ -169,6 +170,7 @@ class Room(TypedDict):
     arrived: asyncio.Event
 
 
+@helper
 def new_room() -> Room:
     """An empty waiting room.
 
@@ -179,6 +181,7 @@ def new_room() -> Room:
     return {"writes": [], "waiting": {}, "arrived": asyncio.Event()}
 
 
+@boundary
 def deposit(room: Room, write: PendingWrite) -> str:
     """Put a write in the room and return its ticket at once.
 
@@ -212,6 +215,7 @@ def deposit(room: Room, write: PendingWrite) -> str:
     return ticket
 
 
+@boundary
 async def collect(room: Room, ticket: str) -> Receipt:
     """Wait for one deposited write, and RAISE whatever it raised.
 
@@ -253,6 +257,7 @@ async def collect(room: Room, ticket: str) -> Receipt:
         room["waiting"].pop(ticket, None)
 
 
+@boundary
 async def drain(
     room: Room,
     execute: Callable[[PendingWrite], Awaitable[Any]],
@@ -348,6 +353,7 @@ async def drain(
     return {"attempted": attempted, "orphaned": orphaned}
 
 
+@boundary
 async def _append_one(
     ticket: str,
     write: PendingWrite,

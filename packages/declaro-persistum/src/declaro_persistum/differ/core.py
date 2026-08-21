@@ -593,22 +593,30 @@ def _same_constraint(prop: str, current: Any, target: Any) -> bool:
     return bool(current == target)
 
 
+# WHAT A NUMBER LOOKS LIKE WRITTEN DOWN, so that recognising one is a declared
+# pattern rather than an exception caught from `float()`. Optional sign, digits
+# either side of an optional point, optional exponent.
+_NUMERIC = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?\Z")
+
+
 def _as_number(value: Any) -> float | None:
     """The number this default denotes, or None if it does not denote one.
 
     A bare `0` is a number. `'0'` WITH QUOTES is the one-character string and
-    must not fold into it, which is why this parses rather than strips.
+    must not fold into it, which is why the quotes are not stripped first.
+
+    A BOOL IS NOT A NUMBER HERE even though Python says `True == 1`. A default
+    of `true` and a default of `1` are different declarations, and folding
+    them would report a changed column as unchanged.
     """
-    if isinstance(value, bool):
+    kind = type(value)
+    if kind is bool:
         return None
-    if isinstance(value, int | float):
+    if kind is int or kind is float:
         return float(value)
-    if not isinstance(value, str):
+    if kind is not str:
         return None
-    try:
-        return float(value.strip())
-    except ValueError:
-        return None
+    return float(value) if _NUMERIC.match(value.strip()) else None
 
 
 def same_default(current: Any, target: Any, dialect: Dialect) -> bool:
