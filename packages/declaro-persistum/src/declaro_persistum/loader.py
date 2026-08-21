@@ -6,9 +6,10 @@ Handles TOML schema files, snapshots, and decision files.
 
 import re
 import tomllib
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import tomli_w
 
@@ -112,34 +113,148 @@ def _load_toml_file(path: Path) -> Schema:
     return schema
 
 
+# A PRIMARY KEY IS ONE NAME OR SEVERAL, AND BOTH MEAN A LIST. Two spellings
+# of one thing is a vocabulary, and the boundary is where it is resolved into
+# the single form everything downstream reads.
+_NAMES_OF: dict[type, Callable[[Any], list[str]]] = {
+    str: lambda written: [written],
+    list: list,
+}
+
+# CARRIED THROUGH UNREAD, so this is a list rather than four `if name in`
+# lines that each do the same thing.
+_TABLE_FIELDS = ("indexes", "constraints", "renamed_from")
+
+
+
+
 @helper
 def _normalize_table(table_data: dict[str, Any], table_name: str) -> Table:
     """Normalize table data from TOML to Table type.
 
     The name is carried through only so a refusal below can name the table.
     """
-    table: Table = {}
+    carried = {name: table_data[name] for name in _TABLE_FIELDS if name in table_data}
+    read = {
+        name: _TABLE_READERS[name](table_data[name], table_name)
+        for name in _TABLE_READERS
+        if name in table_data
+    }
+    return cast(Table, carried | read)
 
-    if "columns" in table_data:
-        table["columns"] = _normalize_columns(table_data["columns"], table_name)
 
-    if "primary_key" in table_data:
-        pk = table_data["primary_key"]
-        if isinstance(pk, str):
-            table["primary_key"] = [pk]
-        else:
-            table["primary_key"] = list(pk)
+# THE OPTIONAL FIELDS, AS A LIST RATHER THAN NINE `if name in col_data`
+# LINES. Each one was the same shape, so the vocabulary is what varies and it
+# is written once. A key the author did not write is absent from the
+# comprehension; a key they did write is carried through unread.
+_COLUMN_FIELDS = (
+    "nullable",
+    "default",
+    "primary_key",
+    "unique",
+    "references",
+    "on_delete",
+    "on_update",
+    "check",
+    "renamed_from",
+    "is_new",
+)
 
-    if "indexes" in table_data:
-        table["indexes"] = table_data["indexes"]
 
-    if "constraints" in table_data:
-        table["constraints"] = table_data["constraints"]
+@helper
+def _column_from_table(
+    col_name: str, table_name: str, col_data: dict[str, Any]
+) -> Column:
+    """The long spelling: a TOML table carrying `type` and whatever else.
 
-    if "renamed_from" in table_data:
-        table["renamed_from"] = table_data["renamed_from"]
+    A MISSING TYPE IS A BROKEN SCHEMA, NOT A TEXT COLUMN. This read
+    `col["type"] = "text"  # Default`, and the comment was accurate.
 
-    return table
+    It is the same fallback three BDD schema helpers were deleted for on
+    2026-08-16, recorded in `test_the_bdd_schema_builder_refuses_a_broken_schema`:
+    "A schema missing a type is a broken schema, and answering it with TEXT
+    means every scenario built on that schema tests a table nobody declared."
+    The helper was fixed and the loader it was helping to test was not.
+
+    TEXT is the one type that accepts every value, so a typo -- `typ` for
+    `type` -- produced a column that stores integers as strings and complains
+    about none of it. Nothing later can tell that from a column the author
+    meant to be TEXT.
+    """
+    _REFUSE_UNTYPED[("type" in col_data)](col_name, table_name, col_data)
+    declared: Column = {"type": col_data["type"]}
+    declared.update(
+        {name: col_data[name] for name in _COLUMN_FIELDS if name in col_data}  # type: ignore[typeddict-item]
+    )
+    return declared
+
+
+@helper
+def _column_from_type_name(
+    _col_name: str, _table_name: str, col_data: str
+) -> Column:
+    """The short spelling: the value is the type and there is nothing else."""
+    return {"type": col_data}
+
+
+@helper
+def _refuse_untyped(col_name: str, table_name: str, col_data: dict[str, Any]) -> None:
+    """A column table with no `type` key."""
+    raise LoaderError(
+        f"Column '{col_name}' in table '{table_name}' declares no type. It "
+        f"carries {sorted(col_data)}; a column needs `type`, either as "
+        f'`{col_name} = {{ type = "text" }}` or the short form '
+        f'`{col_name} = "text"`.'
+    )
+
+
+@helper
+def _accept_typed(
+    _col_name: str, _table_name: str, _col_data: dict[str, Any]
+) -> None:
+    """A column table carrying `type`, so there is nothing to refuse."""
+
+
+_REFUSE_UNTYPED: dict[bool, Callable[[str, str, dict[str, Any]], None]] = {
+    True: _accept_typed,
+    False: _refuse_untyped,
+}
+
+# THE TWO SPELLINGS OF A COLUMN, KEYED BY EXACT TYPE. TOML carries no schema,
+# so the loader is the only thing that can say which of the two an entry is.
+# Reading this by subscript is what makes a third spelling a refusal instead
+# of a silence: `.get` with a fallback would put the old behaviour back.
+_COLUMN_FROM: dict[type, Callable[[str, str, Any], Column]] = {
+    dict: _column_from_table,
+    str: _column_from_type_name,
+}
+
+
+@helper
+def _refuse_unknown_columns(unknown: dict[str, str], table_name: str) -> None:
+    """Columns written in neither spelling, named so the author can find them.
+
+    They used to produce no column, no error and no warning, so the author
+    got a table missing a column they had declared and found out when an
+    INSERT failed on a name the database had never heard of.
+    """
+    written = ", ".join(f"'{name}' ({shape})" for name, shape in sorted(unknown.items()))
+    raise LoaderError(
+        f"Table '{table_name}' declares {written}, which is neither spelling "
+        f"of a column. Write either `name = \"text\"` or "
+        f"`[{table_name}.columns.name]` with a `type`."
+    )
+
+
+@helper
+def _accept_known_columns(_unknown: dict[str, str], _table_name: str) -> None:
+    """Every column is written in one of the two spellings."""
+
+
+_WHEN_UNKNOWN: dict[bool, Callable[[dict[str, str], str], None]] = {
+    True: _refuse_unknown_columns,
+    False: _accept_known_columns,
+}
 
 
 @helper
@@ -152,74 +267,32 @@ def _normalize_columns(
     while a missing type was answered with a default, which is the point: a
     function that never refuses never needs to say which line to look at.
     """
-    columns: dict[str, Column] = {}
+    unknown = {
+        col_name: type(col_data).__name__
+        for col_name, col_data in columns_data.items()
+        if type(col_data) not in _COLUMN_FROM
+    }
+    _WHEN_UNKNOWN[bool(unknown)](unknown, table_name)
 
-    for col_name, col_data in columns_data.items():
-        if isinstance(col_data, dict):
-            col: Column = {}
+    return {
+        col_name: _COLUMN_FROM[type(col_data)](col_name, table_name, col_data)
+        for col_name, col_data in columns_data.items()
+    }
 
-            # A MISSING TYPE IS A BROKEN SCHEMA, NOT A TEXT COLUMN. This read
-            # `col["type"] = "text"  # Default`, and the comment was accurate.
-            #
-            # It is the same fallback three BDD schema helpers were deleted
-            # for on 2026-08-16, recorded in
-            # `test_the_bdd_schema_builder_refuses_a_broken_schema`: "A schema
-            # missing a type is a broken schema, and answering it with TEXT
-            # means every scenario built on that schema tests a table nobody
-            # declared." The helper was fixed and the loader it was helping to
-            # test was not.
-            #
-            # TEXT is the one type that accepts every value, so a typo -- `typ`
-            # for `type` -- produced a column that stores integers as strings
-            # and complains about none of it. Nothing later can tell that from
-            # a column the author meant to be TEXT.
-            if "type" not in col_data:
-                raise LoaderError(
-                    f"Column '{col_name}' in table '{table_name}' declares no "
-                    f"type. It carries {sorted(col_data)}; a column needs "
-                    f"`type`, either as `{col_name} = {{ type = \"text\" }}` "
-                    f"or the short form `{col_name} = \"text\"`."
-                )
-            col["type"] = col_data["type"]
 
-            # Optional fields
-            if "nullable" in col_data:
-                col["nullable"] = col_data["nullable"]
+@helper
+def _primary_key_of(written: Any, _table_name: str) -> list[str]:
+    """One name or several, resolved to the list everything downstream reads."""
+    return _NAMES_OF[type(written)](written)
 
-            if "default" in col_data:
-                col["default"] = col_data["default"]
 
-            if "primary_key" in col_data:
-                col["primary_key"] = col_data["primary_key"]
-
-            if "unique" in col_data:
-                col["unique"] = col_data["unique"]
-
-            if "references" in col_data:
-                col["references"] = col_data["references"]
-
-            if "on_delete" in col_data:
-                col["on_delete"] = col_data["on_delete"]
-
-            if "on_update" in col_data:
-                col["on_update"] = col_data["on_update"]
-
-            if "check" in col_data:
-                col["check"] = col_data["check"]
-
-            # Migration hints
-            if "renamed_from" in col_data:
-                col["renamed_from"] = col_data["renamed_from"]
-
-            if "is_new" in col_data:
-                col["is_new"] = col_data["is_new"]
-
-            columns[col_name] = col
-        elif isinstance(col_data, str):
-            # Shorthand: just the type
-            columns[col_name] = {"type": col_data}
-
-    return columns
+# THE FIELDS THAT ARE READ RATHER THAN CARRIED, each with the function that
+# reads it. Both take the declared value and the table name, so a refusal in
+# either can say where.
+_TABLE_READERS: dict[str, Callable[[Any, str], Any]] = {
+    "columns": _normalize_columns,
+    "primary_key": _primary_key_of,
+}
 
 
 @boundary
@@ -492,5 +565,3 @@ def validate_view(view: View) -> None:
         raise ValueError(
             "View 'trigger_sources' requires refresh='trigger' or 'hybrid'"
         )
-
-
