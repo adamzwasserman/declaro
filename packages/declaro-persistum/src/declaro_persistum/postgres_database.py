@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.database import (
     Database,
     ShutdownPolicy,
@@ -28,6 +29,7 @@ __all__ = ["open_postgresql", "connect_postgresql"]
 DIALECT: Dialect = "postgresql"
 
 
+@boundary
 async def connect_postgresql(db: Database) -> Any:
     """Open one connection to the server this database names."""
     import asyncpg
@@ -35,22 +37,27 @@ async def connect_postgresql(db: Database) -> Any:
     return await asyncpg.connect(db["path"], timeout=db["busy_timeout_s"])
 
 
+@boundary
 async def _close_connection(conn: Any) -> None:
     await conn.close()
 
 
+@helper
 async def _nothing_to_replicate(_db: Database) -> bool:
     return True
 
 
+@helper
 async def _nothing_to_refresh(_db: Database) -> None:
     return None
 
 
+@helper
 async def _release(_db: Database) -> None:
     return None
 
 
+@helper
 async def open_postgresql(
     dsn: str,
     *,

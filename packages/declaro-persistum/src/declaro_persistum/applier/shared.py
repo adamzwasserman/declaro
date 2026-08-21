@@ -13,6 +13,7 @@ Three byte-identical copies of the SQLite mapper also existed, in
 """
 
 from collections.abc import Callable
+from types import MappingProxyType
 from typing import Any
 
 # Re-exported: inspector.shared is the single source of truth for PRAGMA parsing.
@@ -167,20 +168,26 @@ EXPRESSION_DEFAULTS: dict[str, dict[str, str]] = {
 # variant bits are wrong, so it is not v4, and anything that parses or
 # validates it is being lied to. Translating it would replace a loud syntax
 # error with a quiet wrong value.
-NO_EQUIVALENT: dict[str, dict[str, str]] = {
-    "sqlite": {
-        "gen_random_uuid()": (
-            "SQLite has no UUID generator, and a random hex string is not a "
-            "v4 UUID. Have the application supply the id"
-        ),
-        "uuid_generate_v4()": (
-            "SQLite has no UUID generator, and a random hex string is not a "
-            "v4 UUID. Have the application supply the id"
-        ),
-    },
-}
-NO_EQUIVALENT["turso"] = NO_EQUIVALENT["sqlite"]
-NO_EQUIVALENT["postgresql"] = {}
+_NO_UUID = MappingProxyType({
+    "gen_random_uuid()": (
+        "SQLite has no UUID generator, and a random hex string is not a "
+        "v4 UUID. Have the application supply the id"
+    ),
+    "uuid_generate_v4()": (
+        "SQLite has no UUID generator, and a random hex string is not a "
+        "v4 UUID. Have the application supply the id"
+    ),
+})
+
+# WRITTEN ONCE, WHOLE. This was built with sqlite's entry and then mutated on
+# the next two lines to add turso and postgresql, so the table a reader sees
+# was not the table the code used. Every dialect is here, and the mapping
+# cannot be changed after import.
+NO_EQUIVALENT = MappingProxyType({
+    "sqlite": _NO_UUID,
+    "turso": _NO_UUID,
+    "postgresql": MappingProxyType({}),
+})
 
 
 def _translate_default(value: Any, dialect: str, column: str) -> Any:

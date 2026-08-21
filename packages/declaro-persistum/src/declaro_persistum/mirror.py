@@ -179,6 +179,7 @@ async def parallel_write(
     double it for the whole duration of the migration.
     """
 
+    @boundary
     async def to(db: Database) -> None:
         async with writing(db) as conn:
             await conn.execute(sql, params)

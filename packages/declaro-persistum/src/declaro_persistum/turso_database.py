@@ -385,7 +385,7 @@ async def _open_replicated(
         return None
 
     async def replicate_once(_db: Database) -> bool:
-        try:
+        try:  # honest: ignore HC-P002: a network failure is a fault as data
             await held.push()
             return True
         except A_BUG_IN_THIS_PACKAGE:

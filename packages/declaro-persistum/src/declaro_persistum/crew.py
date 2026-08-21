@@ -132,6 +132,7 @@ async def drainer(
                     task.cancel()
                 continue
 
+            @helper
             async def execute(write: PendingWrite) -> None:
                 # The engine's own way to run one write in a transaction,
                 # resolved at open from WRITERS and carried on the Database.

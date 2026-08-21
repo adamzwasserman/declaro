@@ -67,6 +67,7 @@ def trap_shutdown(db: Database) -> Callable[[], None]:
         except (ValueError, OSError):
             continue
 
+        @boundary
         def _handler(
             signum: int,
             frame: FrameType | None,
@@ -97,6 +98,7 @@ def trap_shutdown(db: Database) -> Callable[[], None]:
             # Not the main thread. Nothing to trap; close(db) still works.
             pass
 
+    @boundary
     def restore() -> None:
         for sig, previous in replaced:
             with contextlib.suppress(ValueError, OSError, TypeError):

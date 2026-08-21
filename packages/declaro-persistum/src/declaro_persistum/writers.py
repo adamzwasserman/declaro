@@ -53,12 +53,15 @@ Transaction = Callable[[Any], "AbstractAsyncContextManager[None]"]
 class DbApiConnection(Protocol):
     """Turso and SQLite. Parameters as a sequence, an explicit commit."""
 
+    @boundary
     async def execute(self, sql: str, parameters: Sequence[object] = ..., /) -> object:
         raise NotImplementedError("CODE NOT WRITTEN")
 
+    @boundary
     async def commit(self) -> None:
         raise NotImplementedError("CODE NOT WRITTEN")
 
+    @boundary
     async def rollback(self) -> None:
         # DECLARED BECAUSE `dbapi_transaction` DEPENDS ON IT. The Protocol
         # named `execute` and `commit` only, so the rollback half of the
@@ -71,9 +74,11 @@ class DbApiConnection(Protocol):
 class AsyncpgConnection(Protocol):
     """PostgreSQL. Parameters positionally, the transaction block commits."""
 
+    @helper
     async def execute(self, sql: str, /, *args: object) -> object:
         raise NotImplementedError("CODE NOT WRITTEN")
 
+    @boundary
     def transaction(self) -> AbstractAsyncContextManager[object]:
         raise NotImplementedError("CODE NOT WRITTEN")
 
@@ -93,6 +98,7 @@ class WriteOne(Protocol):
     cannot disagree; `test_every_backend_can_be_opened` is what checks it.
     """
 
+    @boundary
     async def __call__(
         self, conn: Any, sql: str, params: Sequence[object]
     ) -> None:

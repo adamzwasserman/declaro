@@ -408,6 +408,11 @@ def checks_from_ddl(create_statement: str) -> dict[str, str]:
 # a clause in half at the comma inside `[a,b]`.
 _CLOSING = {'"': '"', "`": "`", "[": "]"}
 
+# The same four openers, read the other way: which character ends the name
+# this one begins. `'` is here and not in _CLOSING because a string literal
+# opens a quote for the splitter but is not an identifier.
+_OPENING = {"'": "'", '"': '"', "`": "`", "[": "]"}
+
 
 def _leading_identifier(clause: str) -> tuple[str, bool] | None:
     """The column name a clause opens with, and whether it was quoted.
@@ -469,10 +474,11 @@ def _split_top_level(body: str) -> list[str]:
             if char == quote:
                 quote = None
             continue
-        if char in "'\"`":
-            quote = char
-        elif char == "[":
-            quote = "]"
+        # THE QUOTE TABLE ALREADY EXISTS, thirty lines above. This was an
+        # if/elif chain re-deciding which characters open a quoted name, so
+        # the two could disagree about `[name]` and only one would be fixed.
+        if char in _OPENING:
+            quote = _OPENING[char]
         elif char == "(":
             depth += 1
         elif char == ")":

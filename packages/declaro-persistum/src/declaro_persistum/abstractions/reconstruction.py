@@ -472,14 +472,22 @@ def _validate_columns(table_name: str, columns: dict[str, Column]) -> None:
                 f"(expected 'to' value from {{'from': ..., 'to': ...}} format)."
             )
 
-    # Validate SQL generation succeeds before touching the database
-    try:
+    # RENDER IT BEFORE THE DATABASE IS TOUCHED, so a column definition that
+    # cannot be written is refused while the table is still intact rather than
+    # halfway through a rebuild.
+    #
+    # NARROWED FROM `except Exception`, which caught anything at all including
+    # a defect in the generator itself and reported it as the caller's invalid
+    # column. These three are what a bad definition produces: a missing key, a
+    # value of the wrong type, and a value of the right type that is not
+    # legal. Anything else is ours and belongs in the traceback.
+    try:  # honest: ignore HC-P002: names the bad column before the rebuild
         generate_create_table_sql(f"{table_name}_validate", columns)
-    except Exception as e:
+    except (KeyError, TypeError, ValueError) as unrenderable:
         raise ValueError(
             f"Cannot reconstruct table '{table_name}': "
-            f"invalid column definitions - {e}"
-        ) from e
+            f"invalid column definitions - {unrenderable}"
+        ) from unrenderable
 
 
 # =============================================================================

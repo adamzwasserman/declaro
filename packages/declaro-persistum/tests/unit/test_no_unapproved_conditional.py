@@ -38,10 +38,9 @@ _SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "declaro_persistum"
 
 # The count when the rule was given. LOWER THIS as conditionals are removed.
 # It must never be raised.
-# 723 after two dispatch chains became tables on 2026-08-21: the CLI's
-# eleven-branch operation formatter, and the three reconstruction operations
-# in applier/shared.py.
-BASELINE = 723
+# 722 after the DDL splitter stopped re-deciding which characters open a
+# quoted name and read the table thirty lines above it instead.
+BASELINE = 722
 
 _MARKER = "APPROVED-IF"
 
