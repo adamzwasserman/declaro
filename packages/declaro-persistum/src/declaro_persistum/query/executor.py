@@ -27,7 +27,7 @@ def _conn_module(conn: Any) -> str:
     async wrappers like TursoAsyncConnection).
     Falls back to ``type(conn).__module__`` for raw driver connections.
     """
-    return getattr(conn, "_declaro_dialect", type(conn).__module__)
+    return getattr(conn, "_declaro_dialect", type(conn).__module__)  # honest: ignore HC-P005: the driver's own module is the only marker
 
 
 def detect_dialect(connection: Any) -> str:

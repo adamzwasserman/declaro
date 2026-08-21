@@ -190,7 +190,7 @@ class MigrationError(DeclaroError):
             sql_display = sql if len(sql) < 500 else sql[:500] + "..."
             details.append(f"  SQL: {sql_display}")
         if original_error:
-            details.append(f"  Original error: {type(original_error).__name__}: {original_error}")
+            details.append(f"  Original error: {type(original_error).__name__}: {original_error}")  # honest: ignore HC-P005: the class name IS the message
 
         details_str = "\n".join(details)
         if details_str:
@@ -221,7 +221,7 @@ class RollbackError(MigrationError):
         if rollback_error:
             rollback_msg = (
                 f"\n\n  CRITICAL: Rollback also failed!\n"
-                f"  Rollback error: {type(rollback_error).__name__}: {rollback_error}\n"
+                f"  Rollback error: {type(rollback_error).__name__}: {rollback_error}\n"  # honest: ignore HC-P005: the class name IS the message
                 f"  Manual database inspection required."
             )
         super().__init__(
@@ -369,7 +369,7 @@ class TransferError(DeclaroError):
         if table:
             details.append(f"Table: {table}")
         if original_error:
-            details.append(f"Original error: {type(original_error).__name__}: {original_error}")
+            details.append(f"Original error: {type(original_error).__name__}: {original_error}")  # honest: ignore HC-P005: the class name IS the message
 
         details_str = ""
         if details:

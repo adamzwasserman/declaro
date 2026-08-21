@@ -219,7 +219,7 @@ def is_contention(error: BaseException) -> bool:
     not, as of 2026-08-17: `grep` finds no second definition and no other
     "busy" text check in `src/`. Do not add one.
     """
-    if isinstance(error, A_BUG_IN_THIS_PACKAGE):
+    if isinstance(error, A_BUG_IN_THIS_PACKAGE):  # honest: ignore HC-P005: asking the TYPE is what rule 8 requires
         return False
     text = str(error).lower()
     return "busy" in text or "sqlite_busy" in text or "conflict" in text
