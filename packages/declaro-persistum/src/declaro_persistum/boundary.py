@@ -33,8 +33,27 @@ F = TypeVar("F", bound=Callable[..., object])
 
 
 def boundary(function: F) -> F:
-    """Declare that this function is where the package meets the world."""
+    """This function is where the package meets the world.
+
+    It may open a connection, read or write a file, take the clock, and catch
+    what those raise.
+    """
     return function
 
 
-__all__ = ["boundary"]
+def helper(function: F) -> F:
+    """Data in, data out. No I/O, no clock, no hidden state."""
+    return function
+
+
+def link(function: F) -> F:
+    """One step of handling a request: takes the work and returns it changed."""
+    return function
+
+
+def recognizer(function: F) -> F:
+    """Reads one value and says which declared kind it is, or that it is none."""
+    return function
+
+
+__all__ = ["boundary", "helper", "link", "recognizer"]

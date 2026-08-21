@@ -12,6 +12,7 @@ from typing import Any
 
 import tomli_w
 
+from declaro_persistum.boundary import boundary, helper, recognizer
 from declaro_persistum.exceptions import LoaderError
 from declaro_persistum.types import (
     Column,
@@ -23,6 +24,7 @@ from declaro_persistum.types import (
 )
 
 
+@boundary
 def load_schema(schema_dir: str | Path) -> Schema:
     """
     Load schema from TOML files in a directory.
@@ -83,6 +85,7 @@ def load_schema(schema_dir: str | Path) -> Schema:
     return schema
 
 
+@boundary
 def _load_toml_file(path: Path) -> Schema:
     """Load a single TOML file and return its schema."""
     try:
@@ -109,6 +112,7 @@ def _load_toml_file(path: Path) -> Schema:
     return schema
 
 
+@helper
 def _normalize_table(table_data: dict[str, Any], table_name: str) -> Table:
     """Normalize table data from TOML to Table type.
 
@@ -138,6 +142,7 @@ def _normalize_table(table_data: dict[str, Any], table_name: str) -> Table:
     return table
 
 
+@helper
 def _normalize_columns(
     columns_data: dict[str, Any], table_name: str
 ) -> dict[str, Column]:
@@ -217,6 +222,7 @@ def _normalize_columns(
     return columns
 
 
+@boundary
 def load_snapshot(schema_dir: str | Path) -> Schema:
     """
     Load the schema snapshot file.
@@ -252,6 +258,7 @@ def load_snapshot(schema_dir: str | Path) -> Schema:
     return schema
 
 
+@boundary
 def save_snapshot(
     schema_dir: str | Path,
     schema: Schema,
@@ -296,6 +303,7 @@ def save_snapshot(
     snapshot_path.write_text(content)
 
 
+@boundary
 def load_decisions(schema_dir: str | Path) -> dict[str, Decision]:
     """
     Load pending decisions file.
@@ -347,6 +355,7 @@ def load_decisions(schema_dir: str | Path) -> dict[str, Decision]:
     return decisions
 
 
+@boundary
 def clear_decisions(schema_dir: str | Path) -> None:
     """Delete the pending decisions, because they have been applied.
 
@@ -364,6 +373,7 @@ def clear_decisions(schema_dir: str | Path) -> None:
     pending_path.unlink(missing_ok=True)
 
 
+@boundary
 def save_decisions(schema_dir: str | Path, decisions: dict[str, Any]) -> None:
     """
     Save decisions to pending file.
@@ -424,6 +434,7 @@ def save_decisions(schema_dir: str | Path, decisions: dict[str, Any]) -> None:
 _VALID_IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
+@recognizer
 def _is_valid_identifier(name: str) -> bool:
     """Check if name is a valid SQL identifier."""
     return bool(_VALID_IDENTIFIER.match(name))
@@ -447,6 +458,7 @@ def _is_valid_identifier(name: str) -> bool:
 
 
 
+@helper
 def validate_view(view: View) -> None:
     """
     Validate view definition.

@@ -16,6 +16,7 @@ from typing import Any, Literal, get_args, get_origin, get_type_hints
 from pydantic import BaseModel
 from pydantic import Field as PydanticField
 
+from declaro_persistum.boundary import boundary
 from declaro_persistum.exceptions import LoaderError
 from declaro_persistum.types import Column, Index, Schema, Table, View
 
@@ -504,6 +505,7 @@ def pydantic_model_to_table(model_cls: type) -> tuple[str, Table] | None:
     return table_name, table
 
 
+@boundary
 def _import_module_file(module_path: Path) -> Any:
     """Import a model file once and hand back the module.
 
@@ -584,6 +586,7 @@ def _schema_of(module: Any) -> Schema:
 # same reason `index_from_meta` checks index keys: a misspelled key in a plain
 # dict is silently dropped, and the view is then missing a property nobody can
 # see the absence of.
+@boundary
 def load_views_from_models(models_dir: str | Path) -> dict[str, View]:
     """Every view declared across a models directory.
 
@@ -703,6 +706,7 @@ def _check_view(obj: dict[str, Any]) -> None:
             )
 
 
+@boundary
 def load_schema_from_models(models_dir: str | Path) -> Schema:
     """Load schema from Pydantic model files in a directory.
 
