@@ -38,10 +38,9 @@ _SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "declaro_persistum"
 
 # The count when the rule was given. LOWER THIS as conditionals are removed.
 # It must never be raised.
-# 787 `ast.If` nodes, which is every `if` and every `elif`. My first value
-# here was 834, the count of if/elif/else KEYWORDS, and the gate caught it:
-# an `else` belongs to its `if` and is not a separate node.
-BASELINE = 787
+# 773 after deleting the rename scoring on 2026-08-21: the similarity
+# thresholds and the type and nullability filters were 14 conditionals.
+BASELINE = 773
 
 _MARKER = "APPROVED-IF"
 

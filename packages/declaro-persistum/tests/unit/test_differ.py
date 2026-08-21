@@ -1,10 +1,7 @@
 """Tests for the diff engine."""
 
 
-from declaro_persistum.differ.ambiguity import (
-    calculate_rename_confidence,
-    detect_ambiguities,
-)
+from declaro_persistum.differ.ambiguity import detect_ambiguities
 from declaro_persistum.differ.core import diff
 from declaro_persistum.differ.toposort import build_dependency_graph, topological_sort
 from declaro_persistum.types import Schema
@@ -162,19 +159,24 @@ class TestAmbiguityDetection:
         assert len(ambiguities) >= 1
         assert any(a["type"] == "possible_rename" for a in ambiguities)
 
-    def test_no_ambiguity_with_different_types(self):
-        """No rename ambiguity when types differ."""
-        current: Schema = {
-            "users": {"columns": {"count": {"type": "integer"}}}
-        }
-        target: Schema = {
-            "users": {"columns": {"total": {"type": "text"}}}
-        }
+    def test_a_different_type_is_still_ambiguous(self):
+        """A retyped rename is a rename, and this used to say otherwise.
+
+        REVERSED 2026-08-21, because the old assertion recorded the gap. The
+        detector required a matching type before it would ask, so a column
+        renamed AND retyped in one migration passed unnoticed and its values
+        went with the drop. Whether the types match tells you nothing about
+        whether the author moved the column or replaced it.
+        """
+        current: Schema = {"users": {"columns": {"count": {"type": "integer"}}}}
+        target: Schema = {"users": {"columns": {"total": {"type": "text"}}}}
 
         ambiguities = detect_ambiguities(current, target, "postgresql")
 
         rename_amb = [a for a in ambiguities if a["type"] == "possible_rename"]
-        assert len(rename_amb) == 0
+        assert len(rename_amb) == 1
+        assert rename_amb[0]["from_column"] == "count"
+        assert rename_amb[0]["to_column"] == "total"
 
     def test_no_ambiguity_with_renamed_from_hint(self):
         """No ambiguity when renamed_from hint is present."""
@@ -207,25 +209,13 @@ class TestAmbiguityDetection:
 class TestRenameConfidence:
     """Tests for rename confidence calculation."""
 
-    def test_exact_match_case_change(self):
-        """Exact match (case change) has confidence 1.0."""
-        confidence = calculate_rename_confidence("Name", "name")
-        assert confidence == 1.0
-
-    def test_prefix_match(self):
-        """Prefix match has reasonable confidence."""
-        confidence = calculate_rename_confidence("name", "full_name")
-        assert confidence > 0.4  # "name" is contained in "full_name"
-
-    def test_suffix_match(self):
-        """Suffix match has some confidence."""
-        confidence = calculate_rename_confidence("user_id", "id")
-        assert confidence > 0.2  # "id" is shorter, so lower ratio
-
-    def test_completely_different(self):
-        """Completely different names have low confidence."""
-        confidence = calculate_rename_confidence("foo", "bar")
-        assert confidence < 0.5
+    # THE CONFIDENCE TESTS ARE GONE WITH THE FUNCTION THEY TESTED.
+    # `calculate_rename_confidence` scored a dropped name against an added one
+    # with edit distance, and the differ stayed silent when the score fell
+    # under a threshold. A table renamed and reshaped scored under it, so the
+    # drop ran and the rows went without the operator being asked. Measured
+    # 2026-08-21. A drop beside an add is now ambiguous by construction, and
+    # tests/unit/test_a_drop_beside_an_add_is_always_ambiguous.py holds that.
 
 
 class TestTopologicalSort:

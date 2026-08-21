@@ -100,7 +100,6 @@ module declaro-persistum
 
   fn detect_ambiguities : (current: Schema, target: Schema) -> list<any>
 
-  fn calculate_rename_confidence : (from_name: str, to_name: str) -> float
 
   fn validate_schema : (schema: Schema) -> list<str>
 

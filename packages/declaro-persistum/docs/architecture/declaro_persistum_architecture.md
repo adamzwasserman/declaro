@@ -872,24 +872,28 @@ def detect_column_ambiguity(
             
             # Check if types match
             if dropped_def.get("type") != added_def.get("type"):
-                continue
-            
-            # Check nullability match
-            if dropped_def.get("nullable", True) != added_def.get("nullable", True):
-                continue
-            
-            # Potential rename detected
-            ambiguities.append(Ambiguity(
-                type="possible_rename",
-                table=table,
-                from_column=dropped_col,
-                to_column=added_col,
-                confidence=calculate_rename_confidence(dropped_col, added_col),
-                message=f"Column '{dropped_col}' removed, '{added_col}' added. "
-                        f"Is this a rename (preserves data) or drop+add (loses data)?"
-            ))
-    
-    return ambiguities
+    # NO SCORING, AND NO TYPE OR NULLABILITY FILTER. Both used to gate the
+    # question: a column renamed and retyped in one migration was never
+    # reported, and its values went with the drop. Measured 2026-08-21.
+    #
+    # A drop beside an add is ambiguous by construction. The differ holds two
+    # schemas and cannot know whether the author moved a column or replaced
+    # it, so `renamed_from` on the column is the answer and there is nothing
+    # to measure.
+    return [
+        Ambiguity(
+            type="possible_rename",
+            table=table,
+            from_column=dropped_col,
+            to_column=added_col,
+            message=f"Column '{dropped_col}' removed and '{added_col}' added "
+                    f"on '{table}' in the same migration. Declare "
+                    f"`renamed_from` if this is a rename; the drop destroys "
+                    f"the values if it is not.",
+        )
+        for dropped_col in sorted(dropped - resolved - declared)
+        for added_col in sorted(named)
+    ]
 ```
 
 ### 3.5 Dialect Implementations

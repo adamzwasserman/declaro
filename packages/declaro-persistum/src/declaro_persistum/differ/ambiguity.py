@@ -46,8 +46,11 @@ def detect_ambiguities(
     common_tables = current_tables & target_tables
 
     # Check for possible table renames
+    # `current` is gone from this call. The only thing that read it was the
+    # column-overlap score, and a score is not entitled to decide whether the
+    # operator hears about a drop.
     table_ambiguities = _detect_table_rename_ambiguities(
-        dropped_tables, added_tables, current, target, decisions
+        dropped_tables, added_tables, target, decisions
     )
     ambiguities.extend(table_ambiguities)
 
@@ -67,63 +70,48 @@ def detect_ambiguities(
 def _detect_table_rename_ambiguities(
     dropped: set[str],
     added: set[str],
-    current: Schema,
     target: Schema,
     decisions: dict[str, Decision],
 ) -> list[Ambiguity]:
-    """Detect possible table renames."""
-    ambiguities: list[Ambiguity] = []
+    """Every dropped table beside an added one, with no scoring.
 
-    for dropped_table in dropped:
-        # Skip if already has a decision
-        decision_key = f"table_{dropped_table}"
-        if decision_key in decisions:
-            continue
+    THIS USED TO MEASURE THE PAIR AND STAY SILENT BELOW A THRESHOLD. Edit
+    distance on the names, averaged with the fraction of columns shared, gated
+    at 50% overlap. Renaming a table while also reshaping it scored under the
+    gate, so no ambiguity was raised, the drop ran, and the rows were gone
+    without the operator being asked. Measured 2026-08-21.
 
-        # Check if any added table has renamed_from hint
-        for added_table in added:
-            target_def = target[added_table]
-            if target_def.get("renamed_from") == dropped_table:
-                # Explicit rename, no ambiguity
-                continue
+    A similarity score is not entitled to decide whether data loss gets
+    announced. A drop beside an add is ambiguous by construction: the differ
+    holds two schemas and cannot know whether the author moved a thing or
+    replaced it. Nothing about the names or the columns changes that.
 
-        # Check for possible renames based on structure similarity
-        current_def = current[dropped_table]
-        current_cols = set(current_def.get("columns", {}).keys())
+    `renamed_from` is the answer when the author gives it, and a `decisions`
+    entry is the answer when they gave it at the prompt. Absent both, ask.
+    """
+    resolved = frozenset(t for t in dropped if f"table_{t}" in decisions)
+    declared = frozenset(
+        target[a]["renamed_from"] for a in added if target[a].get("renamed_from")
+    )
+    named = frozenset(a for a in added if not target[a].get("renamed_from"))
 
-        for added_table in added:
-            target_def = target[added_table]
-
-            # Skip if has explicit renamed_from
-            if target_def.get("renamed_from"):
-                continue
-
-            target_cols = set(target_def.get("columns", {}).keys())
-
-            # Check column overlap
-            if current_cols and target_cols:
-                overlap = len(current_cols & target_cols) / max(len(current_cols), len(target_cols))
-
-                if overlap >= 0.5:  # At least 50% column overlap
-                    confidence = calculate_rename_confidence(dropped_table, added_table)
-                    confidence = (confidence + overlap) / 2  # Average with structural similarity
-
-                    ambiguities.append(
-                        {
-                            "type": "possible_rename",
-                            "table": dropped_table,
-                            "from_column": None,
-                            "to_column": None,
-                            "column": None,
-                            "confidence": confidence,
-                            "message": (
-                                f"Table '{dropped_table}' removed, '{added_table}' added with "
-                                f"{overlap * 100:.0f}% column overlap. Is this a rename?"
-                            ),
-                        }
-                    )
-
-    return ambiguities
+    return [
+        {
+            "type": "possible_rename",
+            "table": dropped_table,
+            "from_column": None,
+            "to_column": None,
+            "column": None,
+            "message": (
+                f"Table '{dropped_table}' removed and '{added_table}' added in "
+                f"the same migration. Declare `renamed_from` on "
+                f"'{added_table}' if this is a rename; the drop destroys the "
+                f"rows if it is not."
+            ),
+        }
+        for dropped_table in sorted(dropped - resolved - declared)
+        for added_table in sorted(named)
+    ]
 
 
 def _detect_column_ambiguities(
@@ -155,7 +143,7 @@ def _detect_column_ambiguities(
 
     # Detect possible renames
     column_ambiguities = _detect_column_rename_ambiguities(
-        table_name, dropped_cols, added_cols, current_columns, target_columns, decisions
+        table_name, dropped_cols, added_cols, target_columns, decisions
     )
     ambiguities.extend(column_ambiguities)
 
@@ -172,60 +160,46 @@ def _detect_column_rename_ambiguities(
     table_name: str,
     dropped: set[str],
     added: set[str],
-    current_columns: dict[str, Column],
     target_columns: dict[str, Column],
     decisions: dict[str, Decision],
 ) -> list[Ambiguity]:
+    """Every dropped column beside an added one, with no scoring.
+
+    THIS USED TO REQUIRE A MATCHING TYPE AND A MATCHING NULLABILITY before it
+    would ask, and it scored the names with edit distance on top. A column
+    renamed and retyped in one migration therefore passed unnoticed, and its
+    values went with the drop.
+
+    The same rule as the table half: the differ holds two schemas and cannot
+    know whether a column moved or was replaced. `renamed_from` on the column
+    is the declarative answer and reaches `rename_column` in the differ, so
+    the author who says what they did is never asked.
     """
-    Detect potential column renames vs drop+add.
+    resolved = frozenset(c for c in dropped if f"{table_name}_{c}" in decisions)
+    declared = frozenset(
+        target_columns[a]["renamed_from"]
+        for a in added
+        if target_columns[a].get("renamed_from")
+    )
+    named = frozenset(a for a in added if not target_columns[a].get("renamed_from"))
 
-    Heuristics for likely rename:
-    - Same type
-    - Same nullability
-    - Similar name (edit distance)
-    """
-    ambiguities: list[Ambiguity] = []
-
-    for dropped_col in dropped:
-        # Skip if already has a decision
-        decision_key = f"{table_name}_{dropped_col}"
-        if decision_key in decisions:
-            continue
-
-        dropped_def = current_columns[dropped_col]
-
-        for added_col in added:
-            added_def = target_columns[added_col]
-
-            # Check if types match
-            if dropped_def.get("type") != added_def.get("type"):
-                continue
-
-            # Check nullability match
-            dropped_nullable = dropped_def.get("nullable", True)
-            added_nullable = added_def.get("nullable", True)
-            if dropped_nullable != added_nullable:
-                continue
-
-            # Potential rename detected
-            confidence = calculate_rename_confidence(dropped_col, added_col)
-
-            ambiguities.append(
-                {
-                    "type": "possible_rename",
-                    "table": table_name,
-                    "from_column": dropped_col,
-                    "to_column": added_col,
-                    "column": None,
-                    "confidence": confidence,
-                    "message": (
-                        f"Column '{dropped_col}' removed, '{added_col}' added with same type. "
-                        f"Is this a rename (preserves data) or drop+add (loses data)?"
-                    ),
-                }
-            )
-
-    return ambiguities
+    return [
+        {
+            "type": "possible_rename",
+            "table": table_name,
+            "from_column": dropped_col,
+            "to_column": added_col,
+            "column": None,
+            "message": (
+                f"Column '{dropped_col}' removed and '{added_col}' added on "
+                f"'{table_name}' in the same migration. Declare `renamed_from` "
+                f"on '{added_col}' if this is a rename; the drop destroys the "
+                f"values if it is not."
+            ),
+        }
+        for dropped_col in sorted(dropped - resolved - declared)
+        for added_col in sorted(named)
+    ]
 
 
 def _detect_type_change_ambiguities(
@@ -288,84 +262,3 @@ def _detect_type_change_ambiguities(
                 )
 
     return ambiguities
-
-
-def calculate_rename_confidence(from_name: str, to_name: str) -> float:
-    """
-    Calculate confidence score that two names represent a rename.
-
-    Uses Levenshtein-like similarity plus common patterns.
-
-    Args:
-        from_name: Original name
-        to_name: New name
-
-    Returns:
-        Confidence score between 0.0 and 1.0
-    """
-    from_lower = from_name.lower()
-    to_lower = to_name.lower()
-
-    # Exact match (case change only)
-    if from_lower == to_lower:
-        return 1.0
-
-    # One is prefix/suffix of other
-    if from_lower in to_lower or to_lower in from_lower:
-        longer = max(len(from_lower), len(to_lower))
-        shorter = min(len(from_lower), len(to_lower))
-        return shorter / longer
-
-    # Common rename patterns
-    patterns = [
-        ("name", "full_name"),
-        ("name", "display_name"),
-        ("user", "user_id"),
-        ("id", "user_id"),
-        ("date", "created_at"),
-        ("date", "updated_at"),
-        ("time", "timestamp"),
-    ]
-
-    for pattern_from, pattern_to in patterns:
-        if (pattern_from in from_lower and pattern_to in to_lower) or (
-            pattern_to in from_lower and pattern_from in to_lower
-        ):
-            return 0.7
-
-    # Levenshtein distance based similarity
-    distance = _levenshtein_distance(from_lower, to_lower)
-    max_len = max(len(from_lower), len(to_lower))
-
-    if max_len == 0:
-        return 0.0
-
-    similarity = 1.0 - (distance / max_len)
-
-    # Only consider it a possible rename if reasonably similar
-    return similarity if similarity >= 0.4 else 0.0
-
-
-def _levenshtein_distance(s1: str, s2: str) -> int:
-    """Compute Levenshtein edit distance between two strings."""
-    if len(s1) < len(s2):
-        return _levenshtein_distance(s2, s1)
-
-    if len(s2) == 0:
-        return len(s1)
-
-    previous_row: list[int] = list(range(len(s2) + 1))
-
-    for i, c1 in enumerate(s1):
-        current_row: list[int] = [i + 1]
-
-        for j, c2 in enumerate(s2):
-            # Cost is 0 if characters match, 1 otherwise
-            insertions = previous_row[j + 1] + 1
-            deletions = current_row[j] + 1
-            substitutions = previous_row[j] + (c1 != c2)
-            current_row.append(min(insertions, deletions, substitutions))
-
-        previous_row = current_row
-
-    return previous_row[-1]

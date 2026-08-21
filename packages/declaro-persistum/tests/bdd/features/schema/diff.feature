@@ -71,7 +71,7 @@ Feature: Diffing two schemas into an ordered list of operations
     And a target schema with a table "users" having a column "full_name" instead
     When ambiguities are detected
     Then a "possible_rename" ambiguity is reported from "name" to "full_name"
-    And it carries a confidence score, so a reviewer can tell a near-certain rename from a guess
+    And it carries no confidence score, because the differ does not know, which is why it is asking
 
   Scenario: a decision already made is not asked about again
     Given a current schema with a table "users" having a column "name"
@@ -80,20 +80,12 @@ Feature: Diffing two schemas into an ordered list of operations
     When ambiguities are detected
     Then no ambiguity is reported for it, because re-asking a question the operator has already answered is how a review gets skipped
 
-  Scenario: rename confidence scores identical names as certain
-    Given the names "email" and "EMAIL"
-    When rename confidence is calculated
-    Then it is 1.0, because only the case differs
-
-  Scenario: rename confidence scores a containment by length ratio
-    Given the names "name" and "full_name"
-    When rename confidence is calculated
-    Then it is the shorter length over the longer, which is 4 divided by 9
-
-  Scenario: rename confidence scores unrelated names low
-    Given the names "email" and "quantity"
-    When rename confidence is calculated
-    Then it is below 0.5, so a reviewer is not nudged toward a rename that is not one
+  # THE THREE CONFIDENCE SCENARIOS ARE GONE WITH THE FUNCTION THEY DESCRIBED.
+  # `calculate_rename_confidence` scored a dropped name against an added one,
+  # and the detector stayed silent when the score fell under a threshold. A
+  # table renamed and reshaped scored under it, so no ambiguity was raised,
+  # the drop ran, and the rows went without the operator being asked.
+  # Measured 2026-08-21. A drop beside an add is ambiguous by construction now.
 
   # ============================================================
   # Ordering — the part that makes valid SQL fail

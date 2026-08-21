@@ -5,7 +5,7 @@ else's database — what is created, what is altered, what is DROPPED, and in
 what order — with no unit test and no feature file, while every other subsystem
 had something.
 
-NO MOCKS. `diff`, `detect_ambiguities`, `calculate_rename_confidence` and
+NO MOCKS. `diff`, `detect_ambiguities` and
 `topological_sort` are pure functions over dicts. Schemas in, operations out.
 Rule 10's easy case, which is exactly why the absence of tests here was a
 choice rather than a difficulty.
@@ -23,7 +23,6 @@ import pytest
 from pytest_bdd import given, parsers, scenarios, then, when
 
 from declaro_persistum.differ import (
-    calculate_rename_confidence,
     detect_ambiguities,
     diff,
     diff_views,
@@ -263,14 +262,15 @@ def _then_ambiguity(ctx, kind, frm, to):
 
 
 @then(
-    "it carries a confidence score, so a reviewer can tell a near-certain rename from a guess"
+    "it carries no confidence score, because the differ does not know, which is why it is asking"
 )
-def _then_has_confidence(ctx):
-    score = ctx["matched"].get("confidence")
-    assert isinstance(score, (int, float)), (
-        f"the ambiguity has no confidence score: {ctx['matched']}"
-    )
-    assert 0.0 <= score <= 1.0, f"confidence out of range: {score}"
+def _then_no_confidence(ctx):
+    """A number invites the reader to trust a guess.
+
+    The record used to carry `confidence: 0.714`, an edit distance averaged
+    with a column overlap, and the detector stayed silent below a threshold.
+    """
+    assert "confidence" not in ctx["matched"], ctx["matched"]
 
 
 @then(
@@ -281,41 +281,6 @@ def _then_no_ambiguity(ctx):
     assert not renames, (
         f"a decided rename was raised again: {renames}"
     )
-
-
-@given(parsers.parse('the names "{a}" and "{b}"'))
-def _given_names(ctx, a, b):
-    ctx["names"] = (a, b)
-
-
-@when("rename confidence is calculated")
-def _when_confidence(ctx):
-    ctx["confidence"] = calculate_rename_confidence(*ctx["names"])
-
-
-@then("it is 1.0, because only the case differs")
-def _then_confidence_one(ctx):
-    assert ctx["confidence"] == 1.0, (
-        f"a pure case change scored {ctx['confidence']}, not 1.0"
-    )
-
-
-@then("it is the shorter length over the longer, which is 4 divided by 9")
-def _then_confidence_ratio(ctx):
-    assert ctx["confidence"] == pytest.approx(4 / 9), (
-        f'"name" inside "full_name" scored {ctx["confidence"]}, not 4/9'
-    )
-
-
-@then("it is below 0.5, so a reviewer is not nudged toward a rename that is not one")
-def _then_confidence_low(ctx):
-    assert ctx["confidence"] < 0.5, (
-        f"unrelated names scored {ctx['confidence']}, which would suggest a "
-        f"rename that would silently move data between unrelated columns"
-    )
-
-
-# ------------------------------------------------------------------- ordering
 
 
 def _op(kind: str, table: str = "t") -> dict[str, Any]:
