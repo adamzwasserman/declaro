@@ -5,11 +5,12 @@ Each command is an async function that returns an exit code.
 """
 
 import sys
+from collections.abc import Callable
 from datetime import UTC
 from pathlib import Path
 from typing import Any
 
-from declaro_persistum.boundary import boundary
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import AmbiguityError
 from declaro_persistum.types import Ambiguity, Decision, Dialect, DiffResult, Schema, for_dialect
 
@@ -798,6 +799,53 @@ def _print_drift_error(differences: list[dict[str, str]]) -> None:
     print("    3. Manually reconcile the differences")
 
 
+
+# HOW EACH OPERATION READS, one entry per kind. This was an if/elif chain of
+# eleven branches, which is dispatch on a value written the long way: a kind
+# added to the differ needed a branch here, and one removed left a branch
+# nobody could reach.
+#
+# READ BY SUBSCRIPT WITH A DECLARED FALLBACK. `_describe` asks the table and
+# falls back to naming the kind, because an operation this CLI has not learned
+# to phrase must still be PRINTED. That is a display default and not a
+# behavioural one: nothing is chosen for the operator, and the unknown kind
+# appears in the output rather than being skipped.
+_DESCRIBE: dict[str, Callable[[str, dict[str, Any]], str]] = {
+    "create_table": lambda table, d: (
+        f"CREATE TABLE {table} ({len(d.get('columns', {}))} columns)"
+    ),
+    "drop_table": lambda table, _d: f"DROP TABLE {table}",
+    "rename_table": lambda table, d: f"RENAME TABLE {table} -> {d['new_name']}",
+    "add_column": lambda table, d: (
+        f"ADD COLUMN {table}.{d['column']} ({d['definition'].get('type', '?')})"
+    ),
+    "drop_column": lambda table, d: f"DROP COLUMN {table}.{d['column']}",
+    "rename_column": lambda table, d: (
+        f"RENAME COLUMN {table}.{d['from_column']} -> {d['to_column']}"
+    ),
+    "alter_column": lambda table, d: (
+        f"ALTER COLUMN {table}.{d['column']} "
+        f"({', '.join(d.get('changes', {}).keys())})"
+    ),
+    "add_index": lambda table, d: (
+        f"CREATE INDEX {d['index']} ON {table} "
+        f"({', '.join(d['definition'].get('columns', []))})"
+    ),
+    "drop_index": lambda _table, d: f"DROP INDEX {d['index']}",
+    "add_foreign_key": lambda table, d: (
+        f"ADD FOREIGN KEY {table}.{d['column']} -> {d['references']}"
+    ),
+    "drop_foreign_key": lambda table, d: f"DROP FOREIGN KEY {table}.{d['column']}",
+}
+
+
+@helper
+def _describe(op_type: str, table: str, details: dict[str, Any]) -> str:
+    """One operation as a line an operator reads."""
+    phrase = _DESCRIBE.get(op_type)
+    return phrase(table, details) if phrase else f"{op_type.upper()} on {table}"
+
+
 @boundary
 def _print_diff_result(result: DiffResult, verbose: bool) -> None:
     """Print diff result to console."""
@@ -816,43 +864,7 @@ def _print_diff_result(result: DiffResult, verbose: bool) -> None:
         table = op["table"]
         details = op["details"]
 
-        # Format operation nicely
-        if op_type == "create_table":
-            cols = details.get("columns", {})
-            print(f"  {i + 1}. CREATE TABLE {table} ({len(cols)} columns)")
-        elif op_type == "drop_table":
-            print(f"  {i + 1}. DROP TABLE {table}")
-        elif op_type == "rename_table":
-            print(f"  {i + 1}. RENAME TABLE {table} -> {details['new_name']}")
-        elif op_type == "add_column":
-            col = details["column"]
-            col_def = details["definition"]
-            print(f"  {i + 1}. ADD COLUMN {table}.{col} ({col_def.get('type', '?')})")
-        elif op_type == "drop_column":
-            print(f"  {i + 1}. DROP COLUMN {table}.{details['column']}")
-        elif op_type == "rename_column":
-            print(
-                f"  {i + 1}. RENAME COLUMN {table}.{details['from_column']} -> {details['to_column']}"
-            )
-        elif op_type == "alter_column":
-            changes = details.get("changes", {})
-            change_desc = ", ".join(changes.keys())
-            print(f"  {i + 1}. ALTER COLUMN {table}.{details['column']} ({change_desc})")
-        elif op_type == "add_index":
-            idx = details["index"]
-            cols = details["definition"].get("columns", [])
-            print(f"  {i + 1}. CREATE INDEX {idx} ON {table} ({', '.join(cols)})")
-        elif op_type == "drop_index":
-            print(f"  {i + 1}. DROP INDEX {details['index']}")
-        elif op_type == "add_foreign_key":
-            col = details["column"]
-            ref = details["references"]
-            print(f"  {i + 1}. ADD FOREIGN KEY {table}.{col} -> {ref}")
-        elif op_type == "drop_foreign_key":
-            col = details["column"]
-            print(f"  {i + 1}. DROP FOREIGN KEY {table}.{col}")
-        else:
-            print(f"  {i + 1}. {op_type.upper()} on {table}")
+        print(f"  {i + 1}. {_describe(op_type, table, details)}")
 
         if verbose and details:
             for key, value in details.items():

@@ -641,87 +641,99 @@ def dry_run_preview(
 REMOVABLE_PROPERTIES = frozenset(("default", "unique", "check"))
 
 
+def _require_column(
+    columns: dict[str, Column], column: str, operation: Operation
+) -> None:
+    """Refuse an operation naming a column the table does not have."""
+    if column not in columns:
+        raise ValueError(
+            f"Column '{column}' not found in table '{operation['table']}'"
+        )
+
+
+def _reconstruct_alter_column(
+    columns: dict[str, Column], operation: Operation
+) -> dict[str, Column]:
+    """Apply one column's property changes."""
+    details = operation["details"]
+    column = details["column"]
+    _require_column(columns, column, operation)
+
+    for key, raw in details["changes"].items():
+        value = raw["to"] if isinstance(raw, dict) and "to" in raw else raw
+
+        # A `to: None` MEANS THE PROPERTY IS GONE. Assigning it instead put
+        # None into the column definition, and the reconstruction renderer
+        # tests for the KEY rather than the value, so a CHECK removed from
+        # the models became `CHECK (None)` and SQLite read None as a column
+        # name. Only the three properties the differ can remove are popped;
+        # for anything else a None is a defect to surface.
+        removing = value is None and key in REMOVABLE_PROPERTIES
+        _WRITE_PROPERTY[removing](columns[column], key, value)
+
+    return columns
+
+
+def _reconstruct_add_foreign_key(
+    columns: dict[str, Column], operation: Operation
+) -> dict[str, Column]:
+    """Point a column at another table's column."""
+    details = operation["details"]
+    column = details["column"]
+    _require_column(columns, column, operation)
+
+    ref = details["references"]
+    pair = ref.split(".", 1) if isinstance(ref, str) else [ref["table"], ref["column"]]
+    columns[column]["references"] = f"{pair[0]}.{pair[1]}"
+
+    for action in ("on_delete", "on_update"):
+        columns[column].update({action: details[action]} if action in details else {})
+
+    return columns
+
+
+def _reconstruct_drop_foreign_key(
+    columns: dict[str, Column], operation: Operation
+) -> dict[str, Column]:
+    """Remove the reference and the two actions that travel with it."""
+    column = operation["details"]["column"]
+    _require_column(columns, column, operation)
+
+    for key in ("references", "on_delete", "on_update"):
+        columns[column].pop(key, None)  # type: ignore[misc]
+
+    return columns
+
+
+# WHETHER A PROPERTY IS BEING REMOVED OR SET, as a table rather than a branch.
+_WRITE_PROPERTY: dict[bool, Any] = {
+    True: lambda column, key, _value: column.pop(key, None),
+    False: lambda column, key, value: column.__setitem__(key, value),
+}
+
+# WHICH OPERATIONS A REBUILD CAN CARRY. This was an if/elif chain, so an
+# operation added to the differ needed a branch here and one removed left a
+# branch nothing could reach. Read by subscript: an operation absent from this
+# table cannot be reconstructed, and the KeyError says which.
+_RECONSTRUCT: dict[str, Any] = {
+    "alter_column": _reconstruct_alter_column,
+    "add_foreign_key": _reconstruct_add_foreign_key,
+    "drop_foreign_key": _reconstruct_drop_foreign_key,
+}
+
+
 def apply_reconstruction_changes(
     columns: dict[str, Column], operation: Operation
 ) -> dict[str, Column]:
-    """
-    Apply reconstruction operation to columns dict (pure).
+    """Apply one reconstruction operation to a table's columns (pure).
 
-    Returns updated columns dict. Raises ValueError for unknown operations.
+    Raises KeyError for an operation a rebuild cannot carry.
     """
     op_type = operation["op"]
-    details = operation["details"]
-
-    if op_type == "alter_column":
-        column = details["column"]
-        changes = details["changes"]
-
-        if column not in columns:
-            raise ValueError(f"Column '{column}' not found in table '{operation['table']}'")
-
-        for key, value in changes.items():
-            if isinstance(value, dict) and "to" in value:
-                value = value["to"]
-
-            # A `to: None` MEANS THE PROPERTY IS GONE. Assigning it instead
-            # put None into the column definition, and the reconstruction
-            # renderer tests for the KEY rather than the value, so a CHECK
-            # removed from the models became `CHECK (None)` and SQLite read
-            # None as a column name:
-            #
-            #     alter_column widgets
-            #       {'check': {'from': 'length(name) < 3', 'to': None}}
-            #     OperationalError: no such column: None
-            #
-            # The message names the table and says reconstruction failed, so
-            # it reads as the engine refusing a rebuild rather than as a None
-            # this package put in its own SQL. Measured 2026-08-18 on SQLite
-            # and Turso, for a removed CHECK and a removed UNIQUE alike.
-            #
-            # `drop_foreign_key` below has always popped rather than assigned.
-            # The same idea, three branches away, for the same reason.
-            #
-            # `type` and `nullable` are absent from REMOVABLE deliberately:
-            # neither can be taken off a column, only changed, so a None
-            # there is a defect to surface rather than an absence to honour.
-            if value is None and key in REMOVABLE_PROPERTIES:
-                columns[column].pop(key, None)  # type: ignore[misc]
-            else:
-                columns[column][key] = value  # type: ignore
-
-    elif op_type == "add_foreign_key":
-        column = details["column"]
-        if column not in columns:
-            raise ValueError(f"Column '{column}' not found in table '{operation['table']}'")
-
-        ref = details["references"]
-        if isinstance(ref, str):
-            ref_table, ref_column = ref.split(".", 1)
-        else:
-            ref_table = ref["table"]
-            ref_column = ref["column"]
-        columns[column]["references"] = f"{ref_table}.{ref_column}"
-
-        if "on_delete" in details:
-            columns[column]["on_delete"] = details["on_delete"]
-        if "on_update" in details:
-            columns[column]["on_update"] = details["on_update"]
-
-    elif op_type == "drop_foreign_key":
-        column = details["column"]
-        if column not in columns:
-            raise ValueError(f"Column '{column}' not found in table '{operation['table']}'")
-
-        columns[column].pop("references", None)
-        columns[column].pop("on_delete", None)
-        columns[column].pop("on_update", None)
-
-    else:
-        raise ValueError(
-            f"Operation '{op_type}' does not support reconstruction"
-        )
-
-    return columns
+    reconstruct = _RECONSTRUCT.get(op_type)
+    if reconstruct is None:
+        raise ValueError(f"Operation '{op_type}' does not support reconstruction")
+    return reconstruct(columns, operation)
 
 
 def single_change_property(operation: Operation) -> tuple[str, Any] | None:

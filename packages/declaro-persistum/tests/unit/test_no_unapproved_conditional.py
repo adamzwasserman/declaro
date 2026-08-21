@@ -38,10 +38,10 @@ _SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "declaro_persistum"
 
 # The count when the rule was given. LOWER THIS as conditionals are removed.
 # It must never be raised.
-# 743 after the toposort rewrite on 2026-08-21. That file went 32 -> 2: the
-# sort became set algebra with a two-key dispatch for the cycle case, and
-# all nine dependency handlers became comprehensions.
-BASELINE = 743
+# 723 after two dispatch chains became tables on 2026-08-21: the CLI's
+# eleven-branch operation formatter, and the three reconstruction operations
+# in applier/shared.py.
+BASELINE = 723
 
 _MARKER = "APPROVED-IF"
 
