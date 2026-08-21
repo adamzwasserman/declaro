@@ -689,9 +689,13 @@ def _reconstruct_add_foreign_key(
     column = details["column"]
     _require_column(columns, column, operation)
 
-    ref = details["references"]
-    pair = ref.split(".", 1) if isinstance(ref, str) else [ref["table"], ref["column"]]
-    columns[column]["references"] = f"{pair[0]}.{pair[1]}"
+    # ONE SHAPE. This also accepted {"table": ..., "column": ...}, and
+    # measured 2026-08-21 the differ emits "p.id", every producer in src
+    # builds that string, and nothing in src, tests or examples writes the
+    # dict. Two documents described it, so it was a documented shape that had
+    # never been executed and no test had ever covered. An unreached branch is
+    # a claim, not support.
+    columns[column]["references"] = details["references"]
 
     for action in ("on_delete", "on_update"):
         columns[column].update({action: details[action]} if action in details else {})

@@ -57,7 +57,7 @@ operations = [
         "table": "posts",
         "details": {
             "column": "user_id",
-            "references": {"table": "users", "column": "id"},
+            "references": "users.id",
             "on_delete": "cascade",
         },
     },

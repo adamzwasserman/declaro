@@ -145,7 +145,7 @@ def changed_to(value: Any) -> Any:
     A dict without a `to` is some other dict. An index definition is a dict
     too, and returning its contents would put the wrong thing in a column.
     """
-    return value["to"] if isinstance(value, dict) and "to" in value else value
+    return value["to"] if isinstance(value, dict) and "to" in value else value  # honest: ignore HC-P005: the one place that reads a change record
 
 
 class Enum(TypedDict, total=False):

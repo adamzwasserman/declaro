@@ -202,7 +202,7 @@ def kind_of(value: Any) -> str | None:
 
     A plain dict passed as a value carries no tag and is correctly nothing.
     """
-    return value.get("kind") if isinstance(value, dict) else None
+    return value.get("kind") if isinstance(value, dict) else None  # honest: ignore HC-P005: the one place that reads a kind tag
 
 
 @helper

@@ -609,7 +609,7 @@ def _as_number(value: Any) -> float | None:
     of `true` and a default of `1` are different declarations, and folding
     them would report a changed column as unchanged.
     """
-    kind = type(value)
+    kind = type(value)  # honest: ignore HC-P005: the exact type, so a bool is not an int
     if kind is bool:
         return None
     if kind is int or kind is float:

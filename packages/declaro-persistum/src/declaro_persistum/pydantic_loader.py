@@ -294,12 +294,12 @@ def sql_default(value: Any) -> str:
     would give the column no default at all, which is a schema quietly
     different from the one the author declared.
     """
-    spell = _SQL_DEFAULT.get(type(value))
+    spell = _SQL_DEFAULT.get(type(value))  # honest: ignore HC-P005: the exact type IS the lookup key
     if spell is None:
         raise LoaderError(
             f"Cannot write {value!r} as a SQL default: a default may be a "
             f"string, a bool, an int or a float, and this is "
-            f"{type(value).__name__}."
+            f"{type(value).__name__}."  # honest: ignore HC-P005: the class name IS the message
         )
     return spell(value)
 

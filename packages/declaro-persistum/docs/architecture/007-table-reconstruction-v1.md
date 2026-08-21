@@ -305,7 +305,7 @@ async def _execute_with_reconstruction(
     elif op_type == "add_foreign_key":
         column = details["column"]
         ref = details["references"]
-        columns[column]["references"] = f"{ref['table']}.{ref['column']}"
+        columns[column]["references"] = details["references"]
         # ... on_delete, on_update
 
     # 3. Reconstruct
