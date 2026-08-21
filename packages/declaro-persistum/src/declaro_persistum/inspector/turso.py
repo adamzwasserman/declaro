@@ -41,7 +41,7 @@ from declaro_persistum.inspector.shared import (
     unique_cols_from_index_rows,
     views_from_rows,
 )
-from declaro_persistum.types import Column, Index, Schema, Table, View
+from declaro_persistum.types import Column, DbapiConnection, Index, Schema, Table, View
 
 
 def get_dialect() -> str:
@@ -50,7 +50,7 @@ def get_dialect() -> str:
 
 
 async def introspect(
-    connection: Any,
+    connection: DbapiConnection,
     *,
     _schema_name: str = "main",
     include_views: bool = False,
@@ -212,7 +212,7 @@ _CREATE_TABLE_NAME = re.compile(
 
 
 async def _introspect_table(
-    connection: Any,
+    connection: DbapiConnection,
     table_name: str,
 ) -> Table:
     """Introspect a single table's structure."""
@@ -225,7 +225,7 @@ async def _introspect_table(
 
 
 async def _get_table_constraints(
-    connection: Any, table_name: str
+    connection: DbapiConnection, table_name: str
 ) -> dict[str, dict[str, str]]:
     """The named table-level constraints, from the stored CREATE TABLE."""
     cursor = await _maybe_await(connection.execute(
@@ -239,7 +239,7 @@ async def _get_table_constraints(
 
 
 async def _get_columns(
-    connection: Any,
+    connection: DbapiConnection,
     table_name: str,
 ) -> dict[str, Column]:
     """Get column definitions for a table."""
@@ -269,7 +269,7 @@ async def _get_columns(
 
 
 async def _get_unique_columns(
-    connection: Any,
+    connection: DbapiConnection,
     table_name: str,
 ) -> set[str]:
     """Get columns with unique constraints (single-column only)."""
@@ -287,7 +287,7 @@ async def _get_unique_columns(
 
 
 async def _get_indexes(
-    connection: Any,
+    connection: DbapiConnection,
     table_name: str,
 ) -> dict[str, Index]:
     """Get non-auto indexes for a table."""
@@ -335,7 +335,7 @@ async def _get_indexes(
 
 
 async def _get_foreign_keys(
-    connection: Any,
+    connection: DbapiConnection,
     table_name: str,
 ) -> list[dict[str, str]]:
     """Get foreign key constraints for a table."""
@@ -344,7 +344,7 @@ async def _get_foreign_keys(
 
 
 async def table_exists(
-    connection: Any,
+    connection: DbapiConnection,
     table_name: str,
 ) -> bool:
     """Does the engine consider a table of this name to be there?
@@ -369,7 +369,7 @@ async def table_exists(
 
 
 async def get_table_columns(
-    connection: Any,
+    connection: DbapiConnection,
     table_name: str,
 ) -> dict[str, Any]:
     """Get column definitions for a specific table."""
@@ -380,7 +380,7 @@ async def get_table_columns(
 
 
 async def introspect_views(
-    connection: Any,
+    connection: DbapiConnection,
 ) -> dict[str, View]:
     """Introspect views from Turso/libSQL."""
     cursor = await _maybe_await(connection.execute(

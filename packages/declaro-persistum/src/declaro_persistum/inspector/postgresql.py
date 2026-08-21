@@ -13,7 +13,7 @@ from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionErr
 from declaro_persistum.exceptions import DeclaroError
 from declaro_persistum.inspector.shared import normalize_check
 from declaro_persistum.inspector.shared import normalize_fk_action as _normalize_fk_action
-from declaro_persistum.types import Column, Index, Schema, Table, View
+from declaro_persistum.types import Column, FetchingConnection, Index, Schema, Table, View
 
 
 def _normalize_view_query(query: str) -> str:
@@ -39,7 +39,7 @@ def get_dialect() -> str:
 
 
 async def introspect(
-    connection: Any,
+    connection: FetchingConnection,
     *,
     schema_name: str = "public",
     include_views: bool = False,
@@ -96,7 +96,7 @@ async def introspect(
 
 
 async def _introspect_table(
-    connection: Any,
+    connection: FetchingConnection,
     table_name: str,
     schema_name: str,
 ) -> Table:
@@ -158,7 +158,7 @@ async def _introspect_table(
 
 
 async def _get_columns(
-    connection: Any,
+    connection: FetchingConnection,
     table_name: str,
     schema_name: str,
 ) -> dict[str, Column]:
@@ -267,7 +267,7 @@ def _normalize_type(row: dict[str, Any]) -> str:
 
 
 async def _get_primary_key(
-    connection: Any,
+    connection: FetchingConnection,
     table_name: str,
     schema_name: str,
 ) -> list[str]:
@@ -292,7 +292,7 @@ async def _get_primary_key(
 
 
 async def _get_unique_columns(
-    connection: Any,
+    connection: FetchingConnection,
     table_name: str,
     schema_name: str,
 ) -> set[str]:
@@ -318,7 +318,7 @@ async def _get_unique_columns(
 
 
 async def _get_indexes(
-    connection: Any,
+    connection: FetchingConnection,
     table_name: str,
     schema_name: str,
 ) -> dict[str, Index]:
@@ -399,7 +399,7 @@ async def _get_indexes(
 
 
 async def _get_foreign_keys(
-    connection: Any,
+    connection: FetchingConnection,
     table_name: str,
     schema_name: str,
 ) -> list[dict[str, str]]:
@@ -434,7 +434,7 @@ async def _get_foreign_keys(
 
 
 async def get_table_columns(
-    connection: Any,
+    connection: FetchingConnection,
     table_name: str,
 ) -> dict[str, Column]:
     """One table's columns, or a refusal naming the table.
@@ -449,7 +449,7 @@ async def get_table_columns(
 
 
 async def table_exists(
-    connection: Any,
+    connection: FetchingConnection,
     table_name: str,
     *,
     schema_name: str = "public",
@@ -474,7 +474,7 @@ async def table_exists(
 
 
 async def _get_column_checks(
-    connection: Any, table_name: str, schema_name: str
+    connection: FetchingConnection, table_name: str, schema_name: str
 ) -> dict[str, str]:
     """Column-level CHECK constraints, by column name.
 
@@ -508,7 +508,7 @@ async def _get_column_checks(
 
 
 async def _get_table_constraints(
-    connection: Any, table_name: str, schema_name: str
+    connection: FetchingConnection, table_name: str, schema_name: str
 ) -> dict[str, dict[str, str]]:
     """Named CHECK constraints covering more than one column.
 
@@ -548,7 +548,7 @@ async def _get_table_constraints(
 
 
 async def introspect_views(
-    connection: Any,
+    connection: FetchingConnection,
     *,
     schema_name: str = "public",
 ) -> dict[str, View]:

@@ -13,7 +13,7 @@ shape, copy the data across, drop the old, rename the new.
 SQL generation is shared with Turso through `applier.shared`.
 """
 
-from typing import Any, Literal
+from typing import Literal
 
 from declaro_persistum.applier.shared import (
     apply_reconstruction_changes,
@@ -24,7 +24,7 @@ from declaro_persistum.applier.shared import (
     statements_for,
 )
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, MigrationError
-from declaro_persistum.types import ApplyResult, Operation, View
+from declaro_persistum.types import ApplyResult, DbapiConnection, Operation, View
 
 
 def get_dialect() -> str:
@@ -38,7 +38,7 @@ def get_transaction_mode() -> Literal["all_or_nothing", "per_operation"]:
 
 
 
-async def _restore_enforcement(connection: Any, enforced: int) -> None:
+async def _restore_enforcement(connection: DbapiConnection, enforced: int) -> None:
     """Put `PRAGMA foreign_keys` back to what the caller had.
 
     RESTORING MEANS PUTTING IT BACK, NOT TURNING IT ON. A caller who disabled
@@ -52,7 +52,7 @@ async def _restore_enforcement(connection: Any, enforced: int) -> None:
 
 
 async def apply(
-    connection: Any,
+    connection: DbapiConnection,
     operations: list[Operation],
     execution_order: list[int],
     *,
@@ -202,7 +202,7 @@ async def apply(
 
 
 async def _execute_with_reconstruction(
-    connection: Any, operation: Operation
+    connection: DbapiConnection, operation: Operation
 ) -> None:
     """
     Execute an operation using table reconstruction (async).

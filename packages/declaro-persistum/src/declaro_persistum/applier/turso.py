@@ -17,7 +17,7 @@ real outcome here, which it is not on PostgreSQL.
 
 import contextlib
 import logging
-from typing import Any, Literal
+from typing import Literal
 
 from declaro_persistum.applier.shared import (
     apply_reconstruction_changes,
@@ -30,7 +30,7 @@ from declaro_persistum.applier.shared import (
 # Turso uses identical view generation to SQLite.
 from declaro_persistum.applier.sqlite import generate_create_view, generate_drop_view
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, MigrationError
-from declaro_persistum.types import ApplyResult, Operation
+from declaro_persistum.types import ApplyResult, DbapiConnection, Operation
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ def get_transaction_mode() -> Literal["all_or_nothing", "per_operation"]:
 
 
 
-async def _restore_enforcement(connection: Any, enforced: int) -> None:
+async def _restore_enforcement(connection: DbapiConnection, enforced: int) -> None:
     """Put `PRAGMA foreign_keys` back to what the caller had.
 
     Only meaningful outside a transaction, which is why every call site is
@@ -86,7 +86,7 @@ def migration_succeeded(*, skipped: int) -> bool:
 
 
 async def apply(
-    connection: Any,
+    connection: DbapiConnection,
     operations: list[Operation],
     execution_order: list[int],
     *,
@@ -248,7 +248,7 @@ async def apply(
 
 
 async def _execute_coalesced_reconstruction(
-    connection: Any, table: str, ops: list[Operation]
+    connection: DbapiConnection, table: str, ops: list[Operation]
 ) -> None:
     """
     Apply multiple reconstruction ops to the same table in one pass.

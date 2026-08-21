@@ -31,7 +31,7 @@ from declaro_persistum.inspector.shared import (
     unique_cols_from_index_rows,
     views_from_rows,
 )
-from declaro_persistum.types import Column, Schema, Table, View
+from declaro_persistum.types import Column, DbapiConnection, Schema, Table, View
 
 # Tables neither the user nor the differ should ever see. `sqlite_%` belongs to
 # the engine and `_declaro_%` to us; a schema containing either would make the
@@ -55,12 +55,12 @@ _USER_TABLES = """
 # migration fails outright.
 
 
-async def _rows(connection: Any, sql: str) -> list[tuple]:
+async def _rows(connection: DbapiConnection, sql: str) -> list[tuple]:
     cursor = await connection.execute(sql)
     return await cursor.fetchall()
 
 
-async def columns_of(connection: Any, table: str) -> dict[str, Column]:
+async def columns_of(connection: DbapiConnection, table: str) -> dict[str, Column]:
     """Column definitions, from PRAGMA table_info plus the unique indexes.
 
     Uniqueness is not in table_info — it lives in index_list — so the two are
@@ -100,7 +100,7 @@ async def columns_of(connection: Any, table: str) -> dict[str, Column]:
     return columns
 
 
-async def indexes_of(connection: Any, table: str) -> dict[str, Any]:
+async def indexes_of(connection: DbapiConnection, table: str) -> dict[str, Any]:
     """Indexes, from index_list plus each index's columns and its CREATE SQL.
 
     Three reads, because the pure builder needs three things and none of them
@@ -126,7 +126,7 @@ async def indexes_of(connection: Any, table: str) -> dict[str, Any]:
     return indexes_from_rows(index_rows, index_info, index_sql)
 
 
-async def get_table_columns(connection: Any, table: str) -> dict[str, Column]:
+async def get_table_columns(connection: DbapiConnection, table: str) -> dict[str, Column]:
     """One table's columns, or a refusal naming the table.
 
     `columns_of` beside this returns an empty dict for a table that is not
@@ -143,12 +143,12 @@ async def get_table_columns(connection: Any, table: str) -> dict[str, Column]:
     return await columns_of(connection, table)
 
 
-async def foreign_keys_of(connection: Any, table: str) -> list[dict[str, str]]:
+async def foreign_keys_of(connection: DbapiConnection, table: str) -> list[dict[str, str]]:
     rows = await _rows(connection, f"PRAGMA foreign_key_list('{as_literal(table)}')")
     return fk_list_from_pragma_rows(rows)
 
 
-async def constraints_of(connection: Any, table: str) -> dict[str, dict[str, str]]:
+async def constraints_of(connection: DbapiConnection, table: str) -> dict[str, dict[str, str]]:
     """The named table-level constraints, from the stored CREATE TABLE.
 
     In no PRAGMA, like the column-level checks beside them.
@@ -163,7 +163,7 @@ async def constraints_of(connection: Any, table: str) -> dict[str, dict[str, str
     return {}
 
 
-async def table_of(connection: Any, table: str) -> Table:
+async def table_of(connection: DbapiConnection, table: str) -> Table:
     return assemble_table(
         await columns_of(connection, table),
         await indexes_of(connection, table),
@@ -172,7 +172,7 @@ async def table_of(connection: Any, table: str) -> Table:
     )
 
 
-async def matviews_of(connection: Any) -> dict[str, tuple[str, str]]:
+async def matviews_of(connection: DbapiConnection) -> dict[str, tuple[str, str]]:
     """The emulated materialized views, from the metadata table.
 
     Absent table means none have been created, which is not an error. This is
@@ -204,7 +204,7 @@ async def matviews_of(connection: Any) -> dict[str, tuple[str, str]]:
     return {name: (query, refresh) for name, query, refresh in rows}
 
 
-async def views_of(connection: Any) -> dict[str, View]:
+async def views_of(connection: DbapiConnection) -> dict[str, View]:
     rows = await _rows(
         connection,
         "SELECT name, sql FROM sqlite_master WHERE type = 'view' ORDER BY name",
@@ -213,7 +213,7 @@ async def views_of(connection: Any) -> dict[str, View]:
 
 
 async def introspect(
-    connection: Any,
+    connection: DbapiConnection,
     *,
     _schema_name: str = "main",
     include_views: bool = False,
@@ -252,7 +252,7 @@ async def introspect(
         raise
 
 
-async def table_exists(connection: Any, table: str) -> bool:
+async def table_exists(connection: DbapiConnection, table: str) -> bool:
     """Does the engine consider a table of this name to be there?
 
     THE NAME IS BOUND, NOT INTERPOLATED. It used to arrive inside an f-string

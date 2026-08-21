@@ -21,6 +21,7 @@ from declaro_persistum.types import (
     Schema,
     Table,
     is_nullable,
+    is_our_table,
 )
 
 
@@ -82,6 +83,15 @@ def diff(
     """
     decisions = decisions or {}
     operations: list[Operation] = []
+
+    # OUR OWN BOOKKEEPING TABLES ARE NOT PART OF THE COMPARISON. The differ
+    # reads an introspected table nobody declared as a table the author
+    # dropped, and that has always been true of `_declaro_meta`,
+    # `_declaro_tmp_*`, `_dp_materialized_views` and `_dp_transfer_state`.
+    # Dropping them here rather than exempting them from the ambiguity check
+    # is the difference between the phantom `drop_table` not existing and it
+    # existing but going unmentioned.
+    current = {n: t for n, t in current.items() if not is_our_table(n)}
 
     # Compute table set differences
     current_tables = set(current.keys())

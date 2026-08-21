@@ -5,7 +5,7 @@ All data structures are TypedDict - no classes with state.
 This ensures serialization to/from TOML/JSON and compatibility with pure functions.
 """
 
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, Protocol, TypedDict, runtime_checkable
 
 # THE ENGINES, AS A VOCABULARY RATHER THAN A STRING.
 #
@@ -24,6 +24,104 @@ Dialect = Literal["postgresql", "sqlite", "turso"]
 # =============================================================================
 # Extended Schema Objects (Addendum)
 # =============================================================================
+
+
+# =============================================================================
+# What a database handle IS
+# =============================================================================
+#
+# MEASURED 2026-08-21: 119 of the package's 158 `Any` parameters were a
+# database connection. `Any` declares an unbounded value space, and Umbra
+# derives its facets from the declared type, so each one contributed input
+# regions no test could ever close.
+#
+# TWO SHAPES, NOT ONE, read off the call sites rather than guessed. Every
+# method this package invokes on a connection:
+#
+#     execute 92, commit 17, fetch 13, close 8, rollback 7, fetchrow 3,
+#     fetchval 3, transaction 3, executemany 1, copy_records_to_table 1
+#
+# asyncpg answers `fetch`, `fetchrow`, `fetchval` and `transaction`, has no
+# cursor, and has no `commit` because a transaction is a context manager.
+# aiosqlite and pyturso answer `execute` returning a cursor, plus `commit` and
+# `rollback`. One Protocol covering both would be loose enough to say nothing,
+# which is what `Any` already did.
+#
+# These declare what a handle must BE. Nothing inherits from them, and
+# `runtime_checkable` is here so a test can hand one a live driver and ask.
+
+
+@runtime_checkable
+class DbapiCursor(Protocol):
+    """What `execute` hands back on aiosqlite and pyturso."""
+
+    async def fetchall(self) -> Any: ...
+
+    async def fetchone(self) -> Any: ...
+
+
+@runtime_checkable
+class DbapiConnection(Protocol):
+    """aiosqlite and pyturso: a cursor from `execute`, and explicit commits."""
+
+    async def execute(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    async def commit(self) -> Any: ...
+
+    async def rollback(self) -> Any: ...
+
+    async def close(self) -> Any: ...
+
+
+@runtime_checkable
+class FetchingConnection(Protocol):
+    """asyncpg: rows come straight back, and a transaction is a scope."""
+
+    async def execute(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    async def fetch(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    async def fetchrow(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    async def fetchval(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    def transaction(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    async def close(self, *args: Any, **kwargs: Any) -> Any: ...
+
+
+# =============================================================================
+# Which tables are ours
+# =============================================================================
+
+# THE PREFIXES THIS PACKAGE CREATES FOR ITSELF, and `_dp_enum_` is
+# deliberately absent. `expand_schema_enums` puts the enum lookup tables into
+# the TARGET schema, so they are on both sides of a diff and migrate like any
+# other table; claiming them here would stop them being created at all.
+_OUR_PREFIXES = ("_declaro_meta", "_declaro_tmp_", "_dp_materialized_views",
+                 "_dp_transfer_state")
+
+
+def is_our_table(name: str) -> bool:
+    """Whether this package made the table for its own bookkeeping.
+
+    The differ compares an introspected schema against a declared one, so an
+    introspected table nobody declared reads as a table the author dropped.
+    That was always true of these, and the rename detector only hid it: it
+    scored a dropped table against an added one and stayed silent below 50%
+    column overlap, which these always were.
+
+    Measured 2026-08-21, a database holding `_dp_transfer_state` refused the
+    next migration outright:
+
+        Ambiguous changes detected: Table '_dp_transfer_state' removed and
+        'orders' added in the same migration.
+        Skipping migration - manual intervention required
+
+    `user_tables_sql` already stated the idea for the emptiness check. This is
+    the same rule applied where the diff can see it.
+    """
+    return name.startswith(_OUR_PREFIXES)
 
 
 class Enum(TypedDict, total=False):
