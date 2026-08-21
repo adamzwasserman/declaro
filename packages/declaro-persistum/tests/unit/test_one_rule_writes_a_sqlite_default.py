@@ -82,3 +82,48 @@ def test_the_rebuild_has_no_default_rule_of_its_own() -> None:
         "the rebuild is writing its own DEFAULT clause again; call "
         "sqlite_default so the two cannot disagree"
     )
+
+
+@pytest.mark.parametrize(
+    "value,spelling",
+    [
+        (None, "DEFAULT NULL"),
+        ("(datetime('now'))", "DEFAULT ((datetime('now')))"),
+        ("datetime('now')", "DEFAULT datetime('now')"),
+        (0, "DEFAULT 0"),
+        (-1, "DEFAULT -1"),
+        (1.5, "DEFAULT 1.5"),
+        (True, "DEFAULT True"),
+    ],
+    ids=["nothing", "an expression", "a bare function", "zero", "negative", "a float", "a flag"],
+)
+def test_each_spelling_is_keyed_by_the_type_it_answers(
+    value: object, spelling: str
+) -> None:
+    """The vocabulary, stated as a table rather than an ordering.
+
+    The chain this replaces tested `value is None`, then `isinstance(value,
+    str) and value.startswith("(")`, then fell through. Falling through is
+    what made an unspellable default silent: a dict, a list or a date object
+    was formatted into the SQL by `f"DEFAULT {value}"` and the engine met
+    `DEFAULT {'a': 1}`.
+    """
+    assert sqlite_default(value) == spelling
+
+
+@pytest.mark.parametrize(
+    "value,shape",
+    [({"a": 1}, "a dict"), (["a"], "a list"), ((1, 2), "a pair")],
+    ids=["a dict", "a list", "a pair"],
+)
+def test_a_default_with_no_sqlite_spelling_is_refused(value: object, shape: str) -> None:
+    """A default the writer cannot spell is a question, not a formatted repr.
+
+    `f"DEFAULT {value}"` accepts every Python object, so a value nobody
+    declared a spelling for became syntactically valid nonsense in a CREATE
+    TABLE. On a rebuild that statement runs after the real table is dropped.
+    """
+    with pytest.raises(ValueError) as raised:
+        sqlite_default(value)
+
+    assert "default" in str(raised.value).lower()

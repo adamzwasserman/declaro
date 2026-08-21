@@ -13,11 +13,11 @@ Three byte-identical copies of the SQLite mapper also existed, in
 """
 
 from collections.abc import Callable
-from types import MappingProxyType
+from types import MappingProxyType, NoneType
 from typing import Any
 
 # Re-exported: inspector.shared is the single source of truth for PRAGMA parsing.
-from declaro_persistum.boundary import helper
+from declaro_persistum.boundary import helper, recognizer
 from declaro_persistum.inspector.shared import (
     columns_from_pragma_rows as columns_from_pragma_rows,
 )
@@ -38,6 +38,7 @@ from declaro_persistum.types import (
 TypeMap = Callable[[str], str]
 
 
+@helper
 def sqlite_type(type_str: str) -> str:
     """SQLite storage classes. Turso shares them.
 
@@ -73,6 +74,7 @@ def sqlite_type(type_str: str) -> str:
         return type_str.upper()
 
 
+@helper
 def postgresql_type(type_str: str) -> str:
     """PostgreSQL has a real type for everything the vocabulary declares.
 
@@ -91,6 +93,7 @@ TYPE_MAPS: dict[str, TypeMap] = {
 }
 
 
+@helper
 def same_type(left: str | None, right: str | None, dialect: Dialect) -> bool:
     """Do two declared types name the same column ON THIS ENGINE?
 
@@ -109,6 +112,7 @@ def same_type(left: str | None, right: str | None, dialect: Dialect) -> bool:
     return map_type(left, dialect) == map_type(right, dialect)
 
 
+@helper
 def map_type(type_str: str, dialect: Dialect) -> str:
     """Spell a declared type for one engine.
 
@@ -198,11 +202,18 @@ NO_EQUIVALENT = MappingProxyType({
 })
 
 
-def _translate_default(value: Any, dialect: str, column: str) -> Any:
-    """The declared default, spelled for `dialect`, or a refusal naming both."""
-    if not isinstance(value, str):
-        return value
+@helper
+def _untranslated_default(value: Any, _dialect: str, _column: str) -> Any:
+    """A number, a flag or nothing: the same in every dialect.
 
+    Only text can name an expression, so only text has a dialect spelling.
+    """
+    return value
+
+
+@helper
+def _translate_text_default(value: str, dialect: str, column: str) -> Any:
+    """Text, matched against what this dialect can and cannot spell."""
     key = value.strip().lower().replace(" ", "")
 
     refusal = NO_EQUIVALENT.get(dialect, {}).get(key)
@@ -215,20 +226,95 @@ def _translate_default(value: Any, dialect: str, column: str) -> Any:
     return EXPRESSION_DEFAULTS.get(dialect, {}).get(key, value)
 
 
-def sqlite_default(value: Any) -> str:
-    """SQLite strips one layer of parens from an expression default.
+# ONLY TEXT CARRIES A DIALECT SPELLING, keyed by the type rather than tested
+# by a guard that returned early.
+_TRANSLATE_DEFAULT: dict[type, Callable[[Any, str, str], Any]] = {
+    str: _translate_text_default,
+}
 
-    PRAGMA table_info returns `now()` for a column declared `DEFAULT (now())`,
-    so the round trip loses them and the differ then sees a change that is not
-    one. Double-wrapping is what makes introspection agree with the schema.
-    """
-    if value is None:
-        return "DEFAULT NULL"
-    if isinstance(value, str) and value.startswith("("):
-        return f"DEFAULT ({value})"
+
+@helper
+def _translate_default(value: Any, dialect: str, column: str) -> Any:
+    """The declared default, spelled for `dialect`, or a refusal naming both."""
+    return _TRANSLATE_DEFAULT.get(spelling_of(value), _untranslated_default)(
+        value, dialect, column
+    )
+
+
+@helper
+def _null_default(_value: Any) -> str:
+    """Nothing declared, which SQLite spells NULL."""
+    return "DEFAULT NULL"
+
+
+@helper
+def _literal_default(value: Any) -> str:
+    """A number or a flag, written as it stands."""
     return f"DEFAULT {value}"
 
 
+@helper
+def _wrapped_default(value: str) -> str:
+    """An expression, wrapped a second time so the round trip agrees.
+
+    PRAGMA table_info returns `now()` for a column declared `DEFAULT (now())`,
+    so introspection loses one layer and the differ then sees a change that is
+    not one. Two layers go in and one comes back.
+    """
+    return f"DEFAULT ({value})"
+
+
+@helper
+def _bare_default(value: str) -> str:
+    """Text that is not parenthesised: a quoted string, or a bare function."""
+    return f"DEFAULT {value}"
+
+
+# WHETHER THE TEXT ARRIVED PARENTHESISED, as a table rather than an `and`.
+_TEXT_DEFAULT: dict[bool, Callable[[str], str]] = {
+    True: _wrapped_default,
+    False: _bare_default,
+}
+
+
+@helper
+def _text_default(value: str) -> str:
+    """Text, spelled by whether it is already an expression."""
+    return _TEXT_DEFAULT[value.startswith("(")](value)
+
+
+@helper
+def _refuse_unspellable_default(value: Any) -> str:
+    """A default nobody declared a spelling for."""
+    raise ValueError(
+        f"No SQLite spelling for a default written as "
+        f"{spelling_of(value).__name__}: {value!r}. A default is nothing, "
+        f"text, a number or a flag."
+    )
+
+
+# THE SPELLINGS OF A DEFAULT, KEYED BY THE TYPE EACH ANSWERS. This was an
+# ordering -- `value is None`, then `isinstance(value, str) and
+# value.startswith("(")`, then a fall-through that formatted whatever was left
+# into the SQL. `f"DEFAULT {value}"` accepts every Python object, so a value
+# with no declared spelling became syntactically valid nonsense in a CREATE
+# TABLE, and on a rebuild that statement runs after the real table is dropped.
+_SQLITE_DEFAULT: dict[type, Callable[[Any], str]] = {
+    NoneType: _null_default,
+    str: _text_default,
+    bool: _literal_default,
+    int: _literal_default,
+    float: _literal_default,
+}
+
+
+@helper
+def sqlite_default(value: Any) -> str:
+    """The text that follows DEFAULT in a SQLite CREATE TABLE."""
+    return _SQLITE_DEFAULT.get(spelling_of(value), _refuse_unspellable_default)(value)
+
+
+@helper
 def postgresql_default(value: Any) -> str:
     """PostgreSQL returns an expression default as it was written."""
     return "DEFAULT NULL" if value is None else f"DEFAULT {value}"
@@ -243,6 +329,7 @@ DEFAULTS: dict[str, RenderDefault] = {
 }
 
 
+@helper
 def column_definition(name: str, col: Column, dialect: Dialect) -> str:
     """One column, spelled for one engine.
 
@@ -294,6 +381,7 @@ def column_definition(name: str, col: Column, dialect: Dialect) -> str:
 # =============================================================================
 
 
+@helper
 def insert_enum_values_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Fill a `_dp_enum_` lookup table with the values its column declares.
 
@@ -319,6 +407,7 @@ def insert_enum_values_sql(table: str, details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def constraint_clause(name: str, definition: dict[str, Any]) -> str:
     """One table-level constraint, as it appears inside a CREATE TABLE.
 
@@ -337,6 +426,7 @@ def constraint_clause(name: str, definition: dict[str, Any]) -> str:
     )
 
 
+@helper
 def create_table_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate CREATE TABLE statement."""
     columns = details.get("columns", {})
@@ -394,6 +484,7 @@ def create_table_sql(table: str, details: dict[str, Any]) -> list[str]:
 # `_render_order_by(term, _dialect, _path)` in query/expressions.py.
 
 
+@helper
 def drop_table_sql(table: str, _details: dict[str, Any]) -> list[str]:
     """Generate DROP TABLE statement."""
     return [
@@ -401,6 +492,7 @@ def drop_table_sql(table: str, _details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def rename_table_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate ALTER TABLE RENAME statement."""
     new_name = details["new_name"]
@@ -409,6 +501,7 @@ def rename_table_sql(table: str, details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def add_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate ALTER TABLE ADD COLUMN statement."""
     col_name = details["column"]
@@ -419,6 +512,7 @@ def add_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def drop_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate DROP COLUMN statement (SQLite 3.35.0+)."""
     col_name = details["column"]
@@ -427,6 +521,7 @@ def drop_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def rename_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate RENAME COLUMN statement (SQLite 3.25.0+)."""
     from_col = details["from_column"]
@@ -436,6 +531,7 @@ def rename_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def alter_column_sql(table: str, _details: dict[str, Any]) -> list[str]:
     """Rendered as the note `apply` acts on, because `apply` does act on it.
 
@@ -446,6 +542,7 @@ def alter_column_sql(table: str, _details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def add_index_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate CREATE INDEX statement."""
     idx_name = details["index"]
@@ -460,6 +557,7 @@ def add_index_sql(table: str, details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def drop_index_sql(_table: str, details: dict[str, Any]) -> list[str]:
     """Generate DROP INDEX statement."""
     idx_name = details["index"]
@@ -485,10 +583,12 @@ def drop_index_sql(_table: str, details: dict[str, Any]) -> list[str]:
 # written without a connection: reconstruction reads the table's stored schema
 # to know which columns to copy, and `generate_sql` is a pure function that is
 # handed operations and nothing else.
+@helper
 def _reconstruction_note(table: str, what: str) -> str:
     return f"-- Table reconstruction required for {table} ({what})"
 
 
+@helper
 def add_constraint_sql(table: str, details: dict[str, Any]) -> list[str]:
     """SQLite and Turso cannot add a named constraint to an existing table."""
     raise NotImplementedError(
@@ -499,6 +599,7 @@ def add_constraint_sql(table: str, details: dict[str, Any]) -> list[str]:
     )
 
 
+@helper
 def drop_constraint_sql(table: str, details: dict[str, Any]) -> list[str]:
     """SQLite and Turso cannot drop a named constraint from an existing table."""
     raise NotImplementedError(
@@ -509,6 +610,7 @@ def drop_constraint_sql(table: str, details: dict[str, Any]) -> list[str]:
     )
 
 
+@helper
 def add_foreign_key_sql(table: str, _details: dict[str, Any]) -> list[str]:
     """Rendered as the note `apply` acts on, because `apply` does act on it."""
     return [
@@ -516,6 +618,7 @@ def add_foreign_key_sql(table: str, _details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def drop_foreign_key_sql(table: str, _details: dict[str, Any]) -> list[str]:
     """Rendered as the note `apply` acts on, because `apply` does act on it."""
     return [
@@ -523,6 +626,7 @@ def drop_foreign_key_sql(table: str, _details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def create_view_sql(_table: str, details: dict[str, Any]) -> list[str]:
     """Generate CREATE VIEW statement."""
     from declaro_persistum.applier.sqlite import generate_create_view
@@ -530,6 +634,7 @@ def create_view_sql(_table: str, details: dict[str, Any]) -> list[str]:
     return generate_create_view(details)  # type: ignore[arg-type]
 
 
+@helper
 def drop_view_sql(_table: str, details: dict[str, Any]) -> list[str]:
     """The statements that remove a view on SQLite and Turso.
 
@@ -570,6 +675,7 @@ _SQL_GENERATORS: dict[str, Any] = {
 }
 
 
+@helper
 def statements_for(operation: Operation) -> list[str]:
     """The statements an operation runs, already separated.
 
@@ -589,6 +695,7 @@ def statements_for(operation: Operation) -> list[str]:
     return generator(operation["table"], operation["details"])
 
 
+@helper
 def generate_operation_sql(operation: Operation) -> str:
     """The same statements as one block, for a person to read.
 
@@ -621,11 +728,13 @@ def generate_operation_sql(operation: Operation) -> str:
 _RECONSTRUCTION_OPS = frozenset(("add_foreign_key", "drop_foreign_key", "alter_column"))
 
 
+@recognizer
 def requires_reconstruction(operation: Operation) -> bool:
     """Check if operation requires table reconstruction."""
     return operation["op"] in _RECONSTRUCTION_OPS
 
 
+@helper
 def dry_run_preview(
     operations: list[Operation], execution_order: list[int]
 ) -> ApplyResult:
@@ -656,6 +765,7 @@ def dry_run_preview(
 REMOVABLE_PROPERTIES = frozenset(("default", "unique", "check"))
 
 
+@helper
 def _require_column(
     columns: dict[str, Column], column: str, operation: Operation
 ) -> None:
@@ -666,6 +776,7 @@ def _require_column(
         )
 
 
+@helper
 def _reconstruct_alter_column(
     columns: dict[str, Column], operation: Operation
 ) -> dict[str, Column]:
@@ -689,6 +800,7 @@ def _reconstruct_alter_column(
     return columns
 
 
+@helper
 def _reconstruct_add_foreign_key(
     columns: dict[str, Column], operation: Operation
 ) -> dict[str, Column]:
@@ -711,6 +823,7 @@ def _reconstruct_add_foreign_key(
     return columns
 
 
+@helper
 def _reconstruct_drop_foreign_key(
     columns: dict[str, Column], operation: Operation
 ) -> dict[str, Column]:
@@ -741,6 +854,7 @@ _RECONSTRUCT: dict[str, Any] = {
 }
 
 
+@helper
 def apply_reconstruction_changes(
     columns: dict[str, Column], operation: Operation
 ) -> dict[str, Column]:
@@ -755,6 +869,7 @@ def apply_reconstruction_changes(
     return reconstruct(columns, operation)
 
 
+@recognizer
 def single_change_property(operation: Operation) -> tuple[str, Any] | None:
     """Extract single-property change key and unwrapped value from alter_column op.
 
