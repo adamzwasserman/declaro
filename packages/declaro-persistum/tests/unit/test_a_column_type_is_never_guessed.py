@@ -49,11 +49,19 @@ def test_a_type_that_is_not_a_type_is_refused(builder: str, shape: str) -> None:
     Parametrising over both is the point. The defect was not that one of them
     guessed; it was that they answered differently, so which one a caller
     reached decided whether they were told.
+
+    THE REFUSAL HAS TO NAME THE COLUMN. This accepted any of TypeError,
+    ValueError or AttributeError and asserted nothing about the message, so a
+    named refusal and a `.lower()` crash on a dict passed it identically. The
+    author of a broken schema needs to be told which column, and a bare
+    AttributeError from inside a type mapper does not tell them.
     """
     columns = {"c": {"type": _UNREADABLE[shape]}}
 
-    with pytest.raises((TypeError, ValueError, AttributeError)):
+    with pytest.raises((TypeError, ValueError)) as raised:
         _BUILDERS[builder]("t", columns)
+
+    assert "c" in str(raised.value), str(raised.value)
 
 
 @pytest.mark.parametrize("builder", sorted(_BUILDERS), ids=sorted(_BUILDERS))

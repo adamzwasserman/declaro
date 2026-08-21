@@ -24,7 +24,10 @@ from declaro_persistum.abstractions.pragma_compat import (
     create_index_statements,
     table_column_names,
 )
-from declaro_persistum.applier.shared import sqlite_type
+from declaro_persistum.applier.shared import (
+    refuse_unwritable_column_types,
+    sqlite_type,
+)
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.types import Column
 
@@ -459,6 +462,12 @@ def _generate_create_table_sql(
     Returns:
         CREATE TABLE SQL statement
     """
+    # BEFORE THE LOOP, so every offending column is named at once rather than
+    # the caller fixing them one crash at a time. This rebuilder checked
+    # nothing at all, so which of the two a caller reached decided whether
+    # they were told what was wrong with their schema.
+    refuse_unwritable_column_types(table_name, columns)
+
     col_defs: list[str] = []
     pk_columns: list[str] = []
 

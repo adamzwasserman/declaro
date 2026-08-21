@@ -124,6 +124,19 @@ def is_our_table(name: str) -> bool:
     return name.startswith(_OUR_PREFIXES)
 
 
+def spelling_of(value: Any) -> type:
+    """Which declared spelling a value is written in.
+
+    THE ONE PLACE THE PACKAGE READS A TYPE AT RUNTIME. Schemaless input --
+    hand-written TOML, a column definition a caller built by hand -- carries
+    no declaration, so reading the type is the only way to tell one spelling
+    from another. Every dispatch table that resolves such input is keyed on
+    what this returns, so a type absent from the table is a spelling nobody
+    declared and the caller refuses it by name.
+    """
+    return type(value)  # honest: ignore HC-P005: this IS the recognizer; reading the type of schemaless input is its whole job
+
+
 def changed_to(value: Any) -> Any:
     """What a property became, whether or not it arrived as a change record.
 

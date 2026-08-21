@@ -26,7 +26,11 @@ from declaro_persistum.abstractions.pragma_compat import (
     create_index_statements,
     table_column_names,
 )
-from declaro_persistum.applier.shared import sqlite_default, sqlite_type
+from declaro_persistum.applier.shared import (
+    refuse_unwritable_column_types,
+    sqlite_default,
+    sqlite_type,
+)
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.types import Column, Operation, changed_to
 
@@ -64,6 +68,12 @@ def generate_create_table_sql(
         ... }
         >>> sql = generate_create_table_sql("posts", cols)
     """
+    # THE REFUSAL BELONGS TO THE RENDERER, NOT ONLY THE ORCHESTRATOR.
+    # `_validate_columns` ran in the rebuild path, so a caller who rendered a
+    # CREATE TABLE directly got an AttributeError from inside a type mapper
+    # naming no column. Both rebuilders now refuse the same way.
+    refuse_unwritable_column_types(table_name, columns)
+
     col_defs: list[str] = []
     pk_columns: list[str] = []
 
@@ -456,27 +466,15 @@ async def execute_reconstruction_async(
 
 @helper
 def _validate_columns(table_name: str, columns: dict[str, Column]) -> None:
-    """
-    Validate column definitions before starting reconstruction.
+    """Refuse an unwritable column definition before anything destructive runs.
 
-    Catches invalid column definitions (e.g., non-string types from unprocessed
-    differ output) before any destructive database operations begin.
-
-    Raises:
-        ValueError: If any column definition is invalid
+    The refusal itself lives beside the type mappers in `applier.shared`, so
+    the other rebuilder gets the same answer. This checked only for a dict,
+    and a type written as a number, a list or nothing at all went straight
+    into `.lower()` and died naming no column.
     """
-    for col_name, col_def in columns.items():
-        # NO DEFAULT. A column that never said what it is does not become a
-        # TEXT column; the loader refuses one, so reaching here means a caller
-        # built the definition by hand and left the type out.
-        col_type = col_def["type"]
-        if isinstance(col_type, dict):
-            raise ValueError(
-                f"Invalid column type for '{table_name}'.'{col_name}': "
-                f"got dict {col_type} instead of string. "
-                f"This usually means differ output was not unwrapped "
-                f"(expected 'to' value from {{'from': ..., 'to': ...}} format)."
-            )
+    refuse_unwritable_column_types(table_name, columns)
+
 
     # RENDER IT BEFORE THE DATABASE IS TOUCHED, so a column definition that
     # cannot be written is refused while the table is still intact rather than

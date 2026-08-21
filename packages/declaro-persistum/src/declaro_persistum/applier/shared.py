@@ -17,10 +17,18 @@ from types import MappingProxyType
 from typing import Any
 
 # Re-exported: inspector.shared is the single source of truth for PRAGMA parsing.
+from declaro_persistum.boundary import helper
 from declaro_persistum.inspector.shared import (
     columns_from_pragma_rows as columns_from_pragma_rows,
 )
-from declaro_persistum.types import ApplyResult, Column, Dialect, Operation, changed_to
+from declaro_persistum.types import (
+    ApplyResult,
+    Column,
+    Dialect,
+    Operation,
+    changed_to,
+    spelling_of,
+)
 
 # =============================================================================
 # Type mapping
@@ -779,3 +787,61 @@ def single_change_property(operation: Operation) -> tuple[str, Any] | None:
 # operations makes one operation's meaning depend on an argument the others
 # ignore. `insert_enum_values` carries its own values and every applier runs
 # it the way it runs everything else.
+
+
+# =============================================================================
+# A column type that cannot be written
+# =============================================================================
+
+# A COLUMN TYPE IS WRITTEN AS TEXT AND NOTHING ELSE. `sqlite_type` and every
+# other mapper lower-cases what it is given, so a type that is not a string
+# reaches `.lower()` and dies with an AttributeError naming nothing. The
+# author of the broken schema needs to be told which column.
+_TYPE_SPELLINGS = frozenset({str})
+
+
+@helper
+def _refuse_unwritable_types(table_name: str, wrong: dict[str, str]) -> None:
+    """Columns whose declared type is not text, named so the author finds them.
+
+    A dict here is the differ's `{"from": old, "to": new}` record reaching the
+    renderer unwrapped, which `changed_to` resolves in one place now. The
+    other spellings -- a number, a list, nothing at all -- were never checked,
+    so they crashed inside a type mapper instead of being refused here.
+    """
+    written = ", ".join(f"'{name}' ({shape})" for name, shape in sorted(wrong.items()))
+    raise ValueError(
+        f"Table '{table_name}' declares {written}, which is not a column type. "
+        f"A type is written as text. A dict means differ output reached the "
+        f"renderer unwrapped, so the 'to' value of "
+        f"{{'from': ..., 'to': ...}} was never taken."
+    )
+
+
+@helper
+def _accept_writable_types(_table_name: str, _wrong: dict[str, str]) -> None:
+    """Every column declares its type as text."""
+
+
+_WHEN_UNWRITABLE: dict[bool, Callable[[str, dict[str, str]], None]] = {
+    True: _refuse_unwritable_types,
+    False: _accept_writable_types,
+}
+
+
+@helper
+def refuse_unwritable_column_types(table_name: str, columns: dict[str, Column]) -> None:
+    """Refuse a column whose type cannot be written, before the table is dropped.
+
+    BOTH REBUILDERS CALL THIS. `reconstruction` checked only for a dict and
+    `table_reconstruction` checked nothing, so which rebuilder a caller
+    reached decided whether they were told what was wrong. A rebuild drops the
+    real table and recreates it from these definitions, so a definition that
+    cannot be rendered has to be refused while the table is still there.
+    """
+    wrong = {
+        col_name: spelling_of(col_def["type"]).__name__
+        for col_name, col_def in columns.items()
+        if spelling_of(col_def["type"]) not in _TYPE_SPELLINGS
+    }
+    _WHEN_UNWRITABLE[bool(wrong)](table_name, wrong)

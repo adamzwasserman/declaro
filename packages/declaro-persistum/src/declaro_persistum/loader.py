@@ -22,6 +22,7 @@ from declaro_persistum.types import (
     Schema,
     Table,
     View,
+    spelling_of,
 )
 
 
@@ -268,14 +269,14 @@ def _normalize_columns(
     function that never refuses never needs to say which line to look at.
     """
     unknown = {
-        col_name: type(col_data).__name__
+        col_name: spelling_of(col_data).__name__
         for col_name, col_data in columns_data.items()
-        if type(col_data) not in _COLUMN_FROM
+        if spelling_of(col_data) not in _COLUMN_FROM
     }
     _WHEN_UNKNOWN[bool(unknown)](unknown, table_name)
 
     return {
-        col_name: _COLUMN_FROM[type(col_data)](col_name, table_name, col_data)
+        col_name: _COLUMN_FROM[spelling_of(col_data)](col_name, table_name, col_data)
         for col_name, col_data in columns_data.items()
     }
 
@@ -283,7 +284,7 @@ def _normalize_columns(
 @helper
 def _primary_key_of(written: Any, _table_name: str) -> list[str]:
     """One name or several, resolved to the list everything downstream reads."""
-    return _NAMES_OF[type(written)](written)
+    return _NAMES_OF[spelling_of(written)](written)
 
 
 # THE FIELDS THAT ARE READ RATHER THAN CARRIED, each with the function that
