@@ -23,21 +23,25 @@ from declaro_persistum.applier.shared import (
     single_change_property,
     statements_for,
 )
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, MigrationError
 from declaro_persistum.types import ApplyResult, DbapiConnection, Operation, View
 
 
+@helper
 def get_dialect() -> str:
     """Return dialect identifier."""
     return "sqlite"
 
 
+@helper
 def get_transaction_mode() -> Literal["all_or_nothing", "per_operation"]:
     """SQLite supports transactional DDL."""
     return "all_or_nothing"
 
 
 
+@boundary
 async def _restore_enforcement(connection: DbapiConnection, enforced: int) -> None:
     """Put `PRAGMA foreign_keys` back to what the caller had.
 
@@ -51,6 +55,7 @@ async def _restore_enforcement(connection: DbapiConnection, enforced: int) -> No
     await connection.execute(f"PRAGMA foreign_keys = {'ON' if enforced else 'OFF'}")
 
 
+@boundary
 async def apply(
     connection: DbapiConnection,
     operations: list[Operation],
@@ -201,6 +206,7 @@ async def apply(
         ) from e
 
 
+@helper
 async def _execute_with_reconstruction(
     connection: DbapiConnection, operation: Operation
 ) -> None:
@@ -284,6 +290,7 @@ async def _execute_with_reconstruction(
 # It and `tests/unit/test_triggers.py` were each other's only reason to exist,
 # the same pair `generate_enum_check` formed with `test_enums.py` earlier
 # today, and a hollow test file is what kept both invisible.
+@helper
 def generate_create_view(view: View) -> list[str]:
     """
     Generate SQLite CREATE VIEW SQL.
@@ -338,6 +345,7 @@ def generate_create_view(view: View) -> list[str]:
     return statements
 
 
+@helper
 def generate_drop_view(name: str, materialized: bool) -> list[str]:
     """The statements that remove a view, or the table standing in for one.
 

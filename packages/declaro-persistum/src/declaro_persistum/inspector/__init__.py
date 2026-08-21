@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.inspector import postgresql, sqlite, turso
 from declaro_persistum.types import Dialect, Schema, View, for_dialect
 
@@ -40,6 +41,7 @@ TABLE_EXISTS: dict[str, Any] = {
 }
 
 
+@boundary
 async def introspect(connection: Any, dialect: Dialect) -> Schema:
     """Read a database's tables back out of it."""
     inspector = for_dialect(INSPECTORS, dialect, "Inspectors")
@@ -47,6 +49,7 @@ async def introspect(connection: Any, dialect: Dialect) -> Schema:
     return cast(Schema, result)
 
 
+@helper
 async def introspect_with_views(
     connection: Any, dialect: Dialect
 ) -> tuple[Schema, dict[str, View]]:
@@ -83,6 +86,7 @@ TABLE_COLUMNS: dict[str, Any] = {
 }
 
 
+@helper
 async def get_table_columns(
     connection: Any, dialect: Dialect, table: str
 ) -> dict[str, Any]:
@@ -91,6 +95,7 @@ async def get_table_columns(
     return cast(dict[str, Any], await reader(connection, table))
 
 
+@boundary
 async def table_exists(connection: Any, dialect: Dialect, table: str) -> bool:
     exists = for_dialect(TABLE_EXISTS, dialect, "Table-exists checks")
     return cast(bool, await exists(connection, table))

@@ -9,6 +9,7 @@ a rewrite, so nothing about what PostgreSQL is asked has changed.
 
 from typing import Any
 
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionError
 from declaro_persistum.exceptions import DeclaroError
 from declaro_persistum.inspector.shared import normalize_check
@@ -16,6 +17,7 @@ from declaro_persistum.inspector.shared import normalize_fk_action as _normalize
 from declaro_persistum.types import Column, FetchingConnection, Index, Schema, Table, View
 
 
+@helper
 def _normalize_view_query(query: str) -> str:
     """Normalize view query for consistent comparison.
 
@@ -33,11 +35,13 @@ def _normalize_view_query(query: str) -> str:
     return " ".join(query.split())
 
 
+@helper
 def get_dialect() -> str:
     """Return dialect identifier."""
     return "postgresql"
 
 
+@boundary
 async def introspect(
     connection: FetchingConnection,
     *,
@@ -95,6 +99,7 @@ async def introspect(
         raise
 
 
+@helper
 async def _introspect_table(
     connection: FetchingConnection,
     table_name: str,
@@ -157,6 +162,7 @@ async def _introspect_table(
     return table
 
 
+@boundary
 async def _get_columns(
     connection: FetchingConnection,
     table_name: str,
@@ -218,6 +224,7 @@ async def _get_columns(
     return columns
 
 
+@helper
 def _normalize_type(row: dict[str, Any]) -> str:
     """Normalize PostgreSQL type to canonical form."""
     data_type = row["data_type"]
@@ -266,6 +273,7 @@ def _normalize_type(row: dict[str, Any]) -> str:
     return base_type
 
 
+@boundary
 async def _get_primary_key(
     connection: FetchingConnection,
     table_name: str,
@@ -291,6 +299,7 @@ async def _get_primary_key(
     return [row["column_name"] for row in rows]
 
 
+@boundary
 async def _get_unique_columns(
     connection: FetchingConnection,
     table_name: str,
@@ -317,6 +326,7 @@ async def _get_unique_columns(
     return {row["column_name"] for row in rows}
 
 
+@boundary
 async def _get_indexes(
     connection: FetchingConnection,
     table_name: str,
@@ -398,6 +408,7 @@ async def _get_indexes(
     return indexes
 
 
+@boundary
 async def _get_foreign_keys(
     connection: FetchingConnection,
     table_name: str,
@@ -433,6 +444,7 @@ async def _get_foreign_keys(
     return [dict(row) for row in rows]
 
 
+@helper
 async def get_table_columns(
     connection: FetchingConnection,
     table_name: str,
@@ -448,6 +460,7 @@ async def get_table_columns(
     return await _get_columns(connection, table_name, "public")
 
 
+@boundary
 async def table_exists(
     connection: FetchingConnection,
     table_name: str,
@@ -473,6 +486,7 @@ async def table_exists(
 
 
 
+@boundary
 async def _get_column_checks(
     connection: FetchingConnection, table_name: str, schema_name: str
 ) -> dict[str, str]:
@@ -507,6 +521,7 @@ async def _get_column_checks(
     }
 
 
+@boundary
 async def _get_table_constraints(
     connection: FetchingConnection, table_name: str, schema_name: str
 ) -> dict[str, dict[str, str]]:
@@ -547,6 +562,7 @@ async def _get_table_constraints(
     }
 
 
+@boundary
 async def introspect_views(
     connection: FetchingConnection,
     *,

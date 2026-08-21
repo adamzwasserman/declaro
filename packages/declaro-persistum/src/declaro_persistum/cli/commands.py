@@ -737,6 +737,7 @@ async def _disconnect(connection: Any, dialect: Dialect) -> None:
     await connection.close()
 
 
+@helper
 def _check_drift(actual: Schema, expected: Schema) -> list[dict[str, str]]:
     """Check for drift between actual and expected schemas."""
     differences: list[dict[str, str]] = []

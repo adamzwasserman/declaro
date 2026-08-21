@@ -29,23 +29,27 @@ from declaro_persistum.applier.shared import (
 
 # Turso uses identical view generation to SQLite.
 from declaro_persistum.applier.sqlite import generate_create_view, generate_drop_view
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, MigrationError
 from declaro_persistum.types import ApplyResult, DbapiConnection, Operation
 
 logger = logging.getLogger(__name__)
 
 
+@helper
 def get_dialect() -> str:
     """Return dialect identifier."""
     return "turso"
 
 
+@helper
 def get_transaction_mode() -> Literal["all_or_nothing", "per_operation"]:
     """Per-operation: each op gets its own transaction."""
     return "per_operation"
 
 
 
+@boundary
 async def _restore_enforcement(connection: DbapiConnection, enforced: int) -> None:
     """Put `PRAGMA foreign_keys` back to what the caller had.
 
@@ -56,6 +60,7 @@ async def _restore_enforcement(connection: DbapiConnection, enforced: int) -> No
 
 
 
+@helper
 def migration_succeeded(*, skipped: int) -> bool:
     """A migration is all of it, or it is not done.
 
@@ -85,6 +90,7 @@ def migration_succeeded(*, skipped: int) -> bool:
     return skipped == 0
 
 
+@boundary
 async def apply(
     connection: DbapiConnection,
     operations: list[Operation],
@@ -247,6 +253,7 @@ async def apply(
     }
 
 
+@helper
 async def _execute_coalesced_reconstruction(
     connection: DbapiConnection, table: str, ops: list[Operation]
 ) -> None:

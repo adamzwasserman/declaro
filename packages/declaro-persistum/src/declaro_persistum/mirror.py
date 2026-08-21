@@ -37,6 +37,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any, TypedDict
 
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.database import Database, reading, writing
 
 __all__ = [
@@ -68,6 +69,7 @@ class Mirror(TypedDict):
     divergences: list[Divergence]
 
 
+@helper
 def mirror(
     primary: Database,
     replica: Database,
@@ -84,6 +86,7 @@ def mirror(
     }
 
 
+@helper
 @asynccontextmanager
 async def mirror_writing(m: Mirror) -> AsyncIterator[tuple[Any, Any]]:
     """Yield both write connections. The caller writes the same thing to each.
@@ -96,6 +99,7 @@ async def mirror_writing(m: Mirror) -> AsyncIterator[tuple[Any, Any]]:
         yield a, b
 
 
+@helper
 @asynccontextmanager
 async def mirror_reading(m: Mirror) -> AsyncIterator[Any]:
     """Yield the primary's read connection.
@@ -108,6 +112,7 @@ async def mirror_reading(m: Mirror) -> AsyncIterator[Any]:
         yield conn
 
 
+@boundary
 async def compare(m: Mirror, sql: str, params: Any) -> tuple[Any, Mirror]:
     """Run a read against both and record any disagreement.
 
@@ -146,6 +151,7 @@ async def compare(m: Mirror, sql: str, params: Any) -> tuple[Any, Mirror]:
     return primary_rows, m
 
 
+@helper
 def promote(m: Mirror) -> Mirror:
     """Phase 3: the replica becomes the primary.
 
@@ -156,11 +162,13 @@ def promote(m: Mirror) -> Mirror:
     return {**m, "primary": m["replica"], "replica": m["primary"]}
 
 
+@helper
 def detach(m: Mirror) -> Database:
     """Phase 4: one database again. Returns the survivor."""
     return m["primary"]
 
 
+@boundary
 async def parallel_write(
     m: Mirror, sql: str, params: Any
 ) -> Mirror:

@@ -49,6 +49,7 @@ import contextlib
 import logging
 from typing import Any, TypedDict
 
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.database import Database, is_replicated
 from declaro_persistum.retry import Retry
 from declaro_persistum.write_queue import PendingWrite, Room, drain
@@ -71,6 +72,7 @@ class Crew(TypedDict):
     size: int
 
 
+@helper
 async def drainer(
     room: Room,
     db: Database,
@@ -154,6 +156,7 @@ async def drainer(
         await db["close_connection"](conn)
 
 
+@boundary
 async def start_crew(
     room: Room,
     db: Database,
@@ -200,6 +203,7 @@ async def start_crew(
     return {"room": room, "stop": stop, "tasks": tasks, "size": size}
 
 
+@helper
 async def stop_crew(crew: Crew) -> None:
     """Signal every drainer and wait for it to finish its current write.
 

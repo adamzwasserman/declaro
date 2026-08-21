@@ -25,12 +25,14 @@ from declaro_persistum.abstractions.pragma_compat import (
     table_column_names,
 )
 from declaro_persistum.applier.shared import sqlite_type
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.types import Column
 
 logger = logging.getLogger(__name__)
 
 
 
+@helper
 def columns_to_copy(stored: list[str], declared: list[str]) -> list[tuple[str, str]]:
     """Pairs of (name in the old table, name in the new one). Pure.
 
@@ -66,6 +68,7 @@ def columns_to_copy(stored: list[str], declared: list[str]) -> list[tuple[str, s
     return [(name, by_folded[name.lower()]) for name in stored if name.lower() in by_folded]
 
 
+@boundary
 async def reconstruct_table(
     connection: Any,
     table_name: str,
@@ -222,6 +225,7 @@ async def reconstruct_table(
         raise
 
 
+@helper
 async def alter_column_nullability(
     connection: Any,
     table_name: str,
@@ -253,6 +257,7 @@ async def alter_column_nullability(
     await reconstruct_table(connection, table_name, columns)
 
 
+@helper
 async def alter_column_type(
     connection: Any,
     table_name: str,
@@ -287,6 +292,7 @@ async def alter_column_type(
     await reconstruct_table(connection, table_name, columns)
 
 
+@helper
 async def alter_column_default(
     connection: Any,
     table_name: str,
@@ -329,6 +335,7 @@ async def alter_column_default(
 
 
 
+@boundary
 async def _get_full_table_schema(connection: Any, table_name: str) -> dict[str, Column]:
     """
     Extract full column schema from existing table.
@@ -409,6 +416,7 @@ async def _get_full_table_schema(connection: Any, table_name: str) -> dict[str, 
     return columns
 
 
+@boundary
 async def table_constraints_of(connection: Any, table_name: str) -> dict[str, Any]:
     """The named table-level constraints, for a rebuild to write back.
 
@@ -435,6 +443,7 @@ async def table_constraints_of(connection: Any, table_name: str) -> dict[str, An
 
 
 
+@helper
 def _generate_create_table_sql(
     table_name: str,
     columns: dict[str, Column],

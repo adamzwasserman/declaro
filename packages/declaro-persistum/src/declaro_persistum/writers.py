@@ -1,4 +1,5 @@
-"""How each engine runs one write inside a transaction.
+"""How each engine runs one write inside a transaction.from declaro_persistum.boundary import boundary
+
 
 The engines disagree about three things at once: the statement that opens a
 transaction, how parameters are passed, and whether there is a commit to call.
@@ -29,6 +30,8 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, Protocol
+
+from declaro_persistum.boundary import boundary, helper
 
 __all__ = [
     "WRITERS",
@@ -96,6 +99,7 @@ class WriteOne(Protocol):
         raise NotImplementedError("CODE NOT WRITTEN")
 
 
+@boundary
 async def turso_write_one(
     conn: DbApiConnection, sql: str, params: Sequence[object]
 ) -> None:
@@ -109,6 +113,7 @@ async def turso_write_one(
     await conn.commit()
 
 
+@boundary
 async def sqlite_write_one(
     conn: DbApiConnection, sql: str, params: Sequence[object]
 ) -> None:
@@ -123,6 +128,7 @@ async def sqlite_write_one(
     await conn.commit()
 
 
+@boundary
 async def postgres_write_one(
     conn: AsyncpgConnection, sql: str, params: Sequence[object]
 ) -> None:
@@ -174,6 +180,7 @@ WRITERS: dict[str, WriteOne] = {
 
 
 @asynccontextmanager
+@boundary
 async def dbapi_transaction(conn: DbApiConnection) -> AsyncIterator[None]:
     """Turso and SQLite: commit on a clean exit, roll back on an exception."""
     try:
@@ -185,6 +192,7 @@ async def dbapi_transaction(conn: DbApiConnection) -> AsyncIterator[None]:
         await conn.commit()
 
 
+@helper
 def postgres_transaction(conn: AsyncpgConnection) -> Any:
     """PostgreSQL: asyncpg's own transaction, which already has these
     semantics.

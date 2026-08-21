@@ -27,6 +27,7 @@ from declaro_persistum.abstractions.pragma_compat import (
     pragma_index_list,
     pragma_table_info,
 )
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionError
 from declaro_persistum.exceptions import DeclaroError
 from declaro_persistum.inspector.shared import (
@@ -44,11 +45,13 @@ from declaro_persistum.inspector.shared import (
 from declaro_persistum.types import Column, DbapiConnection, Index, Schema, Table, View
 
 
+@helper
 def get_dialect() -> str:
     """Return dialect identifier."""
     return "turso"
 
 
+@boundary
 async def introspect(
     connection: DbapiConnection,
     *,
@@ -119,6 +122,7 @@ async def introspect(
         raise
 
 
+@helper
 def restore_reference_case(schema: Schema) -> None:
     """Point every `references` at the table name as it was declared.
 
@@ -139,6 +143,7 @@ def restore_reference_case(schema: Schema) -> None:
                 column["references"] = f"{declared[target.lower()]}.{target_column}"
 
 
+@helper
 def declared_name(stored: str, ddl: str | None) -> str:
     """Give back the name as it was written, which Turso does not store.
 
@@ -211,6 +216,7 @@ _CREATE_TABLE_NAME = re.compile(
 )
 
 
+@helper
 async def _introspect_table(
     connection: DbapiConnection,
     table_name: str,
@@ -224,6 +230,7 @@ async def _introspect_table(
     return assemble_table(columns, indexes, foreign_keys, constraints)
 
 
+@boundary
 async def _get_table_constraints(
     connection: DbapiConnection, table_name: str
 ) -> dict[str, dict[str, str]]:
@@ -238,6 +245,7 @@ async def _get_table_constraints(
     return {}
 
 
+@boundary
 async def _get_columns(
     connection: DbapiConnection,
     table_name: str,
@@ -268,6 +276,7 @@ async def _get_columns(
     return columns
 
 
+@helper
 async def _get_unique_columns(
     connection: DbapiConnection,
     table_name: str,
@@ -286,6 +295,7 @@ async def _get_unique_columns(
     return unique_cols_from_index_rows(index_rows, index_info)
 
 
+@boundary
 async def _get_indexes(
     connection: DbapiConnection,
     table_name: str,
@@ -334,6 +344,7 @@ async def _get_indexes(
     }
 
 
+@helper
 async def _get_foreign_keys(
     connection: DbapiConnection,
     table_name: str,
@@ -343,6 +354,7 @@ async def _get_foreign_keys(
     return fk_list_from_pragma_rows(rows)
 
 
+@boundary
 async def table_exists(
     connection: DbapiConnection,
     table_name: str,
@@ -368,6 +380,7 @@ async def table_exists(
     return result is not None
 
 
+@helper
 async def get_table_columns(
     connection: DbapiConnection,
     table_name: str,
@@ -379,6 +392,7 @@ async def get_table_columns(
     return await _get_columns(connection, table_name)
 
 
+@boundary
 async def introspect_views(
     connection: DbapiConnection,
 ) -> dict[str, View]:

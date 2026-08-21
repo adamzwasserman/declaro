@@ -16,6 +16,7 @@ from declaro_persistum.applier.shared import (
     constraint_clause,
     insert_enum_values_sql,
 )
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import MigrationError
 from declaro_persistum.types import ApplyResult, Column, Operation, View
 
@@ -23,11 +24,13 @@ from declaro_persistum.types import ApplyResult, Column, Operation, View
 SQLGenerator = Callable[..., str]
 
 
+@helper
 def get_dialect() -> str:
     """Return dialect identifier."""
     return "postgresql"
 
 
+@helper
 def get_transaction_mode() -> str:
     """One failure ends the batch, and the whole batch is rolled back.
 
@@ -49,6 +52,7 @@ def get_transaction_mode() -> str:
 
 
 
+@boundary
 async def apply(
     connection: Any,
     operations: list[Operation],
@@ -123,6 +127,7 @@ async def apply(
 
 
 
+@helper
 def statements_for(operation: Operation) -> list[str]:
     """The statements an operation runs, already separated.
 
@@ -143,6 +148,7 @@ def statements_for(operation: Operation) -> list[str]:
     return generator(operation["table"], operation["details"])
 
 
+@helper
 def generate_operation_sql(operation: Operation) -> str:
     """The same statements as one block, for a person to read.
 
@@ -152,6 +158,7 @@ def generate_operation_sql(operation: Operation) -> str:
     return ";\n".join(statements_for(operation))
 
 
+@helper
 def _create_table_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate CREATE TABLE statement."""
     columns = details.get("columns", {})
@@ -191,6 +198,7 @@ def _create_table_sql(table: str, details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def _column_definition(name: str, col: Column) -> str:
     """One line thick, because the rest is shared.
 
@@ -202,6 +210,7 @@ def _column_definition(name: str, col: Column) -> str:
     """
     return column_definition(name, col, "postgresql")
 
+@helper
 def _drop_table_sql(table: str, _details: dict[str, Any]) -> list[str]:
     """Generate DROP TABLE statement."""
     return [
@@ -209,6 +218,7 @@ def _drop_table_sql(table: str, _details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def _rename_table_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate ALTER TABLE RENAME statement."""
     new_name = details["new_name"]
@@ -217,6 +227,7 @@ def _rename_table_sql(table: str, details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def _add_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate ALTER TABLE ADD COLUMN statement."""
     col_name = details["column"]
@@ -227,6 +238,7 @@ def _add_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def _drop_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate ALTER TABLE DROP COLUMN statement."""
     col_name = details["column"]
@@ -235,6 +247,7 @@ def _drop_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def _rename_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate ALTER TABLE RENAME COLUMN statement."""
     from_col = details["from_column"]
@@ -244,6 +257,7 @@ def _rename_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def _alter_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate ALTER TABLE ALTER COLUMN statement(s)."""
     col_name = details["column"]
@@ -314,6 +328,7 @@ def _alter_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def _add_index_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate CREATE INDEX statement."""
     idx_name = details["index"]
@@ -329,6 +344,7 @@ def _add_index_sql(table: str, details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def _drop_index_sql(_table: str, details: dict[str, Any]) -> list[str]:
     """Generate DROP INDEX statement."""
     idx_name = details["index"]
@@ -337,6 +353,7 @@ def _drop_index_sql(_table: str, details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def _add_constraint_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate ALTER TABLE ADD CONSTRAINT statement."""
     const_name = details["constraint"]
@@ -357,6 +374,7 @@ def _add_constraint_sql(table: str, details: dict[str, Any]) -> list[str]:
         raise ValueError(f"Unknown constraint type: {const_def.get('type')}")
 
 
+@helper
 def _drop_constraint_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate ALTER TABLE DROP CONSTRAINT statement."""
     const_name = details["constraint"]
@@ -365,6 +383,7 @@ def _drop_constraint_sql(table: str, details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def _add_foreign_key_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate ALTER TABLE ADD FOREIGN KEY statement."""
     col_name = details["column"]
@@ -387,6 +406,7 @@ def _add_foreign_key_sql(table: str, details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def _drop_foreign_key_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Drop a foreign key by both names it can have.
 
@@ -422,11 +442,13 @@ def _drop_foreign_key_sql(table: str, details: dict[str, Any]) -> list[str]:
     ]
 
 
+@helper
 def _create_view_sql(_table: str, details: dict[str, Any]) -> list[str]:
     """Generate CREATE VIEW or CREATE MATERIALIZED VIEW statement."""
     return generate_create_view(details)  # type: ignore[arg-type]
 
 
+@helper
 def _drop_view_sql(_table: str, details: dict[str, Any]) -> list[str]:
     """Generate DROP VIEW or DROP MATERIALIZED VIEW statement."""
     return [
@@ -457,6 +479,7 @@ def _drop_view_sql(_table: str, details: dict[str, Any]) -> list[str]:
 
 
 
+@helper
 def generate_create_view(view: View) -> list[str]:
     """The statements that create a view, native or materialized.
 
@@ -472,6 +495,7 @@ def generate_create_view(view: View) -> list[str]:
     return [f'CREATE OR REPLACE VIEW "{name}" AS\n{query}']
 
 
+@helper
 def generate_drop_view(name: str, materialized: bool) -> str:
     """DROP VIEW or DROP MATERIALIZED VIEW, which are different statements.
 

@@ -18,6 +18,7 @@ from typing import Any
 from declaro_persistum.abstractions.materialized_views import (
     MATVIEW_METADATA_TABLE,
 )
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionError
 from declaro_persistum.exceptions import DeclaroError
 from declaro_persistum.inspector.shared import (
@@ -55,11 +56,13 @@ _USER_TABLES = """
 # migration fails outright.
 
 
+@boundary
 async def _rows(connection: DbapiConnection, sql: str) -> list[tuple]:
     cursor = await connection.execute(sql)
     return await cursor.fetchall()
 
 
+@helper
 async def columns_of(connection: DbapiConnection, table: str) -> dict[str, Column]:
     """Column definitions, from PRAGMA table_info plus the unique indexes.
 
@@ -100,6 +103,7 @@ async def columns_of(connection: DbapiConnection, table: str) -> dict[str, Colum
     return columns
 
 
+@helper
 async def indexes_of(connection: DbapiConnection, table: str) -> dict[str, Any]:
     """Indexes, from index_list plus each index's columns and its CREATE SQL.
 
@@ -126,6 +130,7 @@ async def indexes_of(connection: DbapiConnection, table: str) -> dict[str, Any]:
     return indexes_from_rows(index_rows, index_info, index_sql)
 
 
+@helper
 async def get_table_columns(connection: DbapiConnection, table: str) -> dict[str, Column]:
     """One table's columns, or a refusal naming the table.
 
@@ -143,11 +148,13 @@ async def get_table_columns(connection: DbapiConnection, table: str) -> dict[str
     return await columns_of(connection, table)
 
 
+@helper
 async def foreign_keys_of(connection: DbapiConnection, table: str) -> list[dict[str, str]]:
     rows = await _rows(connection, f"PRAGMA foreign_key_list('{as_literal(table)}')")
     return fk_list_from_pragma_rows(rows)
 
 
+@helper
 async def constraints_of(connection: DbapiConnection, table: str) -> dict[str, dict[str, str]]:
     """The named table-level constraints, from the stored CREATE TABLE.
 
@@ -163,6 +170,7 @@ async def constraints_of(connection: DbapiConnection, table: str) -> dict[str, d
     return {}
 
 
+@helper
 async def table_of(connection: DbapiConnection, table: str) -> Table:
     return assemble_table(
         await columns_of(connection, table),
@@ -172,6 +180,7 @@ async def table_of(connection: DbapiConnection, table: str) -> Table:
     )
 
 
+@helper
 async def matviews_of(connection: DbapiConnection) -> dict[str, tuple[str, str]]:
     """The emulated materialized views, from the metadata table.
 
@@ -204,6 +213,7 @@ async def matviews_of(connection: DbapiConnection) -> dict[str, tuple[str, str]]
     return {name: (query, refresh) for name, query, refresh in rows}
 
 
+@helper
 async def views_of(connection: DbapiConnection) -> dict[str, View]:
     rows = await _rows(
         connection,
@@ -212,6 +222,7 @@ async def views_of(connection: DbapiConnection) -> dict[str, View]:
     return views_from_rows(rows, await matviews_of(connection))
 
 
+@boundary
 async def introspect(
     connection: DbapiConnection,
     *,
@@ -252,6 +263,7 @@ async def introspect(
         raise
 
 
+@boundary
 async def table_exists(connection: DbapiConnection, table: str) -> bool:
     """Does the engine consider a table of this name to be there?
 

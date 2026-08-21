@@ -20,7 +20,7 @@ from collections.abc import Sequence
 from typing import cast
 
 from declaro_persistum import __version__
-from declaro_persistum.boundary import boundary
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.cli.commands import (
     cmd_apply,
     cmd_diff,
@@ -32,6 +32,7 @@ from declaro_persistum.cli.commands import (
 from declaro_persistum.types import Dialect
 
 
+@helper
 def create_parser() -> argparse.ArgumentParser:
     """Create the argument parser for the CLI."""
     parser = argparse.ArgumentParser(
@@ -231,6 +232,7 @@ Examples:
     return parser
 
 
+@boundary
 def get_connection_string(args: argparse.Namespace) -> str | None:
     """Get connection string from args or environment."""
     if args.connection:
@@ -238,6 +240,7 @@ def get_connection_string(args: argparse.Namespace) -> str | None:
     return os.environ.get("DECLARO_DATABASE_URL")
 
 
+@helper
 def detect_dialect(connection_string: str) -> str:
     """Detect dialect from connection string."""
     if connection_string.startswith("postgresql://") or connection_string.startswith("postgres://"):
