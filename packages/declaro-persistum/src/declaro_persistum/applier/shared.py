@@ -279,23 +279,29 @@ def column_definition(name: str, col: Column, dialect: Dialect) -> str:
 # =============================================================================
 
 
-def insert_enum_values_sql(table: str, details: dict[str, Any]) -> str:
+def insert_enum_values_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Fill a `_dp_enum_` lookup table with the values its column declares.
 
-    ONE STATEMENT PER VALUE, joined with `;`, because the SQLite and Turso
-    appliers already split a generated string on `;`, and asyncpg accepts a
-    multi-statement string in `execute`. Verified against all three engines.
+    ONE STATEMENT PER VALUE, RETURNED AS A LIST. This used to join them with
+    `;` because the SQLite and Turso appliers split a generated string on `;`.
+    A semicolon is not a statement separator, and `Literal["ok", "a;b"]` is
+    ordinary Python that the loader accepts, so the split produced two
+    fragments that were each invalid SQL:
+
+        INSERT INTO "_dp_enum_status" (value) VALUES ('a
+        b')
 
     THE VALUES ARE QUOTED BY DOUBLING THE APOSTROPHE, which is SQL's own
     escape. They come from a `Literal[...]` in a models file, so they are
     developer-authored rather than user input, but `it's live` is ordinary
-    English and would end the string literal early.
+    English and would end the string literal early. There is no escape for a
+    semicolon because SQL needs none; the caller had invented a reason.
     """
     values = details["values"]
-    return ";\n".join(
+    return [
         f"""INSERT INTO "{table}" (value) VALUES ('{value.replace("'", "''")}')"""
         for value in values
-    )
+    ]
 
 
 def constraint_clause(name: str, definition: dict[str, Any]) -> str:
@@ -316,7 +322,7 @@ def constraint_clause(name: str, definition: dict[str, Any]) -> str:
     )
 
 
-def create_table_sql(table: str, details: dict[str, Any]) -> str:
+def create_table_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate CREATE TABLE statement."""
     columns = details.get("columns", {})
     primary_key = details.get("primary_key", [])
@@ -353,7 +359,9 @@ def create_table_sql(table: str, details: dict[str, Any]) -> str:
         col_defs.append(constraint_clause(name, definition))
 
     columns_sql = ",\n    ".join(col_defs)
-    return f'CREATE TABLE "{table}" (\n    {columns_sql}\n)'
+    return [
+        f'CREATE TABLE "{table}" (\n    {columns_sql}\n)'
+    ]
 
 
 # AN UNDERSCORE MEANS "THE TABLE REQUIRES IT, THIS ONE DOES NOT READ IT".
@@ -371,47 +379,59 @@ def create_table_sql(table: str, details: dict[str, Any]) -> str:
 # `_render_order_by(term, _dialect, _path)` in query/expressions.py.
 
 
-def drop_table_sql(table: str, _details: dict[str, Any]) -> str:
+def drop_table_sql(table: str, _details: dict[str, Any]) -> list[str]:
     """Generate DROP TABLE statement."""
-    return f'DROP TABLE "{table}"'
+    return [
+        f'DROP TABLE "{table}"'
+    ]
 
 
-def rename_table_sql(table: str, details: dict[str, Any]) -> str:
+def rename_table_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate ALTER TABLE RENAME statement."""
     new_name = details["new_name"]
-    return f'ALTER TABLE "{table}" RENAME TO "{new_name}"'
+    return [
+        f'ALTER TABLE "{table}" RENAME TO "{new_name}"'
+    ]
 
 
-def add_column_sql(table: str, details: dict[str, Any]) -> str:
+def add_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate ALTER TABLE ADD COLUMN statement."""
     col_name = details["column"]
     col_def = details["definition"]
     col_sql = column_definition(col_name, col_def, "sqlite")
-    return f'ALTER TABLE "{table}" ADD COLUMN {col_sql}'
+    return [
+        f'ALTER TABLE "{table}" ADD COLUMN {col_sql}'
+    ]
 
 
-def drop_column_sql(table: str, details: dict[str, Any]) -> str:
+def drop_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate DROP COLUMN statement (SQLite 3.35.0+)."""
     col_name = details["column"]
-    return f'ALTER TABLE "{table}" DROP COLUMN "{col_name}"'
+    return [
+        f'ALTER TABLE "{table}" DROP COLUMN "{col_name}"'
+    ]
 
 
-def rename_column_sql(table: str, details: dict[str, Any]) -> str:
+def rename_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate RENAME COLUMN statement (SQLite 3.25.0+)."""
     from_col = details["from_column"]
     to_col = details["to_column"]
-    return f'ALTER TABLE "{table}" RENAME COLUMN "{from_col}" TO "{to_col}"'
+    return [
+        f'ALTER TABLE "{table}" RENAME COLUMN "{from_col}" TO "{to_col}"'
+    ]
 
 
-def alter_column_sql(table: str, _details: dict[str, Any]) -> str:
+def alter_column_sql(table: str, _details: dict[str, Any]) -> list[str]:
     """Rendered as the note `apply` acts on, because `apply` does act on it.
 
     See `_reconstruction_note` below for why this is a comment and not DDL.
     """
-    return _reconstruction_note(table, "altering a column")
+    return [
+        _reconstruction_note(table, "altering a column")
+    ]
 
 
-def add_index_sql(table: str, details: dict[str, Any]) -> str:
+def add_index_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate CREATE INDEX statement."""
     idx_name = details["index"]
     idx_def = details["definition"]
@@ -420,13 +440,17 @@ def add_index_sql(table: str, details: dict[str, Any]) -> str:
     where = f" WHERE {idx_def['where']}" if idx_def.get("where") else ""
 
     cols_sql = ", ".join(f'"{c}"' for c in columns)
-    return f'CREATE {unique}INDEX "{idx_name}" ON "{table}" ({cols_sql}){where}'
+    return [
+        f'CREATE {unique}INDEX "{idx_name}" ON "{table}" ({cols_sql}){where}'
+    ]
 
 
-def drop_index_sql(_table: str, details: dict[str, Any]) -> str:
+def drop_index_sql(_table: str, details: dict[str, Any]) -> list[str]:
     """Generate DROP INDEX statement."""
     idx_name = details["index"]
-    return f'DROP INDEX "{idx_name}"'
+    return [
+        f'DROP INDEX "{idx_name}"'
+    ]
 
 
 # THE APPLIER RECONSTRUCTS THESE THREE AND THE RENDERER RAISED ON THEM, SO
@@ -450,7 +474,7 @@ def _reconstruction_note(table: str, what: str) -> str:
     return f"-- Table reconstruction required for {table} ({what})"
 
 
-def add_constraint_sql(table: str, details: dict[str, Any]) -> str:
+def add_constraint_sql(table: str, details: dict[str, Any]) -> list[str]:
     """SQLite and Turso cannot add a named constraint to an existing table."""
     raise NotImplementedError(
         f"Cannot add constraint {details['constraint']!r} to {table!r}: SQLite "
@@ -460,7 +484,7 @@ def add_constraint_sql(table: str, details: dict[str, Any]) -> str:
     )
 
 
-def drop_constraint_sql(table: str, details: dict[str, Any]) -> str:
+def drop_constraint_sql(table: str, details: dict[str, Any]) -> list[str]:
     """SQLite and Turso cannot drop a named constraint from an existing table."""
     raise NotImplementedError(
         f"Cannot drop constraint {details['constraint']!r} from {table!r}: "
@@ -470,28 +494,37 @@ def drop_constraint_sql(table: str, details: dict[str, Any]) -> str:
     )
 
 
-def add_foreign_key_sql(table: str, _details: dict[str, Any]) -> str:
+def add_foreign_key_sql(table: str, _details: dict[str, Any]) -> list[str]:
     """Rendered as the note `apply` acts on, because `apply` does act on it."""
-    return _reconstruction_note(table, "adding a foreign key")
+    return [
+        _reconstruction_note(table, "adding a foreign key")
+    ]
 
 
-def drop_foreign_key_sql(table: str, _details: dict[str, Any]) -> str:
+def drop_foreign_key_sql(table: str, _details: dict[str, Any]) -> list[str]:
     """Rendered as the note `apply` acts on, because `apply` does act on it."""
-    return _reconstruction_note(table, "dropping a foreign key")
+    return [
+        _reconstruction_note(table, "dropping a foreign key")
+    ]
 
 
-def create_view_sql(_table: str, details: dict[str, Any]) -> str:
+def create_view_sql(_table: str, details: dict[str, Any]) -> list[str]:
     """Generate CREATE VIEW statement."""
     from declaro_persistum.applier.sqlite import generate_create_view
 
     return generate_create_view(details)  # type: ignore[arg-type]
 
 
-def drop_view_sql(_table: str, details: dict[str, Any]) -> str:
-    """Generate DROP VIEW statement."""
+def drop_view_sql(_table: str, details: dict[str, Any]) -> list[str]:
+    """The statements that remove a view on SQLite and Turso.
+
+    RETURNED, NOT WRAPPED. `generate_drop_view` builds the list itself,
+    because a materialized view here is a table with a registry row beside it
+    and removing it takes more than one statement.
+    """
     from declaro_persistum.applier.sqlite import generate_drop_view
 
-    return generate_drop_view(details["name"])
+    return generate_drop_view(details["name"], bool(details.get("materialized")))
 
 
 # =============================================================================
@@ -522,17 +555,32 @@ _SQL_GENERATORS: dict[str, Any] = {
 }
 
 
-def generate_operation_sql(operation: Operation) -> str:
-    """Generate SQL for a single operation."""
+def statements_for(operation: Operation) -> list[str]:
+    """The statements an operation runs, already separated.
+
+    THE SPLIT IS GONE BECAUSE THE JOIN IS GONE. The appliers used to take a
+    generated string and cut it with `str.split(";")`, which is wrong twice: a
+    trigger body carries semicolons between BEGIN and END, and so does any
+    string literal holding one. Both arrived in real declarations. A generator
+    that needs several statements returns several, and nothing between here
+    and the engine has to know what a semicolon means.
+    """
     op_type = operation["op"]
-    table = operation["table"]
-    details = operation["details"]
 
     generator = _SQL_GENERATORS.get(op_type)
     if not generator:
         raise ValueError(f"Unknown operation type: {op_type}")
 
-    return generator(table, details)
+    return generator(operation["table"], operation["details"])
+
+
+def generate_operation_sql(operation: Operation) -> str:
+    """The same statements as one block, for a person to read.
+
+    JOINING IS SAFE HERE AND WAS NOT SAFE ON THE EXECUTION PATH, because
+    nothing parses this back. It is what `--dry-run` prints.
+    """
+    return ";\n".join(statements_for(operation))
 
 
 # `generate_sql` WAS HERE AND IS NOW ONLY IN `applier/__init__.py`. This copy

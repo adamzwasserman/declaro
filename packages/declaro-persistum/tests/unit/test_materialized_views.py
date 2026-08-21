@@ -314,11 +314,12 @@ class TestSQLiteApplierIntegration:
             "refresh": "manual",
         }
 
-        sql = generate_create_view(view)
+        statements = generate_create_view(view)
 
-        # Should NOT be CREATE VIEW (that's for non-materialized)
-        # Should use table-based emulation
-        assert "CREATE TABLE" in sql or "_dp_materialized_views" in sql
+        # Emulation, not CREATE VIEW. The statements come back separate rather
+        # than joined by semicolons, because a trigger body carries its own.
+        assert any(s.startswith("CREATE TABLE") for s in statements)
+        assert any("_dp_materialized_views" in s for s in statements)
 
     def test_sqlite_generate_create_view_regular_view(self):
         """SQLite should create regular view for non-materialized."""
@@ -331,10 +332,12 @@ class TestSQLiteApplierIntegration:
             "materialized": False,
         }
 
-        sql = generate_create_view(view)
+        statements = generate_create_view(view)
 
-        assert "CREATE VIEW" in sql
-        assert "active_users" in sql
+        assert statements == [
+            'CREATE VIEW IF NOT EXISTS "active_users" AS\n'
+            "SELECT * FROM users WHERE status = 'active'"
+        ]
 
     def test_sqlite_no_warning_for_emulated_matview(self):
         """SQLite should NOT emit warning when using emulation."""
@@ -373,10 +376,12 @@ class TestTursoApplierIntegration:
             "materialized": True,
         }
 
-        sql = generate_create_view(view)
+        statements = generate_create_view(view)
 
-        # Should use table-based emulation
-        assert "CREATE TABLE" in sql or "_dp_materialized_views" in sql
+        # Turso emulates the same way SQLite does, and imports the same
+        # generator, which `test_turso_sqlite_identical_sql` below asserts.
+        assert any(s.startswith("CREATE TABLE") for s in statements)
+        assert any("_dp_materialized_views" in s for s in statements)
 
     def test_turso_sqlite_identical_sql(self):
         """Turso and SQLite should generate identical emulation SQL."""

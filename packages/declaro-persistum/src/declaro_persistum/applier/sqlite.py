@@ -21,6 +21,7 @@ from declaro_persistum.applier.shared import (
     generate_operation_sql,
     requires_reconstruction,
     single_change_property,
+    statements_for,
 )
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, MigrationError
 from declaro_persistum.types import ApplyResult, Operation, View
@@ -118,12 +119,13 @@ async def apply(
                     executed.append(f"Table reconstruction for {operation['table']}")
                 else:
                     # Direct SQL execution
-                    sql = generate_operation_sql(operation)
-                    for statement in sql.split(";"):
-                        statement = statement.strip()
-                        if statement:
-                            await connection.execute(statement)
-                    executed.append(sql)
+                    # THE LIST IS EXECUTED AS IT WAS BUILT. This took a joined
+                    # string and cut it with `split(";")`, which is wrong inside a
+                    # trigger body and inside any string literal holding one.
+                    statements = statements_for(operation)
+                    for statement in statements:
+                        await connection.execute(statement)
+                    executed.extend(statements)
 
             except A_BUG_IN_THIS_PACKAGE:
                 # OURS, AND THE ENGINE WAS NEVER ASKED. A KeyError here means
@@ -282,7 +284,7 @@ async def _execute_with_reconstruction(
 # It and `tests/unit/test_triggers.py` were each other's only reason to exist,
 # the same pair `generate_enum_check` formed with `test_enums.py` earlier
 # today, and a hollow test file is what kept both invisible.
-def generate_create_view(view: View) -> str:
+def generate_create_view(view: View) -> list[str]:
     """
     Generate SQLite CREATE VIEW SQL.
 
@@ -304,7 +306,7 @@ def generate_create_view(view: View) -> str:
     materialized = view.get("materialized", False)
 
     if not materialized:
-        return f'CREATE VIEW IF NOT EXISTS "{name}" AS\n{query}'
+        return [f'CREATE VIEW IF NOT EXISTS "{name}" AS\n{query}']
 
     # Use table-based emulation for materialized views
     refresh = view.get("refresh", "manual")
@@ -333,17 +335,50 @@ def generate_create_view(view: View) -> str:
                 )
             )
 
-    return ";\n".join(statements)
+    return statements
 
 
-def generate_drop_view(name: str) -> str:
+def generate_drop_view(name: str, materialized: bool) -> list[str]:
+    """The statements that remove a view, or the table standing in for one.
+
+    A MATERIALIZED VIEW HERE IS A TABLE. The emulation builds one with CREATE
+    TABLE, so `DROP VIEW` could not remove it: the object survived, its
+    registry row survived, and the schema reported a view the database no
+    longer had.
+
+    THE NAME IS QUOTED. It was interpolated bare, so a view called `order` or
+    `Select` produced a syntax error while every other generator here quoted.
+
+    `materialized` IS REQUIRED AND HAS NO DEFAULT. The caller reads it off the
+    operation the differ emitted, so it is always known, and a default would
+    let a forgetful caller take the plain branch and leave a table behind.
+
+    `drop_matview_sql` ALREADY BUILT THE MATERIALIZED HALF. An earlier draft
+    of this wrote its own DROP TABLE and DELETE, then had to invent a CREATE
+    IF NOT EXISTS for a registry that need not exist, which is machinery for a
+    problem the existing function does not have: it only runs when a
+    materialized view is being dropped, and that implies the registry.
+
+    WHAT THIS DOES NOT DO. A materialized view refreshed by trigger has three
+    triggers for each watched table, and the drop operation carries no record
+    of which tables were watched, so they are left behind and fire against a
+    table that is gone. `drop_refresh_triggers_sql` builds those statements
+    and needs the source list, which the differ does not put in the details.
     """
-    Generate SQLite DROP VIEW SQL.
+    from declaro_persistum.abstractions.materialized_views import drop_matview_sql
 
-    Args:
-        name: View name
+    if materialized:
+        return drop_matview_sql(name)
+    return [f'DROP VIEW IF EXISTS "{name}"']
 
-    Returns:
-        SQL statement
-    """
-    return f"DROP VIEW IF EXISTS {name}"
+
+# WHAT THE DISPATCH TABLES READ OFF THIS MODULE. `APPLIERS` takes `apply`
+# and `SQL_GENERATORS` takes `generate_operation_sql`, which nothing here
+# calls, so a linter reads it as an unused import and removing it breaks
+# `declaro generate` on SQLite.
+__all__ = [
+    "apply",
+    "generate_create_view",
+    "generate_drop_view",
+    "generate_operation_sql",
+]

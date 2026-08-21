@@ -24,6 +24,7 @@ from declaro_persistum.applier.shared import (
     dry_run_preview,
     generate_operation_sql,
     requires_reconstruction,
+    statements_for,
 )
 
 # Turso uses identical view generation to SQLite.
@@ -164,12 +165,13 @@ async def apply(
                 executed.append(f"Table reconstruction for {table_or_empty}")
             else:
                 operation = ops[0]
-                sql = generate_operation_sql(operation)
-                for statement in sql.split(";"):
-                    statement = statement.strip()
-                    if statement:
-                        await connection.execute(statement)
-                executed.append(sql)
+                # THE LIST IS EXECUTED AS IT WAS BUILT. This took a joined
+                # string and cut it with `split(";")`, which is wrong inside a
+                # trigger body and inside any string literal holding one.
+                statements = statements_for(operation)
+                for statement in statements:
+                    await connection.execute(statement)
+                executed.extend(statements)
 
             await connection.commit()
 
@@ -293,4 +295,12 @@ async def _execute_coalesced_reconstruction(
 # "TursoApplier" was listed here long after the class was deleted, so a star
 # import raised AttributeError while every other check stayed green. mypy's
 # name-defined does not read __all__; ruff's F822 does, and now gates it.
-__all__ = ["generate_create_view", "generate_drop_view"]
+__all__ = [
+    "apply",
+    "generate_create_view",
+    "generate_drop_view",
+    # RE-EXPORTED, NOT UNUSED. `SQL_GENERATORS` in applier/__init__ reads
+    # this name off this module, so nothing here calls it and removing it
+    # breaks `declaro generate` on this dialect.
+    "generate_operation_sql",
+]

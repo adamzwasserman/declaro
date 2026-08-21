@@ -75,9 +75,12 @@ class TestViewApplierPostgreSQL:
             "name": "active_users",
             "query": "SELECT id, email FROM users WHERE status = 'active'",
         }
-        sql = generate_create_view(view)
-        assert "CREATE OR REPLACE VIEW active_users AS" in sql
-        assert "SELECT id, email FROM users" in sql
+        statements = generate_create_view(view)
+
+        assert statements == [
+            'CREATE OR REPLACE VIEW "active_users" AS\n'
+            "SELECT id, email FROM users WHERE status = 'active'"
+        ]
 
     def test_create_materialized_view_sql(self):
         """Generate CREATE MATERIALIZED VIEW SQL."""
@@ -88,22 +91,28 @@ class TestViewApplierPostgreSQL:
             "query": "SELECT COUNT(*) as total FROM users",
             "materialized": True,
         }
-        sql = generate_create_view(view)
-        assert "CREATE MATERIALIZED VIEW user_stats AS" in sql
+        statements = generate_create_view(view)
+
+        assert statements == [
+            'CREATE MATERIALIZED VIEW "user_stats" AS\n'
+            "SELECT COUNT(*) as total FROM users"
+        ]
 
     def test_drop_view_sql(self):
         """Generate DROP VIEW SQL."""
         from declaro_persistum.applier.postgresql import generate_drop_view
 
         sql = generate_drop_view("active_users", materialized=False)
-        assert "DROP VIEW IF EXISTS active_users" in sql
+
+        assert sql == 'DROP VIEW IF EXISTS "active_users"'
 
     def test_drop_materialized_view_sql(self):
         """Generate DROP MATERIALIZED VIEW SQL."""
         from declaro_persistum.applier.postgresql import generate_drop_view
 
         sql = generate_drop_view("user_stats", materialized=True)
-        assert "DROP MATERIALIZED VIEW IF EXISTS user_stats" in sql
+
+        assert sql == 'DROP MATERIALIZED VIEW IF EXISTS "user_stats"'
 
 class TestViewApplierSQLite:
     """Tests for SQLite view applier."""
@@ -116,8 +125,12 @@ class TestViewApplierSQLite:
             "name": "active_users",
             "query": "SELECT id, email FROM users WHERE status = 'active'",
         }
-        sql = generate_create_view(view)
-        assert 'CREATE VIEW IF NOT EXISTS "active_users" AS' in sql
+        statements = generate_create_view(view)
+
+        assert statements == [
+            'CREATE VIEW IF NOT EXISTS "active_users" AS\n'
+            "SELECT id, email FROM users WHERE status = 'active'"
+        ]
 
     def test_create_materialized_view_uses_emulation(self):
         """SQLite uses table-based emulation for materialized views."""
@@ -132,11 +145,14 @@ class TestViewApplierSQLite:
         }
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            sql = generate_create_view(view)
-            # Should use table-based emulation
-            assert "CREATE TABLE" in sql
-            assert "_dp_materialized_views" in sql
-            # Should NOT warn - emulation replaces warning
+            statements = generate_create_view(view)
+
+            # THE STATEMENTS ARE SEPARATE, not one string joined by semicolons.
+            # A trigger body carries semicolons between BEGIN and END, so the
+            # applier that used to split a joined string cut one in half.
+            assert any(s.startswith("CREATE TABLE") for s in statements)
+            assert any("_dp_materialized_views" in s for s in statements)
+            # Emulation replaces the warning, so there must not be one.
             matview_warnings = [x for x in w if "materialized" in str(x.message).lower()]
             assert len(matview_warnings) == 0
 
@@ -144,8 +160,11 @@ class TestViewApplierSQLite:
         """Generate SQLite DROP VIEW SQL."""
         from declaro_persistum.applier.sqlite import generate_drop_view
 
-        sql = generate_drop_view("active_users")
-        assert "DROP VIEW IF EXISTS active_users" in sql
+        # `materialized` is required and has no default: a caller that forgot
+        # it emitted DROP VIEW against a table and left the object behind.
+        statements = generate_drop_view("active_users", materialized=False)
+
+        assert statements == ['DROP VIEW IF EXISTS "active_users"']
 
 
 class TestViewValidation:

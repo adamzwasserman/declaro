@@ -62,9 +62,11 @@ async def apply(
     PostgreSQL's transactional DDL means we can safely roll back
     all changes if any operation fails.
     """
-    sql_statements = [
-        generate_operation_sql(operations[i]) for i in execution_order
-    ]
+    # ONE ENTRY PER OPERATION, each holding that operation's statements. The
+    # dry run prints them joined; the run below executes them one at a time,
+    # because an operation is sometimes more than one statement.
+    per_operation = [statements_for(operations[i]) for i in execution_order]
+    sql_statements = [";\n".join(group) for group in per_operation]
 
     if dry_run:
         return {
@@ -83,7 +85,8 @@ async def apply(
             for i, op_idx in enumerate(execution_order):
                 sql = sql_statements[i]
                 try:
-                    await connection.execute(sql)
+                    for statement in per_operation[i]:
+                        await connection.execute(statement)
                     executed.append(sql)
                 except Exception as e:
                     raise MigrationError(
@@ -120,11 +123,15 @@ async def apply(
 
 
 
-def generate_operation_sql(operation: Operation) -> str:
-    """Generate SQL for a single operation."""
+def statements_for(operation: Operation) -> list[str]:
+    """The statements an operation runs, already separated.
+
+    The same shape as `shared.statements_for`, for the same reason: an
+    operation is sometimes more than one statement, and joining them into a
+    string only to take them apart again is how a trigger body and a string
+    literal both got cut in half on the other two dialects.
+    """
     op_type = operation["op"]
-    table = operation["table"]
-    details = operation["details"]
 
     generator = OPERATION_SQL.get(op_type)
     if not generator:
@@ -133,10 +140,19 @@ def generate_operation_sql(operation: Operation) -> str:
             f"Handled: {', '.join(sorted(OPERATION_SQL))}"
         )
 
-    return generator(table, details)
+    return generator(operation["table"], operation["details"])
 
 
-def _create_table_sql(table: str, details: dict[str, Any]) -> str:
+def generate_operation_sql(operation: Operation) -> str:
+    """The same statements as one block, for a person to read.
+
+    This is what `--dry-run` prints. Nothing parses it back, which is why
+    joining is safe here and was not safe on the execution path.
+    """
+    return ";\n".join(statements_for(operation))
+
+
+def _create_table_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate CREATE TABLE statement."""
     columns = details.get("columns", {})
     primary_key = details.get("primary_key", [])
@@ -170,7 +186,9 @@ def _create_table_sql(table: str, details: dict[str, Any]) -> str:
         col_defs.append(constraint_clause(name, definition))
 
     columns_sql = ",\n    ".join(col_defs)
-    return f'CREATE TABLE "{table}" (\n    {columns_sql}\n)'
+    return [
+        f'CREATE TABLE "{table}" (\n    {columns_sql}\n)'
+    ]
 
 
 def _column_definition(name: str, col: Column) -> str:
@@ -184,39 +202,49 @@ def _column_definition(name: str, col: Column) -> str:
     """
     return column_definition(name, col, "postgresql")
 
-def _drop_table_sql(table: str, _details: dict[str, Any]) -> str:
+def _drop_table_sql(table: str, _details: dict[str, Any]) -> list[str]:
     """Generate DROP TABLE statement."""
-    return f'DROP TABLE "{table}"'
+    return [
+        f'DROP TABLE "{table}"'
+    ]
 
 
-def _rename_table_sql(table: str, details: dict[str, Any]) -> str:
+def _rename_table_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate ALTER TABLE RENAME statement."""
     new_name = details["new_name"]
-    return f'ALTER TABLE "{table}" RENAME TO "{new_name}"'
+    return [
+        f'ALTER TABLE "{table}" RENAME TO "{new_name}"'
+    ]
 
 
-def _add_column_sql(table: str, details: dict[str, Any]) -> str:
+def _add_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate ALTER TABLE ADD COLUMN statement."""
     col_name = details["column"]
     col_def = details["definition"]
     col_sql = _column_definition(col_name, col_def)
-    return f'ALTER TABLE "{table}" ADD COLUMN {col_sql}'
+    return [
+        f'ALTER TABLE "{table}" ADD COLUMN {col_sql}'
+    ]
 
 
-def _drop_column_sql(table: str, details: dict[str, Any]) -> str:
+def _drop_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate ALTER TABLE DROP COLUMN statement."""
     col_name = details["column"]
-    return f'ALTER TABLE "{table}" DROP COLUMN "{col_name}"'
+    return [
+        f'ALTER TABLE "{table}" DROP COLUMN "{col_name}"'
+    ]
 
 
-def _rename_column_sql(table: str, details: dict[str, Any]) -> str:
+def _rename_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate ALTER TABLE RENAME COLUMN statement."""
     from_col = details["from_column"]
     to_col = details["to_column"]
-    return f'ALTER TABLE "{table}" RENAME COLUMN "{from_col}" TO "{to_col}"'
+    return [
+        f'ALTER TABLE "{table}" RENAME COLUMN "{from_col}" TO "{to_col}"'
+    ]
 
 
-def _alter_column_sql(table: str, details: dict[str, Any]) -> str:
+def _alter_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate ALTER TABLE ALTER COLUMN statement(s)."""
     col_name = details["column"]
     changes = details["changes"]
@@ -281,10 +309,12 @@ def _alter_column_sql(table: str, details: dict[str, Any]) -> str:
             f"asked for {sorted(changes)}."
         )
 
-    return "; ".join(statements)
+    return [
+        "; ".join(statements)
+    ]
 
 
-def _add_index_sql(table: str, details: dict[str, Any]) -> str:
+def _add_index_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate CREATE INDEX statement."""
     idx_name = details["index"]
     idx_def = details["definition"]
@@ -294,38 +324,48 @@ def _add_index_sql(table: str, details: dict[str, Any]) -> str:
     where = f" WHERE {idx_def['where']}" if idx_def.get("where") else ""
 
     cols_sql = ", ".join(f'"{c}"' for c in columns)
-    return f'CREATE {unique}INDEX "{idx_name}" ON "{table}"{using} ({cols_sql}){where}'
+    return [
+        f'CREATE {unique}INDEX "{idx_name}" ON "{table}"{using} ({cols_sql}){where}'
+    ]
 
 
-def _drop_index_sql(_table: str, details: dict[str, Any]) -> str:
+def _drop_index_sql(_table: str, details: dict[str, Any]) -> list[str]:
     """Generate DROP INDEX statement."""
     idx_name = details["index"]
-    return f'DROP INDEX "{idx_name}"'
+    return [
+        f'DROP INDEX "{idx_name}"'
+    ]
 
 
-def _add_constraint_sql(table: str, details: dict[str, Any]) -> str:
+def _add_constraint_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate ALTER TABLE ADD CONSTRAINT statement."""
     const_name = details["constraint"]
     const_def = details["definition"]
 
     if const_def.get("type") == "check":
         expr = const_def.get("expression", "")
-        return f'ALTER TABLE "{table}" ADD CONSTRAINT "{const_name}" CHECK ({expr})'
+        return [
+            f'ALTER TABLE "{table}" ADD CONSTRAINT "{const_name}" CHECK ({expr})'
+        ]
     elif const_def.get("type") == "unique":
         cols = const_def.get("columns", [])
         cols_sql = ", ".join(f'"{c}"' for c in cols)
-        return f'ALTER TABLE "{table}" ADD CONSTRAINT "{const_name}" UNIQUE ({cols_sql})'
+        return [
+            f'ALTER TABLE "{table}" ADD CONSTRAINT "{const_name}" UNIQUE ({cols_sql})'
+        ]
     else:
         raise ValueError(f"Unknown constraint type: {const_def.get('type')}")
 
 
-def _drop_constraint_sql(table: str, details: dict[str, Any]) -> str:
+def _drop_constraint_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate ALTER TABLE DROP CONSTRAINT statement."""
     const_name = details["constraint"]
-    return f'ALTER TABLE "{table}" DROP CONSTRAINT "{const_name}"'
+    return [
+        f'ALTER TABLE "{table}" DROP CONSTRAINT "{const_name}"'
+    ]
 
 
-def _add_foreign_key_sql(table: str, details: dict[str, Any]) -> str:
+def _add_foreign_key_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Generate ALTER TABLE ADD FOREIGN KEY statement."""
     col_name = details["column"]
     ref = details["references"]
@@ -342,10 +382,12 @@ def _add_foreign_key_sql(table: str, details: dict[str, Any]) -> str:
     if details.get("on_update"):
         sql += f" ON UPDATE {details['on_update'].upper().replace('_', ' ')}"
 
-    return sql
+    return [
+        sql
+    ]
 
 
-def _drop_foreign_key_sql(table: str, details: dict[str, Any]) -> str:
+def _drop_foreign_key_sql(table: str, details: dict[str, Any]) -> list[str]:
     """Drop a foreign key by both names it can have.
 
     THE CONVENTION NAME IS ONLY HALF OF WHAT EXISTS. This dropped
@@ -371,20 +413,25 @@ def _drop_foreign_key_sql(table: str, details: dict[str, Any]) -> str:
 
     convention = f"fk_{table}_{col_name}_{ref_table}"
     postgres_default = f"{table}_{col_name}_fkey"
-    return (
-        f'ALTER TABLE "{table}" DROP CONSTRAINT IF EXISTS "{convention}"; '
-        f'ALTER TABLE "{table}" DROP CONSTRAINT IF EXISTS "{postgres_default}"'
-    )
+    # TWO STATEMENTS, NOT ONE STRING HOLDING A SEMICOLON. These used to be
+    # joined with "; " inside a single f-string, which the SQLite and Turso
+    # appliers would then have had to split apart again.
+    return [
+        f'ALTER TABLE "{table}" DROP CONSTRAINT IF EXISTS "{convention}"',
+        f'ALTER TABLE "{table}" DROP CONSTRAINT IF EXISTS "{postgres_default}"',
+    ]
 
 
-def _create_view_sql(_table: str, details: dict[str, Any]) -> str:
+def _create_view_sql(_table: str, details: dict[str, Any]) -> list[str]:
     """Generate CREATE VIEW or CREATE MATERIALIZED VIEW statement."""
     return generate_create_view(details)  # type: ignore[arg-type]
 
 
-def _drop_view_sql(_table: str, details: dict[str, Any]) -> str:
+def _drop_view_sql(_table: str, details: dict[str, Any]) -> list[str]:
     """Generate DROP VIEW or DROP MATERIALIZED VIEW statement."""
-    return generate_drop_view(details["name"], details.get("materialized", False))
+    return [
+        generate_drop_view(details["name"], bool(details.get("materialized")))
+    ]
 
 
 # =============================================================================
@@ -410,42 +457,38 @@ def _drop_view_sql(_table: str, details: dict[str, Any]) -> str:
 
 
 
-def generate_create_view(view: View) -> str:
-    """
-    Generate CREATE VIEW or CREATE MATERIALIZED VIEW SQL.
+def generate_create_view(view: View) -> list[str]:
+    """The statements that create a view, native or materialized.
 
-    Args:
-        view: View definition
-
-    Returns:
-        SQL statement
+    THE NAME IS QUOTED. It was interpolated bare, so a view called `order` or
+    `Select` produced a syntax error, and a mixed-case name was folded to
+    lower case and became a different object from the one declared.
     """
     name = view["name"]
     query = view["query"]
-    materialized = view.get("materialized", False)
 
-    if materialized:
-        return f"CREATE MATERIALIZED VIEW {name} AS\n{query}"
-    else:
-        return f"CREATE OR REPLACE VIEW {name} AS\n{query}"
+    if view.get("materialized"):
+        return [f'CREATE MATERIALIZED VIEW "{name}" AS\n{query}']
+    return [f'CREATE OR REPLACE VIEW "{name}" AS\n{query}']
 
 
-def generate_drop_view(name: str, materialized: bool = False) -> str:
+def generate_drop_view(name: str, materialized: bool) -> str:
+    """DROP VIEW or DROP MATERIALIZED VIEW, which are different statements.
+
+    `materialized` IS REQUIRED AND HAS NO DEFAULT. It defaulted to False, so a
+    caller that forgot it emitted DROP VIEW against a materialized view, which
+    PostgreSQL refuses with WrongObjectTypeError rather than ignoring. The
+    differ puts `materialized` in the drop operation's details, so the caller
+    always knows it; the default only hid a caller that had not passed it.
+
+    THE NAME IS QUOTED, for the same reason as on the other two dialects. A
+    view called `order` is a legal name and unquoted it is a syntax error.
+
+    The SQLite twin of this had both defects and was fixed first. That is the
+    fifth pair in this package where a fix reached one copy and not the other.
     """
-    Generate DROP VIEW SQL.
-
-    Args:
-        name: View name
-        materialized: Whether it's a materialized view
-
-    Returns:
-        SQL statement
-    """
-    if materialized:
-        return f"DROP MATERIALIZED VIEW IF EXISTS {name}"
-    else:
-        return f"DROP VIEW IF EXISTS {name}"
-
+    kind = "MATERIALIZED VIEW" if materialized else "VIEW"
+    return f'DROP {kind} IF EXISTS "{name}"'
 
 # HOISTED OUT OF THE FUNCTION. This table was a local variable rebuilt on
 # every call, so no gate could read it and it silently fell one operation

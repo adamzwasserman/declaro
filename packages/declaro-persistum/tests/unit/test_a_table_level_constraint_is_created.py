@@ -114,7 +114,10 @@ def test_the_renderer_puts_the_constraint_in_the_create() -> None:
     SQLite and Turso have no ADD CONSTRAINT, so a constraint not written here
     can never be added later.
     """
-    rendered = create_table_sql("t", {**DECLARED["t"], "primary_key": None})
+    statements = create_table_sql("t", {**DECLARED["t"], "primary_key": None})
+    # ONE CREATE TABLE IS ONE STATEMENT. The generator returns a list because
+    # some operations are several; this one is not.
+    rendered = "\n".join(statements)
 
     assert "CHECK" in rendered.upper(), rendered
     assert "lo < hi" in rendered, rendered
@@ -122,7 +125,10 @@ def test_the_renderer_puts_the_constraint_in_the_create() -> None:
 
 def test_the_constraint_is_named_in_the_create() -> None:
     """An unnamed constraint cannot be dropped by name afterwards."""
-    rendered = create_table_sql("t", {**DECLARED["t"], "primary_key": None})
+    statements = create_table_sql("t", {**DECLARED["t"], "primary_key": None})
+    # ONE CREATE TABLE IS ONE STATEMENT. The generator returns a list because
+    # some operations are several; this one is not.
+    rendered = "\n".join(statements)
 
     assert "ck_order" in rendered, rendered
 
@@ -191,7 +197,7 @@ async def test_a_table_with_no_constraints_is_unchanged() -> None:
     """The control. Rendering an empty constraints map must add nothing."""
     plain = {"columns": {"a": {"type": "integer", "primary_key": True}}}
 
-    rendered = create_table_sql("t", {**plain, "primary_key": None})
+    rendered = "\n".join(create_table_sql("t", {**plain, "primary_key": None}))
 
     assert "CHECK" not in rendered.upper(), rendered
 
