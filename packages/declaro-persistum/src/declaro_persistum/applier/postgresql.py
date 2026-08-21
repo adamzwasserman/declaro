@@ -18,7 +18,7 @@ from declaro_persistum.applier.shared import (
 )
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import MigrationError
-from declaro_persistum.types import ApplyResult, Column, Operation, View
+from declaro_persistum.types import ApplyResult, Column, Operation, View, changed_to
 
 # Type for SQL generator functions
 SQLGenerator = Callable[..., str]
@@ -265,20 +265,20 @@ def _alter_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     statements: list[str] = []
 
     if "type" in changes:
-        new_type = changes["type"]["to"]
+        new_type = changed_to(changes["type"])
         statements.append(
             f'ALTER TABLE "{table}" ALTER COLUMN "{col_name}" '
             f'TYPE {new_type} USING "{col_name}"::{new_type}'
         )
 
     if "nullable" in changes:
-        if changes["nullable"]["to"]:
+        if changed_to(changes["nullable"]):
             statements.append(f'ALTER TABLE "{table}" ALTER COLUMN "{col_name}" DROP NOT NULL')
         else:
             statements.append(f'ALTER TABLE "{table}" ALTER COLUMN "{col_name}" SET NOT NULL')
 
     if "default" in changes:
-        new_default = changes["default"]["to"]
+        new_default = changed_to(changes["default"])
         if new_default is None:
             statements.append(f'ALTER TABLE "{table}" ALTER COLUMN "{col_name}" DROP DEFAULT')
         else:
@@ -300,7 +300,7 @@ def _alter_column_sql(table: str, details: dict[str, Any]) -> list[str]:
     # uses below.
     if "unique" in changes:
         constraint = f"{table}_{col_name}_key"
-        if changes["unique"]["to"]:
+        if changed_to(changes["unique"]):
             statements.append(
                 f'ALTER TABLE "{table}" ADD CONSTRAINT "{constraint}" '
                 f'UNIQUE ("{col_name}")'

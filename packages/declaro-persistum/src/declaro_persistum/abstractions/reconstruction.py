@@ -28,7 +28,7 @@ from declaro_persistum.abstractions.pragma_compat import (
 )
 from declaro_persistum.applier.shared import sqlite_type
 from declaro_persistum.boundary import boundary, helper
-from declaro_persistum.types import Column, Operation
+from declaro_persistum.types import Column, Operation, changed_to
 
 logger = logging.getLogger(__name__)
 
@@ -230,8 +230,7 @@ def _apply_alter_column(columns: dict[str, Column], details: dict[str, Any]) -> 
     for key, value in changes.items():
         if key in ("type", "nullable", "default", "unique", "check"):
             # The differ produces {"from": old, "to": new} dicts for changes
-            if isinstance(value, dict) and "to" in value:
-                value = value["to"]
+            value = changed_to(value)
             if value is None and key == "default":
                 col_def.pop("default", None)
             else:

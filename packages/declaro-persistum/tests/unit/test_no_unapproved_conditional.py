@@ -38,9 +38,9 @@ _SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "declaro_persistum"
 
 # The count when the rule was given. LOWER THIS as conditionals are removed.
 # It must never be raised.
-# 722 after the DDL splitter stopped re-deciding which characters open a
-# quoted name and read the table thirty lines above it instead.
-BASELINE = 722
+# 720 after the differ's change record got one reader. Five sites asked
+# `isinstance(value, dict) and "to" in value` and four assumed the answer.
+BASELINE = 720
 
 _MARKER = "APPROVED-IF"
 

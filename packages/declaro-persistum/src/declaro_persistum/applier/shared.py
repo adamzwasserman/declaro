@@ -20,7 +20,7 @@ from typing import Any
 from declaro_persistum.inspector.shared import (
     columns_from_pragma_rows as columns_from_pragma_rows,
 )
-from declaro_persistum.types import ApplyResult, Column, Dialect, Operation
+from declaro_persistum.types import ApplyResult, Column, Dialect, Operation, changed_to
 
 # =============================================================================
 # Type mapping
@@ -667,7 +667,7 @@ def _reconstruct_alter_column(
     _require_column(columns, column, operation)
 
     for key, raw in details["changes"].items():
-        value = raw["to"] if isinstance(raw, dict) and "to" in raw else raw
+        value = changed_to(raw)
 
         # A `to: None` MEANS THE PROPERTY IS GONE. Assigning it instead put
         # None into the column definition, and the reconstruction renderer
@@ -759,8 +759,7 @@ def single_change_property(operation: Operation) -> tuple[str, Any] | None:
     for key in ("nullable", "type", "default"):
         if key in changes:
             val = changes[key]
-            if isinstance(val, dict) and "to" in val:
-                val = val["to"]
+            val = changed_to(val)
             return key, val
 
     return None

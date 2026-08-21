@@ -124,6 +124,30 @@ def is_our_table(name: str) -> bool:
     return name.startswith(_OUR_PREFIXES)
 
 
+def changed_to(value: Any) -> Any:
+    """What a property became, whether or not it arrived as a change record.
+
+    The differ writes `{"from": old, "to": new}` for a property that changed,
+    and a bare value where it did not go through that path. Nine places read
+    that, and on 2026-08-21 they disagreed: the PostgreSQL applier wrote
+    `changes["type"]["to"]` and assumed the record, while five other sites
+    tested `isinstance(value, dict) and "to" in value` first.
+
+    So a bare value reaching PostgreSQL raised TypeError, and a record
+    reaching a site that had forgotten the test went into a column definition
+    whole. The second has happened: `_map_type` called `.lower()` on a dict,
+    and a CHECK removed from the models rendered as `CHECK (None)`.
+
+    `to: None` IS AN ANSWER, not an absence. A property removed is written as
+    a change to None, and reading that as "no value" is what produced the
+    None above.
+
+    A dict without a `to` is some other dict. An index definition is a dict
+    too, and returning its contents would put the wrong thing in a column.
+    """
+    return value["to"] if isinstance(value, dict) and "to" in value else value
+
+
 class Enum(TypedDict, total=False):
     """
     Enum type definition.
