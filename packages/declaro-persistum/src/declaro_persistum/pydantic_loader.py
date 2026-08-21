@@ -19,7 +19,14 @@ from pydantic_core import PydanticUndefined
 
 from declaro_persistum.boundary import boundary, helper, recognizer
 from declaro_persistum.exceptions import LoaderError
-from declaro_persistum.types import Column, Index, Schema, Table, View
+from declaro_persistum.types import (
+    Column,
+    Index,
+    Schema,
+    Table,
+    View,
+    written_as,
+)
 
 # Python type to SQL type mapping
 PYTHON_TO_SQL_TYPE: dict[type | str, str] = {
@@ -319,15 +326,18 @@ def extract_field_metadata(field_info: Any) -> dict[str, Any]:
     meta: dict[str, Any] = {}
 
     # Check for json_schema_extra (Pydantic v2)
+    # A MAPPING IS HOW DECLARO'S OWN METADATA IS WRITTEN, and Pydantic's
+    # `metadata` list also holds constraint objects that are not ours. Reading
+    # the spelling is what tells declaro's entries from theirs.
     json_extra = getattr(field_info, "json_schema_extra", None)
-    if isinstance(json_extra, dict):
+    if written_as(dict, json_extra):
         meta.update(json_extra)
 
     # Check for metadata attribute
     metadata = getattr(field_info, "metadata", None)
     if metadata:
         for item in metadata:
-            if isinstance(item, dict):
+            if written_as(dict, item):
                 meta.update(item)
 
     # EVERY SPELLING OF "NO DEFAULT", RESOLVED HERE. This knew two, `None`
@@ -697,7 +707,10 @@ def views_from_module(module: Any) -> dict[str, View]:
         if name.startswith("_"):
             continue
         obj = getattr(module, name)
-        if not isinstance(obj, dict):
+        # A module's namespace holds every kind of thing. A view is written as
+        # a mapping, so anything else in there is not a declaration this
+        # loader is looking at.
+        if not written_as(dict, obj):
             continue
         if not all(k in obj for k in VIEW_REQUIRED):
             continue
@@ -709,7 +722,7 @@ def views_from_module(module: Any) -> dict[str, View]:
                 f"{list(VIEW_REQUIRED + VIEW_OPTIONAL)}.",
             )
         _check_view(obj)
-        views[obj["name"]] = obj  # type: ignore[assignment]
+        views[obj["name"]] = obj
     return views
 
 
@@ -724,6 +737,25 @@ def views_from_module(module: Any) -> dict[str, View]:
 #
 # Rule 13: the boundary declares the shape once so the differ and both
 # appliers can treat `name` as a string and `query` as SQL without re-checking.
+@helper
+def _named(name: str) -> str:
+    """The view's own name, which is what a reader is looking for."""
+    return name
+
+
+@helper
+def _unnamed(name: Any) -> str:
+    """No usable name, so the refusal shows what was written instead."""
+    return repr(name)
+
+
+# WHETHER THE VIEW HAS A NAME TO QUOTE, as a table rather than a conditional
+# expression.
+_VIEW_DESCRIBED: dict[bool, Callable[[Any], str]] = {
+    True: _named,
+    False: _unnamed,
+}
+
 _VIEW_FIELD_TYPES: dict[str, type] = {
     "name": str,
     "query": str,
@@ -746,16 +778,18 @@ def _check_view(obj: dict[str, Any]) -> None:
     needs an engine, the engine says so at apply time, and a loader guessing
     at validity would reject dialect-specific syntax it does not know.
     """
-    described = obj.get("name") if isinstance(obj.get("name"), str) else repr(obj.get("name"))
+    described = _VIEW_DESCRIBED[written_as(str, obj.get("name"))](obj.get("name"))
 
     for field, expected in _VIEW_FIELD_TYPES.items():
         if field not in obj:
             continue
         value = obj[field]
-        # `bool` is a subclass of `int`, so an `isinstance(x, int)` check would
-        # accept True for a numeric field. Only `materialized` is a bool here
-        # and it is checked against `bool` directly, so the order is safe.
-        if not isinstance(value, expected):
+        # WHAT THE VALUE INHERITS COUNTS, so a mapping or string a library
+        # subclassed is still the thing it derives from. The direction is
+        # what makes this safe where an `isinstance(x, int)` was not: `bool`
+        # derives from `int`, so a flag is written as a number and a number
+        # is not written as a flag, and `materialized` refuses 1.
+        if not written_as(expected, value):
             raise LoaderError(
                 f"view {described}: {field!r} is "
                 f"{type(value).__name__}, and a view's {field!r} must be "  # honest: ignore HC-P005: the class name IS the message

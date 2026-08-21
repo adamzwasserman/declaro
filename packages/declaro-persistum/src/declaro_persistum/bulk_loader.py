@@ -29,10 +29,14 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, Protocol, TypedDict
 
-from declaro_persistum.types import DbapiConnection, FetchingConnection
+from declaro_persistum.types import (
+    DbapiConnection,
+    FetchingConnection,
+    translated_by,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -192,13 +196,18 @@ class BulkLoader(TypedDict):
 # ------------------------------------------------------------- PostgreSQL
 
 
+# THE ONE TRANSLATION A CROSS-ENGINE TRANSFER MAKES, written as the table it
+# is. Every other type is carried across untouched.
+_PORTABLE: dict[type, Callable[[Any], Any]] = {uuid.UUID: str}
+
+
 def _portable(value: Any) -> Any:
     """UUIDs become strings so a SQLite or Turso target accepts them.
 
     asyncpg hands back `uuid.UUID` objects, and the DB-API targets reject them.
     This is the one place a cross-engine transfer has to translate a value.
     """
-    return str(value) if isinstance(value, uuid.UUID) else value
+    return translated_by(_PORTABLE, value)
 
 
 async def postgres_read_rows(

@@ -6,12 +6,48 @@ Both SQLiteInspector and TursoInspector delegate shared logic here.
 """
 
 import re
+from collections.abc import Callable
 from typing import Literal
 
-from declaro_persistum.types import Column, Index, Table, View
+from declaro_persistum.types import (
+    Column,
+    Index,
+    Table,
+    View,
+    applied_to_text,
+)
 
 # Type for FK actions
 FKAction = Literal["cascade", "set null", "restrict", "no action"]
+
+
+def _rewrapped(default: str) -> str:
+    """An expression default given back the parens PRAGMA table_info strips.
+
+    A function call comes back bare -- `datetime('now')` for a column declared
+    `DEFAULT (datetime('now'))` -- so the round trip loses a layer and the
+    differ then sees a change that is not one. Text already parenthesised is
+    left as it is.
+    """
+    return _REWRAP[("(" in default and not default.startswith("("))](default)
+
+
+def _as_stored(default: str) -> str:
+    """Already parenthesised, or not an expression at all."""
+    return default
+
+
+def _wrapped(default: str) -> str:
+    """A bare function call, wrapped to match the declared form."""
+    return f"({default})"
+
+
+# WHETHER THE PARENS NEED PUTTING BACK, as a table rather than a three-part
+# `and` chain.
+_REWRAP: dict[bool, "Callable[[str], str]"] = {
+    True: _wrapped,
+    False: _as_stored,
+}
 
 
 def normalize_fk_action(action: str | None) -> FKAction | None:
@@ -80,9 +116,7 @@ def columns_from_pragma_rows(
         if default is not None:
             # PRAGMA table_info strips outer parens from expression defaults.
             # Re-wrap function-call expressions so they match the target schema form.
-            if isinstance(default, str) and "(" in default and not default.startswith("("):
-                default = f"({default})"
-            col["default"] = default
+            col["default"] = applied_to_text(_rewrapped, default)
 
         if is_pk:
             col["primary_key"] = True

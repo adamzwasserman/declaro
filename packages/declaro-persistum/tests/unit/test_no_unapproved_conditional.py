@@ -40,7 +40,7 @@ _SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "declaro_persistum"
 # It must never be raised.
 # 709 after a Python default's SQL spelling became a lookup on the exact
 # type, instead of an if/elif chain whose order was load-bearing.
-BASELINE = 683
+BASELINE = 682
 
 _MARKER = "APPROVED-IF"
 

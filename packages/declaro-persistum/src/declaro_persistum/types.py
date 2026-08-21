@@ -143,6 +143,43 @@ def _unchanged(value: Any) -> Any:
     return value
 
 
+def written_as(kind: type, value: Any) -> bool:
+    """Whether a value is written as `kind`, or as something derived from it.
+
+    THE YES-OR-NO FORM OF THE SAME QUESTION `translated_by` ASKS. A library is
+    free to hand back its own subclass of anything -- asyncpg does exactly
+    that with `uuid.UUID` -- so a boundary asking for the exact type refuses
+    a value that is, for every purpose it cares about, the type it asked for.
+
+    The direction matters and is not symmetric. `bool` derives from `int`, so
+    a flag is written as a number and a number is not written as a flag. A
+    view's `materialized` must be a flag, and 1 is refused.
+    """
+    return kind in spelling_of(value).__mro__
+
+
+def translated_by(rules: dict[type, Callable[[Any], Any]], value: Any) -> Any:
+    """The rule for how this value is written, or the value unchanged.
+
+    A VALUE WITH SEVERAL DECLARED SPELLINGS IS A VOCABULARY, and the table is
+    where that vocabulary is written down. A spelling absent from the table
+    has no rule of its own and passes through, which is what a caller means
+    by leaving it out: the SQLite default writer is the one place that
+    refuses instead, and it says so with a refusal in the table rather than
+    by omission.
+
+    WHAT A VALUE INHERITS IS PART OF HOW IT IS WRITTEN. Matching the exact
+    type alone lost the one translation `bulk_transfer` makes: asyncpg hands
+    back `asyncpg.pgproto.pgproto.UUID`, which derives from `uuid.UUID`
+    rather than being it, so a PostgreSQL to SQLite transfer moved no rows
+    and reported `type 'asyncpg.pgproto.pgproto.UUID' is not supported`. The
+    nearest declared spelling wins, so an exact entry still beats the base
+    class it derives from.
+    """
+    written = [rules[kind] for kind in spelling_of(value).__mro__ if kind in rules]
+    return [*written, _unchanged][0](value)
+
+
 def applied_to_text(rule: Callable[[str], Any], value: Any) -> Any:
     """`rule` applied to text; every other spelling passes through unchanged.
 
@@ -155,7 +192,7 @@ def applied_to_text(rule: Callable[[str], Any], value: Any) -> Any:
     argument, and the shape of all three bugs `same_default` has been fixed
     for was a rule that reached one argument and not the other.
     """
-    return _APPLIED[spelling_of(value) is str](rule, value)
+    return translated_by({str: rule}, value)
 
 
 def changed_to(value: Any) -> Any:
@@ -586,9 +623,3 @@ def for_dialect(table: dict[str, Any], dialect: str, what: str) -> Any:
         f"{what} exist for: {', '.join(sorted(table))}"
     )
 
-
-# WHETHER THE VALUE IS TEXT, as a table rather than a guard.
-_APPLIED: dict[bool, Callable[[Callable[[str], Any], Any], Any]] = {
-    True: lambda rule, value: rule(value),
-    False: lambda _rule, value: _unchanged(value),
-}
