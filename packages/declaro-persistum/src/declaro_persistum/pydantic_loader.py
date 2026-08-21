@@ -16,7 +16,7 @@ from typing import Any, Literal, get_args, get_origin, get_type_hints
 from pydantic import BaseModel
 from pydantic import Field as PydanticField
 
-from declaro_persistum.boundary import boundary
+from declaro_persistum.boundary import boundary, helper, recognizer
 from declaro_persistum.exceptions import LoaderError
 from declaro_persistum.types import Column, Index, Schema, Table, View
 
@@ -39,11 +39,13 @@ PYTHON_TO_SQL_TYPE: dict[type | str, str] = {
 }
 
 
+@recognizer
 def is_literal_type(annotation: Any) -> bool:
     """Check if annotation is a Literal type."""
     return get_origin(annotation) is Literal
 
 
+@helper
 def extract_literal_values(annotation: Any) -> list[str]:
     """Extract string values from a Literal type annotation.
 
@@ -72,6 +74,7 @@ def extract_literal_values(annotation: Any) -> list[str]:
     return values
 
 
+@recognizer
 def is_optional_type(annotation: Any) -> bool:
     """Check if annotation is Optional (Union with None)."""
     origin = get_origin(annotation)
@@ -87,6 +90,7 @@ def is_optional_type(annotation: Any) -> bool:
     return False
 
 
+@helper
 def unwrap_optional(annotation: Any) -> Any:
     """Unwrap Optional[X] to get X."""
     if not is_optional_type(annotation):
@@ -100,6 +104,7 @@ def unwrap_optional(annotation: Any) -> Any:
     return annotation
 
 
+@recognizer
 def declared_type(annotation: Any) -> str:
     """The declared column type this annotation means. NOT SQL.
 
@@ -164,6 +169,7 @@ def declared_type(annotation: Any) -> str:
 OnAction = Literal["cascade", "set null", "restrict", "no action"]
 
 
+@helper
 def table(name: str) -> Callable[[type], type]:
     """Declare a Pydantic model as a table.
 
@@ -182,6 +188,7 @@ def table(name: str) -> Callable[[type], type]:
     silently describes nothing.
     """
 
+    @helper
     def declare(cls: type) -> type:
         if not (isinstance(cls, type) and issubclass(cls, BaseModel)):
             raise TypeError(
@@ -195,6 +202,7 @@ def table(name: str) -> Callable[[type], type]:
     return declare
 
 
+@helper
 def field(
     *,
     primary_key: bool | None = None,
@@ -254,11 +262,15 @@ def field(
         "renamed_from": renamed_from,
         "is_new": is_new,
     }
-    return PydanticField(
+    # Pydantic carries field metadata on its own FieldInfo and offers no
+    # other way to attach it. This is the declarative surface an author writes
+    # against, so the object IS the contract rather than a leak of one.
+    return PydanticField(  # honest: ignore HC-P010: Pydantic's own field type
         json_schema_extra={k: v for k, v in declared.items() if v is not None}
     )
 
 
+@helper
 def extract_field_metadata(field_info: Any) -> dict[str, Any]:
     """Extract declaro-specific metadata from Pydantic field.
 
@@ -291,6 +303,7 @@ def extract_field_metadata(field_info: Any) -> dict[str, Any]:
 INDEX_FIELDS = ("columns", "unique", "where", "using")
 
 
+@helper
 def index_from_meta(declared: dict[str, Any]) -> tuple[str, Index]:
     """One Meta index entry, checked against what an Index actually is.
 
@@ -344,6 +357,7 @@ def index_from_meta(declared: dict[str, Any]) -> tuple[str, Index]:
     return name, index
 
 
+@helper
 def pydantic_model_to_table(model_cls: type) -> tuple[str, Table] | None:
     """Convert a Pydantic model to a Table definition.
 
@@ -367,7 +381,11 @@ def pydantic_model_to_table(model_cls: type) -> tuple[str, Table] | None:
     # `bool: "boolean"` in PYTHON_TO_SQL_TYPE) miss, silently emitting
     # `text` columns where the user wrote `bool`. get_type_hints resolves
     # string annotations to actual types using the model's module globals.
-    try:
+    # `get_type_hints` resolves a models file's annotations against its
+    # module globals, so this is the intake of the declarative surface. The
+    # catch exists to say WHICH model could not be read, and it re-raises as
+    # LoaderError rather than swallowing.
+    try:  # honest: ignore HC-P002: re-raises naming the unreadable model
         annotations = get_type_hints(model_cls)
     except (NameError, TypeError) as unresolvable:
         # THE FALLBACK HERE BLAMED THE WRONG FIELD. It read
@@ -531,6 +549,7 @@ def _import_module_file(module_path: Path) -> Any:
     return module
 
 
+@boundary
 def load_declarations(module_path: Path) -> tuple[Schema, dict[str, View]]:
     """Everything a models file declares: its tables AND its views.
 
@@ -543,6 +562,7 @@ def load_declarations(module_path: Path) -> tuple[Schema, dict[str, View]]:
     return _schema_of(module), views_from_module(module)
 
 
+@boundary
 def load_models_from_module(module_path: Path) -> Schema:
     """Load all @table decorated Pydantic models from a Python module.
 
@@ -558,6 +578,7 @@ def load_models_from_module(module_path: Path) -> Schema:
     return _schema_of(_import_module_file(module_path))
 
 
+@helper
 def _schema_of(module: Any) -> Schema:
     """The tables a loaded module declares."""
     schema: Schema = {}
@@ -615,6 +636,7 @@ VIEW_REQUIRED = ("name", "query")
 VIEW_OPTIONAL = ("materialized", "refresh", "depends_on", "trigger_sources")
 
 
+@helper
 def views_from_module(module: Any) -> dict[str, View]:
     """Every `View` value declared at module level.
 
@@ -675,6 +697,7 @@ _VIEW_FIELD_TYPES: dict[str, type] = {
 _VIEW_MUST_NOT_BE_BLANK = ("name", "query")
 
 
+@helper
 def _check_view(obj: dict[str, Any]) -> None:
     """Refuse a view whose fields are the wrong type or empty. Raises or returns.
 
@@ -807,6 +830,7 @@ def load_schema_from_models(models_dir: str | Path) -> Schema:
     return schema
 
 
+@helper
 def get_literal_columns(schema: Schema) -> dict[str, dict[str, list[str]]]:
     """Extract all columns with Literal type values from schema.
 

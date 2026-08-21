@@ -6,6 +6,12 @@ Exception messages follow the principle: "A programmer should not have to be
 an expert stack tracer to figure out where they went wrong."
 """
 
+# honest: disable HC-P003: Python requires an exception to be a class and to
+# inherit from BaseException, and rule 8 asks for typed exceptions precisely
+# so a boundary can map a TYPE to a response. `A_BUG_IN_THIS_PACKAGE` is the
+# tuple that separates our defect from the engine's, and it can only do that
+# because the hierarchy exists. There is no composition available here.
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
