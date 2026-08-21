@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import pathlib
 from typing import Any, TypedDict
 
@@ -71,6 +70,8 @@ class Ctx(TypedDict, total=False):
     error: Exception | None
     views: dict[str, Any]
     engine: str
+    postgresql_url: str
+    postgresql_schema_name: str
     run: Any
 
 
@@ -83,7 +84,7 @@ def loop():
 
 
 @pytest.fixture
-def ctx(loop, tmp_path: pathlib.Path) -> Ctx:
+def ctx(loop, tmp_path: pathlib.Path, postgresql_schema) -> Ctx:
     made = Ctx(
         directory=tmp_path,
         databases={},
@@ -91,33 +92,15 @@ def ctx(loop, tmp_path: pathlib.Path) -> Ctx:
         error=None,
         views={},
         run=loop.run_until_complete,
+        postgresql_url=postgresql_schema[0],
+        postgresql_schema_name=postgresql_schema[1],
     )
     yield made
 
-    # CLEAN UP AFTER, NOT ONLY BEFORE. PostgreSQL's probe database is shared
-    # with every other test that uses it, and a materialized view left behind
-    # here blocks `DROP TABLE orders` for all of them:
-    #     DependentObjectsStillExistError: cannot drop table orders because
-    #     other objects depend on it
-    # SQLite and Turso get a fresh file per scenario and never showed it.
-    for engine, database in made["databases"].items():
-        loop.run_until_complete(_scrub(database, engine))
+    # NOTHING TO SCRUB. The schema this scenario was given is dropped whole
+    # by the `postgresql_schema` fixture, so the tables go with it.
+    for database in made["databases"].values():
         loop.run_until_complete(close(database))
-
-
-async def _scrub(database, engine: str) -> None:
-    """Remove everything a scenario may have built, one statement at a time."""
-    statements = [
-        f'DROP {kind} IF EXISTS "{name}" CASCADE'
-        for name in _NAMES
-        for kind in ("MATERIALIZED VIEW", "VIEW")
-    ] + ['DROP TABLE IF EXISTS "orders" CASCADE', "DELETE FROM _declaro_meta"]
-    for statement in statements:
-        try:
-            async with writing(database) as conn:
-                await conn.execute(statement)
-        except Exception:  # noqa: BLE001, S110
-            pass
 
 
 def _declare(ctx: Ctx, *views: str) -> None:
@@ -148,38 +131,17 @@ async def _database(ctx: Ctx, engine: str) -> Any:
         except Exception as exc:  # noqa: BLE001
             pytest.skip(f"no Turso: {type(exc).__name__}: {exc}")
     else:
-        url = os.environ.get(
-            "TEST_POSTGRESQL_URL",
-            "postgresql://postgres:postgres@localhost/declaro_probe",
-        )
+        # A SCHEMA OF THIS SCENARIO'S OWN. Twenty-four test files shared one
+        # PostgreSQL database and collided on table names, so the suite passed
+        # in the order it happened to run in. These scenarios create `orders`,
+        # which eight other places also create.
+        url = ctx["postgresql_url"]
         try:
             database = await open_postgresql(
                 url, shutdown="exit_immediately", busy_timeout_s=5.0
             )
         except Exception as exc:  # noqa: BLE001
             pytest.skip(f"no PostgreSQL at {url}: {type(exc).__name__}: {exc}")
-        # EACH DROP GETS ITS OWN ATTEMPT. `DROP VIEW IF EXISTS` against a
-        # name that is a MATERIALIZED view does not skip: PostgreSQL raises
-        # WrongObjectTypeError, and one bad drop would abort the rest.
-        for statement in [
-            f'DROP {kind} IF EXISTS "{name}" CASCADE'
-            for name in _NAMES
-            for kind in ("MATERIALIZED VIEW", "VIEW")
-        ] + [
-            'DROP TABLE IF EXISTS "orders" CASCADE',
-            # THE STAMP TABLE IS `_declaro_meta`. This said `_dp_meta`, which
-            # does not exist, so the delete raised, the stamp survived, and
-            # skip-if-clean returned before any migration ran. PostgreSQL is
-            # the only engine that shows it: the other two get a fresh file
-            # per scenario and never meet a stamp from a previous run.
-            "DELETE FROM _declaro_meta",
-        ]:
-            try:
-                async with writing(database) as conn:
-                    await conn.execute(statement)
-            except Exception:  # noqa: BLE001, S110
-                pass
-
     ctx["databases"][engine] = database
     return database
 
@@ -206,15 +168,20 @@ async def _objects(ctx: Ctx, engine: str) -> dict[str, str]:
     database = await _database(ctx, engine)
     async with reading(database) as conn:
         if engine == "postgresql":
+            # THE SCENARIO'S OWN SCHEMA, not `public`. The migration writes
+            # where `search_path` points, and asking `public` found only what
+            # other tests had left there.
+            schema = ctx["postgresql_schema_name"]
             rows = await conn.fetch(
                 "SELECT viewname AS n, 'view' AS k FROM pg_views "
-                "WHERE schemaname = 'public' "
+                "WHERE schemaname = $1 "
                 "UNION ALL "
                 "SELECT matviewname, 'matview' FROM pg_matviews "
-                "WHERE schemaname = 'public' "
+                "WHERE schemaname = $1 "
                 "UNION ALL "
                 "SELECT tablename, 'table' FROM pg_tables "
-                "WHERE schemaname = 'public'"
+                "WHERE schemaname = $1",
+                schema,
             )
             return {row["n"]: row["k"] for row in rows}
         cursor = await conn.execute(

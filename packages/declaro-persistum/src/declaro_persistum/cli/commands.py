@@ -9,10 +9,12 @@ from datetime import UTC
 from pathlib import Path
 from typing import Any
 
+from declaro_persistum.boundary import boundary
 from declaro_persistum.exceptions import AmbiguityError
 from declaro_persistum.types import Ambiguity, Decision, Dialect, DiffResult, Schema, for_dialect
 
 
+@boundary
 async def cmd_diff(
     *,
     connection_string: str,
@@ -94,6 +96,7 @@ async def cmd_diff(
         await _disconnect(connection, dialect)
 
 
+@boundary
 async def cmd_apply(
     *,
     connection_string: str,
@@ -249,6 +252,7 @@ async def cmd_apply(
         await _disconnect(connection, dialect)
 
 
+@boundary
 async def cmd_snapshot(
     *,
     connection_string: str,
@@ -315,6 +319,7 @@ async def cmd_snapshot(
         await _disconnect(connection, dialect)
 
 
+@boundary
 def cmd_validate(
     *,
     schema_dir: str,
@@ -363,6 +368,7 @@ def cmd_validate(
     return 0
 
 
+@boundary
 async def cmd_migrate_remote(
     *,
     remote_url: str,
@@ -564,6 +570,7 @@ async def cmd_migrate_remote(
             await conn.close()
 
 
+@boundary
 async def cmd_generate(
     *,
     connection_string: str,
@@ -652,6 +659,7 @@ SQLITE_RELATIVE = "sqlite:///"
 SQLITE_ABSOLUTE = "sqlite:////"
 
 
+@boundary
 def sqlite_path(connection_string: str) -> str:
     """The filename a `sqlite://` URL names, or a refusal that shows the forms.
 
@@ -679,18 +687,21 @@ def sqlite_path(connection_string: str) -> str:
     )
 
 
+@boundary
 async def _connect_postgresql(connection_string: str) -> Any:
     import asyncpg
 
     return await asyncpg.connect(connection_string)
 
 
+@boundary
 async def _connect_sqlite(connection_string: str) -> Any:
     import aiosqlite
 
     return await aiosqlite.connect(sqlite_path(connection_string))
 
 
+@boundary
 async def _connect_turso(connection_string: str) -> Any:
     import turso.aio
 
@@ -704,12 +715,14 @@ CONNECTORS: dict[str, Any] = {
 }
 
 
+@boundary
 async def _connect(connection_string: str, dialect: Dialect) -> Any:
     """Open a connection for `dialect`."""
     connector = for_dialect(CONNECTORS, dialect, "Connectors")
     return await connector(connection_string)
 
 
+@boundary
 async def _disconnect(connection: Any, dialect: Dialect) -> None:
     """Close a connection.
 
@@ -772,6 +785,7 @@ def _check_drift(actual: Schema, expected: Schema) -> list[dict[str, str]]:
     return differences
 
 
+@boundary
 def _print_drift_error(differences: list[dict[str, str]]) -> None:
     """Print drift error message."""
     print("⚠ Database schema has drifted from expected state\n")
@@ -784,6 +798,7 @@ def _print_drift_error(differences: list[dict[str, str]]) -> None:
     print("    3. Manually reconcile the differences")
 
 
+@boundary
 def _print_diff_result(result: DiffResult, verbose: bool) -> None:
     """Print diff result to console."""
     ops = result["operations"]
@@ -845,6 +860,7 @@ def _print_diff_result(result: DiffResult, verbose: bool) -> None:
                     print(f"       {key}: {value}")
 
 
+@boundary
 async def _resolve_ambiguities_interactive(
     ambiguities: list[Ambiguity],
     schema_dir: str,

@@ -20,6 +20,7 @@ from collections.abc import Sequence
 from typing import cast
 
 from declaro_persistum import __version__
+from declaro_persistum.boundary import boundary
 from declaro_persistum.cli.commands import (
     cmd_apply,
     cmd_diff,
@@ -255,6 +256,7 @@ def detect_dialect(connection_string: str) -> str:
         )
 
 
+@boundary
 def main(argv: Sequence[str] | None = None) -> int:
     """Main entry point for the CLI."""
     parser = create_parser()

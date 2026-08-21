@@ -7,6 +7,7 @@ Test levels:
 """
 
 import asyncio
+import hashlib
 import os
 
 import pytest
@@ -30,6 +31,7 @@ def precommit_timeout(request: pytest.FixtureRequest) -> None:
 
 
 DEFAULT_POSTGRESQL_URL = "postgresql://postgres:postgres@localhost/declarotodo"
+POSTGRESQL_PROBE_URL = "postgresql://postgres:postgres@localhost/declaro_probe"
 
 
 @pytest.fixture
@@ -242,3 +244,61 @@ nullable = false
 default = "now()"
 ''')
     return temp_schema_dir
+
+
+# =============================================================================
+# One schema per test, so no two tests can see each other's tables
+# =============================================================================
+
+
+@pytest.fixture
+async def postgresql_schema(request: pytest.FixtureRequest):
+    """A PostgreSQL database of this test's own, dropped afterwards.
+
+    TWENTY-FOUR TEST FILES SHARED ONE DATABASE and collided by name: `t` is
+    created by 83 places in this suite, `users` by 22, `orders` by 8. Each
+    depended on the others cleaning up, so the suite passed in whatever order
+    it happened to run in. Measured 2026-08-21: seed 1 passed and seeds 2 and
+    3 failed the same three scenarios.
+
+    A SCHEMA WAS NOT ENOUGH, and that is worth recording. Pointing
+    `search_path` at a private schema isolates writes, but the inspector reads
+    `pg_tables WHERE schemaname = 'public'`, so a migration still saw every
+    table other tests had left there and reported them as dropped:
+
+        Ambiguous changes detected: Table 't' removed and 'orders' added
+        Skipping migration - manual intervention required
+
+    A whole database is the boundary that matches what the code reads.
+
+    Composition inside a test is untouched. The steps of one scenario still
+    meet the state the previous step left; what is gone is one test seeing
+    another's.
+    """
+    import asyncpg
+
+    url = os.environ.get("TEST_POSTGRESQL_URL", POSTGRESQL_PROBE_URL)
+    name = "t_" + hashlib.sha256(request.node.nodeid.encode()).hexdigest()[:16]
+    base, _, _ = url.rpartition("/")
+
+    try:
+        admin = await asyncpg.connect(url)
+    except (OSError, asyncpg.PostgresError) as exc:
+        pytest.skip(f"no PostgreSQL at {url}: {type(exc).__name__}: {exc}")
+
+    try:
+        await admin.execute(f'DROP DATABASE IF EXISTS "{name}"')
+        await admin.execute(f'CREATE DATABASE "{name}"')
+    finally:
+        await admin.close()
+
+    yield f"{base}/{name}", "public"
+
+    try:
+        admin = await asyncpg.connect(url)
+    except (OSError, asyncpg.PostgresError):
+        return
+    try:
+        await admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+    finally:
+        await admin.close()
