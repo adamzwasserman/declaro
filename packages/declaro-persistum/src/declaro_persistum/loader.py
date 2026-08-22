@@ -16,6 +16,7 @@ import tomli_w
 from declaro_persistum.boundary import boundary, helper, recognizer
 from declaro_persistum.exceptions import LoaderError
 from declaro_persistum.types import (
+    NOTHING,
     Column,
     Decision,
     Dialect,
@@ -205,8 +206,7 @@ def _refuse_untyped(col_name: str, table_name: str, col_data: dict[str, Any]) ->
         f"Column '{col_name}' in table '{table_name}' declares no type. It "
         f"carries {sorted(col_data)}; a column needs `type`, either as "
         f'`{col_name} = {{ type = "text" }}` or the short form '
-        f'`{col_name} = "text"`.'
-    )
+        f'`{col_name} = "text"`.', path=NOTHING)
 
 
 @helper
@@ -243,8 +243,7 @@ def _refuse_unknown_columns(unknown: dict[str, str], table_name: str) -> None:
     raise LoaderError(
         f"Table '{table_name}' declares {written}, which is neither spelling "
         f"of a column. Write either `name = \"text\"` or "
-        f"`[{table_name}.columns.name]` with a `type`."
-    )
+        f"`[{table_name}.columns.name]` with a `type`.", path=NOTHING)
 
 
 @helper

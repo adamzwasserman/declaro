@@ -20,6 +20,7 @@ from pydantic_core import PydanticUndefined
 from declaro_persistum.boundary import boundary, helper, recognizer
 from declaro_persistum.exceptions import LoaderError
 from declaro_persistum.types import (
+    NOTHING,
     Column,
     Index,
     Schema,
@@ -170,8 +171,7 @@ def declared_type(annotation: Any) -> str:
     raise LoaderError(
         f"cannot tell what column type {annotation!r} means. Declared types "
         f"come from: {', '.join(sorted(set(PYTHON_TO_SQL_TYPE.values())))}. "
-        f"Use field(db_type=...) to declare one this mapping does not know."
-    )
+        f"Use field(db_type=...) to declare one this mapping does not know.", path=NOTHING)
 
 
 OnAction = Literal["cascade", "set null", "restrict", "no action"]
@@ -306,7 +306,8 @@ def sql_default(value: Any) -> str:
         raise LoaderError(
             f"Cannot write {value!r} as a SQL default: a default may be a "
             f"string, a bool, an int or a float, and this is "
-            f"{type(value).__name__}."  # honest: ignore HC-P005: the class name IS the message
+            f"{type(value).__name__}.",  # honest: ignore HC-P005: the class name IS the message
+            path=NOTHING,
         )
     return spell(value)
 
@@ -467,8 +468,7 @@ def pydantic_model_to_table(model_cls: type) -> tuple[str, Table] | None:
         raise LoaderError(
             f"Cannot resolve the annotations on {model_cls.__name__}: "
             f"{unresolvable}. Every field is read as a string until this is "
-            f"fixed, so the type of no column can be determined."
-        ) from unresolvable
+            f"fixed, so the type of no column can be determined.", path=NOTHING) from unresolvable
     model_fields = getattr(model_cls, "model_fields", {})
 
     columns: dict[str, Column] = {}
@@ -719,8 +719,7 @@ def views_from_module(module: Any) -> dict[str, View]:
             raise LoaderError(
                 f"view '{obj['name']}' declares unknown {'keys' if len(unknown) > 1 else 'key'} "
                 f"{sorted(unknown)}. A view may carry "
-                f"{list(VIEW_REQUIRED + VIEW_OPTIONAL)}.",
-            )
+                f"{list(VIEW_REQUIRED + VIEW_OPTIONAL)}.", path=NOTHING)
         _check_view(obj)
         views[obj["name"]] = obj
     return views
@@ -793,15 +792,13 @@ def _check_view(obj: dict[str, Any]) -> None:
             raise LoaderError(
                 f"view {described}: {field!r} is "
                 f"{type(value).__name__}, and a view's {field!r} must be "  # honest: ignore HC-P005: the class name IS the message
-                f"{expected.__name__}."
-            )
+                f"{expected.__name__}.", path=NOTHING)
 
     for field in _VIEW_MUST_NOT_BE_BLANK:
         if not obj[field].strip():
             raise LoaderError(
                 f"view {described}: {field!r} is empty. A view needs a name "
-                f"and a SELECT."
-            )
+                f"and a SELECT.", path=NOTHING)
 
 
 @boundary

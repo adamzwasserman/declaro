@@ -11,7 +11,7 @@ Validates schema definitions for correctness:
 from typing import TypedDict
 
 from declaro_persistum.exceptions import ValidationError
-from declaro_persistum.types import Column, Index, Schema, is_nullable
+from declaro_persistum.types import NOTHING, Column, Index, Schema, is_nullable
 
 # Known SQL types (normalized lowercase)
 KNOWN_TYPES = {
@@ -457,5 +457,4 @@ def validate_schema_strict(schema: Schema) -> None:
     if errors:
         error_list = "\n  - ".join(errors)
         raise ValidationError(
-            f"Schema validation failed with {len(errors)} error(s):\n  - {error_list}"
-        )
+            f"Schema validation failed with {len(errors)} error(s):\n  - {error_list}", table=NOTHING, column=NOTHING, reference=NOTHING)

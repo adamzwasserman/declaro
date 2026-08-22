@@ -30,6 +30,8 @@ the programmer reads, which is the property that matters.
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from declaro_persistum.exceptions import (
@@ -49,6 +51,7 @@ from declaro_persistum.exceptions import (
 from declaro_persistum.exceptions import (
     ConnectionError as DeclaroConnectionError,
 )
+from declaro_persistum.types import NOTHING
 
 pytestmark = pytest.mark.precommit
 
@@ -63,10 +66,12 @@ CASES = [
     (DeclaroConnectionError, ("unreachable",), {"dialect": "postgresql"},
      ["unreachable", "postgresql"]),
     (MigrationError, ("apply failed",),
-     {"sql": "CREATE TABLE t (v INT)", "original_error": ValueError("nope")},
+     {"operation": NOTHING, "sql": "CREATE TABLE t (v INT)",
+      "original_error": ValueError("nope")},
      ["apply failed", "CREATE TABLE t", "ValueError", "nope"]),
     (RollbackError, ("rollback failed",),
-     {"sql": "DROP TABLE t", "rollback_error": RuntimeError("stuck")},
+     {"operation": NOTHING, "sql": "DROP TABLE t", "original_error": NOTHING,
+      "rollback_error": RuntimeError("stuck")},
      ["rollback failed", "DROP TABLE t", "stuck"]),
     (ValidationError, ("bad column",),
      {"table": "users", "column": "email", "reference": "accounts.id"},
@@ -129,16 +134,27 @@ def test_every_exception_is_catchable_as_one_declaro_error(
 
 @pytest.mark.parametrize("kind,args,_kwargs,_fragments", CASES,
                          ids=[c[0].__name__ for c in CASES])
-def test_the_optional_context_is_optional(
+def test_the_absent_context_is_named_and_readable(
     kind: type[Exception], args: tuple, _kwargs: dict, _fragments: list[str]
 ) -> None:
-    """With nothing optional supplied, the message is still readable.
+    """With every field named NOTHING, the message is still readable.
 
-    Every `if` in these constructors guards one optional field, so the
-    all-absent path is a real branch. It is also the commonest one in
-    production, where an exception is raised with a message and no context.
+    THIS TEST USED TO ASSERT THE OPPOSITE. It called `kind(*args)` and proved
+    the context could be left out, which is the implicit default rule 14
+    names: the constructor absorbed the omission and afterwards nothing could
+    tell "no file" from "forgot the file".
+
+    Every field is written down now. NOTHING is how a caller says they have
+    none, and this is the test that exercises that path, which is the half of
+    rule 14 a signature default makes unreachable.
     """
-    message = str(kind(*args))
+    absent = {
+        name: NOTHING
+        for name, parameter in inspect.signature(kind).parameters.items()
+        if parameter.kind is parameter.KEYWORD_ONLY
+    }
+
+    message = str(kind(*args, **absent))
     assert message.strip(), f"{kind.__name__} with no context prints nothing"
     assert "None" not in message, (
         f"{kind.__name__} leaked a None into what the programmer reads:\n{message}"
@@ -151,22 +167,22 @@ class TestTheSqlTruncation:
 
     def test_short_sql_is_kept_whole(self) -> None:
         sql = "S" * 499
-        assert "..." not in str(MigrationError("boom", sql=sql))
+        assert "..." not in str(MigrationError("boom", sql=sql, operation=NOTHING, original_error=NOTHING))
 
     def test_long_sql_is_truncated_and_marked(self) -> None:
-        message = str(MigrationError("boom", sql="S" * 600))
+        message = str(MigrationError("boom", sql="S" * 600, operation=NOTHING, original_error=NOTHING))
         shown = message.split("SQL: ")[1].split("\n")[0]
         assert shown.endswith("...")
         assert len(shown) == 503, "500 characters plus the ellipsis"
 
     def test_the_untruncated_sql_survives_on_the_exception(self) -> None:
         """Truncation is for reading. A debugger still wants the whole thing."""
-        error = MigrationError("boom", sql="S" * 600)
+        error = MigrationError("boom", sql="S" * 600, operation=NOTHING, original_error=NOTHING)
         assert len(error.sql) == 600
 
     def test_exactly_500_is_truncated(self) -> None:
         """Which side the boundary falls on, stated rather than assumed."""
-        assert "..." in str(MigrationError("boom", sql="S" * 500))
+        assert "..." in str(MigrationError("boom", sql="S" * 500, operation=NOTHING, original_error=NOTHING))
 
 
 def test_an_exception_with_no_constructor_still_carries_its_message() -> None:

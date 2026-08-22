@@ -38,7 +38,7 @@ from declaro_persistum.pydantic_loader import (
     load_declarations,
     load_models_from_module,
 )
-from declaro_persistum.types import Dialect, for_dialect
+from declaro_persistum.types import NOTHING, Dialect, for_dialect
 from declaro_persistum.validator import validate_schema
 
 META_TABLE = "_declaro_meta"
@@ -562,8 +562,7 @@ async def _recover_orphaned_tmp_tables(db: Database) -> int:
                         f"{tmp_name!r}. Migrating now would create "
                         f"{original_name!r} empty beside them.",
                         sql=f'ALTER TABLE "{tmp_name}" RENAME TO "{original_name}"',
-                        original_error=exc,
-                    ) from exc
+                        original_error=exc, operation=NOTHING) from exc
                 logger.warning(
                     "Recovered orphaned table: %s -> %s", tmp_name, original_name
                 )

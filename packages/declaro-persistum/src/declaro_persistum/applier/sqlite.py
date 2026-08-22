@@ -25,7 +25,7 @@ from declaro_persistum.applier.shared import (
 )
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, MigrationError
-from declaro_persistum.types import ApplyResult, DbapiConnection, Operation, View
+from declaro_persistum.types import NOTHING, ApplyResult, DbapiConnection, Operation, View
 
 
 @helper
@@ -152,8 +152,7 @@ async def apply(
                 raise MigrationError(
                     "Failed to execute operation",
                     operation=operation,
-                    original_error=e,
-                ) from e
+                    original_error=e, sql=NOTHING) from e
 
         await connection.commit()
 
@@ -202,8 +201,7 @@ async def apply(
         await _restore_enforcement(connection, entry_enforcement)
         raise MigrationError(
             f"Migration failed: {e}",
-            original_error=e,
-        ) from e
+            original_error=e, operation=NOTHING, sql=NOTHING) from e
 
 
 @helper

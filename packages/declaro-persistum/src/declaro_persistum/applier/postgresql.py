@@ -18,7 +18,7 @@ from declaro_persistum.applier.shared import (
 )
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import MigrationError
-from declaro_persistum.types import ApplyResult, Column, Operation, View, changed_to
+from declaro_persistum.types import NOTHING, ApplyResult, Column, Operation, View, changed_to
 
 # Type for SQL generator functions
 SQLGenerator = Callable[..., str]
@@ -114,8 +114,7 @@ async def apply(
     except Exception as e:
         raise MigrationError(
             f"Migration failed: {e}",
-            original_error=e,
-        ) from e
+            original_error=e, operation=NOTHING, sql=NOTHING) from e
 
 
 # `generate_sql` was here and nowhere else, so `declaro generate` worked on

@@ -14,6 +14,8 @@ an expert stack tracer to figure out where they went wrong."
 
 from typing import TYPE_CHECKING
 
+from declaro_persistum.types import NOTHING, Nothing, resolved
+
 if TYPE_CHECKING:
     from declaro_persistum.types import Ambiguity, Operation
 
@@ -34,7 +36,11 @@ class SchemaError(DeclaroError):
     - Required fields are missing
     """
 
-    def __init__(self, message: str, *, file: str | None = None, line: int | None = None) -> None:
+    def __init__(self, message: str, *, file: str | Nothing, line: int | Nothing) -> None:
+        # THE VISIBLE RESOLVE. A default would hide this inside the
+        # signature, where no reader sees it happen and no test reaches it.
+        file = resolved(file, None)
+        line = resolved(line, None)
         self.file = file
         self.line = line
         location = ""
@@ -62,7 +68,9 @@ class AmbiguityError(SchemaError):
         super().__init__(
             f"Unresolved ambiguities detected ({len(ambiguities)} total):\n\n"
             f"{ambiguity_list}\n\n"
-            "Run in interactive mode (-i) to resolve, or add migration hints to schema files."
+            "Run in interactive mode (-i) to resolve, or add migration hints to schema files.",
+            file=NOTHING,
+            line=NOTHING,
         )
 
 
@@ -90,7 +98,9 @@ class CycleError(SchemaError):
             f"  To resolve:\n"
             f"    - Remove one of the foreign keys\n"
             f"    - Or use a deferred constraint (add manually after migration)\n\n"
-            f"  Tables involved: {tables_list}"
+            f"  Tables involved: {tables_list}",
+            file=NOTHING,
+            line=NOTHING,
         )
 
 
@@ -106,9 +116,13 @@ class DriftError(DeclaroError):
         self,
         differences: list[dict[str, str]],
         *,
-        last_snapshot: str | None = None,
-        current_time: str | None = None,
+        last_snapshot: str | Nothing,
+        current_time: str | Nothing,
     ) -> None:
+        # THE VISIBLE RESOLVE. A default would hide this inside the
+        # signature, where no reader sees it happen and no test reaches it.
+        last_snapshot = resolved(last_snapshot, None)
+        current_time = resolved(current_time, None)
         self.differences = differences
         self.last_snapshot = last_snapshot
         self.current_time = current_time
@@ -127,8 +141,8 @@ class DriftError(DeclaroError):
             f"  Last snapshot: {last_snapshot}" if last_snapshot else "",
             f"  Current time:  {current_time}" if current_time else "",
         ]
-        given = [line for line in stamps if line]
-        timestamps = "\n\n" + "\n".join(given) if given else ""
+        stamped = [line for line in stamps if line]
+        timestamps = "\n\n" + "\n".join(stamped) if stamped else ""
 
         super().__init__(
             f"Database schema has drifted from expected state\n\n"
@@ -154,7 +168,10 @@ class ConnectionError(DeclaroError):
     - Authentication fails
     """
 
-    def __init__(self, message: str, *, dialect: str | None = None) -> None:
+    def __init__(self, message: str, *, dialect: str | Nothing) -> None:
+        # THE VISIBLE RESOLVE. A default would hide this inside the
+        # signature, where no reader sees it happen and no test reaches it.
+        dialect = resolved(dialect, None)
         self.dialect = dialect
         dialect_hint = ""
         if dialect:
@@ -174,10 +191,15 @@ class MigrationError(DeclaroError):
         self,
         message: str,
         *,
-        operation: "Operation | None" = None,
-        sql: str | None = None,
-        original_error: Exception | None = None,
+        operation: "Operation | Nothing",
+        sql: str | Nothing,
+        original_error: Exception | Nothing,
     ) -> None:
+        # THE VISIBLE RESOLVE. A default would hide this inside the
+        # signature, where no reader sees it happen and no test reaches it.
+        operation = resolved(operation, None)
+        sql = resolved(sql, None)
+        original_error = resolved(original_error, None)
         self.operation = operation
         self.sql = sql
         self.original_error = original_error
@@ -211,11 +233,17 @@ class RollbackError(MigrationError):
         self,
         message: str,
         *,
-        operation: "Operation | None" = None,
-        sql: str | None = None,
-        original_error: Exception | None = None,
-        rollback_error: Exception | None = None,
+        operation: "Operation | Nothing",
+        sql: str | Nothing,
+        original_error: Exception | Nothing,
+        rollback_error: Exception | Nothing,
     ) -> None:
+        # THE VISIBLE RESOLVE. A default would hide this inside the
+        # signature, where no reader sees it happen and no test reaches it.
+        operation = resolved(operation, None)
+        sql = resolved(sql, None)
+        original_error = resolved(original_error, None)
+        rollback_error = resolved(rollback_error, None)
         self.rollback_error = rollback_error
         rollback_msg = ""
         if rollback_error:
@@ -246,10 +274,15 @@ class ValidationError(SchemaError):
         self,
         message: str,
         *,
-        table: str | None = None,
-        column: str | None = None,
-        reference: str | None = None,
+        table: str | Nothing,
+        column: str | Nothing,
+        reference: str | Nothing,
     ) -> None:
+        # THE VISIBLE RESOLVE. A default would hide this inside the
+        # signature, where no reader sees it happen and no test reaches it.
+        table = resolved(table, None)
+        column = resolved(column, None)
+        reference = resolved(reference, None)
         self.table = table
         self.column = column
         self.reference = reference
@@ -266,7 +299,7 @@ class ValidationError(SchemaError):
         if context:
             context_str = "\n  " + "\n  ".join(context)
 
-        super().__init__(f"{message}{context_str}")
+        super().__init__(f"{message}{context_str}", file=NOTHING, line=NOTHING)
 
 
 class LoaderError(SchemaError):
@@ -279,12 +312,15 @@ class LoaderError(SchemaError):
     - Directory structure is invalid
     """
 
-    def __init__(self, message: str, *, path: str | None = None) -> None:
+    def __init__(self, message: str, *, path: str | Nothing) -> None:
+        # THE VISIBLE RESOLVE. A default would hide this inside the
+        # signature, where no reader sees it happen and no test reaches it.
+        path = resolved(path, None)
         self.path = path
         path_str = ""
         if path:
             path_str = f"\n\n  Path: {path}"
-        super().__init__(f"{message}{path_str}")
+        super().__init__(f"{message}{path_str}", file=NOTHING, line=NOTHING)
 
 
 # =============================================================================
@@ -355,10 +391,15 @@ class TransferError(DeclaroError):
         self,
         message: str,
         *,
-        phase: str | None = None,
-        table: str | None = None,
-        original_error: Exception | None = None,
+        phase: str | Nothing,
+        table: str | Nothing,
+        original_error: Exception | Nothing,
     ) -> None:
+        # THE VISIBLE RESOLVE. A default would hide this inside the
+        # signature, where no reader sees it happen and no test reaches it.
+        phase = resolved(phase, None)
+        table = resolved(table, None)
+        original_error = resolved(original_error, None)
         self.phase = phase
         self.table = table
         self.original_error = original_error

@@ -31,7 +31,7 @@ from declaro_persistum.applier.shared import (
 from declaro_persistum.applier.sqlite import generate_create_view, generate_drop_view
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, MigrationError
-from declaro_persistum.types import ApplyResult, DbapiConnection, Operation
+from declaro_persistum.types import NOTHING, ApplyResult, DbapiConnection, Operation
 
 logger = logging.getLogger(__name__)
 
@@ -229,8 +229,7 @@ async def apply(
                     f"Table reconstruction failed for {table_or_empty}. "
                     f"Check for orphaned _declaro_tmp tables.",
                     operation=ops[0],
-                    original_error=e,
-                ) from e
+                    original_error=e, sql=NOTHING) from e
             skip_msg = f"{op_desc}: {e}"
             skipped.append(skip_msg)
             logger.warning(f"Skipped unsupported operation: {skip_msg}")

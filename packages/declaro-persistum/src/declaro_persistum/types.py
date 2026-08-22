@@ -6,7 +6,8 @@ This ensures serialization to/from TOML/JSON and compatibility with pure functio
 """
 
 from collections.abc import Callable
-from typing import Any, Literal, Protocol, TypedDict, runtime_checkable
+from types import EllipsisType
+from typing import Any, Final, Literal, Protocol, TypedDict, runtime_checkable
 
 # THE ENGINES, AS A VOCABULARY RATHER THAN A STRING.
 #
@@ -123,6 +124,68 @@ def is_our_table(name: str) -> bool:
     the same rule applied where the diff can see it.
     """
     return name.startswith(_OUR_PREFIXES)
+
+
+# =============================================================================
+# Absence, written down
+# =============================================================================
+
+# AN OMITTED ARGUMENT WAS INDISTINGUISHABLE FROM A CHOSEN ONE. `def
+# select(table, where=None, limit=None)` absorbs the caller's omission:
+# afterwards nothing can tell "asked for no limit" from "forgot the limit",
+# and the region where the default applies is invisible at every call site,
+# so nothing exercises it. Honest Code rule 14 calls the `=` default the
+# input-side of catch-and-swallow.
+#
+# A parameter is declared `X | Nothing` with no default, so a caller who
+# wants the absent case says so and the type carries exactly two
+# possibilities rather than one plus a silence.
+#
+# IT IS `Ellipsis` UNDERNEATH, which no schema, column, default or query
+# argument can ever be, so it cannot collide with a value somebody meant.
+# `None` cannot do this job: NULL is a legal default and a legal column
+# value, so a sentinel spelled `None` cannot tell absence from a declared
+# NULL. This also matches what the package already reads as "not given":
+# `_NO_DEFAULT` in the pydantic loader has listed `...` beside `None` and
+# `PydanticUndefined` since the loader was written.
+Nothing = EllipsisType
+NOTHING: Final[EllipsisType] = ...
+
+
+def is_nothing(value: Any) -> bool:
+    """Whether a caller left this out."""
+    return value is NOTHING
+
+
+def resolved(value: Any, otherwise: Any) -> Any:
+    """The value a caller passed, or `otherwise` when they passed NOTHING.
+
+    THE VISIBLE RESOLVE. A default hides this inside the signature, where no
+    reader sees it happen and no test can reach it. Here it is a line in the
+    body.
+
+    `value or otherwise` is what this replaces in several places and it is a
+    different function: it takes the fallback for 0, "" and [], so a declared
+    `DEFAULT 0` and an empty WHERE clause became the fallback silently. Only
+    NOTHING means absent.
+    """
+    return _RESOLVED[is_nothing(value)](value, otherwise)
+
+
+def _the_value(value: Any, _otherwise: Any) -> Any:
+    """A caller passed something, so that is the answer."""
+    return value
+
+
+def _the_other(_value: Any, otherwise: Any) -> Any:
+    """A caller passed NOTHING, so the named alternative stands."""
+    return otherwise
+
+
+_RESOLVED: dict[bool, Callable[[Any, Any], Any]] = {
+    True: _the_other,
+    False: _the_value,
+}
 
 
 def spelling_of(value: Any) -> type:

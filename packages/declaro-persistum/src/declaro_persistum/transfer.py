@@ -32,7 +32,7 @@ from declaro_persistum.database import Database, reading
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, TransferError
 from declaro_persistum.inspector import introspect
 from declaro_persistum.migrations import apply_migrations_async
-from declaro_persistum.types import Dialect
+from declaro_persistum.types import NOTHING, Dialect
 
 logger = logging.getLogger(__name__)
 
@@ -342,8 +342,7 @@ async def bulk_transfer(
     if not migration_result["success"]:
         raise TransferError(
             f"Schema migration failed on target: {migration_result.get('error')}",
-            phase="schema_migration",
-        )
+            phase="schema_migration", table=NOTHING, original_error=NOTHING)
     logger.info(
         f"Schema migration complete: {migration_result['operations_applied']} operations applied"
     )
@@ -381,8 +380,7 @@ async def bulk_transfer(
                 f"These tables were asked for and the source does not have "
                 f"them: {', '.join(sorted(missing))}. The source holds "
                 f"{', '.join(sorted(all_tables))}. Nothing has been "
-                f"transferred."
-            )
+                f"transferred.", phase=NOTHING, table=NOTHING, original_error=NOTHING)
         transfer_tables = [t for t in tables if t in source_schema]
     else:
         transfer_tables = [
@@ -438,8 +436,7 @@ async def bulk_transfer(
                     f"these tables have circular references so no load order "
                     f"satisfies them: {', '.join(sorted(circular_refs))}. "
                     f"Transferring now would fail on the first row of each and "
-                    f"report those tables as the problem."
-                ) from exc
+                    f"report those tables as the problem.", phase=NOTHING, table=NOTHING, original_error=NOTHING) from exc
 
         try:
             for table in sorted_tables:
