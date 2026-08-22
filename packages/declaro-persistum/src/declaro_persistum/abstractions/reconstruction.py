@@ -68,8 +68,8 @@ def generate_create_table_sql(
         ... }
         >>> sql = generate_create_table_sql("posts", cols, constraints=NOTHING)
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     constraints = resolved(constraints, None)
     # THE REFUSAL BELONGS TO THE RENDERER, NOT ONLY THE ORCHESTRATOR.
     # `_validate_columns` ran in the rebuild path, so a caller who rendered a
@@ -337,8 +337,8 @@ async def execute_reconstruction_async(
         ... }
         >>> await execute_reconstruction_async(conn, "users", new_cols, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     preserve_data = resolved(preserve_data, True)
     manage_foreign_keys = resolved(manage_foreign_keys, True)
     # Validate column definitions before any destructive operations

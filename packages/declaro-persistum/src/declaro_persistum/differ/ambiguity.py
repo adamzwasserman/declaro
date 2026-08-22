@@ -43,8 +43,8 @@ def detect_ambiguities(
         >>> print(ambiguities[0]["type"])
         'possible_rename'
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     decisions = resolved(decisions, None)
     decisions = decisions or {}
     ambiguities: list[Ambiguity] = []

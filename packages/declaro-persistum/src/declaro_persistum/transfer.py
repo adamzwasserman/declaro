@@ -195,8 +195,8 @@ async def _upsert_progress(
     The clock is read here and passed down, so both families stamp the same
     instant rather than each calling `now()` for itself.
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     error = resolved(error, None)
     await loader["write_progress"](
         conn,
@@ -332,13 +332,13 @@ async def bulk_transfer(
     Raises:
         TransferError: If schema migration or critical setup fails
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     batch_size = resolved(batch_size, 1000)
     expand_enums = resolved(expand_enums, True)
     resume = resolved(resume, True)
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     tables = resolved(tables, None)
     on_progress = resolved(on_progress, None)
     start = datetime.now(UTC)

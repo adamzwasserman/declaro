@@ -262,8 +262,8 @@ def detect_dialect(connection_string: str) -> str:
 @boundary
 def main(argv: Sequence[str] | None | Nothing) -> int:
     """Main entry point for the CLI."""
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     argv = resolved(argv, None)
     parser = create_parser()
     args = parser.parse_args(argv)

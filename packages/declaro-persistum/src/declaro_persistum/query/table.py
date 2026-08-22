@@ -102,48 +102,48 @@ def count_(column: str, alias: str | Nothing) -> SQLFunction:
     that meant "count every row" and a call that forgot to say what to count
     produced the same SQL and nothing could tell them apart.
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     alias = resolved(alias, None)
     return _function("COUNT", column, alias=alias)
 
 
 @helper
 def sum_(column: str, alias: str | Nothing) -> SQLFunction:
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     alias = resolved(alias, None)
     return _function("SUM", column, alias=alias)
 
 
 @helper
 def avg_(column: str, alias: str | Nothing) -> SQLFunction:
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     alias = resolved(alias, None)
     return _function("AVG", column, alias=alias)
 
 
 @helper
 def min_(column: str, alias: str | Nothing) -> SQLFunction:
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     alias = resolved(alias, None)
     return _function("MIN", column, alias=alias)
 
 
 @helper
 def max_(column: str, alias: str | Nothing) -> SQLFunction:
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     alias = resolved(alias, None)
     return _function("MAX", column, alias=alias)
 
 
 @helper
 def now_(alias: str | Nothing) -> SQLFunction:
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     alias = resolved(alias, None)
     return _function("NOW", alias=alias)
 
@@ -165,11 +165,11 @@ def case_(
     only shape that needed `.as_()` instead, which is why that method outlived
     its usefulness.
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     else_ = resolved(else_, None)
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     else_ = resolved(else_, None)
     alias = resolved(alias, None)
     return {"kind": "case", "whens": list(whens), "else_": else_, "alias": alias}

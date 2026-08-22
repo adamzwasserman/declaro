@@ -69,7 +69,7 @@ from declaro_persistum.types import (
     Column,
     Operation,
     changed_to,
-    spelling_of,
+    type_of,
 )
 
 # =============================================================================
@@ -654,8 +654,8 @@ def refuse_unwritable_column_types(table_name: str, columns: dict[str, Column]) 
     cannot be rendered has to be refused while the table is still there.
     """
     wrong = {
-        col_name: spelling_of(col_def["type"]).__name__
+        col_name: type_of(col_def["type"]).__name__
         for col_name, col_def in columns.items()
-        if spelling_of(col_def["type"]) not in _TYPE_SPELLINGS
+        if type_of(col_def["type"]) not in _TYPE_SPELLINGS
     }
     _WHEN_UNWRITABLE[bool(wrong)](table_name, wrong)

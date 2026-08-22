@@ -77,8 +77,8 @@ async def apply(
     SQLite DDL is transactional, allowing safe rollback on failure.
     Uses per-operation execution with reconstruction for unsupported operations.
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     dry_run = resolved(dry_run, False)
     if dry_run:
         return dry_run_preview(operations, execution_order)

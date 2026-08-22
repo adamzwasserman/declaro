@@ -25,7 +25,7 @@ from declaro_persistum.types import (
     Table,
     View,
     resolved,
-    spelling_of,
+    type_of,
 )
 
 
@@ -276,14 +276,14 @@ def _normalize_columns(
     function that never refuses never needs to say which line to look at.
     """
     unknown = {
-        col_name: spelling_of(col_data).__name__
+        col_name: type_of(col_data).__name__
         for col_name, col_data in columns_data.items()
-        if spelling_of(col_data) not in _COLUMN_FROM
+        if type_of(col_data) not in _COLUMN_FROM
     }
     _WHEN_UNKNOWN[bool(unknown)](unknown, table_name)
 
     return {
-        col_name: _COLUMN_FROM[spelling_of(col_data)](col_name, table_name, col_data)
+        col_name: _COLUMN_FROM[type_of(col_data)](col_name, table_name, col_data)
         for col_name, col_data in columns_data.items()
     }
 
@@ -291,7 +291,7 @@ def _normalize_columns(
 @helper
 def _primary_key_of(written: Any, _table_name: str) -> list[str]:
     """One name or several, resolved to the list everything downstream reads."""
-    return _NAMES_OF[spelling_of(written)](written)
+    return _NAMES_OF[type_of(written)](written)
 
 
 # THE FIELDS THAT ARE READ RATHER THAN CARRIED, each with the function that
@@ -356,8 +356,8 @@ def save_snapshot(
         dialect: Database dialect
         applied_by: User/system identifier
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     applied_by = resolved(applied_by, None)
     schema_path = Path(schema_dir)
     schema_path.mkdir(parents=True, exist_ok=True)

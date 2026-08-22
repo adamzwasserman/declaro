@@ -27,7 +27,7 @@ from declaro_persistum.types import (
     is_nullable,
     is_our_table,
     resolved,
-    spelling_of,
+    type_of,
 )
 
 
@@ -88,8 +88,8 @@ def diff(
         >>> print(result["operations"][0]["op"])
         'add_column'
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     decisions = resolved(decisions, None)
     decisions = decisions or {}
     operations: list[Operation] = []
@@ -1054,7 +1054,7 @@ def _same_constraint_definition(current: Any, target: Any) -> bool:
     """
     # A DEFINITION THAT IS NOT A MAPPING HAS NO FIELDS TO COMPARE, so the two
     # are the same only if they are equal outright.
-    both = {spelling_of(current), spelling_of(target)}
+    both = {type_of(current), type_of(target)}
     if both != {dict}:
         return bool(current == target)
     if current.get("type") != target.get("type"):

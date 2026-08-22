@@ -29,8 +29,8 @@ def generate_closure_table(
     Returns:
         Schema dict with closure table definition.
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     pk_column = resolved(pk_column, 'id')
     closure_name = f"{table_name}_closure"
 

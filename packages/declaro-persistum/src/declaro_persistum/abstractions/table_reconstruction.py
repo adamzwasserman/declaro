@@ -106,8 +106,8 @@ async def reconstruct_table(
         ... }
         >>> await reconstruct_table(conn, "users", new_cols, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     preserve_data = resolved(preserve_data, True)
     manage_foreign_keys = resolved(manage_foreign_keys, True)
     # One definition, in migrations.py, shared with the recovery that reads
@@ -466,8 +466,8 @@ def _generate_create_table_sql(
     Returns:
         CREATE TABLE SQL statement
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     constraints = resolved(constraints, None)
     # BEFORE THE LOOP, so every offending column is named at once rather than
     # the caller fixing them one crash at a time. This rebuilder checked

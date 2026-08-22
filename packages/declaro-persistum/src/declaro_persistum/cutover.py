@@ -83,15 +83,15 @@ async def begin_cutover(
     Raises:
         TransferError: If bulk transfer fails critically
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     batch_size = resolved(batch_size, 1000)
     expand_enums = resolved(expand_enums, True)
     resume = resolved(resume, True)
     fail_open = resolved(fail_open, True)
     compare_on_read = resolved(compare_on_read, True)
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     tables = resolved(tables, None)
     on_progress = resolved(on_progress, None)
     # Phase 1: Bulk transfer

@@ -22,7 +22,7 @@ from declaro_persistum.inspector.shared import (
 from declaro_persistum.types import (
     Column,
     Dialect,
-    spelling_of,
+    type_of,
     written_as,
 )
 
@@ -308,7 +308,7 @@ def _refuse_unspellable_default(value: Any) -> Any:
     """A default nobody declared a spelling for."""
     raise ValueError(
         f"No SQLite spelling for a default written as "
-        f"{spelling_of(value).__name__}: {value!r}. A default is nothing, "
+        f"{type_of(value).__name__}: {value!r}. A default is nothing, "
         f"text, a number or a flag."
     )
 
@@ -334,14 +334,9 @@ def _the_spellable_default(value: Any) -> Any:
     return value
 
 
-# THE REFUSAL HAPPENS BEFORE THE LOOKUP, so the table is read by subscript.
-# It was the second argument of a `.get`, which closed the space rather than
-# re-opening it, but a reader cannot tell those two apart at a glance and
-# neither can a scan.
-# BOTH HALVES RETURN THE VALUE, so neither is a function with no body. An
-# empty body reads to a scanner as code nobody wrote, and to a reader as a
-# line that might have been deleted; returning what it was given says the
-# check passed and hands the work on.
+# The refusal happens before the lookup, so the table is read with [] and a
+# type it does not hold raises here rather than being answered by a fallback.
+# Both entries return the value, so neither function has an empty body.
 _WHEN_UNSPELLABLE: dict[bool, Callable[[Any], Any]] = {
     True: _the_spellable_default,
     False: _refuse_unspellable_default,
@@ -351,8 +346,8 @@ _WHEN_UNSPELLABLE: dict[bool, Callable[[Any], Any]] = {
 @helper
 def sqlite_default(value: Any) -> str:
     """The text that follows DEFAULT in a SQLite CREATE TABLE."""
-    spellable = _WHEN_UNSPELLABLE[spelling_of(value) in _SQLITE_DEFAULT](value)
-    return _SQLITE_DEFAULT[spelling_of(spellable)](spellable)
+    spellable = _WHEN_UNSPELLABLE[type_of(value) in _SQLITE_DEFAULT](value)
+    return _SQLITE_DEFAULT[type_of(spellable)](spellable)
 
 
 @helper

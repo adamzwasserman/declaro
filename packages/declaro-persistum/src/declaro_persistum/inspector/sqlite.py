@@ -244,8 +244,8 @@ async def introspect(
     dialect, so a caller can tell "the database is unreachable" from "the
     database says no" without reading the message (Rule 8).
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     # NAMED, NOT USED. Every entry in a dispatch table takes the same
     # arguments, or it is not one function. This engine has no schemas
     # to choose between, and `schema_name` was spelled `_schema_name`

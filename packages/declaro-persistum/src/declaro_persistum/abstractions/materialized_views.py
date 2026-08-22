@@ -73,8 +73,8 @@ def create_matview_sql(
     Returns:
         List of SQL statements to execute
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     refresh_strategy = resolved(refresh_strategy, 'manual')
     depends_on = resolved(depends_on, None)
     statements: list[str] = []
@@ -140,8 +140,8 @@ def refresh_matview_sql(
     Returns:
         List of SQL statements to execute
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     atomic = resolved(atomic, True)
     if atomic:
         # Atomic refresh: delete all rows, insert new ones
@@ -177,8 +177,8 @@ def generate_refresh_trigger_sql(
     Returns:
         List of SQL statements to create triggers
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     events = resolved(events, None)
     events = events or ["INSERT", "UPDATE", "DELETE"]
     statements: list[str] = []

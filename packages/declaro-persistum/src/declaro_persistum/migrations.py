@@ -637,8 +637,8 @@ async def apply_migrations_async(
     Raises:
         Exception: If migration fails critically (logs error but may not crash)
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     expand_enums = resolved(expand_enums, True)
     force = resolved(force, False)
     schema_path = Path(schema_path)

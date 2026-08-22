@@ -80,8 +80,8 @@ _SAFE = str.maketrans({".": "_", "-": "_", " ": "_", '"': "", "'": ""})
 
 
 def _name(path: str, column: str, suffix: str | Nothing) -> str:
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     suffix = resolved(suffix, '')
     return f"{path}_{column.translate(_SAFE)}{suffix}"
 

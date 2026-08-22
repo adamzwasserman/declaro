@@ -75,8 +75,8 @@ async def apply(
     PostgreSQL's transactional DDL means we can safely roll back
     all changes if any operation fails.
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     dry_run = resolved(dry_run, False)
     # ONE ENTRY PER OPERATION, each holding that operation's statements. The
     # dry run prints them joined; the run below executes them one at a time,

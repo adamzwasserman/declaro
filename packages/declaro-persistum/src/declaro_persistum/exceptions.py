@@ -37,8 +37,8 @@ class SchemaError(DeclaroError):
     """
 
     def __init__(self, message: str, *, file: str | Nothing, line: int | Nothing) -> None:
-        # THE VISIBLE RESOLVE. A default would hide this inside the
-        # signature, where no reader sees it happen and no test reaches it.
+        # A default in the signature would decide this where no reader
+        # sees it happen and no test reaches it.
         file = resolved(file, None)
         line = resolved(line, None)
         self.file = file
@@ -119,8 +119,8 @@ class DriftError(DeclaroError):
         last_snapshot: str | Nothing,
         current_time: str | Nothing,
     ) -> None:
-        # THE VISIBLE RESOLVE. A default would hide this inside the
-        # signature, where no reader sees it happen and no test reaches it.
+        # A default in the signature would decide this where no reader
+        # sees it happen and no test reaches it.
         last_snapshot = resolved(last_snapshot, None)
         current_time = resolved(current_time, None)
         self.differences = differences
@@ -169,8 +169,8 @@ class ConnectionError(DeclaroError):
     """
 
     def __init__(self, message: str, *, dialect: str | Nothing) -> None:
-        # THE VISIBLE RESOLVE. A default would hide this inside the
-        # signature, where no reader sees it happen and no test reaches it.
+        # A default in the signature would decide this where no reader
+        # sees it happen and no test reaches it.
         dialect = resolved(dialect, None)
         self.dialect = dialect
         dialect_hint = ""
@@ -195,8 +195,8 @@ class MigrationError(DeclaroError):
         sql: str | Nothing,
         original_error: Exception | Nothing,
     ) -> None:
-        # THE VISIBLE RESOLVE. A default would hide this inside the
-        # signature, where no reader sees it happen and no test reaches it.
+        # A default in the signature would decide this where no reader
+        # sees it happen and no test reaches it.
         operation = resolved(operation, None)
         sql = resolved(sql, None)
         original_error = resolved(original_error, None)
@@ -238,8 +238,8 @@ class RollbackError(MigrationError):
         original_error: Exception | Nothing,
         rollback_error: Exception | Nothing,
     ) -> None:
-        # THE VISIBLE RESOLVE. A default would hide this inside the
-        # signature, where no reader sees it happen and no test reaches it.
+        # A default in the signature would decide this where no reader
+        # sees it happen and no test reaches it.
         operation = resolved(operation, None)
         sql = resolved(sql, None)
         original_error = resolved(original_error, None)
@@ -278,8 +278,8 @@ class ValidationError(SchemaError):
         column: str | Nothing,
         reference: str | Nothing,
     ) -> None:
-        # THE VISIBLE RESOLVE. A default would hide this inside the
-        # signature, where no reader sees it happen and no test reaches it.
+        # A default in the signature would decide this where no reader
+        # sees it happen and no test reaches it.
         table = resolved(table, None)
         column = resolved(column, None)
         reference = resolved(reference, None)
@@ -313,8 +313,8 @@ class LoaderError(SchemaError):
     """
 
     def __init__(self, message: str, *, path: str | Nothing) -> None:
-        # THE VISIBLE RESOLVE. A default would hide this inside the
-        # signature, where no reader sees it happen and no test reaches it.
+        # A default in the signature would decide this where no reader
+        # sees it happen and no test reaches it.
         path = resolved(path, None)
         self.path = path
         path_str = ""
@@ -395,8 +395,8 @@ class TransferError(DeclaroError):
         table: str | Nothing,
         original_error: Exception | Nothing,
     ) -> None:
-        # THE VISIBLE RESOLVE. A default would hide this inside the
-        # signature, where no reader sees it happen and no test reaches it.
+        # A default in the signature would decide this where no reader
+        # sees it happen and no test reaches it.
         phase = resolved(phase, None)
         table = resolved(table, None)
         original_error = resolved(original_error, None)

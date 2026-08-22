@@ -51,7 +51,7 @@ def test_a_spelling_with_no_rule_passes_through() -> None:
 def test_written_as_reads_a_subclass_as_its_base() -> None:
     """The same question asked as a yes or no.
 
-    `spelling_of(x) is dict` refuses a mapping a library subclassed, and in
+    `type_of(x) is dict` refuses a mapping a library subclassed, and in
     `extract_field_metadata` that means a column silently missing the
     `primary_key` its author declared.
     """

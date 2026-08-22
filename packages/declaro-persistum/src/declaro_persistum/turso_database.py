@@ -296,8 +296,8 @@ async def open_turso(
     2026-08-13: 2.8s alone, 20-25s for 25 cold opens at once, because they
     serialize.
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     primary = resolved(primary, None)
     token = resolved(token, None)
     check_shutdown(

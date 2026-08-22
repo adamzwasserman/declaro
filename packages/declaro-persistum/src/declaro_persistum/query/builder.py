@@ -102,8 +102,8 @@ def select(
         >>> print(q["sql"])
         SELECT "id", "email" FROM "users" WHERE id = :id
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     where = resolved(where, None)
     params = resolved(params, None)
     order_by = resolved(order_by, None)
@@ -214,8 +214,8 @@ def insert(
         >>> print(q["sql"])
         INSERT INTO "users" ("email", "name") VALUES (:email, :name)
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     returning = resolved(returning, None)
     on_conflict = resolved(on_conflict, None)
     # ONE ROW OR SEVERAL, AND BOTH MEAN SEVERAL. Two spellings of one thing
@@ -293,8 +293,8 @@ def update(
         >>> print(q["sql"])
         UPDATE "users" SET "name" = :name WHERE id = :id
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     params = resolved(params, None)
     returning = resolved(returning, None)
     if not set_values:
@@ -377,8 +377,8 @@ def delete(
         >>> print(q["sql"])
         DELETE FROM "users" WHERE id = :id
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     params = resolved(params, None)
     returning = resolved(returning, None)
     if not where:
@@ -413,8 +413,8 @@ def raw(sql: str, params: dict[str, Any] | Nothing) -> Query:
     Returns:
         Query dict
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     params = resolved(params, None)
     return {
         "sql": sql,

@@ -83,8 +83,8 @@ async def execute(
         >>> users = await execute(q, conn, row_factory=NOTHING)
         >>> print(users[0]["email"])
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     row_factory = resolved(row_factory, None)
     sql, params = _prepare_query(query, connection)
     rows = await _execute_fetch(connection, sql, params)
@@ -118,8 +118,8 @@ async def execute_one(
         >>> if user:
         ...     print(user["email"])
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     row_factory = resolved(row_factory, None)
     sql, params = _prepare_query(query, connection)
     row = await _execute_fetch_one(connection, sql, params)

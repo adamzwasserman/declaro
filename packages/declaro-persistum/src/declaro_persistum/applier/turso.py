@@ -119,8 +119,8 @@ async def apply(
         execution_order: Order to execute operations
         dry_run: If True, only generate SQL without executing
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     dry_run = resolved(dry_run, False)
     if dry_run:
         return dry_run_preview(operations, execution_order)

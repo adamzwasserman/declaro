@@ -168,8 +168,8 @@ def build_record(
     error: str | Nothing,
 ) -> LatencyRecord:
     """Build a LatencyRecord from execution metadata."""
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     error = resolved(error, '')
     return {
         "ts": datetime.now(UTC).isoformat(),

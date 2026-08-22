@@ -72,8 +72,8 @@ async def introspect(
     Returns:
         Schema dict, or tuple of (Schema, views dict) if include_views=True
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     schema_name = resolved(schema_name, 'public')
     include_views = resolved(include_views, False)
     try:
@@ -482,8 +482,8 @@ async def table_exists(
     schema_name: str | Nothing,
 ) -> bool:
     """Check if a table exists."""
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     schema_name = resolved(schema_name, 'public')
     result = await connection.fetchval(
         """
@@ -595,8 +595,8 @@ async def introspect_views(
     Returns:
         Dict mapping view names to View definitions
     """
-    # THE VISIBLE RESOLVE. A default would hide this inside the
-    # signature, where no reader sees it happen and no test reaches it.
+    # A default in the signature would decide this where no reader
+    # sees it happen and no test reaches it.
     schema_name = resolved(schema_name, 'public')
     views: dict[str, View] = {}
 

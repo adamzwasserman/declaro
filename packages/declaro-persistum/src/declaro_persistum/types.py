@@ -160,9 +160,8 @@ def is_nothing(value: Any) -> bool:
 def resolved(value: Any, otherwise: Any) -> Any:
     """The value a caller passed, or `otherwise` when they passed NOTHING.
 
-    THE VISIBLE RESOLVE. A default hides this inside the signature, where no
-    reader sees it happen and no test can reach it. Here it is a line in the
-    body.
+    A default hides this inside the signature, where no reader sees it happen
+    and no test can reach it. Here it is a line in the body.
 
     `value or otherwise` is what this replaces in several places and it is a
     different function: it takes the fallback for 0, "" and [], so a declared
@@ -188,72 +187,67 @@ _RESOLVED: dict[bool, Callable[[Any, Any], Any]] = {
 }
 
 
-def spelling_of(value: Any) -> type:
-    """Which declared spelling a value is written in.
+def type_of(value: Any) -> type:
+    """The type of a value read at runtime.
 
-    THE ONE PLACE THE PACKAGE READS A TYPE AT RUNTIME. Schemaless input --
-    hand-written TOML, a column definition a caller built by hand -- carries
-    no declaration, so reading the type is the only way to tell one spelling
-    from another. Every dispatch table that resolves such input is keyed on
-    what this returns, so a type absent from the table is a spelling nobody
-    declared and the caller refuses it by name.
+    This is the one place the package calls `type()`. Input that carries no
+    declaration -- hand-written TOML, a column definition a caller built by
+    hand -- has to be read somehow, and the dispatch tables that handle it
+    are keyed on what this returns. A type the table does not hold is one
+    nobody declared, and the caller refuses it by name.
     """
-    return type(value)  # honest: ignore HC-P005: this IS the recognizer; reading the type of schemaless input is its whole job
+    return type(value)  # honest: ignore HC-P005: reading the type is what this function is for
 
 
 def _unchanged(value: Any) -> Any:
-    """Not text, so there is no second spelling to fold."""
+    """No rule applies to this value, so it comes back as it went in."""
     return value
 
 
 def written_as(kind: type, value: Any) -> bool:
-    """Whether a value is written as `kind`, or as something derived from it.
+    """Whether `value` is a `kind`, counting subclasses.
 
-    THE YES-OR-NO FORM OF THE SAME QUESTION `translated_by` ASKS. A library is
-    free to hand back its own subclass of anything -- asyncpg does exactly
-    that with `uuid.UUID` -- so a boundary asking for the exact type refuses
-    a value that is, for every purpose it cares about, the type it asked for.
+    A library can hand back its own subclass of anything -- asyncpg does that
+    with `uuid.UUID` -- so a check for the exact type refuses a value that is,
+    for every purpose the caller cares about, what it asked for.
 
-    The direction matters and is not symmetric. `bool` derives from `int`, so
-    a flag is written as a number and a number is not written as a flag. A
-    view's `materialized` must be a flag, and 1 is refused.
+    The order of the arguments matters. `bool` is a subclass of `int`, so
+    `written_as(int, True)` is true and `written_as(bool, 1)` is false. A
+    view's `materialized` has to be a bool, and 1 is refused.
     """
-    return kind in spelling_of(value).__mro__
+    return kind in type_of(value).__mro__
 
 
 def translated_by(rules: dict[type, Callable[[Any], Any]], value: Any) -> Any:
-    """The rule for how this value is written, or the value unchanged.
+    """Apply the rule `rules` holds for this value's type, or return it as is.
 
-    A VALUE WITH SEVERAL DECLARED SPELLINGS IS A VOCABULARY, and the table is
-    where that vocabulary is written down. A spelling absent from the table
-    has no rule of its own and passes through, which is what a caller means
-    by leaving it out: the SQLite default writer is the one place that
-    refuses instead, and it says so with a refusal in the table rather than
-    by omission.
+    Subclasses count. Matching the exact type alone lost the one conversion
+    `bulk_transfer` makes: asyncpg hands back `asyncpg.pgproto.pgproto.UUID`,
+    a subclass of `uuid.UUID` rather than `uuid.UUID` itself, so a PostgreSQL
+    to SQLite transfer moved no rows and reported `type
+    'asyncpg.pgproto.pgproto.UUID' is not supported`. The nearest match along
+    the class hierarchy wins, so an entry for the exact type still beats one
+    for a base class.
 
-    WHAT A VALUE INHERITS IS PART OF HOW IT IS WRITTEN. Matching the exact
-    type alone lost the one translation `bulk_transfer` makes: asyncpg hands
-    back `asyncpg.pgproto.pgproto.UUID`, which derives from `uuid.UUID`
-    rather than being it, so a PostgreSQL to SQLite transfer moved no rows
-    and reported `type 'asyncpg.pgproto.pgproto.UUID' is not supported`. The
-    nearest declared spelling wins, so an exact entry still beats the base
-    class it derives from.
+    A type `rules` does not hold has no conversion and the value comes back
+    unchanged. `sqlite_default` is the one caller that refuses instead, and it
+    does so with an entry that raises rather than by leaving the type out.
     """
-    written = [rules[kind] for kind in spelling_of(value).__mro__ if kind in rules]
+    written = [rules[kind] for kind in type_of(value).__mro__ if kind in rules]
     return [*written, _unchanged][0](value)
 
 
 def applied_to_text(rule: Callable[[str], Any], value: Any) -> Any:
-    """`rule` applied to text; every other spelling passes through unchanged.
+    """Apply `rule` to a string; return anything else unchanged.
 
-    ONLY TEXT CAN BE WRITTEN MORE THAN ONE WAY, so only text needs folding. A
-    number is a number in every dialect and nothing about it varies.
+    Only a string can be written more than one way, so only a string needs
+    normalising. A number is the same number on every engine.
 
-    Five places had written this as a guard -- `if not isinstance(x, str):
-    return x` -- ahead of a normalisation, and each one was a separate chance
-    to forget it. `_comparable` had four such guards, two per rule and one per
-    argument, and the shape of all three bugs `same_default` has been fixed
-    for was a rule that reached one argument and not the other.
+    Five places wrote this as `if not isinstance(x, str): return x` ahead of
+    the normalising, and each was a separate chance to forget it. `_comparable`
+    had four such guards, two per rule and one per argument. All three bugs
+    `same_default` has been fixed for were a rule that reached one argument
+    and not the other.
     """
     return translated_by({str: rule}, value)
 
