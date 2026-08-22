@@ -34,50 +34,68 @@ def _build_fk_graph(schema: Schema) -> dict[str, set[str]]:
     Returns dict mapping each table to the set of tables it depends on
     (i.e., tables it references via foreign keys).
     """
-    deps: dict[str, set[str]] = {table: set() for table in schema}
+    # A SELF-REFERENCE IS NOT A DEPENDENCY: a tree whose parent_id points at
+    # its own table does not wait for itself.
+    return {
+        table_name: {
+            ref.split(".")[0]
+            for col_def in table_def.get("columns", {}).values()
+            for ref in [col_def.get("references") or ""]
+            if "." in ref
+            and ref.split(".")[0] in schema
+            and ref.split(".")[0] != table_name
+        }
+        for table_name, table_def in schema.items()
+    }
 
-    for table_name, table_def in schema.items():
-        for col_def in table_def.get("columns", {}).values():
-            ref = col_def.get("references")
-            if ref and "." in ref:
-                ref_table = ref.split(".")[0]
-                if ref_table in schema and ref_table != table_name:
-                    deps[table_name].add(ref_table)
 
-    return deps
+def _refuse_cycle(remaining: set[str]) -> set[str]:
+    """Nothing is ready and tables remain, so they wait on each other.
+
+    Everything still remaining is either in a cycle or queued behind one,
+    which includes a table naming a parent the graph does not hold: nothing
+    ever satisfies it. A table that sorted cleanly has already gone, so it is
+    not named here.
+    """
+    raise ValueError(f"Circular FK dependencies: {remaining}")
+
+
+def _the_ready_tables(remaining: set[str]) -> set[str]:
+    """Something is ready, so the remaining set is handed back unchanged."""
+    return remaining
+
+
+_WHEN_READY: dict[bool, Callable[[set[str]], set[str]]] = {
+    True: _the_ready_tables,
+    False: _refuse_cycle,
+}
 
 
 def _toposort(deps: dict[str, set[str]]) -> list[str]:
-    """Kahn's algorithm for topological sort (pure).
+    """Kahn's algorithm, written as set algebra (pure).
 
     Returns table names in dependency order (no-deps first).
     Raises ValueError on circular FK dependencies.
+
+    Each round takes the ready set — every remaining table whose parents have
+    all been placed — and places the alphabetically first member of it. That
+    is the same choice the old queue made, which re-sorted after every pop.
+
+    A PARENT THE GRAPH DOES NOT HOLD IS NEVER PLACED, so a table naming one
+    can never be ready and the batch is refused. The old in-degree count said
+    the same thing by never reaching zero.
     """
-    in_degree = {t: len(parents) for t, parents in deps.items()}
+    remaining = set(deps)
+    order: list[str] = []
 
-    reverse: dict[str, list[str]] = {t: [] for t in deps}
-    for table, parents in deps.items():
-        for parent in parents:
-            if parent in reverse:
-                reverse[parent].append(table)
+    while remaining:
+        placed = set(deps) - remaining
+        ready = sorted(t for t in remaining if deps[t] <= placed)
+        _WHEN_READY[bool(ready)](remaining)
+        order.append(ready[0])
+        remaining.discard(ready[0])
 
-    queue = sorted(t for t, deg in in_degree.items() if deg == 0)
-    result: list[str] = []
-
-    while queue:
-        table = queue.pop(0)
-        result.append(table)
-        for child in sorted(reverse.get(table, [])):
-            in_degree[child] -= 1
-            if in_degree[child] == 0:
-                queue.append(child)
-        queue.sort()
-
-    if len(result) != len(deps):
-        missing = set(deps) - set(result)
-        raise ValueError(f"Circular FK dependencies: {missing}")
-
-    return result
+    return order
 
 
 def fk_insert_order(schema: Schema) -> list[str]:
@@ -202,6 +220,42 @@ STATEMENTS: dict[str, Callable[[str, dict[str, Any]], tuple[str, tuple[Any, ...]
 }
 
 
+def _refuse_unknown_ops(unknown: list[str], _ops: list[DMLOp]) -> list[DMLOp]:
+    """`STATEMENTS` holds no SQL for these, so the batch is refused."""
+    raise ValueError(f"Unknown op_type: {', '.join(unknown)}")
+
+
+def _the_whole_batch(_unknown: list[str], ops: list[DMLOp]) -> list[DMLOp]:
+    """Every op_type has SQL, so the batch is handed back unchanged."""
+    return ops
+
+
+_WHEN_UNKNOWN_OPS: dict[bool, Callable[[list[str], list[DMLOp]], list[DMLOp]]] = {
+    True: _refuse_unknown_ops,
+    False: _the_whole_batch,
+}
+
+
+async def _execute_one(db: Database, table_name: str, op_type: str, data: dict[str, Any]) -> int:
+    """One statement, on its own write connection, committed before returning."""
+    sql, params = STATEMENTS[op_type](table_name, data)
+    async with writing(db) as conn:
+        cursor = await conn.execute(sql, params)
+        # COMMIT, WHICH THIS DID NOT DO. `writing(db)` closes the connection
+        # when the block ends and does not commit, so every operation here was
+        # rolled back on the way out — while `cursor.rowcount` still reported
+        # 1 and this function still returned a list of successes. Measured
+        # 2026-08-13 against a real SQLite file: rowcount 1, zero rows in the
+        # table.
+        #
+        # The old tests could not see it. They drove this through a recording
+        # connection that had no transaction to discard.
+        await conn.commit()
+        rowcount: int = cursor.rowcount
+    logger.debug("FK-ordered %s on %s: %d rows", op_type, table_name, rowcount)
+    return rowcount
+
+
 async def execute_fk_ordered(
     db: Database,
     schema: Schema,
@@ -219,29 +273,18 @@ async def execute_fk_ordered(
 
     Returns:
         List of rowcounts for each operation (in sorted order)
+
+    Raises:
+        ValueError: when any op names a type `STATEMENTS` has no SQL for. The
+            whole batch is read first, so an unknown type at the end refuses
+            the batch before anything is written. The old check sat inside the
+            write loop and raised on reaching the bad op, which left every
+            operation before it committed.
     """
-    sorted_ops = sort_operations(schema, ops)
-    rowcounts: list[int] = []
+    unknown = sorted({op_type for _, op_type, _ in ops if op_type not in STATEMENTS})
+    _WHEN_UNKNOWN_OPS[bool(unknown)](unknown, ops)
 
-    for table_name, op_type, data in sorted_ops:
-        statement = STATEMENTS.get(op_type)
-        if statement is None:
-            raise ValueError(f"Unknown op_type: {op_type}")
-        sql, params = statement(table_name, data)
-
-        async with writing(db) as conn:
-            cursor = await conn.execute(sql, params)
-            # COMMIT, WHICH THIS DID NOT DO. `writing(db)` closes the
-            # connection when the block ends and does not commit, so every
-            # operation here was rolled back on the way out — while
-            # `cursor.rowcount` still reported 1 and this function still
-            # returned a list of successes. Measured 2026-08-13 against a real
-            # SQLite file: rowcount 1, zero rows in the table.
-            #
-            # The old tests could not see it. They drove this through a
-            # recording connection that had no transaction to discard.
-            await conn.commit()
-            rowcounts.append(cursor.rowcount)
-            logger.debug("FK-ordered %s on %s: %d rows", op_type, table_name, cursor.rowcount)
-
-    return rowcounts
+    return [
+        await _execute_one(db, table_name, op_type, data)
+        for table_name, op_type, data in sort_operations(schema, ops)
+    ]

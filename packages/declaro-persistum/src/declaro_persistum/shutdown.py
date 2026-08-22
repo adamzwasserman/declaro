@@ -22,6 +22,7 @@ import signal
 import time
 from collections.abc import Callable
 from types import FrameType
+from typing import Any
 
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.database import Database, replicate_on_shutdown
@@ -49,7 +50,7 @@ def _noop() -> None:
     return None
 
 
-@boundary
+@helper
 def trap_shutdown(db: Database) -> Callable[[], None]:
     """Install SIGTERM/SIGINT handlers that replicate before the process exits.
 
@@ -62,9 +63,18 @@ def trap_shutdown(db: Database) -> Callable[[], None]:
     `shutdown="replicate"`. Reading the policy off the value means the decision
     lives where the database was opened rather than wherever this was called.
     """
-    if db["shutdown"] != "replicate":
-        return _noop
+    return _TRAP[db["shutdown"] == "replicate"](db)
 
+
+@helper
+def _trap_nothing(_db: Database) -> Callable[[], None]:
+    """This database was not opened asking to replicate, so nothing is trapped."""
+    return _noop
+
+
+@boundary
+def _trap_signals(db: Database) -> Callable[[], None]:
+    """Install the handlers, and hand back the function that removes them."""
     replaced: list[tuple[int, object]] = []
 
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -80,8 +90,9 @@ def trap_shutdown(db: Database) -> Callable[[], None]:
             _previous: Handler = previous,
             _db: Database = db,
         ) -> None:
-            if callable(_previous):
-                _previous(signum, frame)
+            # Python installs a default handler that is not callable, and
+            # calling it would raise. Only a handler somebody set runs.
+            [h(signum, frame) for h in [_previous] if callable(h)]
             logger.info(
                 "Signal %s received; replicating %s before exit.",
                 signum, _db["path"],
@@ -92,10 +103,9 @@ def trap_shutdown(db: Database) -> Callable[[], None]:
             except RuntimeError:
                 asyncio.run(coro)
             else:
-                if loop.is_running():
-                    loop.create_task(coro)
-                else:
-                    loop.run_until_complete(coro)
+                # A running loop takes the work as a task; a stopped one runs
+                # it to completion here.
+                _ON_THE_LOOP[loop.is_running()](loop, coro)
 
         try:
             signal.signal(sig, _handler)
@@ -112,3 +122,28 @@ def trap_shutdown(db: Database) -> Callable[[], None]:
         replaced.clear()
 
     return restore
+
+
+@helper
+def _as_a_task(loop: asyncio.AbstractEventLoop, coro: Any) -> None:
+    """The loop is running, so the work joins it."""
+    loop.create_task(coro)
+
+
+@helper
+def _to_completion(loop: asyncio.AbstractEventLoop, coro: Any) -> None:
+    """The loop is stopped, so the work runs here and finishes before we go."""
+    loop.run_until_complete(coro)
+
+
+# Whether the loop is already running.
+_ON_THE_LOOP: dict[bool, Callable[[asyncio.AbstractEventLoop, Any], None]] = {
+    True: _as_a_task,
+    False: _to_completion,
+}
+
+# Whether this database was opened asking to replicate at shutdown.
+_TRAP: dict[bool, Callable[[Database], Callable[[], None]]] = {
+    True: _trap_signals,
+    False: _trap_nothing,
+}

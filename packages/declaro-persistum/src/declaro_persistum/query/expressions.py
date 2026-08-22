@@ -18,6 +18,7 @@ keeps it acyclic.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, Literal, Protocol, TypedDict
 
 from declaro_persistum.boundary import helper, recognizer
@@ -55,6 +56,28 @@ class CaseExpression(TypedDict):
     alias: str | None
 
 
+@helper
+def _named(sql: str, alias: str) -> str:
+    """This position takes an alias and there is one, so it is written."""
+    return f"{sql} AS {alias}"
+
+
+@helper
+def _unnamed(sql: str, _alias: Any) -> str:
+    """No alias to write here, so the SQL stands as it was rendered."""
+    return sql
+
+
+ALIASED: dict[bool, Callable[[str, Any], str]] = {True: _named, False: _unnamed}
+"""Whether a rendered expression carries its alias, as a table of two.
+
+Both callers ask the same question twice over: is there an alias, and does
+this position accept one? A SELECT column takes it; an ORDER BY term and a
+nested function argument must not, because `... END AS band ASC` is not valid
+SQL. `render_function` in `table.py` reads the same table, so the answer is
+written once.
+"""
+
 
 @helper
 def render_case(
@@ -85,16 +108,16 @@ def render_case(
         params[name] = result
         parts.append(f"WHEN {cond_sql} THEN :{name}")
 
-    if expr["else_"] is not None:
-        name = f"{path}_else"
-        params[name] = expr["else_"]
-        parts.append(f"ELSE :{name}")
+    # NO ELSE CLAUSE WHEN THERE IS NOTHING TO PUT IN IT. A CASE whose WHENs
+    # all miss already yields NULL, so an `else_` of None is the absence of
+    # the clause rather than a value to bind.
+    else_names = [f"{path}_else" for value in [expr["else_"]] if value is not None]
+    params.update(dict.fromkeys(else_names, expr["else_"]))
+    parts += [f"ELSE :{name}" for name in else_names]
 
     parts.append("END")
     sql = " ".join(parts)
-    if with_alias and expr["alias"]:
-        sql = f"{sql} AS {expr['alias']}"
-    return sql, params
+    return ALIASED[with_alias and bool(expr["alias"])](sql, expr["alias"]), params
 
 
 

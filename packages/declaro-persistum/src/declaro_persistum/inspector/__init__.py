@@ -41,7 +41,7 @@ TABLE_EXISTS: dict[str, Any] = {
 }
 
 
-@boundary
+@helper
 async def introspect(connection: Any, dialect: Dialect) -> Schema:
     """Read a database's tables back out of it."""
     inspector = for_dialect(INSPECTORS, dialect, "Inspectors")

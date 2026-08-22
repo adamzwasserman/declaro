@@ -48,6 +48,7 @@ from declaro_persistum.applier import apply
 from declaro_persistum.differ import diff
 from declaro_persistum.inspector import introspect
 from declaro_persistum.types import NOTHING
+from tests.conftest import probe_url
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.precommit]
 
@@ -366,7 +367,7 @@ async def test_it_round_trips_on_postgresql(prop, value) -> None:
 
     url = os.environ.get(
         "TEST_POSTGRESQL_URL",
-        "postgresql://postgres:postgres@localhost/declaro_probe",
+        probe_url(),
     )
     try:
         conn = await asyncpg.connect(url)
@@ -440,7 +441,7 @@ async def test_an_object_property_round_trips_on_postgresql(kind, prop, value) -
 
     url = os.environ.get(
         "TEST_POSTGRESQL_URL",
-        "postgresql://postgres:postgres@localhost/declaro_probe",
+        probe_url(),
     )
     try:
         conn = await asyncpg.connect(url)

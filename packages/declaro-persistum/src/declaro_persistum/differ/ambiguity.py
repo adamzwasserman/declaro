@@ -67,14 +67,13 @@ def detect_ambiguities(
     ambiguities.extend(table_ambiguities)
 
     # Check columns in common tables
-    for table_name in common_tables:
-        current_table = current[table_name]
-        target_table = target[table_name]
-
-        column_ambiguities = _detect_column_ambiguities(
-            table_name, current_table, target_table, decisions, dialect
+    ambiguities.extend(
+        ambiguity
+        for table_name in sorted(common_tables)
+        for ambiguity in _detect_column_ambiguities(
+            table_name, current[table_name], target[table_name], decisions, dialect
         )
-        ambiguities.extend(column_ambiguities)
+    )
 
     return ambiguities
 
@@ -145,17 +144,29 @@ def _detect_column_ambiguities(
     dropped_cols = current_col_names - target_col_names
     added_cols = target_col_names - current_col_names
 
-    # Filter out columns with explicit hints
-    for added_col in list(added_cols):
-        col_def = target_columns[added_col]
-        if col_def.get("renamed_from") or col_def.get("is_new"):
-            added_cols.discard(added_col)
-            if col_def.get("renamed_from"):
-                dropped_cols.discard(col_def["renamed_from"])
+    # THE AUTHOR SAID WHAT THEY DID, so nothing needs asking. `renamed_from`
+    # names the column this one came from and takes both ends out of the
+    # question; `is_new` says the added column is not a rename of anything and
+    # takes only the added end.
+    hinted = {
+        added_col
+        for added_col in added_cols
+        if target_columns[added_col].get("renamed_from")
+        or target_columns[added_col].get("is_new")
+    }
+    spoken_for = {
+        target_columns[added_col]["renamed_from"]
+        for added_col in added_cols
+        if target_columns[added_col].get("renamed_from")
+    }
 
     # Detect possible renames
     column_ambiguities = _detect_column_rename_ambiguities(
-        table_name, dropped_cols, added_cols, target_columns, decisions
+        table_name,
+        dropped_cols - spoken_for,
+        added_cols - hinted,
+        target_columns,
+        decisions,
     )
     ambiguities.extend(column_ambiguities)
 
@@ -214,6 +225,20 @@ def _detect_column_rename_ambiguities(
     ]
 
 
+# Type pairs that might lose data when changed.
+RISKY_CHANGES = frozenset(
+    {
+        ("text", "integer"),
+        ("text", "boolean"),
+        ("text", "uuid"),
+        ("jsonb", "text"),
+        ("float8", "integer"),
+        ("numeric", "integer"),
+        ("timestamptz", "date"),
+    }
+)
+
+
 def _detect_type_change_ambiguities(
     table_name: str,
     current_columns: dict[str, Column],
@@ -229,48 +254,26 @@ def _detect_type_change_ambiguities(
     ambiguity about a column nobody had touched, and an ambiguity stops the
     run. On PostgreSQL the two are genuinely different and still trip.
     """
-    ambiguities: list[Ambiguity] = []
-
-    # Types that might lose data when changed
-    risky_changes = {
-        ("text", "integer"),
-        ("text", "boolean"),
-        ("text", "uuid"),
-        ("jsonb", "text"),
-        ("float8", "integer"),
-        ("numeric", "integer"),
-        ("timestamptz", "date"),
-    }
-
-    common_cols = set(current_columns.keys()) & set(target_columns.keys())
-
-    for col_name in common_cols:
-        decision_key = f"{table_name}_{col_name}_type"
-        if decision_key in decisions:
-            continue
-
-        current_type = current_columns[col_name].get("type", "").lower()
-        target_type = target_columns[col_name].get("type", "").lower()
-
-        if not same_type(current_type, target_type, dialect):
-            # Normalize types for comparison
-            current_base = current_type.split("(")[0]
-            target_base = target_type.split("(")[0]
-
-            if (current_base, target_base) in risky_changes:
-                ambiguities.append(
-                    {
-                        "type": "type_change",
-                        "table": table_name,
-                        "from_column": None,
-                        "to_column": None,
-                        "column": col_name,
-                        "confidence": 0.0,
-                        "message": (
-                            f"Column '{col_name}' type change from {current_type} to {target_type} "
-                            f"may cause data loss. Confirm this change?"
-                        ),
-                    }
-                )
-
-    return ambiguities
+    return [
+        {
+            "type": "type_change",
+            "table": table_name,
+            "from_column": None,
+            "to_column": None,
+            "column": col_name,
+            "confidence": 0.0,
+            "message": (
+                f"Column '{col_name}' type change from {current_type} to {target_type} "
+                f"may cause data loss. Confirm this change?"
+            ),
+        }
+        for col_name in sorted(set(current_columns) & set(target_columns))
+        # A decision already taken is not asked again.
+        if f"{table_name}_{col_name}_type" not in decisions
+        for current_type in [current_columns[col_name].get("type", "").lower()]
+        for target_type in [target_columns[col_name].get("type", "").lower()]
+        if not same_type(current_type, target_type, dialect)
+        # The length or precision in the parentheses is not what loses data;
+        # the base type is.
+        and (current_type.split("(")[0], target_type.split("(")[0]) in RISKY_CHANGES
+    ]

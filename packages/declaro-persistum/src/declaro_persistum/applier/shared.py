@@ -12,6 +12,8 @@ Three byte-identical copies of the SQLite mapper also existed, in
 `abstractions/reconstruction.py` and `abstractions/table_reconstruction.py`.
 """
 
+# Re-exported: inspector.shared is the single source of truth for PRAGMA parsing.
+import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -58,9 +60,7 @@ from declaro_persistum.applier.spelling import (
 from declaro_persistum.applier.spelling import (
     sqlite_type as sqlite_type,
 )
-
-# Re-exported: inspector.shared is the single source of truth for PRAGMA parsing.
-from declaro_persistum.boundary import helper, recognizer
+from declaro_persistum.boundary import boundary, helper, recognizer
 from declaro_persistum.inspector.shared import (
     columns_from_pragma_rows as columns_from_pragma_rows,
 )
@@ -104,6 +104,47 @@ def insert_enum_values_sql(table: str, details: dict[str, Any]) -> list[str]:
 
 
 @helper
+def _check_clause(name: str, definition: dict[str, Any]) -> str:
+    """A CHECK, written with the expression the declaration carries."""
+    return f'CONSTRAINT "{name}" CHECK ({definition["expression"]})'
+
+
+@helper
+def _unique_clause(name: str, definition: dict[str, Any]) -> str:
+    """A UNIQUE over the columns the declaration names."""
+    columns = ", ".join(f'"{c}"' for c in definition.get("columns", []))
+    return f'CONSTRAINT "{name}" UNIQUE ({columns})'
+
+
+# WHAT EACH CONSTRAINT TYPE IS WRITTEN AS. Two entries, read by subscript.
+_CONSTRAINT_CLAUSES: dict[str, Callable[[str, dict[str, Any]], str]] = {
+    "check": _check_clause,
+    "unique": _unique_clause,
+}
+
+
+@helper
+def _write_constraint(name: str, kind: Any, definition: dict[str, Any]) -> str:
+    """A type this renderer writes, so the table names the writer."""
+    return _CONSTRAINT_CLAUSES[kind](name, definition)
+
+
+@helper
+def _refuse_constraint(name: str, kind: Any, _definition: dict[str, Any]) -> str:
+    """A type this renderer does not write, named so the author finds it."""
+    raise ValueError(
+        f"constraint {name!r} has type {kind!r}; this renderer writes "
+        f"{sorted(_CONSTRAINT_CLAUSES)}."
+    )
+
+
+_KNOWN_CONSTRAINT: dict[bool, Callable[[str, Any, dict[str, Any]], str]] = {
+    True: _write_constraint,
+    False: _refuse_constraint,
+}
+
+
+@helper
 def constraint_clause(name: str, definition: dict[str, Any]) -> str:
     """One table-level constraint, as it appears inside a CREATE TABLE.
 
@@ -111,15 +152,7 @@ def constraint_clause(name: str, definition: dict[str, Any]) -> str:
     table, so a rebuild cannot spell a constraint differently from the create.
     """
     kind = definition.get("type")
-    if kind == "check":
-        return f'CONSTRAINT "{name}" CHECK ({definition["expression"]})'
-    if kind == "unique":
-        columns = ", ".join(f'"{c}"' for c in definition.get("columns", []))
-        return f'CONSTRAINT "{name}" UNIQUE ({columns})'
-    raise ValueError(
-        f"constraint {name!r} has type {kind!r}; this renderer writes "
-        f"{['check', 'unique']}."
-    )
+    return _KNOWN_CONSTRAINT[kind in _CONSTRAINT_CLAUSES](name, kind, definition)
 
 
 @helper
@@ -128,15 +161,20 @@ def create_table_sql(table: str, details: dict[str, Any]) -> list[str]:
     columns = details.get("columns", {})
     primary_key = details.get("primary_key", [])
 
-    col_defs: list[str] = []
+    col_defs: list[str] = [
+        column_definition(col_name, col_def, "sqlite")
+        for col_name, col_def in columns.items()
+    ]
 
-    for col_name, col_def in columns.items():
-        col_sql = column_definition(col_name, col_def, "sqlite")
-        col_defs.append(col_sql)
-
-    if primary_key and len(primary_key) > 1:
-        pk_cols = ", ".join(f'"{c}"' for c in primary_key)
-        col_defs.append(f"PRIMARY KEY ({pk_cols})")
+    # A single-column key is written on the column itself, so only a composite
+    # one becomes a table-level clause. The filter has to sit above the join,
+    # because a comprehension evaluates its clauses in order and `primary_key`
+    # can be absent.
+    composite_key = [
+        f"PRIMARY KEY ({', '.join(chr(34) + c + chr(34) for c in key)})"
+        for key in [primary_key]
+        if key and len(key) > 1
+    ]
 
     # A TABLE-LEVEL CONSTRAINT IS CARRIED HERE AND WAS DROPPED ON THE FLOOR.
     # This function read `columns` and `primary_key` and ignored
@@ -156,10 +194,12 @@ def create_table_sql(table: str, details: dict[str, Any]) -> list[str]:
     # moment one can exist.
     #
     # Named, because an unnamed constraint cannot be dropped by name later.
-    for name, definition in (details.get("constraints") or {}).items():
-        col_defs.append(constraint_clause(name, definition))
+    constraint_defs = [
+        constraint_clause(name, definition)
+        for name, definition in (details.get("constraints") or {}).items()
+    ]
 
-    columns_sql = ",\n    ".join(col_defs)
+    columns_sql = ",\n    ".join(col_defs + composite_key + constraint_defs)
     return [
         f'CREATE TABLE "{table}" (\n    {columns_sql}\n)'
     ]
@@ -372,6 +412,24 @@ _SQL_GENERATORS: dict[str, Any] = {
 
 
 @helper
+def _the_generator(op_type: str) -> Any:
+    """An operation the table names, so the table hands back its generator."""
+    return _SQL_GENERATORS[op_type]
+
+
+@helper
+def _refuse_unknown_operation(op_type: str) -> Any:
+    """An operation nothing renders, named so the caller can see which."""
+    raise ValueError(f"Unknown operation type: {op_type}")
+
+
+_KNOWN_OPERATION: dict[bool, Callable[[str], Any]] = {
+    True: _the_generator,
+    False: _refuse_unknown_operation,
+}
+
+
+@helper
 def statements_for(operation: Operation) -> list[str]:
     """The statements an operation runs, already separated.
 
@@ -384,9 +442,7 @@ def statements_for(operation: Operation) -> list[str]:
     """
     op_type = operation["op"]
 
-    generator = _SQL_GENERATORS.get(op_type)
-    if not generator:
-        raise ValueError(f"Unknown operation type: {op_type}")
+    generator = _KNOWN_OPERATION[op_type in _SQL_GENERATORS](op_type)
 
     return generator(operation["table"], operation["details"])
 
@@ -431,19 +487,27 @@ def requires_reconstruction(operation: Operation) -> bool:
 
 
 @helper
+def _rebuild_note(operation: Operation) -> str:
+    """A rebuild reads the stored schema, which a pure renderer cannot do."""
+    return f"-- Table reconstruction required for {operation['table']}"
+
+
+# WHETHER THE OPERATION IS A REBUILD, as a table rather than a branch.
+_PREVIEW_LINE: dict[bool, Callable[[Operation], str]] = {
+    True: _rebuild_note,
+    False: generate_operation_sql,
+}
+
+
+@helper
 def dry_run_preview(
     operations: list[Operation], execution_order: list[int]
 ) -> ApplyResult:
     """Generate dry-run preview of operations."""
-    sql_statements = []
-    for op_idx in execution_order:
-        operation = operations[op_idx]
-        if requires_reconstruction(operation):
-            sql_statements.append(
-                f"-- Table reconstruction required for {operation['table']}"
-            )
-        else:
-            sql_statements.append(generate_operation_sql(operation))
+    sql_statements = [
+        _PREVIEW_LINE[requires_reconstruction(operations[op_idx])](operations[op_idx])
+        for op_idx in execution_order
+    ]
 
     return {
         "success": True,
@@ -462,14 +526,41 @@ REMOVABLE_PROPERTIES = frozenset(("default", "unique", "check"))
 
 
 @helper
+def _refuse_absent_column(
+    _columns: dict[str, Column], column: str, operation: Operation
+) -> dict[str, Column]:
+    """The table has no such column, so the operation names one nobody declared."""
+    raise ValueError(
+        f"Column '{column}' not found in table '{operation['table']}'"
+    )
+
+
+@helper
+def _the_named_column(
+    columns: dict[str, Column], _column: str, _operation: Operation
+) -> dict[str, Column]:
+    """The table has the column, so the definitions come back unchanged."""
+    return columns
+
+
+_WHEN_ABSENT: dict[
+    bool, Callable[[dict[str, Column], str, Operation], dict[str, Column]]
+] = {
+    True: _refuse_absent_column,
+    False: _the_named_column,
+}
+
+
+@helper
 def _require_column(
     columns: dict[str, Column], column: str, operation: Operation
-) -> None:
-    """Refuse an operation naming a column the table does not have."""
-    if column not in columns:
-        raise ValueError(
-            f"Column '{column}' not found in table '{operation['table']}'"
-        )
+) -> dict[str, Column]:
+    """Refuse an operation naming a column the table does not have.
+
+    Hands back what it checked, so the answer is a value rather than the
+    absence of an exception.
+    """
+    return _WHEN_ABSENT[column not in columns](columns, column, operation)
 
 
 @helper
@@ -551,18 +642,39 @@ _RECONSTRUCT: dict[str, Any] = {
 
 
 @helper
+def _the_rebuilder(op_type: str) -> Any:
+    """An operation a rebuild carries, so the table hands back its rebuilder."""
+    return _RECONSTRUCT[op_type]
+
+
+@helper
+def _refuse_unrebuildable(op_type: str) -> Any:
+    """An operation no rebuild carries, named so the caller can see which."""
+    raise ValueError(f"Operation '{op_type}' does not support reconstruction")
+
+
+_CAN_REBUILD: dict[bool, Callable[[str], Any]] = {
+    True: _the_rebuilder,
+    False: _refuse_unrebuildable,
+}
+
+
+@helper
 def apply_reconstruction_changes(
     columns: dict[str, Column], operation: Operation
 ) -> dict[str, Column]:
     """Apply one reconstruction operation to a table's columns (pure).
 
-    Raises KeyError for an operation a rebuild cannot carry.
+    Raises ValueError for an operation a rebuild cannot carry.
     """
     op_type = operation["op"]
-    reconstruct = _RECONSTRUCT.get(op_type)
-    if reconstruct is None:
-        raise ValueError(f"Operation '{op_type}' does not support reconstruction")
+    reconstruct = _CAN_REBUILD[op_type in _RECONSTRUCT](op_type)
     return reconstruct(columns, operation)
+
+
+# The three properties SQLite can change with a single ALTER. Everything else
+# the differ compares takes a full rebuild.
+_SPECIALISED_ALTERS = frozenset(("nullable", "type", "default"))
 
 
 @recognizer
@@ -571,21 +683,24 @@ def single_change_property(operation: Operation) -> tuple[str, Any] | None:
 
     Returns (change_key, value) if the operation is an alter_column with exactly
     one change in {"nullable", "type", "default"}. Returns None otherwise.
+
+    THREE CONDITIONS READ AS THREE FILTERS. The first source list is empty for
+    any other operation, so `details["changes"]` is never read for one that
+    does not carry it.
     """
-    if operation["op"] != "alter_column":
-        return None
-
-    changes = operation["details"]["changes"]
-    if len(changes) != 1:
-        return None
-
-    for key in ("nullable", "type", "default"):
-        if key in changes:
-            val = changes[key]
-            val = changed_to(val)
-            return key, val
-
-    return None
+    changes = [
+        operation["details"]["changes"]
+        for _ in [operation]
+        if operation["op"] == "alter_column"
+    ]
+    single = [
+        (key, changed_to(value))
+        for one in changes
+        if len(one) == 1
+        for key, value in one.items()
+        if key in _SPECIALISED_ALTERS
+    ]
+    return [*single, None][0]
 
 
 # `enum_population_sql(operation, target_schema)` stood here. It was called
@@ -659,3 +774,44 @@ def refuse_unwritable_column_types(table_name: str, columns: dict[str, Column]) 
         if type_of(col_def["type"]) not in _TYPE_SPELLINGS
     }
     _WHEN_UNWRITABLE[bool(wrong)](table_name, wrong)
+
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# What both rebuilders do
+# =============================================================================
+
+# TWO REBUILDERS SHARE ONE VOCABULARY, and `refuse_unwritable_column_types`
+# above is here for the same reason. When both were rewritten as dispatch
+# tables on 2026-08-22 they each wrote these two bodies again, because a
+# question asked in two places gets answered in two places unless the answer
+# has one home.
+
+
+@boundary
+async def copy_the_shared_columns(
+    connection: Any,
+    table_name: str,
+    temp_table: str,
+    pairs: list[tuple[str, str]],
+) -> int:
+    """Move the rows across, reading old names and writing new ones."""
+    read_sql = ", ".join(f'"{old}"' for old, _ in pairs)
+    write_sql = ", ".join(f'"{new}"' for _, new in pairs)
+    copy_sql = (
+        f'INSERT INTO "{temp_table}" ({write_sql}) '
+        f'SELECT {read_sql} FROM "{table_name}"'
+    )
+    logger.debug(f"Copying data: {copy_sql}")
+    await connection.execute(copy_sql)
+    return len(pairs)
+
+
+@helper
+def refuse_the_violations(violations: list[Any]) -> list[Any]:
+    """The rebuilt table breaks a foreign key, so the caller is told."""
+    raise ValueError(
+        f"Foreign key constraint violations after reconstruction: {violations}"
+    )

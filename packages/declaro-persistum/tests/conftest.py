@@ -31,7 +31,71 @@ def precommit_timeout(request: pytest.FixtureRequest) -> None:
 
 
 DEFAULT_POSTGRESQL_URL = "postgresql://postgres:postgres@localhost/declarotodo"
-POSTGRESQL_PROBE_URL = "postgresql://postgres:postgres@localhost/declaro_probe"
+_PROBE_SERVER = "postgresql://postgres:postgres@localhost"
+
+
+def probe_url() -> str:
+    """A PostgreSQL database this pytest process owns.
+
+    TWENTY-ONE TEST FILES HARD-CODED ONE DATABASE NAME and created the same
+    tables in it: `t`, `users`, `widgets`, `parents`, `children`. One runner
+    was fine. Two were not, and on 2026-08-22 three agents working in
+    parallel each hit `DuplicateTableError: relation "widgets" already
+    exists` on a different test, then each spent a run proving their own
+    change innocent before finding the shared database.
+
+    The table names are fixed on purpose, because the tests are about what
+    the differ does to a named table. So the boundary has to be the database,
+    which is what `postgresql_schema` already does per test. This is the same
+    thing per process, for the files that build their own connection.
+
+    `TEST_POSTGRESQL_URL` still wins, so a caller can point the suite at a
+    database of their choosing and get the old shared behaviour deliberately.
+    """
+    chosen = os.environ.get("TEST_POSTGRESQL_URL")
+    return chosen or f"{_PROBE_SERVER}/declaro_probe_{os.getpid()}"
+
+
+POSTGRESQL_PROBE_URL = probe_url()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _a_probe_database_of_our_own():
+    """Make this process's probe database, and drop it at the end.
+
+    Without this the twenty-one files that build their own connection would
+    point at a database nobody created and skip, which reads exactly like
+    PostgreSQL being unavailable. A silent skip is worse than the collision
+    it replaced.
+    """
+    import asyncio
+
+    import asyncpg
+
+    server, _, name = POSTGRESQL_PROBE_URL.rpartition("/")
+
+    async def _make() -> bool:
+        try:
+            admin = await asyncpg.connect(f"{server}/postgres")
+        except (OSError, asyncpg.PostgresError):
+            return False
+        try:
+            await admin.execute(f'DROP DATABASE IF EXISTS "{name}"')
+            await admin.execute(f'CREATE DATABASE "{name}"')
+        finally:
+            await admin.close()
+        return True
+
+    async def _drop() -> None:
+        admin = await asyncpg.connect(f"{server}/postgres")
+        try:
+            await admin.execute(f'DROP DATABASE IF EXISTS "{name}"')
+        finally:
+            await admin.close()
+
+    made = asyncio.run(_make())
+    yield
+    [asyncio.run(_drop()) for _ in [made] if made]
 
 
 @pytest.fixture

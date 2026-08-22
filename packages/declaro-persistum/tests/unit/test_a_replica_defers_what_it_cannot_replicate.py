@@ -170,29 +170,56 @@ async def test_the_loop_waits_rather_than_polling(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_commit_wakes_the_loop(monkeypatch) -> None:
-    """The floor. A loop that never replicates passes the test above."""
-    from declaro_persistum import database
+async def test_a_commit_wakes_the_loop() -> None:
+    """The floor. A loop that never wakes passes the test above.
+
+    IT USED TO SUBSTITUTE `database.replicate` FOR A FAKE and watch the fake
+    run. Two things were wrong with that. It swapped a real function for one
+    that only records being called, which proves the loop called something
+    rather than that it did anything; and on 2026-08-22 it stopped working
+    silently, because `_IF_IDLE` holds the real `replicate` from import and
+    never reads the module attribute the patch rebinds. The patch was ignored,
+    the real function ran against this test's data, and the failure arrived as
+    a KeyError from somewhere else entirely.
+
+    The loop clears `wanted` before each pass, on purpose, so that a signal
+    arriving mid-pass is not discarded. That makes the cleared event the
+    observable: a loop still parked in `wanted.wait()` leaves it set. Nothing
+    is substituted, and the real dispatch runs.
+    """
+    import tempfile
+
+    from declaro_persistum import close, open_turso
     from declaro_persistum.database import replication_loop
+    from declaro_persistum.types import NOTHING
 
-    ran = asyncio.Event()
-
-    async def _replicate(_db):
-        ran.set()
-        return True
-
-    monkeypatch.setattr(database, "replicate", _replicate)
-
-    db = _replica(None)
-    wanted = asyncio.Event()
-    task = asyncio.create_task(replication_loop(db, wanted))
-    try:
-        wanted.set()
-        await asyncio.wait_for(ran.wait(), timeout=2)
-    finally:
-        db["closed"] = True
-        wanted.set()
-        await asyncio.wait_for(task, timeout=2)
+    with tempfile.TemporaryDirectory() as folder:
+        # No primary and no token: this is a local file, which is what a
+        # database with nothing to replicate to looks like.
+        db = await open_turso(
+            f"{folder}/wake.db",
+            primary=NOTHING,
+            token=NOTHING,
+            shutdown="exit_immediately",
+        )
+        wanted = asyncio.Event()
+        task = asyncio.create_task(replication_loop(db, wanted))
+        try:
+            wanted.set()
+            woke = [
+                None
+                for _ in range(200)
+                if not wanted.is_set() or await asyncio.sleep(0.005)
+            ]
+            assert not wanted.is_set(), (
+                f"the loop never woke after {len(woke)} turns: `wanted` is "
+                f"still set, so nothing consumed the signal a commit sends"
+            )
+        finally:
+            db["closed"] = True
+            wanted.set()
+            await asyncio.wait_for(task, timeout=2)
+            await close(db)
 
 
 @pytest.mark.asyncio

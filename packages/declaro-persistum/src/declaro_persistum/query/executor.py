@@ -15,6 +15,45 @@ from declaro_persistum.types import Nothing, resolved, written_as
 
 T = TypeVar("T")
 
+
+@helper
+def _rows_as_the_driver_wrote_them(rows: list[Any], _row_factory: Any) -> Any:
+    """No factory, so the rows go back exactly as they came off the cursor."""
+    return rows
+
+
+@helper
+def _rows_through_the_factory(rows: list[Any], row_factory: Any) -> Any:
+    """Each row is handed to the caller's factory, in order."""
+    return [row_factory(row) for row in rows]
+
+
+_ALL_ROWS: dict[bool, Callable[[list[Any], Any], Any]] = {
+    True: _rows_through_the_factory,
+    False: _rows_as_the_driver_wrote_them,
+}
+
+
+@helper
+def _row_as_the_driver_wrote_it(row: Any, _row_factory: Any) -> Any:
+    """Either there is no row to shape or no factory to shape it with."""
+    return row
+
+
+@helper
+def _row_through_the_factory(row: Any, row_factory: Any) -> Any:
+    """There is a row and a factory, so the factory shapes it."""
+    return row_factory(row)
+
+
+# A ROW THAT IS ABSENT IS NOT PUT THROUGH A FACTORY. `execute_one` asks both
+# halves of that in one key, because a factory called on a missing row would
+# be handed None and asked to make a record of it.
+_ONE_ROW: dict[bool, Callable[[Any, Any], Any]] = {
+    True: _row_through_the_factory,
+    False: _row_as_the_driver_wrote_it,
+}
+
 _DIALECT_MAP = {
     "asyncpg": "postgresql",
     "aiosqlite": "sqlite",
@@ -30,6 +69,72 @@ def _conn_module(conn: Any) -> str:
     Falls back to ``type(conn).__module__`` for raw driver connections.
     """
     return getattr(conn, "_declaro_dialect", type(conn).__module__)  # honest: ignore HC-P005: the driver's own module is the only marker
+
+
+@helper
+def _recognised_keys(conn_type: str) -> list[str]:
+    """Which driver names in `_DIALECT_MAP` appear in this module path.
+
+    The scan is by substring because a driver keeps its connection in a
+    submodule: `asyncpg.connection`, `aiosqlite.core`. `_DIALECT_MAP` is
+    ordered, so the first name that appears is the answer, which is what the
+    loop with a `return` inside it used to give.
+    """
+    return [key for key in _DIALECT_MAP if key in conn_type]
+
+
+@helper
+def _refuse_unnamed_engine(conn_type: str, _keys: list[str]) -> str:
+    """A driver nobody has taught this package about, refused by name."""
+    raise ValueError(
+        f"cannot tell which engine {conn_type!r} belongs to. Recognised: "
+        f"{', '.join(sorted(set(_DIALECT_MAP.values())))}."
+    )
+
+
+@helper
+def _the_named_engine(_conn_type: str, keys: list[str]) -> str:
+    """The module path names a driver, so its dialect is the answer."""
+    return _DIALECT_MAP[keys[0]]
+
+
+_WHEN_ENGINE_UNNAMED: dict[bool, Callable[[str, list[str]], str]] = {
+    True: _the_named_engine,
+    False: _refuse_unnamed_engine,
+}
+
+
+@helper
+def _refuse_unsupported_connection(conn_type: str, _keys: list[str]) -> str:
+    """The same refusal, in the words the execution paths have always used."""
+    raise ValueError(f"Unsupported connection type: {conn_type}")
+
+
+@helper
+def _the_supported_key(_conn_type: str, keys: list[str]) -> str:
+    """The driver name the per-dialect tables are keyed on."""
+    return keys[0]
+
+
+_WHEN_CONNECTION_UNSUPPORTED: dict[bool, Callable[[str, list[str]], str]] = {
+    True: _the_supported_key,
+    False: _refuse_unsupported_connection,
+}
+
+
+@helper
+def _driver_key(conn_type: str) -> str:
+    """The key every per-dialect table in this module is read with.
+
+    A CONNECTION NO TABLE HOLDS IS REFUSED, not defaulted. `_prepare_query`
+    used to fall through to `return sql, params` under a comment reading
+    "assume named parameters work", which handed an unrecognised driver the
+    statement unconverted and let it fail further downstream.
+    """
+    return [
+        _WHEN_CONNECTION_UNSUPPORTED[bool(keys)](conn_type, keys)
+        for keys in [_recognised_keys(conn_type)]
+    ][0]
 
 
 @helper
@@ -51,13 +156,10 @@ def detect_dialect(connection: Any) -> str:
     three layers away.
     """
     conn_type = _conn_module(connection)
-    for key, dialect in _DIALECT_MAP.items():
-        if key in conn_type:
-            return dialect
-    raise ValueError(
-        f"cannot tell which engine {conn_type!r} belongs to. Recognised: "
-        f"{', '.join(sorted(set(_DIALECT_MAP.values())))}."
-    )
+    return [
+        _WHEN_ENGINE_UNNAMED[bool(keys)](conn_type, keys)
+        for keys in [_recognised_keys(conn_type)]
+    ][0]
 
 
 @boundary
@@ -89,9 +191,7 @@ async def execute(
     sql, params = _prepare_query(query, connection)
     rows = await _execute_fetch(connection, sql, params)
 
-    if row_factory:
-        return [row_factory(row) for row in rows]
-    return rows
+    return _ALL_ROWS[bool(row_factory)](rows, row_factory)
 
 
 @boundary
@@ -124,12 +224,7 @@ async def execute_one(
     sql, params = _prepare_query(query, connection)
     row = await _execute_fetch_one(connection, sql, params)
 
-    if row is None:
-        return None
-
-    if row_factory:
-        return row_factory(row)
-    return row
+    return _ONE_ROW[row is not None and bool(row_factory)](row, row_factory)
 
 
 @boundary
@@ -211,22 +306,15 @@ def _prepare_query(query: Query, connection: Any) -> tuple[str, Any]:
     sql = query["sql"]
     params = query["params"]
 
-    conn_type = _conn_module(connection)
-
-    _CONVERTERS = {
-        "asyncpg": _convert_to_asyncpg,
-        "aiosqlite": _convert_to_aiosqlite,
-        "turso": _convert_to_turso,
-    }
-
-    for key, converter in _CONVERTERS.items():
-        if key in conn_type:
-            return converter(sql, params)
-    # Default: assume named parameters work
-    return sql, params
+    return _CONVERTERS[_driver_key(_conn_module(connection))](sql, params)
 
 
-_PLACEHOLDER = re.compile(r":([a-zA-Z_][a-zA-Z0-9_]*)")
+_SCAN = re.compile(
+    r"'[^']*'?"  # a string literal, closed or running to the end of the text
+    r'|"[^"]*"?'  # a quoted identifier, likewise
+    r"|::"  # a cast, taken whole so its second colon starts nothing
+    r"|:([a-zA-Z_][a-zA-Z0-9_]*)"  # and the only thing that is a placeholder
+)
 
 
 @helper
@@ -244,30 +332,17 @@ def _placeholders(sql: str) -> list[tuple[int, int, str]]:
         n::text             a cast. A parameter named `text` turned this into
                             `n:$1`, which no engine parses.
 
-    So the scan walks the statement rather than searching it, carrying whether
-    it stands inside a literal or a quoted name, and skipping a doubled colon
-    whole. Returned as spans so a caller can rewrite from the end and leave
-    every earlier offset valid.
+    So the scan reads the statement as a sequence of four things rather than
+    searching it for one. Alternation is ordered and matches are leftmost and
+    non-overlapping, so a literal, a quoted name and a cast each swallow their
+    own colons before a placeholder can be read out of them. Returned as spans
+    so a caller can rewrite around them and leave every other offset valid.
     """
-    spans: list[tuple[int, int, str]] = []
-    position = 0
-    while position < len(sql):
-        char = sql[position]
-        if char in "'\"":
-            closing = sql.find(char, position + 1)
-            position = len(sql) if closing == -1 else closing + 1
-            continue
-        if char == ":":
-            if sql.startswith("::", position):
-                position += 2
-                continue
-            match = _PLACEHOLDER.match(sql, position)
-            if match:
-                spans.append((match.start(), match.end(), match.group(1)))
-                position = match.end()
-                continue
-        position += 1
-    return spans
+    return [
+        (found.start(), found.end(), found.group(1))
+        for found in _SCAN.finditer(sql)
+        if found.group(1) is not None
+    ]
 
 
 @boundary
@@ -284,23 +359,25 @@ def _convert_to_asyncpg(sql: str, params: dict[str, Any]) -> tuple[str, list[Any
     the same query worked or failed by how its parameters happened to be
     written.
     """
-    param_list: list[Any] = []
-    numbers: dict[str, int] = {}
-    pieces: list[str] = []
-    cursor = 0
+    # A PLACEHOLDER THE CALLER SUPPLIED NO VALUE FOR IS LEFT ALONE, which is
+    # what the `continue` did. It reaches the driver as it was written and the
+    # driver says so.
+    spans = [span for span in _placeholders(sql) if span[2] in params]
+    # `dict.fromkeys` keeps first appearance and drops the repeats, so a name
+    # written twice takes the same number twice and its value is passed once.
+    ordered = list(dict.fromkeys(name for _, _, name in spans))
+    numbers = {name: i + 1 for i, name in enumerate(ordered)}
+    param_list = [params[name] for name in ordered]
 
-    for start, end, name in _placeholders(sql):
-        if name not in params:
-            continue
-        if name not in numbers:
-            param_list.append(params[name])
-            numbers[name] = len(param_list)
-        pieces.append(sql[cursor:start])
-        pieces.append(f"${numbers[name]}")
-        cursor = end
-
-    pieces.append(sql[cursor:])
-    return "".join(pieces), param_list
+    # Where the untouched text between placeholders starts: the front of the
+    # statement, then the end of each span in turn.
+    resume = [0, *[end for _, end, _ in spans]]
+    pieces = [
+        piece
+        for (start, _end, name), cursor in zip(spans, resume, strict=False)
+        for piece in (sql[cursor:start], f"${numbers[name]}")
+    ]
+    return "".join([*pieces, sql[resume[-1] :]]), param_list
 
 
 @helper
@@ -322,20 +399,28 @@ def _convert_to_turso(sql: str, params: dict[str, Any]) -> tuple[str, list[Any]]
     rewrote a colon inside a string literal, appending a second value that
     pushed every later bind one position out.
     """
-    param_list: list[Any] = []
-    pieces: list[str] = []
-    cursor = 0
+    # A PLACEHOLDER THE CALLER SUPPLIED NO VALUE FOR IS LEFT ALONE, as above.
+    spans = [span for span in _placeholders(sql) if span[2] in params]
+    param_list = [params[name] for _, _, name in spans]
 
-    for start, end, name in _placeholders(sql):
-        if name not in params:
-            continue
-        param_list.append(params[name])
-        pieces.append(sql[cursor:start])
-        pieces.append("?")
-        cursor = end
+    resume = [0, *[end for _, end, _ in spans]]
+    pieces = [
+        piece
+        for (start, _end, _name), cursor in zip(spans, resume, strict=False)
+        for piece in (sql[cursor:start], "?")
+    ]
+    return "".join([*pieces, sql[resume[-1] :]]), param_list
 
-    pieces.append(sql[cursor:])
-    return "".join(pieces), param_list
+
+# HOW EACH DRIVER SPELLS A BOUND PARAMETER. Read with [], so a driver no
+# converter answers for is refused by `_driver_key` rather than handed the
+# statement unconverted under a comment reading "assume named parameters
+# work".
+_CONVERTERS: dict[str, Callable[[str, dict[str, Any]], tuple[str, Any]]] = {
+    "asyncpg": _convert_to_asyncpg,
+    "aiosqlite": _convert_to_aiosqlite,
+    "turso": _convert_to_turso,
+}
 
 
 @boundary
@@ -381,10 +466,7 @@ async def _execute_fetch(connection: Any, sql: str, params: Any) -> list[dict[st
         "turso": _fetch_turso,
     }
 
-    for key, fetcher in _FETCHERS.items():
-        if key in conn_type:
-            return await fetcher()
-    raise ValueError(f"Unsupported connection type: {conn_type}")
+    return await _FETCHERS[_driver_key(conn_type)]()
 
 
 @boundary
@@ -422,10 +504,12 @@ async def _execute_fetch_one(connection: Any, sql: str, params: Any) -> dict[str
     async def _fetch_one_turso() -> dict[str, Any] | None:
         cursor = await connection.execute(sql, params if params else ())
         row = await cursor.fetchone()
-        if not row:
-            return None
         columns = [desc[0] for desc in cursor.description] if cursor.description else []
-        return dict(zip(columns, row, strict=True))
+        # AN ABSENT ROW STAYS ABSENT. Only a row that is there gets named.
+        named = [
+            dict(zip(columns, present, strict=True)) for present in [row] if present
+        ]
+        return [*named, None][0]
 
     _FETCHERS = {
         "asyncpg": _fetch_one_asyncpg,
@@ -433,10 +517,7 @@ async def _execute_fetch_one(connection: Any, sql: str, params: Any) -> dict[str
         "turso": _fetch_one_turso,
     }
 
-    for key, fetcher in _FETCHERS.items():
-        if key in conn_type:
-            return await fetcher()
-    raise ValueError(f"Unsupported connection type: {conn_type}")
+    return await _FETCHERS[_driver_key(conn_type)]()
 
 
 @helper
@@ -472,13 +553,16 @@ def _first_value(row: Any) -> Any:
     `list(result.values())[0]`, which is this workaround written at the call
     site by somebody who hit the same wall.
     """
-    if row is None:
-        return None
     # A DRIVER HANDS BACK A MAPPING OR A SEQUENCE, and either way the scalar
     # is its first value. aiosqlite gives a Row that indexes by position,
     # asyncpg a Record that also reads by name, and a row_factory can make it
-    # a plain dict.
-    return _FIRST_VALUE[written_as(dict, row)](row)
+    # a plain dict. A query that matched nothing has no row and no first value.
+    found = [
+        _FIRST_VALUE[written_as(dict, present)](present)
+        for present in [row]
+        if present is not None
+    ]
+    return [*found, None][0]
 
 
 @boundary
@@ -506,10 +590,7 @@ async def _execute_fetch_scalar(connection: Any, sql: str, params: Any) -> Any:
         "turso": _scalar_turso,
     }
 
-    for key, fetcher in _FETCHERS.items():
-        if key in conn_type:
-            return await fetcher()
-    raise ValueError(f"Unsupported connection type: {conn_type}")
+    return await _FETCHERS[_driver_key(conn_type)]()
 
 
 @boundary
@@ -541,10 +622,7 @@ async def _execute_update(connection: Any, sql: str, params: Any) -> int:
         "turso": _update_turso,
     }
 
-    for key, updater in _UPDATERS.items():
-        if key in conn_type:
-            return await updater()
-    raise ValueError(f"Unsupported connection type: {conn_type}")
+    return await _UPDATERS[_driver_key(conn_type)]()
 
 
 @boundary

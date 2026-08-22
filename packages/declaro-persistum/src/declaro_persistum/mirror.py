@@ -33,7 +33,7 @@ a different database than it thinks.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any, TypedDict
 
@@ -112,7 +112,95 @@ async def mirror_reading(m: Mirror) -> AsyncIterator[Any]:
         yield conn
 
 
+# WHAT A MIRROR FAILURE MEANS, AS A TABLE ON `fail_open`. Both entries take
+# the same three things and both return, so neither reads as a path nothing
+# takes.
+@helper
+def _kept_to_the_mirror(m: Mirror, primary_rows: Any, _error: Exception) -> tuple[Any, Mirror]:
+    """fail_open: the primary's answer stands and the failure goes no further."""
+    return primary_rows, m
+
+
+@helper
+def _handed_to_the_caller(
+    _m: Mirror, _primary_rows: Any, error: Exception
+) -> tuple[Any, Mirror]:
+    """fail_closed: by now the mirror is production, so its failure is the caller's."""
+    raise error
+
+
+_WHEN_THE_MIRROR_FAILS: dict[
+    bool, Callable[[Mirror, Any, Exception], tuple[Any, Mirror]]
+] = {
+    True: _kept_to_the_mirror,
+    False: _handed_to_the_caller,
+}
+
+
+@helper
+def _recorded(
+    m: Mirror, sql: str, primary_rows: Any, replica_rows: Any
+) -> tuple[Any, Mirror]:
+    """The two disagreed, so the disagreement joins the list."""
+    divergence: Divergence = {
+        "sql": sql,
+        "primary": primary_rows,
+        "replica": replica_rows,
+    }
+    return primary_rows, {**m, "divergences": [*m["divergences"], divergence]}
+
+
+@helper
+def _agreed(
+    m: Mirror, _sql: str, primary_rows: Any, _replica_rows: Any
+) -> tuple[Any, Mirror]:
+    """The two answered the same thing, so there is nothing to record."""
+    return primary_rows, m
+
+
+_WHEN_THEY_DIFFER: dict[bool, Callable[[Mirror, str, Any, Any], tuple[Any, Mirror]]] = {
+    True: _recorded,
+    False: _agreed,
+}
+
+
 @boundary
+async def _read(db: Database, sql: str, params: Any) -> Any:
+    """One read, on its own connection."""
+    async with reading(db) as conn:
+        cur = await conn.execute(sql, params)
+        return await cur.fetchall()
+
+
+@boundary
+async def _against_the_replica(
+    m: Mirror, sql: str, params: Any, primary_rows: Any
+) -> tuple[Any, Mirror]:
+    """compare_on_read is on, so the same read runs against the replica."""
+    try:
+        replica_rows = await _read(m["replica"], sql, params)
+    except Exception as error:
+        return _WHEN_THE_MIRROR_FAILS[m["fail_open"]](m, primary_rows, error)
+    return _WHEN_THEY_DIFFER[primary_rows != replica_rows](
+        m, sql, primary_rows, replica_rows
+    )
+
+
+@helper
+async def _the_primary_alone(
+    m: Mirror, _sql: str, _params: Any, primary_rows: Any
+) -> tuple[Any, Mirror]:
+    """compare_on_read is off, so the primary's answer is the whole answer."""
+    return primary_rows, m
+
+
+_WHEN_COMPARING: dict[bool, Any] = {
+    True: _against_the_replica,
+    False: _the_primary_alone,
+}
+
+
+@helper
 async def compare(m: Mirror, sql: str, params: Any) -> tuple[Any, Mirror]:
     """Run a read against both and record any disagreement.
 
@@ -124,31 +212,11 @@ async def compare(m: Mirror, sql: str, params: Any) -> tuple[Any, Mirror]:
     not take production down; it is raised otherwise. Either way the
     divergence list is what tells you whether the mirror is ready.
     """
-    async with reading(m["primary"]) as conn:
-        cur = await conn.execute(sql, params)
-        primary_rows = await cur.fetchall()
-
-    if not m["compare_on_read"]:
-        return primary_rows, m
-
-    try:
-        async with reading(m["replica"]) as conn:
-            cur = await conn.execute(sql, params)
-            replica_rows = await cur.fetchall()
-    except Exception:
-        if not m["fail_open"]:
-            raise
-        return primary_rows, m
-
-    if primary_rows != replica_rows:
-        divergence: Divergence = {
-            "sql": sql,
-            "primary": primary_rows,
-            "replica": replica_rows,
-        }
-        return primary_rows, {**m, "divergences": [*m["divergences"], divergence]}
-
-    return primary_rows, m
+    primary_rows = await _read(m["primary"], sql, params)
+    result: tuple[Any, Mirror] = await _WHEN_COMPARING[m["compare_on_read"]](
+        m, sql, params, primary_rows
+    )
+    return result
 
 
 @helper
@@ -166,6 +234,27 @@ def promote(m: Mirror) -> Mirror:
 def detach(m: Mirror) -> Database:
     """Phase 4: one database again. Returns the survivor."""
     return m["primary"]
+
+
+# The same policy again, for a write rather than a read. It is a separate
+# table because a write returns the Mirror alone.
+@helper
+def _write_kept_to_the_mirror(m: Mirror, sql: str, _error: Exception) -> Mirror:
+    """fail_open: the replica's failure becomes a divergence and nothing more."""
+    divergence: Divergence = {"sql": sql, "primary": "ok", "replica": "failed"}
+    return {**m, "divergences": [*m["divergences"], divergence]}
+
+
+@helper
+def _write_handed_to_the_caller(_m: Mirror, _sql: str, error: Exception) -> Mirror:
+    """fail_closed: the replica's failure is the caller's."""
+    raise error
+
+
+_WHEN_THE_WRITE_FAILS: dict[bool, Callable[[Mirror, str, Exception], Mirror]] = {
+    True: _write_kept_to_the_mirror,
+    False: _write_handed_to_the_caller,
+}
 
 
 @boundary
@@ -193,10 +282,7 @@ async def parallel_write(
 
     try:
         await replica_task
-    except Exception:
-        if not m["fail_open"]:
-            raise
-        divergence: Divergence = {"sql": sql, "primary": "ok", "replica": "failed"}
-        return {**m, "divergences": [*m["divergences"], divergence]}
+    except Exception as error:
+        return _WHEN_THE_WRITE_FAILS[m["fail_open"]](m, sql, error)
 
     return m

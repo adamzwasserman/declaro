@@ -134,20 +134,39 @@ async def test_turso_commits_too(tmp_path) -> None:
 
 
 def test_both_paths_finish_a_block_the_same_way() -> None:
-    """The structural guard: two branches that must agree are one function.
+    """The structural guard: two paths that must agree share one function.
 
-    Asserted on the source because that is where the drift happened. If a
-    future edit inlines the commit into one branch again, this fails.
+    IT USED TO COUNT `"_write_connection(db)"` TWICE IN `writing`'S SOURCE,
+    and on 2026-08-22 the two branches became `_WRITE_PATH`, a table read by
+    `writing`. The string left that function and the test went red while the
+    property it guards still held, which is the same failure it exists to
+    catch pointed the other way: it was reading one function's text rather
+    than asking where the paths go.
+
+    It asks the table now. Every entry either is `_write_connection` or
+    reaches it, so a future edit that gives one path its own commit fails
+    here whichever shape the choice is written in.
     """
     import inspect
 
     from declaro_persistum import database
 
-    source = inspect.getsource(database.writing)
-    assert source.count("_write_connection(db)") == 2, (
-        "one of `writing`'s two paths no longer goes through the shared "
-        "transaction scope, which is exactly how the commit came to apply to "
-        "replicated databases only"
+    shared = database._write_connection
+    stray = [
+        f"{key}: {entry.__name__}"
+        for key, entry in database._WRITE_PATH.items()
+        if entry is not shared
+        and "_write_connection(db)" not in inspect.getsource(entry)
+    ]
+
+    assert not stray, (
+        f"these write paths no longer go through the shared transaction "
+        f"scope: {stray}. That is exactly how the commit came to apply to "
+        f"replicated databases only."
+    )
+    assert len(database._WRITE_PATH) == 2, (
+        "the write paths are no longer two, so this test is measuring "
+        "something other than the pair it was written for"
     )
 
 

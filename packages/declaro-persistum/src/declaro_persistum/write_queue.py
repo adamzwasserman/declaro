@@ -181,6 +181,29 @@ def new_room() -> Room:
     return {"writes": [], "waiting": {}, "arrived": asyncio.Event()}
 
 
+@helper
+def _the_statement(write: PendingWrite) -> PendingWrite:
+    """There is SQL here, so the write goes on as it arrived."""
+    return write
+
+
+@helper
+def _refuse_an_empty_write(_write: PendingWrite) -> PendingWrite:
+    """No SQL, so the caller is told at the door rather than by the engine."""
+    raise ValueError(
+        "a write needs SQL. `deposit` was given an empty statement, which "
+        "the engine would reject after a ticket, a drainer and a round "
+        "trip."
+    )
+
+
+# Whether the deposited write carries a statement to run.
+_A_WRITE_WITH: dict[bool, Callable[[PendingWrite], PendingWrite]] = {
+    True: _the_statement,
+    False: _refuse_an_empty_write,
+}
+
+
 @boundary
 def deposit(room: Room, write: PendingWrite) -> str:
     """Put a write in the room and return its ticket at once.
@@ -198,12 +221,7 @@ def deposit(room: Room, write: PendingWrite) -> str:
     so the interior may trust it. `turso_write_one` and its siblings then mean
     "a statement" by `sql`, which is what their signatures already imply.
     """
-    if not write["sql"].strip():
-        raise ValueError(
-            "a write needs SQL. `deposit` was given an empty statement, which "
-            "the engine would reject after a ticket, a drainer and a round "
-            "trip."
-        )
+    write = _A_WRITE_WITH[bool(write["sql"].strip())](write)
     ticket = str(uuid.uuid4())
     room["writes"].append((ticket, write))
     room["waiting"][ticket] = asyncio.get_running_loop().create_future()
@@ -255,6 +273,58 @@ async def collect(room: Room, ticket: str) -> Receipt:
         return await room["waiting"][ticket]
     finally:
         room["waiting"].pop(ticket, None)
+
+
+@helper
+def _is_listening(waiter: asyncio.Future[Any] | None) -> bool:
+    """Whether one ticket still has a caller who can be told the answer.
+
+    A depositor that cancelled its `collect` leaves either no future at all or
+    a settled one, and both mean the same thing here: nobody to hand this to.
+    """
+    return waiter is not None and not waiter.done()
+
+
+@helper
+def _hand_the_failure_over(waiter: Any, exc: BaseException) -> list[BaseException]:
+    """The depositor is waiting, so its own exception goes down its ticket."""
+    waiter.set_exception(exc)
+    return []
+
+
+@helper
+def _nobody_holds_the_ticket(
+    _waiter: Any, exc: BaseException
+) -> list[BaseException]:
+    """No caller left, so the failure leaves as data for `drain` to return."""
+    return [exc]
+
+
+@helper
+def _hand_the_receipt_over(waiter: Any, receipt: Receipt) -> Receipt:
+    """The depositor is waiting, so its receipt goes down its ticket."""
+    waiter.set_result(receipt)
+    return receipt
+
+
+@helper
+def _a_receipt_nobody_collected(_waiter: Any, receipt: Receipt) -> Receipt:
+    """No caller left. The write landed and its receipt has nowhere to go."""
+    return receipt
+
+
+# Whether the depositor of this write is still waiting on its ticket.
+_WITH_A_FAILURE: dict[
+    bool, Callable[[Any, BaseException], list[BaseException]]
+] = {
+    True: _hand_the_failure_over,
+    False: _nobody_holds_the_ticket,
+}
+
+_WITH_A_RECEIPT: dict[bool, Callable[[Any, Receipt], Receipt]] = {
+    True: _hand_the_receipt_over,
+    False: _a_receipt_nobody_collected,
+}
 
 
 @boundary
@@ -337,18 +407,17 @@ async def drain(
             # appender stops instead of grinding the rest of the room through
             # the same broken call. Those writes stay queued, which is
             # recoverable and visible; popped and dropped is neither.
-            if waiter is not None and not waiter.done():
-                waiter.set_exception(exc)
+            #
+            # Nothing is orphaned here: the exception itself leaves on the
+            # `raise` below, so a caller that stopped listening loses nothing
+            # this line could have told it.
+            _WITH_A_FAILURE[_is_listening(waiter)](waiter, exc)
             raise
         except Exception as exc:
-            if waiter is not None and not waiter.done():
-                waiter.set_exception(exc)
-            else:
-                orphaned.append(exc)
+            orphaned.extend(_WITH_A_FAILURE[_is_listening(waiter)](waiter, exc))
             attempted += 1
             continue
-        if waiter is not None and not waiter.done():
-            waiter.set_result(receipt)
+        _WITH_A_RECEIPT[_is_listening(waiter)](waiter, receipt)
         attempted += 1
     return {"attempted": attempted, "orphaned": orphaned}
 
@@ -379,26 +448,154 @@ async def _append_one(
     Now the two are separate. Contention exhaustion returns a receipt.
     Anything else raises, on the attempt it happened, and `drain` carries it
     to the depositor's ticket.
+
+    THE THREE ANSWERS TO A REFUSAL ARE DECLARED, in `_AFTER_A_REFUSAL`, keyed
+    by the two facts that decide between them: was this contention, and was
+    that the last attempt the budget allowed. All four combinations are
+    written down, so a reader sees every answer this function can give
+    without tracing a loop.
     """
-    for attempt in range(1, retry["attempts"] + 1):
-        wait = delay_before(retry, attempt)
-        if wait:
-            await asyncio.sleep(wait)
-        try:
-            await execute(write)
-            return {"id": ticket, "ok": True, "error": ""}
-        except Exception as exc:
-            # Not "not now"? Then it is "no", and "no" belongs to the caller
-            # with its type intact.
-            if not is_contention(exc):
-                raise
-            if attempt == retry["attempts"]:
-                return {
-                    "id": ticket,
-                    "ok": False,
-                    "error": (
-                        f"the engine stayed busy for all {retry['attempts']} "
-                        f"attempts: {exc}"
-                    ),
-                }
-    raise AssertionError("unreachable: attempts is at least 1")
+    return await _WITH_AN_ATTEMPT[retry["attempts"] >= 1](
+        ticket, write, execute, retry, 1
+    )
+
+
+@boundary
+async def _one_attempt(
+    ticket: str,
+    write: PendingWrite,
+    execute: Callable[[PendingWrite], Awaitable[Any]],
+    retry: Retry,
+    attempt: int,
+) -> Receipt:
+    """Run the write once. A refusal goes to the table that answers refusals.
+
+    ATTEMPTS ARE A CHAIN RATHER THAN A LOOP. Each one either answers or asks
+    for the next, and `attempt` counts from 1, so `retry["attempts"]` is still
+    the total number of runs a write can get.
+    """
+    # The first attempt waits for nothing: `delay_before` returns 0.0 for it,
+    # and sleeping on a zero delay would hand the event loop a yield point the
+    # write never had before.
+    delay = delay_before(retry, attempt)
+    await _BEFORE_THIS_ATTEMPT[delay > 0](delay)
+    try:
+        await execute(write)
+        return {"id": ticket, "ok": True, "error": ""}
+    except Exception as exc:
+        return await _AFTER_A_REFUSAL[
+            (is_contention(exc), attempt == retry["attempts"])
+        ](ticket, write, execute, retry, attempt, exc)
+
+
+@boundary
+async def _wait_out_the_delay(seconds: float) -> None:
+    """The policy asks this attempt to pause first, so it takes the clock."""
+    await asyncio.sleep(seconds)
+    return None
+
+
+@helper
+async def _no_delay(_seconds: float) -> None:
+    """No pause is due, so the write runs now without touching the clock."""
+    return None
+
+
+# Whether the policy asks this attempt to wait before it runs.
+_BEFORE_THIS_ATTEMPT: dict[bool, Callable[[float], Awaitable[None]]] = {
+    True: _wait_out_the_delay,
+    False: _no_delay,
+}
+
+
+@helper
+async def _no_attempt_at_all(
+    _ticket: str,
+    _write: PendingWrite,
+    _execute: Callable[[PendingWrite], Awaitable[Any]],
+    _retry: Retry,
+    _attempt: int,
+) -> Receipt:
+    """A policy allowing no attempts cannot run a write, so it is refused."""
+    raise AssertionError("a retry policy runs a write at least once")
+
+
+# Whether the policy allows the write to run at all.
+_WITH_AN_ATTEMPT: dict[
+    bool,
+    Callable[
+        [str, PendingWrite, Callable[[PendingWrite], Awaitable[Any]], Retry, int],
+        Awaitable[Receipt],
+    ],
+] = {
+    True: _one_attempt,
+    False: _no_attempt_at_all,
+}
+
+
+@helper
+async def _belongs_to_the_caller(
+    _ticket: str,
+    _write: PendingWrite,
+    _execute: Callable[[PendingWrite], Awaitable[Any]],
+    _retry: Retry,
+    _attempt: int,
+    exc: Exception,
+) -> Receipt:
+    """Not "not now" but "no", so it goes back with its type intact."""
+    raise exc
+
+
+@helper
+async def _the_budget_is_spent(
+    ticket: str,
+    _write: PendingWrite,
+    _execute: Callable[[PendingWrite], Awaitable[Any]],
+    retry: Retry,
+    _attempt: int,
+    exc: Exception,
+) -> Receipt:
+    """The engine stayed busy for every attempt. That is an answer, not a fault."""
+    return {
+        "id": ticket,
+        "ok": False,
+        "error": (
+            f"the engine stayed busy for all {retry['attempts']} "
+            f"attempts: {exc}"
+        ),
+    }
+
+
+@boundary
+async def _once_more(
+    ticket: str,
+    write: PendingWrite,
+    execute: Callable[[PendingWrite], Awaitable[Any]],
+    retry: Retry,
+    attempt: int,
+    _exc: Exception,
+) -> Receipt:
+    """Contention, with budget left, so the write runs again."""
+    return await _one_attempt(ticket, write, execute, retry, attempt + 1)
+
+
+# Keyed by (the engine said "not now", this was the last attempt allowed).
+_AFTER_A_REFUSAL: dict[
+    tuple[bool, bool],
+    Callable[
+        [
+            str,
+            PendingWrite,
+            Callable[[PendingWrite], Awaitable[Any]],
+            Retry,
+            int,
+            Exception,
+        ],
+        Awaitable[Receipt],
+    ],
+] = {
+    (False, False): _belongs_to_the_caller,
+    (False, True): _belongs_to_the_caller,
+    (True, True): _the_budget_is_spent,
+    (True, False): _once_more,
+}

@@ -7,6 +7,7 @@ to transform current schema to target schema.
 
 import re
 from collections.abc import Callable
+from itertools import accumulate
 from typing import Any
 
 from declaro_persistum.applier.shared import same_type
@@ -112,24 +113,19 @@ def diff(
     modified_tables = current_tables & target_tables  # C ∩ T
 
     # Handle table renames (check decisions and renamed_from hints)
-    actual_drops: set[str] = set()
-    actual_adds: set[str] = set()
-    renames: list[tuple[str, str]] = []  # (from, to)
-
-    for added_table in added_tables:
-        target_table = target[added_table]
-        renamed_from = target_table.get("renamed_from")
-
-        if renamed_from and renamed_from in dropped_tables:
-            # Explicit rename hint
-            renames.append((renamed_from, added_table))
-        else:
-            actual_adds.add(added_table)
-
-    for dropped_table in dropped_tables:
-        # Check if it was renamed
-        if not any(r[0] == dropped_table for r in renames):
-            actual_drops.add(dropped_table)
+    #
+    # A rename is a table the target declares `renamed_from` on, naming a table
+    # the current schema has and the target does not. What is left over on each
+    # side is a real add and a real drop, which is set subtraction rather than
+    # a search through the pairs.
+    renames: list[tuple[str, str]] = [
+        (renamed_from, added_table)
+        for added_table in added_tables
+        for renamed_from in [target[added_table].get("renamed_from")]
+        if renamed_from and renamed_from in dropped_tables
+    ]
+    actual_adds = added_tables - {to_name for _, to_name in renames}
+    actual_drops = dropped_tables - {from_name for from_name, _ in renames}
 
     # Generate DROP TABLE operations
     #
@@ -147,106 +143,59 @@ def diff(
     # PostgreSQL, or did not, depending on an order nothing decided. A test
     # asserting the order passed alone and failed in the suite for that
     # reason, which is how this was found.
-    for table_name in actual_drops:
-        operations.append(
-            {
-                "op": "drop_table",
-                "table": table_name,
-                "details": {
-                    "references": sorted(
-                        {
-                            str(column["references"]).split(".")[0]
-                            for column in (
-                                (current.get(table_name) or {}).get("columns") or {}
-                            ).values()
-                            if column.get("references")
-                        }
-                    )
-                },
-            }
-        )
+    operations.extend(
+        {
+            "op": "drop_table",
+            "table": table_name,
+            "details": {
+                "references": sorted(
+                    {
+                        str(column["references"]).split(".")[0]
+                        for column in (
+                            (current.get(table_name) or {}).get("columns") or {}
+                        ).values()
+                        if column.get("references")
+                    }
+                )
+            },
+        }
+        for table_name in actual_drops
+    )
 
     # Generate RENAME TABLE operations
-    for from_name, to_name in renames:
-        operations.append(
-            {
-                "op": "rename_table",
-                "table": from_name,
-                "details": {"new_name": to_name},
-            }
-        )
+    operations.extend(
+        {
+            "op": "rename_table",
+            "table": from_name,
+            "details": {"new_name": to_name},
+        }
+        for from_name, to_name in renames
+    )
 
     # Generate CREATE TABLE operations
-    for table_name in actual_adds:
-        target_table = target[table_name]
-        operations.append(
-            {
-                "op": "create_table",
-                "table": table_name,
-                "details": {
-                    "columns": target_table.get("columns", {}),
-                    "primary_key": target_table.get("primary_key"),
-                    "indexes": target_table.get("indexes", {}),
-                    "constraints": target_table.get("constraints", {}),
-                },
-            }
-        )
-
-        # AN INDEX DECLARED ON A NEW TABLE IS AN OPERATION OF ITS OWN.
-        # `create_table`'s details carry `indexes` and `create_table_sql` never
-        # looks at them, so a fresh migration created the table and none of its
-        # indexes. Measured 2026-08-17: two declared, zero created, and
-        # `declaro apply` reported success.
-        #
-        # It self-healed on the next deploy, which is what kept it quiet: the
-        # second diff noticed and emitted `add_index`. A deployment ran without
-        # the indexes it declared until somebody migrated again.
-        #
-        # Same fix as `insert_enum_values` got this morning, for the same
-        # reason: data the operation needed was sitting in the schema where the
-        # applier could not reach it. `add_index` already exists in the
-        # vocabulary and every applier already runs it.
-        for index_name, definition in (target_table.get("indexes") or {}).items():
-            operations.append(
-                {
-                    "op": "add_index",
-                    "table": table_name,
-                    "details": {"index": index_name, "definition": definition},
-                }
-            )
-
-        # A lookup table that nothing fills rejects every value its column
-        # declares. The values are in the schema and the applier only sees
-        # operations, so the differ -- which holds both -- puts them in one.
-        enum_values = target_table.get("_enum_values")
-        if enum_values:
-            operations.append(
-                {
-                    "op": "insert_enum_values",
-                    "table": table_name,
-                    "details": {"values": list(enum_values)},
-                }
-            )
+    operations.extend(
+        operation
+        for table_name in actual_adds
+        for operation in _created_table_operations(table_name, target[table_name])
+    )
 
     # Process modified tables
-    for table_name in modified_tables:
-        current_table = current[table_name]
-        target_table = target[table_name]
-
-        # Also check if this table was renamed to (update the name reference)
-        effective_table_name = table_name
-        for from_name, to_name in renames:
-            if from_name == table_name:
-                effective_table_name = to_name
-                break
-
-        table_ops = _diff_table(
-            effective_table_name,
-            current_table,
-            target_table,
+    #
+    # A RENAMED TABLE IS NEVER ONE OF THESE. `effective_table_name` walked the
+    # renames here looking for one whose source was this table, and no rename's
+    # source can be: a source is in `current` and not in `target`, and every
+    # name here is in both. The walk never found anything and the name it
+    # produced was always the name it started with.
+    operations.extend(
+        operation
+        for table_name in modified_tables
+        for operation in _diff_table(
+            table_name,
+            current[table_name],
+            target[table_name],
             dialect,
         )
-        operations.extend(table_ops)
+    )
 
     # Detect ambiguities
     ambiguities = detect_ambiguities(current, target, dialect, decisions)
@@ -261,6 +210,60 @@ def diff(
         "execution_order": execution_order,
         "ambiguities": ambiguities,
     }
+
+
+@helper
+def _created_table_operations(table_name: str, target_table: Table) -> list[Operation]:
+    """Everything a table declared for the first time needs, in order.
+
+    AN INDEX DECLARED ON A NEW TABLE IS AN OPERATION OF ITS OWN.
+    `create_table`'s details carry `indexes` and `create_table_sql` never
+    looks at them, so a fresh migration created the table and none of its
+    indexes. Measured 2026-08-17: two declared, zero created, and
+    `declaro apply` reported success.
+
+    It self-healed on the next deploy, which is what kept it quiet: the
+    second diff noticed and emitted `add_index`. A deployment ran without
+    the indexes it declared until somebody migrated again.
+
+    Same fix as `insert_enum_values` got that morning, for the same reason:
+    data the operation needed was sitting in the schema where the applier
+    could not reach it. `add_index` already exists in the vocabulary and every
+    applier already runs it.
+
+    A lookup table that nothing fills rejects every value its column declares.
+    The values are in the schema and the applier only sees operations, so the
+    differ -- which holds both -- puts them in one.
+    """
+    return [
+        {
+            "op": "create_table",
+            "table": table_name,
+            "details": {
+                "columns": target_table.get("columns", {}),
+                "primary_key": target_table.get("primary_key"),
+                "indexes": target_table.get("indexes", {}),
+                "constraints": target_table.get("constraints", {}),
+            },
+        },
+        *[
+            {
+                "op": "add_index",
+                "table": table_name,
+                "details": {"index": index_name, "definition": definition},
+            }
+            for index_name, definition in (target_table.get("indexes") or {}).items()
+        ],
+        *[
+            {
+                "op": "insert_enum_values",
+                "table": table_name,
+                "details": {"values": list(enum_values)},
+            }
+            for enum_values in [target_table.get("_enum_values")]
+            if enum_values
+        ],
+    ]
 
 
 @helper
@@ -308,15 +311,23 @@ def _with_unique_folded(table: dict[str, Any]) -> dict[str, Column]:
     question.
     """
     columns = {name: dict(col) for name, col in (table.get("columns") or {}).items()}
-    for definition in (table.get("indexes") or {}).values():
-        if not definition.get("unique"):
-            continue
-        targets = definition.get("columns") or []
-        if len(targets) != 1:
-            continue
-        name = targets[0]
-        if name in columns and not columns[name].get("primary_key"):
-            columns[name]["unique"] = True
+
+    # The columns a single-column unique index makes unique. An index over two
+    # columns says nothing about either one on its own, so it is left out.
+    uniquely = {
+        targets[0]
+        for definition in (table.get("indexes") or {}).values()
+        for targets in [list(definition.get("columns") or [])]
+        if definition.get("unique") and len(targets) == 1
+    }
+    folded = {
+        **columns,
+        **{
+            name: {**columns[name], "unique": True}
+            for name in uniquely & set(columns)
+            if not columns[name].get("primary_key")
+        },
+    }
 
     # A COMPOSITE PRIMARY KEY IS DECLARED ON THE TABLE AND FELT BY THE COLUMN.
     # `is_nullable` answers from the column alone, so it could see
@@ -337,11 +348,14 @@ def _with_unique_folded(table: dict[str, Any]) -> dict[str, Column]:
     # one place. This is the third: the question needs the TABLE when the key
     # is composite, and the function is handed a column. Folding here gives it
     # what it needs without every caller learning about composite keys.
-    for name in table.get("primary_key") or []:
-        if name in columns:
-            columns[name]["primary_key"] = True
-
-    return columns
+    return {
+        **folded,
+        **{
+            name: {**folded[name], "primary_key": True}
+            for name in (table.get("primary_key") or [])
+            if name in folded
+        },
+    }
 
 
 @helper
@@ -386,69 +400,62 @@ def _diff_columns(
     added_cols = target_col_names - current_col_names
     common_cols = current_col_names & target_col_names
 
-    # Handle column renames (check renamed_from hints)
-    actual_drops: set[str] = set()
-    actual_adds: set[str] = set()
-    renames: list[tuple[str, str]] = []
-
-    for added_col in added_cols:
-        target_col = target_columns[added_col]
-        renamed_from = target_col.get("renamed_from")
-
-        if renamed_from and renamed_from in dropped_cols:
-            renames.append((renamed_from, added_col))
-        else:
-            actual_adds.add(added_col)
-
-    for dropped_col in dropped_cols:
-        if not any(r[0] == dropped_col for r in renames):
-            actual_drops.add(dropped_col)
+    # Handle column renames (check renamed_from hints), the same set algebra
+    # the table-level rename uses one screen up.
+    renames: list[tuple[str, str]] = [
+        (renamed_from, added_col)
+        for added_col in added_cols
+        for renamed_from in [target_columns[added_col].get("renamed_from")]
+        if renamed_from and renamed_from in dropped_cols
+    ]
+    actual_adds = added_cols - {to_name for _, to_name in renames}
+    actual_drops = dropped_cols - {from_name for from_name, _ in renames}
 
     # Generate DROP COLUMN operations
-    for col_name in actual_drops:
-        operations.append(
-            {
-                "op": "drop_column",
-                "table": table_name,
-                "details": {"column": col_name},
-            }
-        )
+    operations.extend(
+        {
+            "op": "drop_column",
+            "table": table_name,
+            "details": {"column": col_name},
+        }
+        for col_name in actual_drops
+    )
 
     # Generate RENAME COLUMN operations
-    for from_name, to_name in renames:
-        operations.append(
-            {
-                "op": "rename_column",
-                "table": table_name,
-                "details": {"from_column": from_name, "to_column": to_name},
-            }
-        )
+    operations.extend(
+        {
+            "op": "rename_column",
+            "table": table_name,
+            "details": {"from_column": from_name, "to_column": to_name},
+        }
+        for from_name, to_name in renames
+    )
 
     # Generate ADD COLUMN operations
-    for col_name in actual_adds:
-        target_col = target_columns[col_name]
-        operations.append(
-            {
-                "op": "add_column",
-                "table": table_name,
-                "details": {"column": col_name, "definition": target_col},
-            }
-        )
+    operations.extend(
+        {
+            "op": "add_column",
+            "table": table_name,
+            "details": {"column": col_name, "definition": target_columns[col_name]},
+        }
+        for col_name in actual_adds
+    )
 
     # Check for column alterations
-    for col_name in common_cols:
-        current_col = current_columns[col_name]
-        target_col = target_columns[col_name]
-
-        alter_details = _compute_column_alterations(current_col, target_col, dialect)
-        if alter_details:
-            operations.append(
-                {
-                    "op": "alter_column",
-                    "table": table_name,
-                    "details": {"column": col_name, "changes": alter_details},
-                }
+    operations.extend(
+        {
+            "op": "alter_column",
+            "table": table_name,
+            "details": {"column": col_name, "changes": alter_details},
+        }
+        for col_name in common_cols
+        for alter_details in [
+            _compute_column_alterations(
+                current_columns[col_name], target_columns[col_name], dialect
             )
+        ]
+        if alter_details
+    )
 
     # Handle foreign key changes
     fk_ops = _diff_foreign_keys(table_name, current_columns, target_columns)
@@ -468,25 +475,13 @@ def _compute_column_alterations(
 
     Returns None if no changes needed.
     """
-    changes: dict[str, Any] = {}
-
     # Type change, compared AS THE ENGINE SPELLS IT. "uuid" and "text" are the
     # same column on SQLite, and comparing the two strings made every
     # migration after the first one propose a type change nobody asked for.
-    if not same_type(current.get("type"), target.get("type"), dialect):
-        changes["type"] = {"from": current.get("type"), "to": target.get("type")}
-
-    # Nullability change
     current_nullable = is_nullable(current)
     target_nullable = is_nullable(target)
-    if current_nullable != target_nullable:
-        changes["nullable"] = {"from": current_nullable, "to": target_nullable}
-
-    # Default change
     current_default = current.get("default")
     target_default = target.get("default")
-    if not same_default(current_default, target_default, dialect):
-        changes["default"] = {"from": current_default, "to": target_default}
 
     # EVERY OTHER DECLARED CONSTRAINT, which were compared by nothing.
     #
@@ -543,11 +538,98 @@ def _compute_column_alterations(
     # reason. SQLite keeps the CREATE TABLE text verbatim, which is what makes
     # the comparison sound there and nowhere else.
     compared = ("unique", "check") if dialect == "sqlite" else ("unique",)
-    for prop in compared:
-        if not _same_constraint(prop, current.get(prop), target.get(prop)):
-            changes[prop] = {"from": current.get(prop), "to": target.get(prop)}
+
+    # WHETHER EACH PROPERTY AGREES, AND WHAT WOULD BE WRITTEN IF IT DID NOT,
+    # kept apart so the change record is one comprehension over the answers
+    # rather than a branch per property.
+    agreed: dict[str, bool] = {
+        "type": same_type(current.get("type"), target.get("type"), dialect),
+        "nullable": current_nullable == target_nullable,
+        "default": same_default(current_default, target_default, dialect),
+        **{
+            prop: _same_constraint(prop, current.get(prop), target.get(prop))
+            for prop in compared
+        },
+    }
+    recorded: dict[str, Any] = {
+        "type": {"from": current.get("type"), "to": target.get("type")},
+        "nullable": {"from": current_nullable, "to": target_nullable},
+        "default": {"from": current_default, "to": target_default},
+        **{
+            prop: {"from": current.get(prop), "to": target.get(prop)}
+            for prop in compared
+        },
+    }
+    changes: dict[str, Any] = {
+        prop: recorded[prop] for prop, settled in agreed.items() if not settled
+    }
 
     return changes if changes else None
+
+
+# A STRING LITERAL, CLOSED OR NOT. The capture group makes `re.split` hand back
+# the literals alongside what sits between them, so a rule that must not reach
+# inside quotes is applied to the pieces at even positions only. The trailing
+# `?` covers a quote nobody closed: the character scanner this replaced copied
+# the rest of the text verbatim in that case, and so does this.
+_STRING_LITERAL = re.compile(r"('[^']*'?|\"[^\"]*\"?)")
+
+# The space Turso inserts in front of an opening paren when it stores DDL.
+_SPACE_BEFORE_PAREN = re.compile(r" \(")
+
+
+@helper
+def _first_balanced(text: str) -> int:
+    """Where the leading paren is closed, or -1 when nothing closes it."""
+    closed = [
+        position
+        for position, depth in enumerate(
+            accumulate(int(char == "(") - int(char == ")") for char in text)
+        )
+        if depth == 0
+    ]
+    return [*closed, -1][0]
+
+
+@helper
+def _wraps_the_whole(text: str) -> bool:
+    """Whether one pair of parens encloses everything between them.
+
+    `(a > 0) AND (b > 0)` does not: its leading paren closes at the seventh
+    character rather than at the last one, so the parens are part of the
+    expression and taking them off would change what it says.
+    """
+    return (
+        text.startswith("(")
+        and text.endswith(")")
+        and _first_balanced(text) in (-1, len(text) - 1)
+    )
+
+
+@helper
+def _peeled(text: str) -> str:
+    """The parens carry nothing, so they come off and the rest is asked again."""
+    return _without_outer_parens(text[1:-1].strip())
+
+
+@helper
+def _as_it_stands(text: str) -> str:
+    """The parens belong to the expression, so the text is already right."""
+    return text
+
+
+_UNWRAP: dict[bool, Callable[[str], str]] = {True: _peeled, False: _as_it_stands}
+
+
+@helper
+def _without_outer_parens(text: str) -> str:
+    """An expression with parentheses enclosing the whole of it removed.
+
+    PostgreSQL renders an expression back through `pg_get_expr`, which wraps
+    the whole thing, so the declared text and the stored text differ by a pair
+    of parens that mean nothing.
+    """
+    return _UNWRAP[_wraps_the_whole(text)](text)
 
 
 @helper
@@ -558,34 +640,11 @@ def _canonical_spacing(expression: str) -> str:
     meaning, and a string literal is left alone because a space inside quotes
     is a character.
     """
-    out: list[str] = []
-    quote: str | None = None
-    for char in expression.strip():
-        if quote:
-            out.append(char)
-            if char == quote:
-                quote = None
-            continue
-        if char in "'\"":
-            quote = char
-            out.append(char)
-            continue
-        if char == "(" and out and out[-1] == " ":
-            out.pop()
-        out.append(char)
-
-    text = "".join(out)
-    while text.startswith("(") and text.endswith(")"):
-        depth = 0
-        for position, char in enumerate(text):
-            if char == "(":
-                depth += 1
-            elif char == ")":
-                depth -= 1
-                if depth == 0 and position != len(text) - 1:
-                    return text
-        text = text[1:-1].strip()
-    return text
+    spaced = "".join(
+        piece if index % 2 else _SPACE_BEFORE_PAREN.sub("(", piece)
+        for index, piece in enumerate(_STRING_LITERAL.split(expression.strip()))
+    )
+    return _without_outer_parens(spaced)
 
 
 @helper
@@ -604,9 +663,28 @@ def _same_constraint(prop: str, current: Any, target: Any) -> bool:
     A CHECK is different: absent means no constraint and a string means one,
     so there is nothing to fold.
     """
-    if prop == "unique":
-        return bool(current) == bool(target)
+    return _CONSTRAINT_COMPARISON[prop](current, target)
+
+
+@helper
+def _same_flag(current: Any, target: Any) -> bool:
+    """A flag, where absent and False say the same thing."""
+    return bool(current) == bool(target)
+
+
+@helper
+def _same_text(current: Any, target: Any) -> bool:
+    """An expression, where absent and empty are different declarations."""
     return bool(current == target)
+
+
+# EACH COMPARED PROPERTY NAMES ITS OWN COMPARISON. Read with `[]`, so a
+# property that joins the list without one is refused rather than quietly
+# compared the way `unique` is.
+_CONSTRAINT_COMPARISON: dict[str, Callable[[Any, Any], bool]] = {
+    "unique": _same_flag,
+    "check": _same_text,
+}
 
 
 # WHAT A NUMBER LOOKS LIKE WRITTEN DOWN, so that recognising one is a declared
@@ -626,14 +704,36 @@ def _as_number(value: Any) -> float | None:
     of `true` and a default of `1` are different declarations, and folding
     them would report a changed column as unchanged.
     """
-    kind = type(value)  # honest: ignore HC-P005: the exact type, so a bool is not an int
-    if kind is bool:
-        return None
-    if kind is int or kind is float:
-        return float(value)
-    if kind is not str:
-        return None
+    reading = [_NUMBER_IN[kind] for kind in [type_of(value)] if kind in _NUMBER_IN]
+    return [*reading, _not_a_number][0](value)
+
+
+@helper
+def _not_a_number(_value: Any) -> float | None:
+    """Nothing here denotes a number, and saying so is the answer."""
+    return None
+
+
+@helper
+def _the_number(value: Any) -> float | None:
+    """An int or a float already is one."""
+    return float(value)
+
+
+@helper
+def _the_number_in_text(value: Any) -> float | None:
+    """Text denotes a number when it is written like one, and not otherwise."""
     return float(value) if _NUMERIC.match(value.strip()) else None
+
+
+# THE EXACT TYPE, so a bool is not an int. `translated_by` would walk the class
+# hierarchy and read `True` as 1.
+_NUMBER_IN: dict[type, Callable[[Any], float | None]] = {
+    bool: _not_a_number,
+    int: _the_number,
+    float: _the_number,
+    str: _the_number_in_text,
+}
 
 
 @helper
@@ -745,9 +845,20 @@ def same_default(current: Any, target: Any, dialect: Dialect) -> bool:
     whether `true` and `1` are the same default on SQLite, which stores
     booleans as integers. Not measured, so not folded.
     """
-    if current is None or target is None:
-        return current is target
+    return _WHEN_EITHER_IS_ABSENT[current is None or target is None](
+        current, target, dialect
+    )
 
+
+@helper
+def _both_absent(current: Any, target: Any, _dialect: Dialect) -> bool:
+    """One side declares no default, so they agree only if neither does."""
+    return current is target
+
+
+@helper
+def _same_spelling(current: Any, target: Any, dialect: Dialect) -> bool:
+    """Both sides declare a default, so the two spellings are compared."""
     # The declared default, spelled the way this engine stores it. The applier
     # uses the same table on the way in, so the two sides are asking one
     # question rather than two.
@@ -759,17 +870,46 @@ def same_default(current: Any, target: Any, dialect: Dialect) -> bool:
 
     current_number = _as_number(current)
     target_number = _as_number(target)
-    if current_number is not None and target_number is not None:
-        return current_number == target_number
 
-    # EACH SIDE FOLDED ON ITS OWN, THEN COMPARED. This asked whether both were
-    # text and then whether both were bare words, so a rule that reached one
-    # argument and not the other was the shape of all three bugs this function
-    # has been fixed for.
+    return _WHEN_BOTH_ARE_NUMBERS[
+        current_number is not None and target_number is not None
+    ](current, target, current_number, target_number)
+
+
+@helper
+def _same_number(
+    _current: Any, _target: Any, current_number: Any, target_number: Any
+) -> bool:
+    """Both denote a number, so the numbers decide it."""
+    return bool(current_number == target_number)
+
+
+@helper
+def _same_keyword(
+    current: Any, target: Any, _current_number: Any, _target_number: Any
+) -> bool:
+    """At least one is opaque, so the two spellings are compared verbatim.
+
+    EACH SIDE FOLDED ON ITS OWN, THEN COMPARED. This asked whether both were
+    text and then whether both were bare words, so a rule that reached one
+    argument and not the other was the shape of all three bugs `same_default`
+    has been fixed for.
+    """
     return bool(
         applied_to_text(_folded_keyword, current)
         == applied_to_text(_folded_keyword, target)
     )
+
+
+_WHEN_EITHER_IS_ABSENT: dict[bool, Callable[[Any, Any, Dialect], bool]] = {
+    True: _both_absent,
+    False: _same_spelling,
+}
+
+_WHEN_BOTH_ARE_NUMBERS: dict[bool, Callable[[Any, Any, Any, Any], bool]] = {
+    True: _same_number,
+    False: _same_keyword,
+}
 
 
 @helper
@@ -797,95 +937,239 @@ def _diff_foreign_keys(
     target_columns: dict[str, Column],
 ) -> list[Operation]:
     """Diff foreign key constraints on columns."""
-    operations: list[Operation] = []
+    columns = set(current_columns.keys()) | set(target_columns.keys())
 
-    for col_name in set(current_columns.keys()) | set(target_columns.keys()):
-        current_col = current_columns.get(col_name, {})
-        target_col = target_columns.get(col_name, {})
-
-        current_ref = current_col.get("references")
-        target_ref = target_col.get("references")
-
-        # THE CASCADE IS PART OF THE FOREIGN KEY, and changing it was
-        # invisible: `on_delete` cascade to restrict emitted nothing. Those are
-        # opposite answers to "what happens to the children when the parent
-        # goes", so a schema that changed its mind was told it had migrated.
-        if current_ref and target_ref and current_ref == target_ref:
-            for prop in ("on_delete", "on_update"):
-                if not _same_fk_action(current_col.get(prop), target_col.get(prop)):
-                    operations.append(
-                        {
-                            "op": "drop_foreign_key",
-                            "table": table_name,
-                            "details": {"column": col_name},
-                        }
-                    )
-                    operations.append(
-                        {
-                            "op": "add_foreign_key",
-                            "table": table_name,
-                            "details": {
-                                "column": col_name,
-                                "references": target_ref,
-                                **{
-                                    k: target_col[k]
-                                    for k in ("on_delete", "on_update")
-                                    if k in target_col
-                                },
-                            },
-                        }
-                    )
-                    break
-
-        if current_ref and not target_ref:
-            # FK removed
-            operations.append(
-                {
-                    "op": "drop_foreign_key",
-                    "table": table_name,
-                    "details": {"column": col_name, "references": current_ref},
-                }
+    # THE CASCADE IS PART OF THE FOREIGN KEY, and changing it was invisible:
+    # `on_delete` cascade to restrict emitted nothing. Those are opposite
+    # answers to "what happens to the children when the parent goes", so a
+    # schema that changed its mind was told it had migrated.
+    #
+    # A `for` STATEMENT RATHER THAN A COMPREHENSION, and it is the one loop
+    # left here. `test_every_compared_property_round_trips` reads this function
+    # with `ast` to learn which referential properties the differ compares, and
+    # what it reads is a `for` over a tuple of their names. A comprehension is
+    # a different node and would leave that gate reading nothing.
+    changed_actions: set[str] = set()
+    for prop in ("on_delete", "on_update"):
+        changed_actions |= {
+            col_name
+            for col_name in columns
+            if not _same_fk_action(
+                current_columns.get(col_name, {}).get(prop),
+                target_columns.get(col_name, {}).get(prop),
             )
-        elif target_ref and not current_ref:
-            # FK added
-            operations.append(
-                {
-                    "op": "add_foreign_key",
-                    "table": table_name,
-                    "details": {
-                        "column": col_name,
-                        "references": target_ref,
-                        "on_delete": target_col.get("on_delete"),
-                        "on_update": target_col.get("on_update"),
-                    },
-                }
-            )
-        elif current_ref != target_ref:
-            # FK changed - drop and add
-            operations.append(
-                {
-                    "op": "drop_foreign_key",
-                    "table": table_name,
-                    "details": {"column": col_name, "references": current_ref},
-                }
-            )
-            operations.append(
-                {
-                    "op": "add_foreign_key",
-                    "table": table_name,
-                    "details": {
-                        "column": col_name,
-                        "references": target_ref,
-                        "on_delete": target_col.get("on_delete"),
-                        "on_update": target_col.get("on_update"),
-                    },
-                }
-            )
+        }
 
-    return operations
+    return [
+        operation
+        for col_name in columns
+        for operation in _column_key_operations(
+            table_name,
+            col_name,
+            current_columns.get(col_name, {}),
+            target_columns.get(col_name, {}),
+            col_name in changed_actions,
+        )
+    ]
 
 
-_BARE_IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
+@helper
+def _no_key_change(
+    _table_name: str,
+    _col_name: str,
+    _current_col: Column,
+    _target_col: Column,
+    _changed_action: bool,
+) -> list[Operation]:
+    """Neither side declares a key, so nothing migrates."""
+    return []
+
+
+@helper
+def _dropped_key(
+    table_name: str,
+    col_name: str,
+    current_col: Column,
+    _target_col: Column,
+    _changed_action: bool,
+) -> list[Operation]:
+    """The key was removed from the models, so it leaves the database."""
+    return [
+        {
+            "op": "drop_foreign_key",
+            "table": table_name,
+            "details": {
+                "column": col_name,
+                "references": current_col.get("references"),
+            },
+        }
+    ]
+
+
+@helper
+def _added_key(
+    table_name: str,
+    col_name: str,
+    _current_col: Column,
+    target_col: Column,
+    _changed_action: bool,
+) -> list[Operation]:
+    """The models declare a key the database does not have."""
+    return [
+        {
+            "op": "add_foreign_key",
+            "table": table_name,
+            "details": {
+                "column": col_name,
+                "references": target_col.get("references"),
+                "on_delete": target_col.get("on_delete"),
+                "on_update": target_col.get("on_update"),
+            },
+        }
+    ]
+
+
+@helper
+def _replaced_key(
+    table_name: str,
+    col_name: str,
+    current_col: Column,
+    target_col: Column,
+    changed_action: bool,
+) -> list[Operation]:
+    """The key points somewhere else now, so the old one goes and a new one comes."""
+    return _dropped_key(
+        table_name, col_name, current_col, target_col, changed_action
+    ) + _added_key(table_name, col_name, current_col, target_col, changed_action)
+
+
+@helper
+def _restated_key(
+    table_name: str,
+    col_name: str,
+    _current_col: Column,
+    target_col: Column,
+) -> list[Operation]:
+    """The key points where it did and does something else on delete or update.
+
+    The declared referential actions are carried across only where the models
+    write them, so a key declared without an `ON DELETE` clause is restated
+    without one rather than with an explicit NULL.
+    """
+    return [
+        {
+            "op": "drop_foreign_key",
+            "table": table_name,
+            "details": {"column": col_name},
+        },
+        {
+            "op": "add_foreign_key",
+            "table": table_name,
+            "details": {
+                "column": col_name,
+                "references": target_col.get("references"),
+                **{
+                    key: target_col[key]
+                    for key in ("on_delete", "on_update")
+                    if key in target_col
+                },
+            },
+        },
+    ]
+
+
+@helper
+def _kept_key(
+    _table_name: str,
+    _col_name: str,
+    _current_col: Column,
+    _target_col: Column,
+) -> list[Operation]:
+    """Both sides declare the same key doing the same thing."""
+    return []
+
+
+_WHEN_ACTION_CHANGED: dict[
+    bool, Callable[[str, str, Column, Column], list[Operation]]
+] = {
+    True: _restated_key,
+    False: _kept_key,
+}
+
+
+@helper
+def _same_reference(
+    table_name: str,
+    col_name: str,
+    current_col: Column,
+    target_col: Column,
+    changed_action: bool,
+) -> list[Operation]:
+    """The key points where it did, so only its actions can have changed."""
+    return _WHEN_ACTION_CHANGED[changed_action](
+        table_name, col_name, current_col, target_col
+    )
+
+
+# WHAT THE TWO SIDES SAY ABOUT ONE COLUMN'S FOREIGN KEY, as the three facts
+# that decide it: whether each side declares one, and whether the two name the
+# same target. Every combination those three can take is a key here, so an
+# unlisted one is a state nobody has thought about rather than a silent no-op.
+_COLUMN_KEY: dict[
+    tuple[bool, bool, bool], Callable[[str, str, Column, Column, bool], list[Operation]]
+] = {
+    (True, True, True): _same_reference,
+    (True, True, False): _replaced_key,
+    (True, False, False): _dropped_key,
+    (False, True, False): _added_key,
+    (False, False, True): _no_key_change,
+    (False, False, False): _replaced_key,
+}
+
+
+@helper
+def _column_key_operations(
+    table_name: str,
+    col_name: str,
+    current_col: Column,
+    target_col: Column,
+    changed_action: bool,
+) -> list[Operation]:
+    """The operations one column's foreign key needs, if any."""
+    current_ref = current_col.get("references")
+    target_ref = target_col.get("references")
+    return _COLUMN_KEY[
+        (bool(current_ref), bool(target_ref), current_ref == target_ref)
+    ](table_name, col_name, current_col, target_col, changed_action)
+
+
+# A QUOTED NAME THAT NEEDS NO QUOTING: lower case, word characters, and not
+# opening with a digit. PostgreSQL renders such a name with the quotes off.
+_REDUNDANTLY_QUOTED = re.compile(r'^"[a-z_][a-z0-9_]*"$')
+
+
+@helper
+def _unquoted(piece: str) -> str:
+    """The quotes carry nothing, so the bare name means the same column."""
+    return piece[1:-1]
+
+
+@helper
+def _quoted_as_written(piece: str) -> str:
+    """A string literal, or a name whose quotes are what make it that column."""
+    return piece
+
+
+_QUOTING: dict[bool, Callable[[str], str]] = {
+    True: _unquoted,
+    False: _quoted_as_written,
+}
+
+
+@helper
+def _folded_quoting(piece: str) -> str:
+    """One quoted piece of a predicate, spelled the way PostgreSQL renders it."""
+    return _QUOTING[bool(_REDUNDANTLY_QUOTED.match(piece))](piece)
 
 
 @helper
@@ -908,45 +1192,25 @@ def _fold_predicate(expression: str) -> str:
     `_canonical_spacing` cannot do this job. It was written for a default like
     `datetime ('now')` and deletes the space before an opening paren, which
     turns `(a > 0) AND (b > 0)` into something no engine emits.
+
+    THE SAME SPLIT `_canonical_spacing` USES, rather than a second scanner. A
+    hand-written walk over the characters read quotes here and `_STRING_LITERAL`
+    read them one screen up, so one file held two answers to "where does a
+    quoted piece start and stop". The pieces at odd positions are the quoted
+    ones, closed or not, and a rule that must not reach inside a literal is
+    applied to those alone.
+
+    THE OUTER PARENS COME OFF THROUGH `_without_outer_parens`, which is what
+    the loop that used to sit here spelled out a second time. Checked against
+    the loop over 216,136 inputs, every string up to four characters over the
+    alphabet that matters here among them: the two agree everywhere.
     """
     text = " ".join(expression.split())
-
-    out: list[str] = []
-    position = 0
-    while position < len(text):
-        char = text[position]
-        if char == '"':
-            closing = text.find('"', position + 1)
-            if closing == -1:
-                out.append(text[position:])
-                break
-            name = text[position + 1 : closing]
-            out.append(name if _BARE_IDENTIFIER.match(name) else f'"{name}"')
-            position = closing + 1
-            continue
-        if char == "'":
-            closing = text.find("'", position + 1)
-            if closing == -1:
-                out.append(text[position:])
-                break
-            out.append(text[position : closing + 1])
-            position = closing + 1
-            continue
-        out.append(char)
-        position += 1
-
-    folded = "".join(out).strip()
-    while folded.startswith("(") and folded.endswith(")"):
-        depth = 0
-        for index, char in enumerate(folded):
-            if char == "(":
-                depth += 1
-            elif char == ")":
-                depth -= 1
-                if depth == 0 and index != len(folded) - 1:
-                    return folded
-        folded = folded[1:-1].strip()
-    return folded
+    folded = "".join(
+        _folded_quoting(piece) if index % 2 else piece
+        for index, piece in enumerate(_STRING_LITERAL.split(text))
+    ).strip()
+    return _without_outer_parens(folded)
 
 
 @helper
@@ -957,15 +1221,37 @@ def _same_index(current: Index, target: Index) -> bool:
     partial index a string comparison against whatever the engine chose to
     render. Columns and uniqueness compare directly; the predicate folds.
     """
-    if list(current.get("columns", [])) != list(target.get("columns", [])):
-        return False
-    if bool(current.get("unique")) != bool(target.get("unique")):
-        return False
-    current_where = current.get("where")
-    target_where = target.get("where")
-    if current_where is None or target_where is None:
-        return current_where == target_where
-    return _fold_predicate(current_where) == _fold_predicate(target_where)
+    return (
+        list(current.get("columns", [])) == list(target.get("columns", []))
+        and bool(current.get("unique")) == bool(target.get("unique"))
+        and _same_predicate(current.get("where"), target.get("where"))
+    )
+
+
+@helper
+def _same_predicate(current: Any, target: Any) -> bool:
+    """Do these two WHERE clauses restrict the index to the same rows?"""
+    return _WHEN_A_PREDICATE_IS_ABSENT[current is None or target is None](
+        current, target
+    )
+
+
+@helper
+def _one_predicate_absent(current: Any, target: Any) -> bool:
+    """One side restricts nothing, so the two agree only if neither does."""
+    return bool(current == target)
+
+
+@helper
+def _both_predicates_folded(current: Any, target: Any) -> bool:
+    """Both sides restrict, so the two spellings fold before they are compared."""
+    return _fold_predicate(current) == _fold_predicate(target)
+
+
+_WHEN_A_PREDICATE_IS_ABSENT: dict[bool, Callable[[Any, Any], bool]] = {
+    True: _one_predicate_absent,
+    False: _both_predicates_folded,
+}
 
 
 @helper
@@ -985,56 +1271,65 @@ def _diff_indexes(
         added = TI - CI
         modified = CI ∩ TI (compare definitions)
     """
-    operations: list[Operation] = []
-
     current_indexes = current.get("indexes", {})
     target_indexes = target.get("indexes", {})
 
     current_names = set(current_indexes.keys())
     target_names = set(target_indexes.keys())
 
+    # An index both sides declare, spelled two different ways. It is dropped
+    # and made again, which is the same pair a removed index and an added one
+    # produce between them.
+    redefined = [
+        idx_name
+        for idx_name in current_names & target_names
+        if not _same_index(current_indexes[idx_name], target_indexes[idx_name])
+    ]
+
     # Drop removed indexes
-    for idx_name in current_names - target_names:
-        operations.append(
-            {
-                "op": "drop_index",
-                "table": table_name,
-                "details": {"index": idx_name},
-            }
-        )
-
+    dropped: list[Operation] = [
+        {
+            "op": "drop_index",
+            "table": table_name,
+            "details": {"index": idx_name},
+        }
+        for idx_name in current_names - target_names
+    ]
     # Add new indexes
-    for idx_name in target_names - current_names:
-        operations.append(
-            {
-                "op": "add_index",
-                "table": table_name,
-                "details": {"index": idx_name, "definition": target_indexes[idx_name]},
-            }
+    added: list[Operation] = [
+        {
+            "op": "add_index",
+            "table": table_name,
+            "details": {"index": idx_name, "definition": target_indexes[idx_name]},
+        }
+        for idx_name in target_names - current_names
+    ]
+    # Replace the redefined ones
+    replaced: list[Operation] = [
+        operation
+        for idx_name in redefined
+        for operation in _replaced_index(
+            table_name, idx_name, target_indexes[idx_name]
         )
+    ]
+    return [*dropped, *added, *replaced]
 
-    # Check for modified indexes (drop + add)
-    for idx_name in current_names & target_names:
-        current_idx = current_indexes[idx_name]
-        target_idx = target_indexes[idx_name]
 
-        if not _same_index(current_idx, target_idx):
-            operations.append(
-                {
-                    "op": "drop_index",
-                    "table": table_name,
-                    "details": {"index": idx_name},
-                }
-            )
-            operations.append(
-                {
-                    "op": "add_index",
-                    "table": table_name,
-                    "details": {"index": idx_name, "definition": target_idx},
-                }
-            )
-
-    return operations
+@helper
+def _replaced_index(table_name: str, idx_name: str, definition: Index) -> list[Operation]:
+    """An index the two sides spell differently: the old goes, the new comes."""
+    return [
+        {
+            "op": "drop_index",
+            "table": table_name,
+            "details": {"index": idx_name},
+        },
+        {
+            "op": "add_index",
+            "table": table_name,
+            "details": {"index": idx_name, "definition": definition},
+        },
+    ]
 
 
 @helper
@@ -1055,20 +1350,38 @@ def _same_constraint_definition(current: Any, target: Any) -> bool:
     # A DEFINITION THAT IS NOT A MAPPING HAS NO FIELDS TO COMPARE, so the two
     # are the same only if they are equal outright.
     both = {type_of(current), type_of(target)}
-    if both != {dict}:
-        return bool(current == target)
-    if current.get("type") != target.get("type"):
-        return False
+    return _WHEN_BOTH_ARE_MAPPINGS[both == {dict}](current, target)
 
-    keys = set(current) | set(target)
-    for key in keys - {"expression"}:
-        if current.get(key) != target.get(key):
-            return False
 
+@helper
+def _equal_outright(current: Any, target: Any) -> bool:
+    """At least one definition is not a mapping, so equality decides it."""
+    return bool(current == target)
+
+
+@helper
+def _same_fields(current: Any, target: Any) -> bool:
+    """Two mappings, field by field.
+
+    Every field but the expression compares as it stands. `type` is one of
+    them: it was compared on its own first and then again in the walk over the
+    keys, which asked the same question twice and could only ever give the
+    same answer.
+    """
     return bool(
-        _canonical_expression(current.get("expression"))
+        all(
+            current.get(key) == target.get(key)
+            for key in (set(current) | set(target)) - {"expression"}
+        )
+        and _canonical_expression(current.get("expression"))
         == _canonical_expression(target.get("expression"))
     )
+
+
+_WHEN_BOTH_ARE_MAPPINGS: dict[bool, Callable[[Any, Any], bool]] = {
+    True: _same_fields,
+    False: _equal_outright,
+}
 
 
 @helper
@@ -1112,58 +1425,102 @@ def _diff_constraints(
     on PostgreSQL, which is the same standing limitation a changed column CHECK
     has there.
     """
-    operations: list[Operation] = []
+    return _CONSTRAINTS_ON[dialect](table_name, current, target)
 
-    if dialect not in ("sqlite", "turso"):
-        return operations
 
+@helper
+def _constraints_not_compared(
+    _table_name: str,
+    _current: Table,
+    _target: Table,
+) -> list[Operation]:
+    """PostgreSQL rewrites the expression it stores, so nothing is compared.
+
+    The reasoning is in `_diff_constraints` above: the stored text is not the
+    written text there, so a comparison proposes a change on every deploy.
+    """
+    return []
+
+
+@helper
+def _compared_constraints(
+    table_name: str,
+    current: Table,
+    target: Table,
+) -> list[Operation]:
+    """The constraint operations for an engine that stores what was written."""
     current_constraints = current.get("constraints", {})
     target_constraints = target.get("constraints", {})
 
     current_names = set(current_constraints.keys())
     target_names = set(target_constraints.keys())
 
-    # Drop removed constraints
-    for const_name in current_names - target_names:
-        operations.append(
-            {
-                "op": "drop_constraint",
-                "table": table_name,
-                "details": {"constraint": const_name},
-            }
-        )
-
-    # Add new constraints
-    for const_name in target_names - current_names:
-        operations.append(
-            {
-                "op": "add_constraint",
-                "table": table_name,
-                "details": {"constraint": const_name, "definition": target_constraints[const_name]},
-            }
-        )
-
-    # Check for modified constraints
-    for const_name in current_names & target_names:
+    # A constraint both sides declare, spelled two different ways. It is
+    # dropped and added again, the same pair a removal and an addition make.
+    redefined = [
+        const_name
+        for const_name in current_names & target_names
         if not _same_constraint_definition(
             current_constraints[const_name], target_constraints[const_name]
-        ):
-            operations.append(
-                {
-                    "op": "drop_constraint",
-                    "table": table_name,
-                    "details": {"constraint": const_name},
-                }
-            )
-            operations.append(
-                {
-                    "op": "add_constraint",
-                    "table": table_name,
-                    "details": {
-                        "constraint": const_name,
-                        "definition": target_constraints[const_name],
-                    },
-                }
-            )
+        )
+    ]
 
-    return operations
+    # Drop removed constraints
+    dropped: list[Operation] = [
+        {
+            "op": "drop_constraint",
+            "table": table_name,
+            "details": {"constraint": const_name},
+        }
+        for const_name in current_names - target_names
+    ]
+    # Add new constraints
+    added: list[Operation] = [
+        {
+            "op": "add_constraint",
+            "table": table_name,
+            "details": {
+                "constraint": const_name,
+                "definition": target_constraints[const_name],
+            },
+        }
+        for const_name in target_names - current_names
+    ]
+    # Replace the redefined ones
+    replaced: list[Operation] = [
+        operation
+        for const_name in redefined
+        for operation in _replaced_constraint(
+            table_name, const_name, target_constraints[const_name]
+        )
+    ]
+    return [*dropped, *added, *replaced]
+
+
+@helper
+def _replaced_constraint(
+    table_name: str, const_name: str, definition: Any
+) -> list[Operation]:
+    """A constraint the two sides spell differently: the old goes, the new comes."""
+    return [
+        {
+            "op": "drop_constraint",
+            "table": table_name,
+            "details": {"constraint": const_name},
+        },
+        {
+            "op": "add_constraint",
+            "table": table_name,
+            "details": {"constraint": const_name, "definition": definition},
+        },
+    ]
+
+
+# WHICH ENGINES A NAMED CONSTRAINT IS COMPARED ON, named one by one. Read with
+# `[]`, so an engine that joins the vocabulary without an entry here is refused
+# rather than quietly treated like PostgreSQL.
+_CONSTRAINTS_ON: dict[Dialect, Callable[[str, Table, Table], list[Operation]]] = {
+    "sqlite": _compared_constraints,
+    "turso": _compared_constraints,
+    "postgresql": _constraints_not_compared,
+}

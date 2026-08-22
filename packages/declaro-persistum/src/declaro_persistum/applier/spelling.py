@@ -34,40 +34,65 @@ from declaro_persistum.types import (
 TypeMap = Callable[[str], str]
 
 
+# THE DECLARED TYPES SQLITE STORES, EACH BESIDE THE CLASS IT LANDS IN. This
+# was an if/elif chain whose order a reader had to hold in their head to know
+# which rule answered. The three tables below are read in the order they are
+# written and the first answer wins, which is the only ordering that remains.
+_SQLITE_STORAGE_CLASS: dict[str, str] = {
+    "text": "TEXT",
+    "varchar": "TEXT",
+    "char": "TEXT",
+    "string": "TEXT",
+    "boolean": "INTEGER",
+    "bool": "INTEGER",
+    "uuid": "TEXT",
+    "timestamptz": "TEXT",
+    "timestamp": "TEXT",
+    "date": "TEXT",
+    "datetime": "TEXT",
+    "jsonb": "TEXT",
+    "json": "TEXT",
+    "float": "REAL",
+    "double": "REAL",
+    "real": "REAL",
+    "float4": "REAL",
+    "float8": "REAL",
+    "blob": "BLOB",
+    "bytea": "BLOB",
+}
+
+# A NAME THAT CARRIES ITS SIZE. `bigint`, `smallint` and `int4` all hold
+# "int", and this fragment is read before the exact names because it always
+# was: it was the first arm of the chain.
+_SQLITE_BY_FRAGMENT: tuple[tuple[str, str], ...] = (("int", "INTEGER"),)
+
+# A NAME THAT CARRIES A PARAMETER LIST: `varchar(255)`, `numeric(10,2)`.
+_SQLITE_BY_PREFIX: tuple[tuple[str, str], ...] = (
+    ("varchar(", "TEXT"),
+    ("numeric", "REAL"),
+)
+
+
 @helper
 def sqlite_type(type_str: str) -> str:
     """SQLite storage classes. Turso shares them.
 
     Five classes, so uuid, every timestamp and every json flavour all land in
     TEXT. A type the mapper does not recognise is passed through upper-cased
-    rather than guessed at.
+    rather than guessed at, so an engine-specific spelling survives.
     """
     type_lower = type_str.lower()
-
-    if "int" in type_lower:
-        return "INTEGER"
-    elif type_lower in ("text", "varchar", "char", "string") or type_lower.startswith(
-        "varchar("
-    ):
-        return "TEXT"
-    elif type_lower in ("boolean", "bool"):
-        return "INTEGER"
-    elif type_lower in (
-        "uuid",
-        "timestamptz",
-        "timestamp",
-        "date",
-        "datetime",
-    ) or type_lower in ("jsonb", "json"):
-        return "TEXT"
-    elif type_lower in ("float", "double", "real", "float4", "float8") or type_lower.startswith(
-        "numeric"
-    ):
-        return "REAL"
-    elif type_lower in ("blob", "bytea"):
-        return "BLOB"
-    else:
-        return type_str.upper()
+    spellings = [
+        *[storage for fragment, storage in _SQLITE_BY_FRAGMENT if fragment in type_lower],
+        *[
+            _SQLITE_STORAGE_CLASS[name]
+            for name in [type_lower]
+            if name in _SQLITE_STORAGE_CLASS
+        ],
+        *[storage for prefix, storage in _SQLITE_BY_PREFIX if type_lower.startswith(prefix)],
+        type_str.upper(),
+    ]
+    return spellings[0]
 
 
 @helper
@@ -90,6 +115,26 @@ TYPE_MAPS: dict[str, TypeMap] = {
 
 
 @helper
+def _one_absence_is_not_the_other(left: Any, right: Any, _dialect: Dialect) -> bool:
+    """One side has no type, so the answer is whether both sides have none."""
+    return bool(left is right)
+
+
+@helper
+def _the_same_spelling(left: Any, right: Any, dialect: Dialect) -> bool:
+    """Two declared types, compared as this engine writes them."""
+    return bool(map_type(left, dialect) == map_type(right, dialect))
+
+
+# WHETHER A TYPE IS MISSING ON EITHER SIDE. Absence is a different question
+# from difference, and each has its own answer rather than a shared branch.
+_COMPARE_TYPES: dict[bool, Callable[[Any, Any, Dialect], bool]] = {
+    True: _one_absence_is_not_the_other,
+    False: _the_same_spelling,
+}
+
+
+@helper
 def same_type(left: str | None, right: str | None, dialect: Dialect) -> bool:
     """Do two declared types name the same column ON THIS ENGINE?
 
@@ -103,9 +148,30 @@ def same_type(left: str | None, right: str | None, dialect: Dialect) -> bool:
     Absent on either side means the caller has no type to compare, which is
     not the same as the types differing; two absences are equal and one is not.
     """
-    if left is None or right is None:
-        return left is right
-    return map_type(left, dialect) == map_type(right, dialect)
+    return _COMPARE_TYPES[left is None or right is None](left, right, dialect)
+
+
+@helper
+def _refuse_unmappable_dialect(dialect: Dialect) -> Dialect:
+    """No engine by this name declares how it spells a type."""
+    raise ValueError(
+        f"cannot spell types for dialect {dialect!r}. "
+        f"Supported: {sorted(TYPE_MAPS)}."
+    )
+
+
+@helper
+def _the_mappable_dialect(dialect: Dialect) -> Dialect:
+    """An engine with a type mapper, handed back to be looked up."""
+    return dialect
+
+
+# The refusal happens before the lookup, so `TYPE_MAPS` is read with [] and a
+# dialect it does not hold raises here rather than through a `.get` fallback.
+_WHEN_UNMAPPABLE: dict[bool, Callable[[Dialect], Dialect]] = {
+    True: _the_mappable_dialect,
+    False: _refuse_unmappable_dialect,
+}
 
 
 @helper
@@ -115,13 +181,8 @@ def map_type(type_str: str, dialect: Dialect) -> str:
     `dialect` is required (Rule 14). A default would have meant PostgreSQL
     silently receiving SQLite affinity, which is the defect this replaced.
     """
-    mapper = TYPE_MAPS.get(dialect)
-    if mapper is None:
-        raise ValueError(
-            f"cannot spell types for dialect {dialect!r}. "
-            f"Supported: {sorted(TYPE_MAPS)}."
-        )
-    return mapper(type_str)
+    mappable = _WHEN_UNMAPPABLE[dialect in TYPE_MAPS](dialect)
+    return TYPE_MAPS[mappable](type_str)
 
 
 # =============================================================================
@@ -229,19 +290,44 @@ def _untranslated_default(value: Any, _dialect: str, _column: str) -> Any:
 
 
 @helper
+def _refuse_unspellable_expression(
+    value: str, dialect: str, column: str, refusal: list[str]
+) -> str:
+    """This engine has no way to write the expression the column declares."""
+    raise ValueError(
+        f"column {column!r} defaults to {value}, which {dialect} cannot "
+        f"spell. {refusal[0]}."
+    )
+
+
+@helper
+def _the_spellable_expression(
+    value: str, _dialect: str, _column: str, _refusal: list[str]
+) -> str:
+    """An expression this engine can write, handed back to be spelled."""
+    return value
+
+
+# WHETHER THIS ENGINE REFUSES THE EXPRESSION OUTRIGHT, read before the
+# spelling table, so a refusal names the column rather than passing text the
+# engine cannot parse.
+_WHEN_NO_EQUIVALENT: dict[bool, Callable[[str, str, str, list[str]], str]] = {
+    True: _refuse_unspellable_expression,
+    False: _the_spellable_expression,
+}
+
+
+@helper
 def _translate_text_default(value: str, dialect: str, column: str) -> Any:
     """Text, matched against what this dialect can and cannot spell."""
     key = value.strip().lower().replace(" ", "")
 
-    refusal = NO_EQUIVALENT.get(dialect, {}).get(key)
-    if refusal is not None:
-        raise ValueError(
-            f"column {column!r} defaults to {value}, which {dialect} cannot "
-            f"spell. {refusal}."
-        )
+    refused = NO_EQUIVALENT[dialect]
+    refusal = [refused[name] for name in [key] if name in refused]
+    spellable = _WHEN_NO_EQUIVALENT[bool(refusal)](value, dialect, column, refusal)
 
     spelled = EXPRESSION_DEFAULTS[dialect]
-    return _SPELLED_FOR[key in spelled](spelled, key, value)
+    return _SPELLED_FOR[key in spelled](spelled, key, spellable)
 
 
 # ONLY TEXT CARRIES A DIALECT SPELLING, and both cases are written out. This
@@ -366,6 +452,46 @@ DEFAULTS: dict[str, RenderDefault] = {
 
 
 @helper
+def _refuse_unrenderable_dialect(dialect: Dialect) -> Dialect:
+    """No engine by this name declares how it writes a default."""
+    raise ValueError(
+        f"cannot render a column for dialect {dialect!r}. "
+        f"Supported: {sorted(DEFAULTS)}."
+    )
+
+
+@helper
+def _the_renderable_dialect(dialect: Dialect) -> Dialect:
+    """An engine with a default renderer, handed back to be looked up."""
+    return dialect
+
+
+_WHEN_UNRENDERABLE: dict[bool, Callable[[Dialect], Dialect]] = {
+    True: _the_renderable_dialect,
+    False: _refuse_unrenderable_dialect,
+}
+
+
+@helper
+def _foreign_key_clause(col: Column, reference: str) -> str:
+    """REFERENCES, with whichever cascade actions the column declares."""
+    ref_table, ref_col = reference.split(".")
+    return " ".join([
+        f'REFERENCES "{ref_table}"("{ref_col}")',
+        *[
+            f"ON DELETE {action.upper().replace('_', ' ')}"
+            for action in [col.get("on_delete")]
+            if action
+        ],
+        *[
+            f"ON UPDATE {action.upper().replace('_', ' ')}"
+            for action in [col.get("on_update")]
+            if action
+        ],
+    ])
+
+
+@helper
 def column_definition(name: str, col: Column, dialect: Dialect) -> str:
     """One column, spelled for one engine.
 
@@ -373,41 +499,32 @@ def column_definition(name: str, col: Column, dialect: Dialect) -> str:
     they differed in two lines: the type and the expression default. Both are
     now looked up by dialect, so the rest -- PRIMARY KEY, NOT NULL, UNIQUE,
     CHECK, REFERENCES with its cascade -- is written once.
+
+    EACH CLAUSE IS A COMPREHENSION THAT YIELDS IT OR YIELDS NOTHING, so the
+    parts a column carries are read down the list rather than accumulated by
+    seven branches. `nullable` is tested against False rather than for
+    falseness, because a column that never mentions it is not NOT NULL.
     """
-    render_default = DEFAULTS.get(dialect)
-    if render_default is None:
-        raise ValueError(
-            f"cannot render a column for dialect {dialect!r}. "
-            f"Supported: {sorted(DEFAULTS)}."
-        )
-    parts = [f'"{name}"', map_type(col.get("type", "text"), dialect)]
-
-    if col.get("primary_key"):
-        parts.append("PRIMARY KEY")
-
-    if col.get("nullable") is False:
-        parts.append("NOT NULL")
-
-    if col.get("unique"):
-        parts.append("UNIQUE")
-
-    if "default" in col:
-        parts.append(render_default(_translate_default(col["default"], dialect, name)))
-
-    if "check" in col:
-        parts.append(f"CHECK ({col['check']})")
-
-    if "references" in col:
-        ref = col["references"]
-        ref_table, ref_col = ref.split(".")
-        fk_sql = f'REFERENCES "{ref_table}"("{ref_col}")'
-
-        if col.get("on_delete"):
-            fk_sql += f" ON DELETE {col['on_delete'].upper().replace('_', ' ')}"
-        if col.get("on_update"):
-            fk_sql += f" ON UPDATE {col['on_update'].upper().replace('_', ' ')}"
-
-        parts.append(fk_sql)
+    renderable = _WHEN_UNRENDERABLE[dialect in DEFAULTS](dialect)
+    render_default = DEFAULTS[renderable]
+    parts = [
+        f'"{name}"',
+        map_type(col.get("type", "text"), dialect),
+        *["PRIMARY KEY" for declared in [col.get("primary_key")] if declared],
+        *["NOT NULL" for nullable in [col.get("nullable")] if nullable is False],
+        *["UNIQUE" for declared in [col.get("unique")] if declared],
+        *[
+            render_default(_translate_default(col[key], dialect, name))
+            for key in ["default"]
+            if key in col
+        ],
+        *[f"CHECK ({col[key]})" for key in ["check"] if key in col],
+        *[
+            _foreign_key_clause(col, col[key])
+            for key in ["references"]
+            if key in col
+        ],
+    ]
 
     return " ".join(parts)
 

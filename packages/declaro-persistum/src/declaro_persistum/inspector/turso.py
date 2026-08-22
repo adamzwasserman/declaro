@@ -15,7 +15,8 @@ exists: SQLite compatibility is the aim, not a guarantee.
 """
 
 import re
-from typing import Any
+from collections.abc import Callable
+from typing import Any, NoReturn
 
 from declaro_persistum.abstractions.materialized_views import (
     MATVIEW_METADATA_TABLE,
@@ -103,15 +104,6 @@ async def introspect(
         views_ = await introspect_views(connection)
         backing = {n for n, v in views_.items() if v.get("materialized")}
 
-        schema: Schema = {}
-
-        for row in tables:
-            stored_name = row[0]
-            if stored_name in backing:
-                continue
-            table_name = declared_name(stored_name, row[1])
-            schema[table_name] = await _introspect_table(connection, stored_name)
-
         # A FOREIGN KEY NAMES ITS TARGET, AND THE PRAGMA FOLDS THAT TOO.
         # `PRAGMA foreign_key_list("Post")` gives back `userprofile` for a
         # column declared `references: UserProfile.id`, so the differ saw a
@@ -121,45 +113,131 @@ async def introspect(
         # success. SQLite's PRAGMA returns `UserProfile` and needs none of
         # this. Measured 2026-08-18.
         #
-        # The names recovered above are the answer, so this runs after the
-        # loop rather than inside it: a table may reference one introspected
+        # The names recovered above are the answer, so this runs over the
+        # finished dict rather than inside it: a table may reference one read
         # later.
-        restore_reference_case(schema)
+        schema = restore_reference_case(
+            {
+                declared_name(row[0], row[1]): await _introspect_table(
+                    connection, row[0]
+                )
+                for row in tables
+                if row[0] not in backing
+            }
+        )
 
-        if include_views:
-            return schema, views_
-
-        return schema
+        return _WITH_VIEWS[bool(include_views)](schema, views_)
 
     except Exception as e:
         error_msg = str(e).lower()
-        if "network" in error_msg or "connection" in error_msg or "http" in error_msg:
-            raise DeclaroConnectionError(
-                f"Failed to connect to Turso database: {e}",
-                dialect="turso",
-            ) from e
-        raise
+        _WHEN_UNREACHABLE[
+            any(word in error_msg for word in ("network", "connection", "http"))
+        ](e)
 
 
 @helper
-def restore_reference_case(schema: Schema) -> None:
-    """Point every `references` at the table name as it was declared.
+def _schema_alone(
+    schema: Schema, _views: dict[str, View]
+) -> Schema | tuple[Schema, dict[str, View]]:
+    """The caller asked for the tables, so that is what comes back."""
+    return schema
 
-    Mutates in place because it is finishing a dict this function just built
-    and nobody else has seen. A table that the schema does not hold is left
-    exactly as the engine gave it: guessing at a name for a table nobody
-    declared would turn a readable mismatch into an invented one.
+
+@helper
+def _schema_and_views(
+    schema: Schema, views: dict[str, View]
+) -> Schema | tuple[Schema, dict[str, View]]:
+    """The caller asked for the views as well, so both come back."""
+    return schema, views
+
+
+_WITH_VIEWS: dict[
+    bool, Callable[[Schema, dict[str, View]], Schema | tuple[Schema, dict[str, View]]]
+] = {
+    True: _schema_and_views,
+    False: _schema_alone,
+}
+
+
+@helper
+def _as_connection_failure(error: Exception) -> NoReturn:
+    """The engine could not be reached, which is a failure of its own kind.
+
+    A caller can then tell "the database is unreachable" from "the database
+    says no" by the type, without reading the message.
+    """
+    raise DeclaroConnectionError(
+        f"Failed to connect to Turso database: {error}",
+        dialect="turso",
+    ) from error
+
+
+@helper
+def _the_error_as_it_came(error: Exception) -> NoReturn:
+    """The database answered and said no, so its own error goes back up.
+
+    Raised here rather than returned so that the caller's line is one lookup
+    with no `raise ... from` beside it, which would name the error as its own
+    cause on this path.
+    """
+    raise error
+
+
+# WHETHER THE DATABASE COULD BE REACHED AT ALL. Both entries end the call, one
+# with a typed failure and one with the engine's own.
+_WHEN_UNREACHABLE: dict[bool, Callable[[Exception], NoReturn]] = {
+    True: _as_connection_failure,
+    False: _the_error_as_it_came,
+}
+
+
+@helper
+def restore_reference_case(schema: Schema) -> Schema:
+    """The same schema, with every `references` naming the declared table.
+
+    A table the schema does not hold is left exactly as the engine gave it:
+    guessing at a name for a table nobody declared would turn a readable
+    mismatch into an invented one.
     """
     declared = {name.lower(): name for name in schema}
 
-    for table in schema.values():
-        for column in table.get("columns", {}).values():
-            reference = column.get("references")
-            if not reference or "." not in reference:
-                continue
-            target, _, target_column = reference.partition(".")
-            if target.lower() in declared:
-                column["references"] = f"{declared[target.lower()]}.{target_column}"
+    return {
+        name: {**table, "columns": _referring_as_declared(table["columns"], declared)}
+        for name, table in schema.items()
+    }
+
+
+@helper
+def _referring_as_declared(
+    columns: dict[str, Column], declared: dict[str, str]
+) -> dict[str, Column]:
+    """Every column of one table, pointing at names as they were written."""
+    return {
+        name: _reference_as_declared(column, declared)
+        for name, column in columns.items()
+    }
+
+
+@helper
+def _reference_as_declared(column: Column, declared: dict[str, str]) -> Column:
+    """One column, pointing at the declared spelling of the table it names.
+
+    A column with no `references`, one whose reference names no column, and
+    one naming a table outside this schema all come back unchanged.
+    """
+    targets = [
+        f"{declared[head.lower()]}.{tail}"
+        for reference in [column.get("references") or ""]
+        for head, dot, tail in [reference.partition(".")]
+        if dot and head.lower() in declared
+    ]
+    return [*[_referring_to(column, target) for target in targets], column][0]
+
+
+@helper
+def _referring_to(column: Column, target: str) -> Column:
+    """The same column, carrying the reference rewritten as declared."""
+    return {**column, "references": target}
 
 
 @helper
@@ -203,19 +281,21 @@ def declared_name(stored: str, ddl: str | None) -> str:
 
     Column names are not folded, so nothing else on this engine needs it.
     """
-    if ddl is None:
-        return stored
-
-    match = _CREATE_TABLE_NAME.search(ddl)
-    if match is None:
-        return stored
-
-    # Whichever of the four quotings matched. Taking only `quoted` and `bare`
-    # would silently fall back to the folded name for a backtick or bracket
-    # name, which is the same defect one spelling further along.
-    written = next(
-        (g for g in match.groupdict().values() if g is not None), stored
-    )
+    # Whichever of the four quotings matched, out of whatever DDL there was.
+    # Taking only `quoted` and `bare` would silently fall back to the folded
+    # name for a backtick or bracket name, which is the same defect one
+    # spelling further along. No DDL, and DDL that is not a CREATE, both leave
+    # the list empty and the stored name stands.
+    spellings = [
+        group
+        for text in [ddl]
+        if text is not None
+        for match in [_CREATE_TABLE_NAME.search(text)]
+        if match is not None
+        for group in match.groupdict().values()
+        if group is not None
+    ]
+    written = [*spellings, stored][0]
 
     # A DDL that names a different table is not this table's DDL. Fall back
     # rather than trust a match that disagrees with the catalogue.
@@ -259,9 +339,14 @@ async def _get_table_constraints(
         f"AND name='{as_literal(table_name)}'"
     ))
     rows = await _maybe_await(cursor.fetchall())
-    if rows and rows[0][0]:
-        return table_constraints_from_ddl(rows[0][0])
-    return {}
+    # No row means no such table, and a row whose `sql` is unset says nothing
+    # about constraints. Both read as none declared.
+    return {
+        name: constraint
+        for row in rows[:1]
+        if row[0]
+        for name, constraint in table_constraints_from_ddl(row[0]).items()
+    }
 
 
 @boundary
@@ -287,12 +372,44 @@ async def _get_columns(
         f"AND name='{as_literal(table_name)}'"
     )
     ddl_rows = await cursor.fetchall()
-    if ddl_rows and ddl_rows[0][0]:
-        for name, expression in checks_from_ddl(ddl_rows[0][0]).items():
-            if name in columns:
-                columns[name]["check"] = expression
+    checks = _checks_in(ddl_rows)
 
-    return columns
+    return {
+        name: _checked(column, [checks[key] for key in [name] if key in checks])
+        for name, column in columns.items()
+    }
+
+
+@helper
+def _checks_in(ddl_rows: list[tuple]) -> dict[str, str]:
+    """The column CHECK expressions in a stored CREATE TABLE.
+
+    The rows are what `sqlite_master` gave back for one table: none when the
+    table is not there, and one whose `sql` a caller cannot assume is set.
+    Both read as no checks.
+    """
+    return {
+        name: expression
+        for row in ddl_rows[:1]
+        if row[0]
+        for name, expression in checks_from_ddl(row[0]).items()
+    }
+
+
+@helper
+def _checked(column: Column, expressions: list[str]) -> Column:
+    """The column, carrying the one CHECK the DDL declares for it, if any.
+
+    A CHECK the DDL names for a column no PRAGMA reported belongs to no
+    column here, and is dropped rather than invented.
+    """
+    return [*[_with_check(column, text) for text in expressions], column][0]
+
+
+@helper
+def _with_check(column: Column, expression: str) -> Column:
+    """The same column, carrying the CHECK expression read out of the DDL."""
+    return {**column, "check": expression}
 
 
 @helper
@@ -303,18 +420,17 @@ async def _get_unique_columns(
     """Get columns with unique constraints (single-column only)."""
     index_rows = await pragma_index_list(connection, table_name)
 
-    index_info: dict[str, list[tuple]] = {}
-    for idx_row in index_rows:
-        idx_name = idx_row[1]
-        is_unique = bool(idx_row[2])
-        origin = idx_row[3]
-        if is_unique and origin != "pk":
-            index_info[idx_name] = await pragma_index_info(connection, idx_name)
+    # Only a UNIQUE index that the engine did not make for a primary key can
+    # mark a column, so only those have their columns fetched.
+    index_info: dict[str, list[tuple]] = {
+        row[1]: await pragma_index_info(connection, row[1])
+        for row in index_rows
+        if row[2] and row[3] != "pk"
+    }
 
     return unique_cols_from_index_rows(index_rows, index_info)
 
 
-@boundary
 async def _get_indexes(
     connection: DbapiConnection,
     table_name: str,
@@ -322,32 +438,22 @@ async def _get_indexes(
     """Get non-auto indexes for a table."""
     index_rows = await pragma_index_list(connection, table_name)
 
-    index_info: dict[str, list[tuple]] = {}
-    index_sql: dict[str, str | None] = {}
+    # ONLY `pk` IS SKIPPED HERE NOW. This skipped `u` as well, so a
+    # multi-column unique never had its columns fetched and
+    # `indexes_from_rows` could not decide anything about it: the index
+    # arrived with an empty column list and was dropped for looking like
+    # a single-column one.
+    #
+    # The SQLite inspector does not filter here at all, which is why the
+    # same fix landed in `indexes_from_rows` and worked there first.
+    wanted = [row[1] for row in index_rows if row[3] != "pk"]
 
-    for idx_row in index_rows:
-        idx_name = idx_row[1]
-        origin = idx_row[3]
-
-        # ONLY `pk` IS SKIPPED HERE NOW. This skipped `u` as well, so a
-        # multi-column unique never had its columns fetched and
-        # `indexes_from_rows` could not decide anything about it: the index
-        # arrived with an empty column list and was dropped for looking like
-        # a single-column one.
-        #
-        # The SQLite inspector does not filter here at all, which is why the
-        # same fix landed in `indexes_from_rows` and worked there first.
-        if origin == "pk":
-            continue
-
-        index_info[idx_name] = await pragma_index_info(connection, idx_name)
-
-        sql_cursor = await _maybe_await(connection.execute(
-            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
-            (idx_name,),
-        ))
-        sql_row = await _maybe_await(sql_cursor.fetchone())
-        index_sql[idx_name] = sql_row[0] if sql_row else None
+    index_info: dict[str, list[tuple]] = {
+        name: await pragma_index_info(connection, name) for name in wanted
+    }
+    index_sql: dict[str, str | None] = {
+        name: await _index_ddl(connection, name) for name in wanted
+    }
 
     indexes = indexes_from_rows(index_rows, index_info, index_sql)
 
@@ -361,6 +467,22 @@ async def _get_indexes(
         declared_name(name, index_sql.get(name)): index
         for name, index in indexes.items()
     }
+
+
+@boundary
+async def _index_ddl(connection: DbapiConnection, index_name: str) -> str | None:
+    """The CREATE INDEX text the catalogue stored for one index.
+
+    None for an index the engine made itself, which has no statement behind
+    it. `indexes_from_rows` reads the text only to recover a partial index's
+    WHERE clause, which appears in no PRAGMA.
+    """
+    cursor = await _maybe_await(connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+        (index_name,),
+    ))
+    row = await _maybe_await(cursor.fetchone())
+    return row[0] if row else None
 
 
 @helper
@@ -413,10 +535,30 @@ async def get_table_columns(
     table_name: str,
 ) -> dict[str, Any]:
     """Get column definitions for a specific table."""
-    if not await table_exists(connection, table_name, schema_name=NOTHING):
-        raise DeclaroError(f"Table '{table_name}' does not exist")
+    present = await table_exists(connection, table_name, schema_name=NOTHING)
+    return await _get_columns(connection, _WHEN_PRESENT[present](table_name))
 
-    return await _get_columns(connection, table_name)
+
+@helper
+def _refuse_absent_table(table_name: str) -> NoReturn:
+    """Nothing of this name is there, and no column list can say so.
+
+    An empty dict is also what a table with no columns would look like, so
+    the two answers have to differ.
+    """
+    raise DeclaroError(f"Table '{table_name}' does not exist")
+
+
+@helper
+def _the_table_name(table_name: str) -> str:
+    """The table is there, so its name goes on to be read."""
+    return table_name
+
+
+_WHEN_PRESENT: dict[bool, Callable[[str], str]] = {
+    True: _the_table_name,
+    False: _refuse_absent_table,
+}
 
 
 @boundary
@@ -451,18 +593,12 @@ async def introspect_views(
             f"AND name = '{MATVIEW_METADATA_TABLE}'"
         )
     )
-    matviews: dict[str, tuple[str, str]] = {}
-    if await _maybe_await(cursor.fetchall()):
-        cursor = await _maybe_await(
-            connection.execute(
-                "SELECT name, query, refresh_strategy "
-                f"FROM {MATVIEW_METADATA_TABLE} ORDER BY name"
-            )
-        )
-        matviews = {
-            name: (query, refresh)
-            for name, query, refresh in await _maybe_await(cursor.fetchall())
-        }
+    present = await _maybe_await(cursor.fetchall())
+    matviews: dict[str, tuple[str, str]] = {
+        name: (query, refresh)
+        for _ in present[:1]
+        for name, query, refresh in await _matview_rows(connection)
+    }
 
     # The fifth folding site. A view's name comes back from
     # `sqlite_master.name` like a table's, and its `sql` keeps the original
@@ -470,3 +606,19 @@ async def introspect_views(
     named = [(declared_name(row[0], row[1]), *row[1:]) for row in rows]
 
     return views_from_rows(named, matviews)
+
+
+@boundary
+async def _matview_rows(connection: DbapiConnection) -> list[tuple]:
+    """Every registered materialized view, read from the metadata table.
+
+    Called only once the table is known to be there, so anything that goes
+    wrong here is a real failure and raises.
+    """
+    cursor = await _maybe_await(
+        connection.execute(
+            "SELECT name, query, refresh_strategy "
+            f"FROM {MATVIEW_METADATA_TABLE} ORDER BY name"
+        )
+    )
+    return await _maybe_await(cursor.fetchall())

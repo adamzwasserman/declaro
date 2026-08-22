@@ -11,6 +11,7 @@ import logging
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime
+from itertools import accumulate, groupby
 from typing import TypedDict
 
 from declaro_persistum.boundary import boundary, helper, recognizer
@@ -68,13 +69,11 @@ def classify_sql(sql: str) -> str:
     caller error the way an unknown dialect is.
     """
     stripped = sql.strip()
-    if not stripped:
-        return "other"
-
-    first = stripped.split(None, 1)[0].lower()
-    if first == "with":
-        return _verb(_after_the_cte(stripped), "select")
-    return _verb(first, "other")
+    # A STATEMENT WITH NO WORDS HAS NO FIRST KEYWORD, and the empty string is
+    # not in the table, so `_verb` answers "other" for it without a branch of
+    # its own. This used to be a separate early return saying the same thing.
+    first = [*stripped.split(None, 1), ""][0].lower()
+    return _LEADS_WITH_A_CTE[first == "with"](stripped, first)
 
 
 @helper
@@ -107,30 +106,60 @@ def _verb(word: str, unrecognised: str) -> str:
     return _KNOWN_VERB[word in _SQL_OP_MAP](word, unrecognised)
 
 
+@helper
+def _the_cte_verb(stripped: str, _first: str) -> str:
+    """A `WITH ...` is named by the statement that follows its CTE bodies."""
+    return _verb(_after_the_cte(stripped), "select")
+
+
+@helper
+def _the_first_verb(_stripped: str, first: str) -> str:
+    """Every other statement is named by its own first keyword."""
+    return _verb(first, "other")
+
+
+# WHETHER THE STATEMENT OPENS WITH A CTE, as a table rather than a branch.
+_LEADS_WITH_A_CTE: dict[bool, Callable[[str, str], str]] = {
+    True: _the_cte_verb,
+    False: _the_first_verb,
+}
+
+
 @recognizer
 def _after_the_cte(sql: str) -> str:
     """The keyword a `WITH ...` statement actually performs.
 
-    Scans past balanced parentheses so a SELECT inside the CTE body is not
+    Reads past balanced parentheses so a SELECT inside the CTE body is not
     mistaken for the statement's own verb.
+
+    THE SCAN IS THREE LISTS INSTEAD OF A STATEFUL LOOP, and each says one
+    thing. `deltas` is what each character does to the nesting; `depth`
+    is where the nesting stood before that character; `visible` keeps the
+    characters that sit outside every parenthesis. Words come out of
+    `visible`, and the first one the table names is the statement's verb.
+
+    A word never terminated by punctuation is returned as it stands, which is
+    what the loop's final `return token.lower()` did.
     """
-    depth = 0
-    token = ""
-    for char in sql[len("with"):]:
-        if char == "(":
-            depth += 1
-        elif char == ")":
-            depth -= 1
-        elif depth == 0:
-            if char.isalpha():
-                token += char
-                continue
-            if token:
-                lowered = token.lower()
-                if lowered in _SQL_OP_MAP and lowered != "with":
-                    return lowered
-                token = ""
-    return token.lower()
+    body = sql[len("with"):]
+    deltas = [(char == "(") - (char == ")") for char in body]
+    depth = [0, *accumulate(deltas)][:-1]
+    visible = "".join(
+        char
+        for char, delta, outside in zip(body, deltas, depth, strict=True)
+        if delta == 0 and outside == 0
+    )
+    words = [
+        "".join(run) for alpha, run in groupby(visible, str.isalpha) if alpha
+    ]
+    named = [
+        lowered
+        for word in words
+        for lowered in [word.lower()]
+        if lowered in _SQL_OP_MAP and lowered != "with"
+    ]
+    unterminated = [word.lower() for word in words[-1:] if visible[-1:].isalpha()]
+    return [*named, *unterminated, ""][0]
 
 
 @recognizer

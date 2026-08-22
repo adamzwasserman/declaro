@@ -32,12 +32,11 @@ import pytest
 
 from declaro_persistum.exceptions import DeclaroError
 from declaro_persistum.inspector import get_table_columns
+from tests.conftest import probe_url
 
 pytestmark = [pytest.mark.precommit]
 
-PROBE_URL = os.environ.get(
-    "TEST_POSTGRESQL_URL", "postgresql://postgres:postgres@localhost/declaro_probe"
-)
+PROBE_URL = probe_url()
 
 CREATE = 'CREATE TABLE "widgets" (id INTEGER PRIMARY KEY, name TEXT)'
 

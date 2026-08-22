@@ -92,16 +92,21 @@ def test_there_is_one_type_map_not_three() -> None:
     `sqlite_type` with a non-string fallback it is separately tested for, so
     the two are not the same object and should not be.
 
-    The marker is the last branch of the affinity chain. A module that contains
-    it has its own copy of the mapping.
+    The marker is a row of the mapping itself. A module that contains it has
+    its own copy.
+
+    IT USED TO READ `sqlite_type`'S OWN SOURCE, and the mapping moved out of
+    the function body into a module-level table when the chain became a
+    lookup. The marker went blind and this test caught it, which is what the
+    first assertion is for.
     """
     import inspect
 
     from declaro_persistum.abstractions import reconstruction, table_reconstruction
-    from declaro_persistum.applier import shared
+    from declaro_persistum.applier import spelling
 
-    MARKER = '("blob", "bytea")'
-    assert MARKER in inspect.getsource(shared.sqlite_type), (
+    MARKER = '"blob": "BLOB"'
+    assert MARKER in inspect.getsource(spelling), (
         "the marker no longer identifies the mapping; this test is blind"
     )
     for module in (reconstruction, table_reconstruction):

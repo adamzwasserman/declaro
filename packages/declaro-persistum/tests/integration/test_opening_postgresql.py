@@ -19,12 +19,13 @@ import os
 import pytest
 
 from declaro_persistum import close, open_postgresql, reading, writing
+from tests.conftest import probe_url
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgresql, pytest.mark.integration]
 
 DSN = os.environ.get(
     "TEST_POSTGRESQL_URL",
-    "postgresql://postgres:postgres@localhost/declaro_probe",
+    probe_url(),
 )
 
 

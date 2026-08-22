@@ -5,12 +5,16 @@ Ensures operations are executed in an order that respects dependencies.
 For example, DROP FOREIGN KEY must happen before DROP TABLE.
 """
 
+from collections import defaultdict
 from collections.abc import Callable
+from typing import Any
 
+from declaro_persistum.boundary import helper
 from declaro_persistum.exceptions import CycleError
 from declaro_persistum.types import Operation
 
 
+@helper
 def build_dependency_graph(operations: list[Operation]) -> dict[int, list[int]]:
     """
     Build a dependency graph for operations.
@@ -38,13 +42,11 @@ def build_dependency_graph(operations: list[Operation]) -> dict[int, list[int]]:
     """
     dependencies: dict[int, list[int]] = {i: [] for i in range(len(operations))}
 
-    # Build indexes for quick lookup
-    op_by_type: dict[str, list[int]] = {}
+    # Which operations are of each type. This was built by hand, testing for
+    # the key and creating the list, which is what defaultdict does.
+    op_by_type: defaultdict[str, list[int]] = defaultdict(list)
     for i, op in enumerate(operations):
-        op_type = op["op"]
-        if op_type not in op_by_type:
-            op_by_type[op_type] = []
-        op_by_type[op_type].append(i)
+        op_by_type[op["op"]].append(i)
 
     # Tables being created
     created_tables: dict[str, int] = {}
@@ -94,6 +96,7 @@ def build_dependency_graph(operations: list[Operation]) -> dict[int, list[int]]:
     return dependencies
 
 
+@helper
 def _handle_drop_table(
     op: Operation,
     op_idx: int,
@@ -132,6 +135,7 @@ def _handle_drop_table(
     return keys + views + parents
 
 
+@helper
 def _handle_drop_column(
     op: Operation,
     all_operations: list[Operation],
@@ -157,6 +161,7 @@ def _handle_drop_column(
     return keys + indexes
 
 
+@helper
 def _handle_create_table(
     op: Operation,
     created_tables: dict[str, int],
@@ -176,6 +181,7 @@ def _handle_create_table(
     return [created_tables[name] for name in sorted(referenced)]
 
 
+@helper
 def _handle_add_column(
     op: Operation,
     created_tables: dict[str, int],
@@ -186,6 +192,7 @@ def _handle_add_column(
     return [created_tables[name] for name in [table_name] if name in created_tables]
 
 
+@helper
 def _handle_add_foreign_key(
     op: Operation,
     all_operations: list[Operation],
@@ -215,6 +222,7 @@ def _handle_add_foreign_key(
     return table + columns
 
 
+@helper
 def _handle_add_index(
     op: Operation,
     all_operations: list[Operation],
@@ -235,6 +243,7 @@ def _handle_add_index(
     return table + columns
 
 
+@helper
 def _handle_alter_column(
     op: Operation,
     all_operations: list[Operation],
@@ -258,6 +267,7 @@ def _handle_alter_column(
     ]
 
 
+@helper
 def _handle_create_view(
     op: Operation,
     created_tables: dict[str, int],
@@ -277,6 +287,7 @@ def _handle_create_view(
     ]
 
 
+@helper
 def _handle_drop_view(
     op: Operation,
     op_idx: int,
@@ -303,6 +314,14 @@ def _handle_drop_view(
 # convention `_details` uses in the applier and `_dialect` in the condition
 # renderer, so an argument that is deliberately unread reads differently from
 # one that was forgotten.
+@helper
+def _depends_on_nothing(
+    _op: Operation, _op_idx: int, _all_ops: list[Operation], **_kw: Any
+) -> list[int]:
+    """This operation can run whenever, so it waits on nothing."""
+    return []
+
+
 OP_DEPENDENCY_HANDLERS: dict = {
     "drop_table": lambda op, op_idx, all_ops, **kw: _handle_drop_table(op, op_idx, all_ops, kw["dropped_fks"]),
     "drop_column": lambda op, _op_idx, all_ops, **kw: _handle_drop_column(op, all_ops, kw["dropped_fks"], kw["dropped_indexes"]),
@@ -313,9 +332,21 @@ OP_DEPENDENCY_HANDLERS: dict = {
     "alter_column": lambda op, _op_idx, all_ops, **kw: _handle_alter_column(op, all_ops, kw["dropped_indexes"]),
     "create_view": lambda op, _op_idx, _all_ops, **kw: _handle_create_view(op, kw["created_tables"], kw["created_views"]),
     "drop_view": lambda op, op_idx, all_ops, **_kw: _handle_drop_view(op, op_idx, all_ops),
+    # THESE SEVEN DEPEND ON NOTHING, and saying so is what lets the table be
+    # read with []. They were absent, so `.get` returned None and a guard
+    # turned that into an empty list -- which made "no dependencies" and "op
+    # type nobody has written a handler for" the same answer.
+    "add_constraint": _depends_on_nothing,
+    "drop_constraint": _depends_on_nothing,
+    "drop_foreign_key": _depends_on_nothing,
+    "drop_index": _depends_on_nothing,
+    "insert_enum_values": _depends_on_nothing,
+    "rename_column": _depends_on_nothing,
+    "rename_table": _depends_on_nothing,
 }
 
 
+@helper
 def _get_operation_dependencies(
     op_idx: int,
     op: Operation,
@@ -326,21 +357,21 @@ def _get_operation_dependencies(
     dropped_indexes: list[tuple[int, str, str]],
 ) -> list[int]:
     """Get dependencies for a single operation using dict-based dispatch."""
-    op_type = op["op"]
-    handler = OP_DEPENDENCY_HANDLERS.get(op_type)
-    if handler:
-        return handler(
-            op,
-            op_idx,
-            all_operations,
-            created_tables=created_tables,
-            created_views=created_views,
-            dropped_fks=dropped_fks,
-            dropped_indexes=dropped_indexes,
-        )
-    return []
+    # An operation type with no entry depends on nothing, which is an answer
+    # rather than a missing case, so the table says it. Reading it with [] and
+    # a guard meant the two were the same line.
+    return OP_DEPENDENCY_HANDLERS[op["op"]](
+        op,
+        op_idx,
+        all_operations,
+        created_tables=created_tables,
+        created_views=created_views,
+        dropped_fks=dropped_fks,
+        dropped_indexes=dropped_indexes,
+    )
 
 
+@helper
 def _refuse_cycle(operations: list[Operation], stuck: set[int]) -> list[Operation]:
     """Nothing is ready and operations remain, so they wait on each other.
 
@@ -357,6 +388,7 @@ def _refuse_cycle(operations: list[Operation], stuck: set[int]) -> list[Operatio
 # WHETHER ANYTHING IS READY, AS A TABLE RATHER THAN A BRANCH. One key, two
 # entries, and the refusal is a value in the table rather than a path through
 # an `if`.
+@helper
 def _the_ready_operations(
     operations: list[Operation], _stuck: set[int]
 ) -> list[Operation]:
@@ -370,6 +402,7 @@ _WHEN_READY: dict[bool, Callable[[list[Operation], set[int]], list[Operation]]] 
 }
 
 
+@helper
 def topological_sort(
     operations: list[Operation],
     dependencies: dict[int, list[int]],
@@ -412,6 +445,7 @@ def topological_sort(
     return order
 
 
+@helper
 def _operation_priority(op: Operation) -> int:
     """
     Get priority for an operation type.

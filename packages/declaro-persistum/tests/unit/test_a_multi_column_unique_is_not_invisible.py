@@ -46,6 +46,7 @@ import pytest
 
 from declaro_persistum.inspector import introspect
 from declaro_persistum.types import NOTHING
+from tests.conftest import probe_url
 
 pytestmark = [pytest.mark.precommit]
 
@@ -72,9 +73,7 @@ async def _turso() -> Any:
     return await turso.aio.connect(os.path.join(tempfile.mkdtemp(), "u.db"))
 
 
-PROBE_URL = os.environ.get(
-    "TEST_POSTGRESQL_URL", "postgresql://postgres:postgres@localhost/declaro_probe"
-)
+PROBE_URL = probe_url()
 
 
 async def _postgresql() -> Any:

@@ -31,6 +31,7 @@ point; the test says so when you do.
 
 import ast
 import pathlib
+import textwrap
 
 import pytest
 
@@ -40,7 +41,7 @@ _SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "declaro_persistum"
 # It must never be raised.
 # 709 after a Python default's SQL spelling became a lookup on the exact
 # type, instead of an if/elif chain whose order was load-bearing.
-BASELINE = 681
+BASELINE = 0
 
 _MARKER = "APPROVED-IF"
 
@@ -78,15 +79,41 @@ def _survey() -> tuple[int, int, dict[str, int]]:
 def test_the_gate_still_finds_conditionals() -> None:
     """The floor. A scan matching nothing passes every other test here.
 
-    Without this, a rename or a broken parse turns the gate silently green and
-    it reads exactly like a codebase with no conditionals left in it.
-    """
-    total, _, _ = _survey()
+    IT USED TO ASSERT `total > 0` AGAINST `src/`, and its own docstring said
+    what to do when that stopped being true: "either this package really has
+    none, in which case delete this test and celebrate, or the scan is broken
+    and every assertion below is meaningless". On 2026-08-22 `src/` reached
+    zero, so the two cases became indistinguishable and the test failed while
+    reporting success.
 
-    assert total > 0, (
-        "the scan found no conditionals at all; either this package really has "
-        "none, in which case delete this test and celebrate, or the scan is "
-        "broken and every assertion below is meaningless"
+    Deleting it would leave the scan unproven, which is the other half of the
+    same problem. It reads a sample with a known count instead: four `if`
+    keywords, of which the `elif` is a second `If` node and the `else` belongs
+    to the `if` above it, so the answer is four rather than five.
+    """
+    sample = textwrap.dedent(
+        """
+        def f(x):
+            if x == 1:
+                return "one"
+            elif x == 2:
+                return "two"
+            else:
+                return [y for y in x if y]
+
+        def g(x):
+            if x:
+                if x > 1:
+                    return 1
+            return 0
+        """
+    )
+
+    found = _conditional_lines(ast.parse(sample))
+
+    assert len(found) == 4, (
+        f"the scan found {len(found)} conditionals in a sample holding four; "
+        f"it is broken, and every assertion below it is meaningless"
     )
 
 

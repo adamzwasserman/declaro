@@ -18,6 +18,7 @@ Reference: https://www.sqlite.org/lang_altertable.html#making_other_kinds_of_tab
 """
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from declaro_persistum.abstractions.pragma_compat import (
@@ -25,7 +26,10 @@ from declaro_persistum.abstractions.pragma_compat import (
     table_column_names,
 )
 from declaro_persistum.applier.shared import (
+    copy_the_shared_columns,
+    refuse_the_violations,
     refuse_unwritable_column_types,
+    sqlite_default,
     sqlite_type,
 )
 from declaro_persistum.boundary import boundary, helper
@@ -120,14 +124,16 @@ async def reconstruct_table(
     fk_enabled = 0
 
     try:
-        if manage_foreign_keys:
-            # 1. Get current foreign key state
-            fk_cursor = await connection.execute("PRAGMA foreign_keys")
-            fk_row = await fk_cursor.fetchone()
-            fk_enabled = fk_row[0] if fk_row else 0
-
-            # 2. Disable foreign keys during reconstruction
-            await connection.execute("PRAGMA foreign_keys = OFF")
+        # 1. and 2. Read the foreign key state, then turn enforcement off for
+        # the rebuild. A caller that manages the pragma itself gets neither,
+        # and enforcement stays reported as off, which is what the rest of
+        # this function assumed when it skipped the read.
+        state_read = [
+            await _disable_foreign_keys(connection)
+            for managed in [manage_foreign_keys]
+            if managed
+        ]
+        fk_enabled = [*state_read, 0][0]
 
         # 3. Drop any leftover _new table from a previous failed reconstruction
         await connection.execute(f'DROP TABLE IF EXISTS "{temp_table}"')
@@ -146,26 +152,27 @@ async def reconstruct_table(
         logger.debug(f"Creating temp table: {create_sql}")
         await connection.execute(create_sql)
 
-        # 4. Copy compatible data if requested
-        if preserve_data:
-            # Get intersection of old and new column names
-            old_columns = await table_column_names(connection, table_name)
-            common_columns = columns_to_copy(old_columns, list(new_columns))
-
-            if common_columns:
-                read_sql = ", ".join(f'"{old}"' for old, _ in common_columns)
-                write_sql = ", ".join(f'"{new}"' for _, new in common_columns)
-                copy_sql = (
-                    f'INSERT INTO "{temp_table}" ({write_sql}) '
-                    f'SELECT {read_sql} FROM "{table_name}"'
-                )
-                logger.debug(f"Copying data: {copy_sql}")
-                await connection.execute(copy_sql)
-            else:
-                logger.warning(
-                    f"No common columns between old and new schema for '{table_name}'. "
-                    f"No data will be copied."
-                )
+        # 4. Copy compatible data if requested. The old table is read only
+        # when a copy is wanted, and a schema sharing no column with it gets
+        # the warning instead of an INSERT naming nothing.
+        stored_columns = [
+            await table_column_names(connection, table_name)
+            for wanted in [preserve_data]
+            if wanted
+        ]
+        shared_columns = [
+            columns_to_copy(stored, list(new_columns)) for stored in stored_columns
+        ]
+        _copied = [
+            await copy_the_shared_columns(connection, table_name, temp_table, pairs)
+            for pairs in shared_columns
+            if pairs
+        ]
+        _warned = [
+            _warn_that_no_column_is_shared(table_name)
+            for pairs in shared_columns
+            if not pairs
+        ]
 
         # 5. Get indexes and constraints to recreate
         indexes = await create_index_statements(connection, table_name)
@@ -177,11 +184,10 @@ async def reconstruct_table(
         await connection.execute(f'ALTER TABLE "{temp_table}" RENAME TO "{table_name}"')
 
         # 8. Recreate indexes (substituting new table name)
-        for index_sql in indexes:
-            # Replace old table name with new in index definitions
-            recreate_sql = index_sql.replace(f'"{temp_table}"', f'"{table_name}"')
-            logger.debug(f"Recreating index: {recreate_sql}")
-            await connection.execute(recreate_sql)
+        _recreated = [
+            await _recreate_index(connection, index_sql, temp_table, table_name)
+            for index_sql in indexes
+        ]
 
         # 9. THE RESTORE IS NOT DONE HERE, AND CANNOT BE.
         #
@@ -199,37 +205,97 @@ async def reconstruct_table(
         #
         # A caller using this function directly owns the restore, and
         # `test_the_fk_restore_actually_lands.py` says so.
-        if manage_foreign_keys and fk_enabled:
-
-            # Verify foreign key constraints
-            check_cursor = await connection.execute(f'PRAGMA foreign_key_check("{table_name}")')
-            violations = await check_cursor.fetchall()
-            if violations:
-                raise ValueError(
-                    f"Foreign key constraint violations after reconstruction: {violations}"
-                )
+        #
+        # Verify foreign key constraints, which is worth doing only where this
+        # rebuild is the one that turned enforcement off.
+        _checked = [
+            await _check_the_foreign_keys(connection, table_name)
+            for enforcing in [manage_foreign_keys and fk_enabled]
+            if enforcing
+        ]
 
         logger.info(f"Successfully reconstructed table '{table_name}'")
 
     except Exception as e:
         logger.error(f"Table reconstruction failed for '{table_name}': {e}")
-        # Re-enable foreign keys before re-raising
-        if manage_foreign_keys:
-            try:
-                if fk_enabled:
-                    await connection.execute("PRAGMA foreign_keys = ON")
-            except Exception as fk_exc:
-                # The original failure is about to be re-raised, but this one
-                # leaves the connection enforcing nothing. A caller that
-                # catches the reconstruction error and carries on would write
-                # against unchecked constraints and never know.
-                logger.error(
-                    "Could not re-enable foreign keys after the failed "
-                    "reconstruction of '%s': %s. THIS CONNECTION NOW HAS "
-                    "FOREIGN KEY ENFORCEMENT OFF.",
-                    table_name, fk_exc,
-                )
+        # Re-enable foreign keys before re-raising, for the same connections
+        # this rebuild turned them off for.
+        _restored = [
+            await _restore_the_pragma(connection, table_name)
+            for enforcing in [manage_foreign_keys and fk_enabled]
+            if enforcing
+        ]
         raise
+
+
+@boundary
+async def _disable_foreign_keys(connection: Any) -> int:
+    """Turn enforcement off for the rebuild, and report what it was.
+
+    The state is read before it is changed, because whoever commits has to
+    know what to put back.
+    """
+    fk_cursor = await connection.execute("PRAGMA foreign_keys")
+    fk_row = await fk_cursor.fetchone()
+    enabled: int = fk_row[0] if fk_row else 0
+    await connection.execute("PRAGMA foreign_keys = OFF")
+    return enabled
+
+
+
+
+def _warn_that_no_column_is_shared(table_name: str) -> None:
+    """Nothing is in both tables, so the rebuilt table comes out empty.
+
+    An INSERT naming no column is not SQL, so the empty case is a warning
+    rather than a statement.
+    """
+    logger.warning(
+        f"No common columns between old and new schema for '{table_name}'. "
+        f"No data will be copied."
+    )
+
+
+@boundary
+async def _recreate_index(
+    connection: Any, index_sql: str, temp_table: str, table_name: str
+) -> str:
+    """One index, reissued against the table under its final name."""
+    recreate_sql = index_sql.replace(f'"{temp_table}"', f'"{table_name}"')
+    logger.debug(f"Recreating index: {recreate_sql}")
+    await connection.execute(recreate_sql)
+    return recreate_sql
+
+
+
+
+@boundary
+async def _check_the_foreign_keys(connection: Any, table_name: str) -> list[Any]:
+    """Read every reference in the rebuilt table back, and refuse a broken one."""
+    check_cursor = await connection.execute(f'PRAGMA foreign_key_check("{table_name}")')
+    violations = list(await check_cursor.fetchall())
+    _refused = [refuse_the_violations(broken) for broken in [violations] if broken]
+    return violations
+
+
+@boundary
+async def _restore_the_pragma(connection: Any, table_name: str) -> list[str]:
+    """Put enforcement back after a failed rebuild, and say what ran."""
+    try:
+        await connection.execute("PRAGMA foreign_keys = ON")
+        return ["PRAGMA foreign_keys = ON"]
+    except Exception as fk_exc:
+        # The original failure is about to be re-raised, but this one leaves
+        # the connection enforcing nothing. A caller that catches the
+        # reconstruction error and carries on would write against unchecked
+        # constraints and never know.
+        logger.error(
+            "Could not re-enable foreign keys after the failed "
+            "reconstruction of '%s': %s. THIS CONNECTION NOW HAS "
+            "FOREIGN KEY ENFORCEMENT OFF.",
+            table_name, fk_exc,
+        )
+        return []
 
 
 @helper
@@ -253,15 +319,13 @@ async def alter_column_nullability(
     """
     # Get current schema
     columns = await _get_full_table_schema(connection, table_name)
-
-    if column_name not in columns:
-        raise ValueError(f"Column '{column_name}' not found in table '{table_name}'")
+    changing = _the_column_to_change(table_name, column_name, columns)
 
     # Update nullability
-    columns[column_name]["nullable"] = nullable
+    changed = {**columns, column_name: {**changing, "nullable": nullable}}
 
     # Reconstruct table
-    await reconstruct_table(connection, table_name, columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+    await reconstruct_table(connection, table_name, changed, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 
 
 @helper
@@ -288,15 +352,13 @@ async def alter_column_type(
     """
     # Get current schema
     columns = await _get_full_table_schema(connection, table_name)
-
-    if column_name not in columns:
-        raise ValueError(f"Column '{column_name}' not found in table '{table_name}'")
+    changing = _the_column_to_change(table_name, column_name, columns)
 
     # Update type
-    columns[column_name]["type"] = new_type
+    changed = {**columns, column_name: {**changing, "type": new_type}}
 
     # Reconstruct table
-    await reconstruct_table(connection, table_name, columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+    await reconstruct_table(connection, table_name, changed, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 
 
 @helper
@@ -321,18 +383,76 @@ async def alter_column_default(
     """
     # Get current schema
     columns = await _get_full_table_schema(connection, table_name)
+    changing = _the_column_to_change(table_name, column_name, columns)
 
-    if column_name not in columns:
-        raise ValueError(f"Column '{column_name}' not found in table '{table_name}'")
-
-    # Update default
-    if default_value is None:
-        columns[column_name].pop("default", None)
-    else:
-        columns[column_name]["default"] = default_value
+    # Update default. None asks for the default to go, and any other value
+    # asks for that value, so the two are separate functions.
+    changed = {
+        **columns,
+        column_name: _WHEN_A_DEFAULT_IS_GIVEN[default_value is not None](
+            changing, default_value
+        ),
+    }
 
     # Reconstruct table
-    await reconstruct_table(connection, table_name, columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+    await reconstruct_table(connection, table_name, changed, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+
+
+@helper
+def _with_default(col_def: Column, default_value: str | None) -> Column:
+    """The column carrying the default the caller named."""
+    return {**col_def, "default": default_value}
+
+
+@helper
+def _without_default(col_def: Column, _default_value: str | None) -> Column:
+    """The column with no default at all, which is what None asks for."""
+    return {key: value for key, value in col_def.items() if key != "default"}
+
+
+_WHEN_A_DEFAULT_IS_GIVEN: dict[bool, Callable[[Column, str | None], Column]] = {
+    True: _with_default,
+    False: _without_default,
+}
+
+
+@helper
+def _no_such_column(
+    table_name: str, column_name: str, _columns: dict[str, Column]
+) -> Column:
+    """A column this table does not have, named so the caller finds it.
+
+    BEFORE ANYTHING IS DROPPED. The rebuild these three functions call drops
+    the real table, so a column nobody can change has to be refused while the
+    table is still there.
+    """
+    raise ValueError(f"Column '{column_name}' not found in table '{table_name}'")
+
+
+@helper
+def _the_named_column(
+    _table_name: str, column_name: str, columns: dict[str, Column]
+) -> Column:
+    """The definition the table holds for this column."""
+    return columns[column_name]
+
+
+_WHEN_THE_COLUMN_EXISTS: dict[
+    bool, Callable[[str, str, dict[str, Column]], Column]
+] = {
+    True: _the_named_column,
+    False: _no_such_column,
+}
+
+
+@helper
+def _the_column_to_change(
+    table_name: str, column_name: str, columns: dict[str, Column]
+) -> Column:
+    """The column about to be altered, or a refusal naming it."""
+    return _WHEN_THE_COLUMN_EXISTS[column_name in columns](
+        table_name, column_name, columns
+    )
 
 
 # =============================================================================
@@ -357,48 +477,19 @@ async def _get_full_table_schema(connection: Any, table_name: str) -> dict[str, 
     )
 
     rows = await pragma_table_info(connection, table_name)
-    columns: dict[str, Column] = {}
+    columns: dict[str, Column] = {row[1]: _column_from_pragma(row) for row in rows}
 
-    for row in rows:
-        cid, name, type_str, notnull, dflt_value, pk = row
-
-        col_def: Column = {
-            "type": type_str or "TEXT",
-            "nullable": not bool(notnull),
-        }
-
-        if pk:
-            col_def["primary_key"] = True
-
-        if dflt_value is not None:
-            col_def["default"] = dflt_value
-
-        columns[name] = col_def
-
-    # Detect inline UNIQUE constraints (auto-generated indexes with origin='u')
+    # Inline UNIQUE constraints are auto-generated indexes with origin 'u'.
+    # An index row is (seq, name, unique, origin, partial).
     index_list = await pragma_index_list(connection, table_name)
-    for idx_row in index_list:
-        # (seq, name, unique, origin, partial)
-        if idx_row[3] == "u" and idx_row[2]:
-            cursor = await connection.execute(f'PRAGMA index_info("{idx_row[1]}")')
-            idx_info = await cursor.fetchall()
-            if len(idx_info) == 1:  # Single-column unique constraint
-                col_name = idx_info[0][2]
-                if col_name in columns:
-                    columns[col_name]["unique"] = True
+    unique_indexes = [
+        await _index_columns(connection, idx_row[1])
+        for idx_row in index_list
+        if idx_row[3] == "u" and idx_row[2]
+    ]
+    unique_columns = [covered[0][2] for covered in unique_indexes if len(covered) == 1]
 
-    # Detect foreign key constraints
     fk_list = await pragma_foreign_key_list(connection, table_name)
-    for fk_row in fk_list:
-        # (id, seq, table, from, to, on_update, on_delete, match)
-        from_col, ref_table, ref_col = fk_row[3], fk_row[2], fk_row[4]
-        on_delete, on_update = fk_row[6], fk_row[5]
-        if from_col in columns:
-            columns[from_col]["references"] = f"{ref_table}.{ref_col}"
-            if on_delete and on_delete.upper() not in ("NO ACTION", "NONE", ""):
-                columns[from_col]["on_delete"] = on_delete.lower()
-            if on_update and on_update.upper() not in ("NO ACTION", "NONE", ""):
-                columns[from_col]["on_update"] = on_update.lower()
 
     # A CHECK IS IN NO PRAGMA, so this function did not read one and every
     # rebuild dropped it, on both engines. Measured 2026-08-19: a table with
@@ -415,12 +506,106 @@ async def _get_full_table_schema(connection: Any, table_name: str) -> dict[str, 
         (table_name,),
     )
     ddl_rows = await cursor.fetchall()
-    if ddl_rows and ddl_rows[0][0]:
-        for name, expression in checks_from_ddl(ddl_rows[0][0]).items():
-            if name in columns:
-                columns[name]["check"] = expression
+    checks = [
+        (name, expression)
+        for row in ddl_rows[:1]
+        if row[0]
+        for name, expression in checks_from_ddl(row[0]).items()
+    ]
 
-    return columns
+    return _with_properties(
+        columns,
+        [
+            *[(name, {"unique": True}) for name in unique_columns],
+            *[(fk_row[3], _foreign_key_properties(fk_row)) for fk_row in fk_list],
+            *[(name, {"check": expression}) for name, expression in checks],
+        ],
+    )
+
+
+@helper
+def _column_from_pragma(row: Any) -> Column:
+    """One column as PRAGMA table_info reports it.
+
+    The row is (cid, name, type, notnull, dflt_value, pk). A property the row
+    does not carry is left out rather than written as a false one.
+    """
+    type_str, notnull, dflt_value, pk = row[2], row[3], row[4], row[5]
+    column: dict[str, Any] = dict(
+        [
+            ("type", type_str or "TEXT"),
+            ("nullable", not bool(notnull)),
+            *[("primary_key", True) for is_key in [pk] if is_key],
+            *[("default", value) for value in [dflt_value] if value is not None],
+        ]
+    )
+    return column  # type: ignore[return-value]
+
+
+@boundary
+async def _index_columns(connection: Any, index_name: str) -> list[Any]:
+    """The columns one index covers, as PRAGMA index_info reports them."""
+    cursor = await connection.execute(f'PRAGMA index_info("{index_name}")')
+    return list(await cursor.fetchall())
+
+
+# What SQLite reports for a reference that declared no action. None of the
+# three is worth recording, and recording one makes a rebuilt table differ
+# from the schema that asked for it.
+_NO_ACTION = ("NO ACTION", "NONE", "")
+
+
+@helper
+def _is_a_declared_action(action: Any) -> bool:
+    """Whether the engine reported an action somebody actually asked for."""
+    return bool(action) and action.upper() not in _NO_ACTION
+
+
+@helper
+def _foreign_key_properties(fk_row: Any) -> dict[str, Any]:
+    """The reference one PRAGMA foreign_key_list row declares.
+
+    The row is (id, seq, table, from, to, on_update, on_delete, match).
+    """
+    ref_table, ref_col = fk_row[2], fk_row[4]
+    return dict(
+        [
+            ("references", f"{ref_table}.{ref_col}"),
+            *[
+                ("on_delete", action.lower())
+                for action in [fk_row[6]]
+                if _is_a_declared_action(action)
+            ],
+            *[
+                ("on_update", action.lower())
+                for action in [fk_row[5]]
+                if _is_a_declared_action(action)
+            ],
+        ]
+    )
+
+
+@helper
+def _with_properties(
+    columns: dict[str, Column], extra: list[tuple[str, dict[str, Any]]]
+) -> dict[str, Column]:
+    """The columns, each carrying the extra properties that name it.
+
+    A property naming a column the table does not have is dropped, which is
+    what the three separate `in columns` tests here used to do one at a time.
+    """
+    return {
+        name: {
+            **col_def,
+            **{
+                key: value
+                for named, properties in extra
+                if named == name
+                for key, value in properties.items()
+            },
+        }
+        for name, col_def in columns.items()
+    }
 
 
 @boundary
@@ -443,9 +628,14 @@ async def table_constraints_of(connection: Any, table_name: str) -> dict[str, An
         (table_name,),
     )
     rows = await cursor.fetchall()
-    if rows and rows[0][0]:
-        return dict(table_constraints_from_ddl(rows[0][0]))
-    return {}
+    # A table nobody stored DDL for carries no constraint, so the comprehension
+    # over the nought-or-one row is the whole answer.
+    return {
+        name: definition
+        for row in rows[:1]
+        if row[0]
+        for name, definition in table_constraints_from_ddl(row[0]).items()
+    }
 
 
 
@@ -469,84 +659,105 @@ def _generate_create_table_sql(
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
     constraints = resolved(constraints, None)
-    # BEFORE THE LOOP, so every offending column is named at once rather than
-    # the caller fixing them one crash at a time. This rebuilder checked
-    # nothing at all, so which of the two a caller reached decided whether
-    # they were told what was wrong with their schema.
+    # BEFORE ANYTHING IS WRITTEN, so every offending column is named at once
+    # rather than the caller fixing them one crash at a time. This rebuilder
+    # checked nothing at all, so which of the two a caller reached decided
+    # whether they were told what was wrong with their schema.
     refuse_unwritable_column_types(table_name, columns)
-
-    col_defs: list[str] = []
-    pk_columns: list[str] = []
-
-    for col_name, col_def in columns.items():
-        parts = [f'"{col_name}"']
-
-        # Type
-        # NO DEFAULT. A column that never said what it is does not become a
-        # TEXT column; the loader refuses one, so reaching here means a caller
-        # built the definition by hand and left the type out.
-        col_type = col_def["type"]
-        parts.append(_map_type(col_type))
-
-        # Primary key
-        if col_def.get("primary_key"):
-            pk_columns.append(col_name)
-            # Single-column PK can be inline
-            if len(columns) == 1 or not any(
-                c.get("primary_key") for n, c in columns.items() if n != col_name
-            ):
-                parts.append("PRIMARY KEY")
-
-        # NOT NULL
-        if col_def.get("nullable") is False:
-            parts.append("NOT NULL")
-
-        # UNIQUE
-        if col_def.get("unique"):
-            parts.append("UNIQUE")
-
-        # DEFAULT
-        if "default" in col_def:
-            parts.append(f"DEFAULT {col_def['default']}")
-
-        # CHECK
-        if "check" in col_def:
-            parts.append(f"CHECK ({col_def['check']})")
-
-        # Foreign key reference
-        if "references" in col_def:
-            ref = col_def["references"]
-            if "." in ref:
-                ref_table, ref_col = ref.split(".", 1)
-            else:
-                ref_table = ref
-                ref_col = "id"
-
-            fk_sql = f'REFERENCES "{ref_table}"("{ref_col}")'
-
-            if col_def.get("on_delete"):
-                fk_sql += f" ON DELETE {col_def['on_delete'].upper().replace('_', ' ')}"
-            if col_def.get("on_update"):
-                fk_sql += f" ON UPDATE {col_def['on_update'].upper().replace('_', ' ')}"
-
-            parts.append(fk_sql)
-
-        col_defs.append(" ".join(parts))
-
-    # Add composite primary key if multiple PK columns
-    if len(pk_columns) > 1:
-        pk_cols = ", ".join(f'"{c}"' for c in pk_columns)
-        col_defs.append(f"PRIMARY KEY ({pk_cols})")
 
     # Written through the shared clause so a rebuilt table cannot spell a
     # constraint differently from the create that first made it.
     from declaro_persistum.applier.shared import constraint_clause
 
-    for name, definition in (constraints or {}).items():
-        col_defs.append(constraint_clause(name, definition))
+    pk_columns = [
+        col_name for col_name, col_def in columns.items() if col_def.get("primary_key")
+    ]
+    col_defs: list[str] = [
+        # A key over one column is written on that column; a key over several
+        # cannot be, so it becomes a clause of its own below.
+        *[
+            _column_clause(col_name, col_def, [col_name] == pk_columns)
+            for col_name, col_def in columns.items()
+        ],
+        *[_composite_primary_key(keys) for keys in [pk_columns] if len(keys) > 1],
+        *[
+            constraint_clause(name, definition)
+            for name, definition in (constraints or {}).items()
+        ],
+    ]
 
     columns_sql = ",\n    ".join(col_defs)
     return f'CREATE TABLE "{table_name}" (\n    {columns_sql}\n)'
+
+
+@helper
+def _column_clause(col_name: str, col_def: Column, inline_primary_key: bool) -> str:
+    """One column, as it appears inside a CREATE TABLE.
+
+    Each clause is a comprehension over the one value that decides it, so a
+    clause the column does not carry contributes nothing.
+    """
+    return " ".join(
+        [
+            f'"{col_name}"',
+            # NO DEFAULT ON THE TYPE. A column that never said what it is does
+            # not become a TEXT column; the loader refuses one, so reaching
+            # here means a caller built the definition by hand and left the
+            # type out.
+            _map_type(col_def["type"]),
+            *["PRIMARY KEY" for alone in [inline_primary_key] if alone],
+            *["NOT NULL" for nullable in [col_def.get("nullable")] if nullable is False],
+            *["UNIQUE" for unique in [col_def.get("unique")] if unique],
+            # ONE RULE WRITES THIS CLAUSE, and it was written twice. This read
+            # `f"DEFAULT {col_def['default']}"` while the applier and the other
+            # rebuilder both called `sqlite_default`, which wraps an expression
+            # a second time because `PRAGMA table_info` strips one layer. So a
+            # rebuild through this module returned `(datetime('now'))` a layer
+            # shallower each time, the differ saw a change that was not one,
+            # and the schema migrated on every deploy. It also formatted a
+            # default with no SQL spelling straight into the statement, and
+            # this renderer runs after the real table has been dropped.
+            *[sqlite_default(col_def[key]) for key in ["default"] if key in col_def],
+            *[f"CHECK ({col_def['check']})" for key in ["check"] if key in col_def],
+            *[_reference_clause(col_def) for key in ["references"] if key in col_def],
+        ]
+    )
+
+
+@helper
+def _reference_clause(col_def: Column) -> str:
+    """The REFERENCES clause a column carries, with the actions it declares."""
+    ref = col_def["references"]
+    # A reference naming only a table means that table's `id`.
+    ref_table, ref_col = ref.split(".", 1) if "." in ref else (ref, "id")
+    return "".join(
+        [
+            f'REFERENCES "{ref_table}"("{ref_col}")',
+            *[
+                f" ON DELETE {_written_action(action)}"
+                for action in [col_def.get("on_delete")]
+                if action
+            ],
+            *[
+                f" ON UPDATE {_written_action(action)}"
+                for action in [col_def.get("on_update")]
+                if action
+            ],
+        ]
+    )
+
+
+@helper
+def _written_action(action: str) -> str:
+    """A declared action as SQL spells it: `set_null` is `SET NULL`."""
+    return action.upper().replace("_", " ")
+
+
+@helper
+def _composite_primary_key(pk_columns: list[str]) -> str:
+    """A key over more than one column, which no single column can carry."""
+    written = ", ".join(f'"{c}"' for c in pk_columns)
+    return f"PRIMARY KEY ({written})"
 
 
 # SQLite spelling. This was a byte-for-byte copy of `applier.shared.sqlite_type`.

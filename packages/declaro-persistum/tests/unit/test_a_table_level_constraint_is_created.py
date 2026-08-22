@@ -55,6 +55,7 @@ from declaro_persistum.applier import apply
 from declaro_persistum.applier.shared import create_table_sql
 from declaro_persistum.differ.core import diff
 from declaro_persistum.types import NOTHING
+from tests.conftest import probe_url
 
 pytestmark = [pytest.mark.precommit]
 
@@ -82,9 +83,7 @@ async def _turso() -> Any:
     return await turso.aio.connect(os.path.join(tempfile.mkdtemp(), "c.db"))
 
 
-PROBE_URL = os.environ.get(
-    "TEST_POSTGRESQL_URL", "postgresql://postgres:postgres@localhost/declaro_probe"
-)
+PROBE_URL = probe_url()
 
 
 async def _postgresql() -> Any:

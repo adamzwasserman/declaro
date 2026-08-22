@@ -28,7 +28,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, TypedDict, cast
 
 from declaro_persistum.exceptions import DatabaseClosedError
 from declaro_persistum.types import Dialect
@@ -71,6 +71,53 @@ __all__ = [
 # omission, and a default cannot tell those apart.
 ShutdownPolicy = Literal["replicate", "exit_immediately"]
 
+# The two answers, written once. `ShutdownPolicy` is a `Literal`, which Python
+# does not enforce at runtime, so the vocabulary needs a value to check against.
+POLICIES: tuple[str, ...] = ("replicate", "exit_immediately")
+
+
+def _policy_stands(_policy: str, _opener: str) -> None:
+    """The policy names one of the two answers, so nothing is refused."""
+    return None
+
+
+def _refuse_unknown_policy(policy: str, opener: str) -> None:
+    """A misspelt policy reads as 'do not replicate', so it is refused by name."""
+    raise ValueError(
+        f"{opener}: shutdown={policy!r} is not a policy. It takes "
+        f"'exit_immediately', or 'replicate' where there is a primary to "
+        f"replicate to. A value that is neither reaches the database "
+        f"record and reads as 'do not replicate', so the writes are lost "
+        f"at the next deploy without anything being said."
+    )
+
+
+_KNOWN_POLICY: dict[bool, Callable[[str, str], None]] = {
+    True: _policy_stands,
+    False: _refuse_unknown_policy,
+}
+
+
+def _replication_stands(_policy: str, _opener: str) -> None:
+    """Either there is a primary, or the policy does not ask for one."""
+    return None
+
+
+def _refuse_replicating_nowhere(_policy: str, opener: str) -> None:
+    """`replicate` with no primary would fail at SIGTERM, so it fails at open."""
+    raise ValueError(
+        f"{opener}: shutdown='replicate' needs a primary to replicate to, "
+        f"and this database has none. Pass 'exit_immediately', or open a "
+        f"replica with a primary and a token."
+    )
+
+
+_CAN_HONOUR_POLICY: dict[bool, Callable[[str, str], None]] = {
+    True: _replication_stands,
+    False: _refuse_replicating_nowhere,
+}
+
+
 def check_shutdown(policy: str, *, can_replicate: bool, opener: str) -> None:
     """Refuse a shutdown policy this database cannot honour.
 
@@ -91,20 +138,8 @@ def check_shutdown(policy: str, *, can_replicate: bool, opener: str) -> None:
     `replicate` with nowhere to replicate to is the other half: the failure
     would otherwise arrive at SIGTERM, which is the worst moment to find it.
     """
-    if policy not in ("replicate", "exit_immediately"):
-        raise ValueError(
-            f"{opener}: shutdown={policy!r} is not a policy. It takes "
-            f"'exit_immediately', or 'replicate' where there is a primary to "
-            f"replicate to. A value that is neither reaches the database "
-            f"record and reads as 'do not replicate', so the writes are lost "
-            f"at the next deploy without anything being said."
-        )
-    if policy == "replicate" and not can_replicate:
-        raise ValueError(
-            f"{opener}: shutdown='replicate' needs a primary to replicate to, "
-            f"and this database has none. Pass 'exit_immediately', or open a "
-            f"replica with a primary and a token."
-        )
+    _KNOWN_POLICY[policy in POLICIES](policy, opener)
+    _CAN_HONOUR_POLICY[can_replicate or policy != "replicate"](policy, opener)
 
 
 
@@ -269,9 +304,24 @@ def is_replicated(db: Database) -> bool:
     return db["primary"] is not None
 
 
+def _still_open(_db: Database) -> None:
+    """The database is open, so the caller may go on."""
+    return None
+
+
+def _refuse_closed(_db: Database) -> None:
+    """`close` released everything, so there is nothing left to work on."""
+    raise DatabaseClosedError("Database has been closed")
+
+
+_IS_CLOSED: dict[bool, Callable[[Database], None]] = {
+    True: _refuse_closed,
+    False: _still_open,
+}
+
+
 def _check_open(db: Database) -> None:
-    if db["closed"]:
-        raise DatabaseClosedError("Database has been closed")
+    _IS_CLOSED[db["closed"]](db)
 
 
 @asynccontextmanager
@@ -318,25 +368,13 @@ async def _write_connection(db: Database) -> AsyncIterator[Any]:
 
 
 @asynccontextmanager
-async def writing(db: Database) -> AsyncIterator[Any]:
-    """A connection for writing, for the span of the block.
+async def _serialised_write(db: Database) -> AsyncIterator[Any]:
+    """Take the serialise lock, then write. Only a replicated database gets here.
 
-    On a replicated database the writers are serialised: the engine allows one
-    writer, and without the lock 1 of 8 concurrent writes landed and 7 errored
-    (measured, real replica, 2026-08-12). On a local database there is no lock
-    and no serialisation, because concurrency is the entire reason MVCC is on
-    there.
-
-    The block commits on a clean exit and rolls back on an exception, on both
-    paths. See `_write_connection`.
+    `serialise` is not None on this path: `_WRITE_PATH` is keyed on exactly
+    that, so the field is read once here and read as the lock it is.
     """
-    _check_open(db)
-    serialise = db["serialise"]
-    if serialise is None:
-        async with _write_connection(db) as conn:
-            yield conn
-        return
-
+    serialise = cast("WriteLock", db["serialise"])
     # INCREMENTED AROUND THE AWAIT, not anywhere convenient. A counter that is
     # initialised and never incremented satisfies every test that sets it by
     # hand, which is how machinery that does nothing passes for healthy.
@@ -352,6 +390,34 @@ async def writing(db: Database) -> AsyncIterator[Any]:
             yield conn
     finally:
         serialise["lock"].release()
+
+
+# Which door a write goes through. A local database has no lock to take, and
+# `_write_connection` is that door unchanged; a replicated one goes through the
+# lock first. The two paths share `_write_connection`, so the commit cannot
+# reach one and miss the other.
+_WRITE_PATH: dict[bool, ForDDL] = {
+    True: _serialised_write,
+    False: _write_connection,
+}
+
+
+@asynccontextmanager
+async def writing(db: Database) -> AsyncIterator[Any]:
+    """A connection for writing, for the span of the block.
+
+    On a replicated database the writers are serialised: the engine allows one
+    writer, and without the lock 1 of 8 concurrent writes landed and 7 errored
+    (measured, real replica, 2026-08-12). On a local database there is no lock
+    and no serialisation, because concurrency is the entire reason MVCC is on
+    there.
+
+    The block commits on a clean exit and rolls back on an exception, on both
+    paths. See `_write_connection`.
+    """
+    _check_open(db)
+    async with _WRITE_PATH[db["serialise"] is not None](db) as conn:
+        yield conn
 
 
 # ---------------------------------------------------------------------------
@@ -378,17 +444,46 @@ async def replicate(db: Database) -> bool:
     the value meant nothing: "true by vacuity rather than by success". A caller
     cannot tell that apart from a replication that worked, so it now raises.
     """
-    if not is_replicated(db):
-        raise ValueError(
-            f"cannot replicate {db['path']}: it has no primary. A local-only "
-            f"database has nothing to bring into conformity — open it with a "
-            f"primary, or do not ask."
-        )
+    _HAS_A_PRIMARY[is_replicated(db)](db)
     _check_open(db)
-    if not await db["replicate_once"](db):
-        return False
+    return await _AFTER_SENDING[await db["replicate_once"](db)](db)
+
+
+def _primary_stands(_db: Database) -> None:
+    """There is a primary, so there is something to bring into conformity."""
+    return None
+
+
+def _refuse_local_only(db: Database) -> None:
+    """A local-only database has no second copy, so the request has no meaning."""
+    raise ValueError(
+        f"cannot replicate {db['path']}: it has no primary. A local-only "
+        f"database has nothing to bring into conformity — open it with a "
+        f"primary, or do not ask."
+    )
+
+
+_HAS_A_PRIMARY: dict[bool, Callable[[Database], None]] = {
+    True: _primary_stands,
+    False: _refuse_local_only,
+}
+
+
+async def _sent_nothing(_db: Database) -> bool:
+    """The primary did not take the writes, so the local copy still holds them."""
+    return False
+
+
+async def _bring_the_primary_down(db: Database) -> bool:
+    """The writes went up, so now the primary's changes come down."""
     await db["refresh_once"](db)
     return True
+
+
+_AFTER_SENDING: dict[bool, Callable[[Database], Awaitable[bool]]] = {
+    True: _bring_the_primary_down,
+    False: _sent_nothing,
+}
 
 
 async def replicate_if_idle(db: Database) -> bool:
@@ -402,11 +497,19 @@ async def replicate_if_idle(db: Database) -> bool:
     produce one pass when the load clears, not ten — otherwise recovering load
     releases a backlog onto a connection at the moment it can least afford it.
     """
-    if db["closed"] or not is_replicated(db):
-        return False
-    if writers_waiting(db) > 0:
-        return False
-    return await replicate(db)
+    idle = not db["closed"] and is_replicated(db) and writers_waiting(db) == 0
+    return await _IF_IDLE[idle](db)
+
+
+async def _no_pass_now(_db: Database) -> bool:
+    """Closed, local-only, or a writer is waiting. The pass is dropped, not queued."""
+    return False
+
+
+_IF_IDLE: dict[bool, Callable[[Database], Awaitable[bool]]] = {
+    True: replicate,
+    False: _no_pass_now,
+}
 
 
 async def replication_loop(db: Database, wanted: asyncio.Event) -> None:
@@ -423,9 +526,15 @@ async def replication_loop(db: Database, wanted: asyncio.Event) -> None:
         # waits for an unrelated trigger — a lost wakeup, which is how an
         # eventual-consistency loop quietly stops being eventual.
         wanted.clear()
-        if db["closed"]:
-            return
-        await replicate_if_idle(db)
+        # Closed while we waited: nothing runs, and the loop's own condition
+        # ends it on the next turn.
+        await _AFTER_WAKING[db["closed"]](db)
+
+
+_AFTER_WAKING: dict[bool, Callable[[Database], Awaitable[bool]]] = {
+    True: _no_pass_now,
+    False: replicate_if_idle,
+}
 
 
 async def replicate_on_shutdown(db: Database, *, now: Callable[[], float]) -> None:
@@ -444,9 +553,16 @@ async def replicate_on_shutdown(db: Database, *, now: Callable[[], float]) -> No
     `now` is injected rather than called here, which is what lets a test assert
     the elapsed time appears without sleeping for it.
     """
-    if not is_replicated(db):
-        return
+    await _ON_SHUTDOWN[is_replicated(db)](db, now)
 
+
+async def _nothing_to_deliver(_db: Database, _now: Callable[[], float]) -> None:
+    """A local-only database has no primary, so shutdown waits for nothing."""
+    return None
+
+
+async def _deliver_before_exit(db: Database, now: Callable[[], float]) -> None:
+    """Retry until the primary has everything, saying so on every attempt."""
     started = now()
     logger.info(
         "Shutdown: replicating %s to its primary before exit. The process will "
@@ -469,16 +585,36 @@ async def replicate_on_shutdown(db: Database, *, now: Callable[[], float]) -> No
     )
 
 
+_ON_SHUTDOWN: dict[bool, Callable[[Database, Callable[[], float]], Awaitable[None]]] = {
+    True: _deliver_before_exit,
+    False: _nothing_to_deliver,
+}
+
+
 async def refresh(db: Database) -> None:
     """Bring the primary's changes down into the local copy.
 
     The other direction. Named for what it does to the local file rather
     than "pull", which describes the wire and not the effect.
     """
-    if not is_replicated(db):
-        return
+    await _REFRESH[is_replicated(db)](db)
+
+
+async def _refresh_nothing(_db: Database) -> None:
+    """No primary, so there is nothing to bring down."""
+    return None
+
+
+async def _refresh_from_primary(db: Database) -> None:
+    """Take whatever the primary has that this copy does not."""
     _check_open(db)
     await db["refresh_once"](db)
+
+
+_REFRESH: dict[bool, Callable[[Database], Awaitable[None]]] = {
+    True: _refresh_from_primary,
+    False: _refresh_nothing,
+}
 
 
 async def flush(db: Database) -> None:
@@ -488,13 +624,27 @@ async def flush(db: Database) -> None:
     schedule; a caller that needs them there NOW says so here. On ephemeral
     disk, anything not replicated when the process dies is gone.
     """
-    if not is_replicated(db):
-        return
+    await _FLUSH[is_replicated(db)](db)
+
+
+async def _flush_nothing(_db: Database) -> None:
+    """No primary, so every write is already where it is going to be."""
+    return None
+
+
+async def _flush_to_primary(db: Database) -> None:
+    """Keep sending until the primary takes it, then take back what it has."""
     # IGNORES LOAD. A caller that awaited this has said it is willing to wait;
     # politeness belongs to the background pass, not here.
     while not await db["replicate_once"](db):
         await db["sleep"](db["retry_delay_s"])
     await db["refresh_once"](db)
+
+
+_FLUSH: dict[bool, Callable[[Database], Awaitable[None]]] = {
+    True: _flush_to_primary,
+    False: _flush_nothing,
+}
 
 
 async def close(db: Database) -> Database:
@@ -504,8 +654,10 @@ async def close(db: Database) -> Database:
     may be on disk that does not survive the process. Returns the closed
     value rather than mutating in place, so a caller cannot hold a `Database`
     that silently became unusable.
+
+    `flush` on a local-only database returns at once, so it is called
+    unconditionally here rather than guarded a second time.
     """
-    if is_replicated(db):
-        await flush(db)
+    await flush(db)
     await db["release"](db)
     return {**db, "closed": True}

@@ -7,7 +7,9 @@ queries are byte-for-byte the ones that were there: this was a de-classing, not
 a rewrite, so nothing about what PostgreSQL is asked has changed.
 """
 
-from typing import Any
+from collections.abc import Callable
+from functools import reduce
+from typing import Any, NoReturn
 
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionError
@@ -52,6 +54,49 @@ def get_dialect() -> str:
 
 
 @boundary
+async def _the_tables_alone(
+    _connection: FetchingConnection, schema: Schema, _schema_name: str
+) -> Schema | tuple[Schema, dict[str, View]]:
+    """Views were not asked for, so none are read."""
+    return schema
+
+
+@boundary
+async def _the_tables_and_views(
+    connection: FetchingConnection, schema: Schema, schema_name: str
+) -> Schema | tuple[Schema, dict[str, View]]:
+    """Views were asked for, so they are read and handed back beside the tables."""
+    return schema, await introspect_views(connection, schema_name=schema_name)
+
+
+_WHEN_VIEWS_ARE_WANTED: dict[bool, Any] = {
+    True: _the_tables_and_views,
+    False: _the_tables_alone,
+}
+
+
+@helper
+def _as_a_connection_failure(error: Exception) -> Schema:
+    """The message names the connection, so the failure is reported as one."""
+    raise DeclaroConnectionError(
+        f"Failed to introspect database: {error}",
+        dialect="postgresql",
+    ) from error
+
+
+@helper
+def _as_it_arrived(error: Exception) -> Schema:
+    """Nothing identifies this as a connection failure, so it goes up unchanged."""
+    raise error
+
+
+_WHEN_THE_CONNECTION_IS_NAMED: dict[bool, Callable[[Exception], Schema]] = {
+    True: _as_a_connection_failure,
+    False: _as_it_arrived,
+}
+
+
+@boundary
 async def introspect(
     connection: FetchingConnection,
     *,
@@ -90,27 +135,19 @@ async def introspect(
             schema_name,
         )
 
-        schema: Schema = {}
-
-        for table_row in tables:
-            table_name = table_row["table_name"]
-            schema[table_name] = await _introspect_table(
-                connection, table_name, schema_name
+        schema: Schema = {
+            row["table_name"]: await _introspect_table(
+                connection, row["table_name"], schema_name
             )
+            for row in tables
+        }
 
-        if include_views:
-            views = await introspect_views(connection, schema_name=schema_name)
-            return schema, views
-
-        return schema
+        return await _WHEN_VIEWS_ARE_WANTED[bool(include_views)](
+            connection, schema, schema_name
+        )
 
     except Exception as e:
-        if "connection" in str(e).lower():
-            raise DeclaroConnectionError(
-                f"Failed to introspect database: {e}",
-                dialect="postgresql",
-            ) from e
-        raise
+        return _WHEN_THE_CONNECTION_IS_NAMED["connection" in str(e).lower()](e)
 
 
 @helper
@@ -126,16 +163,7 @@ async def _introspect_table(
     foreign_keys = await _get_foreign_keys(connection, table_name, schema_name)
 
     # Merge foreign key info into columns
-    for fk in foreign_keys:
-        col_name = fk["column_name"]
-        if col_name in columns:
-            columns[col_name]["references"] = f"{fk['foreign_table']}.{fk['foreign_column']}"
-            on_delete = _normalize_fk_action(fk.get("delete_rule"))
-            if on_delete:
-                columns[col_name]["on_delete"] = on_delete
-            on_update = _normalize_fk_action(fk.get("update_rule"))
-            if on_update:
-                columns[col_name]["on_update"] = on_update
+    with_keys = reduce(_with_foreign_key, foreign_keys, columns)
 
     # A CHECK, which nothing read back until 2026-08-17. PostgreSQL keeps
     # these in `pg_constraint`, and `pg_get_constraintdef` returns them as
@@ -146,34 +174,82 @@ async def _introspect_table(
     # Only a single-column check is attached to its column. One over two
     # columns constrains the ROW, and hanging it on whichever column came
     # first would have the differ propose removing a constraint nobody
-    # declared on it.
-    for column_name, expression in (
-        await _get_column_checks(connection, table_name, schema_name)
-    ).items():
-        if column_name in columns:
-            columns[column_name]["check"] = expression
+    # declared on it. A check named for a column no row reported belongs to
+    # no column here and is dropped rather than invented.
+    checks = await _get_column_checks(connection, table_name, schema_name)
+    checked = {
+        **with_keys,
+        **{
+            name: {**with_keys[name], "check": expression}
+            for name, expression in checks.items()
+            if name in with_keys
+        },
+    }
 
-    table: Table = {"columns": columns}
-
-    if primary_key and len(primary_key) > 1:
-        # Only set composite PK if multiple columns
-        table["primary_key"] = primary_key
-        # For single-column PK, it's already in the column definition
-
-    if indexes:
-        table["indexes"] = indexes
-
-    # THE MULTI-COLUMN CHECKS, WHICH THE LOOP ABOVE SKIPS BY DESIGN. Skipping
-    # them attached them nowhere, so a declared table-level constraint was
-    # created and then proposed again on every deploy, and the second add
-    # fails because the name is already taken. Measured 2026-08-19; the SQLite
-    # and Turso inspectors had the same hole and read theirs out of the stored
-    # CREATE TABLE, which is the only place those engines record it.
+    # THE MULTI-COLUMN CHECKS, WHICH THE COLUMN READ ABOVE SKIPS BY DESIGN.
+    # Skipping them attached them nowhere, so a declared table-level
+    # constraint was created and then proposed again on every deploy, and the
+    # second add fails because the name is already taken. Measured
+    # 2026-08-19; the SQLite and Turso inspectors had the same hole and read
+    # theirs out of the stored CREATE TABLE, which is the only place those
+    # engines record it.
     constraints = await _get_table_constraints(connection, table_name, schema_name)
-    if constraints:
-        table["constraints"] = constraints  # type: ignore[typeddict-item]
 
-    return table
+    # A SINGLE-COLUMN PRIMARY KEY IS ALREADY ON ITS COLUMN, so only a
+    # composite one is written here. The other three facts are written only
+    # when the engine reports any, because that is how a declared table
+    # spells them.
+    facts: list[tuple[str, Any]] = [
+        ("columns", checked),
+        *[("primary_key", primary_key) for keys in [primary_key] if len(keys) > 1],
+        *[("indexes", indexes) for declared in [indexes] if declared],
+        *[("constraints", constraints) for declared in [constraints] if declared],
+    ]
+    return dict(facts)  # type: ignore[return-value]
+
+
+@helper
+def _with_foreign_key(
+    columns: dict[str, Column], fk: dict[str, str]
+) -> dict[str, Column]:
+    """The columns, with one key folded onto the column it leaves from.
+
+    A FOLD RATHER THAN A COMPREHENSION, because two keys can leave the same
+    column. Each is merged onto the answer the one before it gave, which is
+    what the loop this replaces did; building every column from the original
+    would let the second key drop the first key's action.
+    """
+    name = fk["column_name"]
+    merged = [
+        (name, _pointing_at(columns[name], fk))
+        for present in [name]
+        if present in columns
+    ]
+    return {**columns, **dict(merged)}
+
+
+@helper
+def _pointing_at(column: Column, fk: dict[str, str]) -> Column:
+    """One column, carrying the foreign key that leaves it.
+
+    An action the engine reports as NO ACTION, or in words this package has
+    no spelling for, is left off rather than written down as something else.
+    """
+    facts: list[tuple[str, Any]] = [
+        *column.items(),
+        ("references", f"{fk['foreign_table']}.{fk['foreign_column']}"),
+        *[
+            ("on_delete", action)
+            for action in [_normalize_fk_action(fk.get("delete_rule"))]
+            if action
+        ],
+        *[
+            ("on_update", action)
+            for action in [_normalize_fk_action(fk.get("update_rule"))]
+            if action
+        ],
+    ]
+    return dict(facts)  # type: ignore[return-value]
 
 
 @boundary
@@ -203,88 +279,165 @@ async def _get_columns(
         table_name,
     )
 
-    columns: dict[str, Column] = {}
+    columns: dict[str, Column] = {
+        row["column_name"]: _column_from_row(row) for row in rows
+    }
 
-    for row in rows:
-        col_name = row["column_name"]
-        col: Column = {"type": _normalize_type(row)}
-
-        if row["is_nullable"] == "NO":
-            col["nullable"] = False
-
-        if row["column_default"] is not None:
-            # Clean up default value
-            default = row["column_default"]
-            # Remove type casts like ::text
-            if "::" in default:
-                default = default.split("::")[0]
-            col["default"] = default
-
-        columns[col_name] = col
-
-    # Get primary key info to mark PK columns
+    # A SINGLE-COLUMN PRIMARY KEY IS A FACT ABOUT THE COLUMN. Two or more
+    # belong to the table, and `_introspect_table` writes them there.
     pk_columns = await _get_primary_key(connection, table_name, schema_name)
-    if pk_columns and len(pk_columns) == 1:
-        pk_col = pk_columns[0]
-        if pk_col in columns:
-            columns[pk_col]["primary_key"] = True
+    marked_pk = {
+        **columns,
+        **{
+            name: {**columns[name], "primary_key": True}
+            for name in pk_columns[:1]
+            if len(pk_columns) == 1 and name in columns
+        },
+    }
 
-    # Get unique constraints
+    # UNIQUE, read from the single-column unique indexes.
     unique_cols = await _get_unique_columns(connection, table_name, schema_name)
-    for col_name in unique_cols:
-        if col_name in columns:
-            columns[col_name]["unique"] = True
+    return {
+        **marked_pk,
+        **{
+            name: {**marked_pk[name], "unique": True}
+            for name in unique_cols
+            if name in marked_pk
+        },
+    }
 
-    return columns
+
+@helper
+def _cleaned_default(default: str) -> str:
+    """A default without its cast. PostgreSQL stores `'x'::text` for `'x'`.
+
+    Splitting on a separator the text does not carry returns the text, so
+    a default with no cast comes back as it was stored.
+    """
+    return default.split("::")[0]
+
+
+@helper
+def _column_from_row(row: dict[str, Any]) -> Column:
+    """One column definition, from one information_schema row.
+
+    NULLABLE IS WRITTEN DOWN ONLY WHEN FALSE, and a default only when the
+    engine reports one, because that is how the declared side spells them and
+    the differ compares the two dicts.
+    """
+    facts: list[tuple[str, Any]] = [
+        ("type", _normalize_type(row)),
+        *[
+            ("nullable", False)
+            for nullable in [row["is_nullable"]]
+            if nullable == "NO"
+        ],
+        *[
+            ("default", _cleaned_default(default))
+            for default in [row["column_default"]]
+            if default is not None
+        ],
+    ]
+    return dict(facts)  # type: ignore[return-value]
+
+
+# PostgreSQL's internal spelling of a type, against the one this package
+# declares. A type absent from here keeps whatever `data_type` said.
+_TYPE_MAP: dict[str, str] = {
+    "character varying": "varchar",
+    "character": "char",
+    "timestamp without time zone": "timestamp",
+    "timestamp with time zone": "timestamptz",
+    "time without time zone": "time",
+    "time with time zone": "timetz",
+    "double precision": "float8",
+    "real": "float4",
+    "integer": "integer",
+    "bigint": "bigint",
+    "smallint": "smallint",
+    "boolean": "boolean",
+    "text": "text",
+    "uuid": "uuid",
+    "jsonb": "jsonb",
+    "json": "json",
+    "bytea": "bytea",
+}
+
+
+@helper
+def _the_array_element(udt_name: str) -> str:
+    """An array's element type. PostgreSQL prefixes the element with `_`."""
+    return f"{udt_name.removeprefix('_')}[]"
+
+
+@helper
+def _the_udt_name(udt_name: str) -> str:
+    """An enum or another type the user made: its own name is the answer."""
+    return udt_name
+
+
+# The two `data_type` values that name the real type somewhere else. Read
+# after `_TYPE_MAP`, which holds neither of these keys.
+_FROM_THE_UDT_NAME: dict[str, Callable[[str], str]] = {
+    "ARRAY": _the_array_element,
+    "USER-DEFINED": _the_udt_name,
+}
+
+
+@helper
+def _base_type(data_type: str, udt_name: str) -> str:
+    """The type without its length or precision.
+
+    Three answers in order of preference: the canonical name this package
+    declares, the name the udt carries for an array or a user-defined type,
+    and failing both, what information_schema said.
+    """
+    return [
+        *[_TYPE_MAP[key] for key in [data_type] if key in _TYPE_MAP],
+        *[
+            _FROM_THE_UDT_NAME[key](udt_name)
+            for key in [data_type]
+            if key in _FROM_THE_UDT_NAME
+        ],
+        data_type,
+    ][0]
+
+
+@helper
+def _numeric_spelling(precision: Any, scale: Any) -> str:
+    """`numeric(p,s)` where the engine reports a scale, `numeric(p)` where not.
+
+    A scale of 0 is reported as no scale here, which is how this has always
+    read it and how the declared side spells an integral numeric.
+    """
+    return [
+        *[f"numeric({precision},{scale})" for reported in [scale] if reported],
+        f"numeric({precision})",
+    ][0]
+
+
+@helper
+def _with_precision(base_type: str, row: dict[str, Any]) -> str:
+    """The type, carrying the length or precision that applies to it."""
+    return [
+        *[
+            f"{base_type}({length})"
+            for length in [row["character_maximum_length"]]
+            if base_type in ("varchar", "char") and length
+        ],
+        *[
+            _numeric_spelling(precision, row["numeric_scale"])
+            for precision in [row["numeric_precision"]]
+            if base_type == "numeric" and precision
+        ],
+        base_type,
+    ][0]
 
 
 @helper
 def _normalize_type(row: dict[str, Any]) -> str:
     """Normalize PostgreSQL type to canonical form."""
-    data_type = row["data_type"]
-    udt_name = row["udt_name"]
-
-    # Map PostgreSQL internal types to canonical names
-    type_map = {
-        "character varying": "varchar",
-        "character": "char",
-        "timestamp without time zone": "timestamp",
-        "timestamp with time zone": "timestamptz",
-        "time without time zone": "time",
-        "time with time zone": "timetz",
-        "double precision": "float8",
-        "real": "float4",
-        "integer": "integer",
-        "bigint": "bigint",
-        "smallint": "smallint",
-        "boolean": "boolean",
-        "text": "text",
-        "uuid": "uuid",
-        "jsonb": "jsonb",
-        "json": "json",
-        "bytea": "bytea",
-    }
-
-    if data_type in type_map:
-        base_type = type_map[data_type]
-    elif data_type == "ARRAY":
-        # Array type - use udt_name without leading underscore
-        base_type = f"{udt_name[1:]}[]" if udt_name.startswith("_") else f"{udt_name}[]"
-    elif data_type == "USER-DEFINED":
-        # Enum or custom type
-        base_type = udt_name
-    else:
-        base_type = data_type
-
-    # Add precision/length for applicable types
-    if base_type in ("varchar", "char") and row["character_maximum_length"]:
-        return f"{base_type}({row['character_maximum_length']})"
-    elif base_type == "numeric" and row["numeric_precision"]:
-        if row["numeric_scale"]:
-            return f"numeric({row['numeric_precision']},{row['numeric_scale']})"
-        return f"numeric({row['numeric_precision']})"
-
-    return base_type
+    return _with_precision(_base_type(row["data_type"], row["udt_name"]), row)
 
 
 @boundary
@@ -405,21 +558,34 @@ async def _get_indexes(
         table_name,
     )
 
-    indexes: dict[str, Index] = {}
+    return {row["index_name"]: _index_from_row(row) for row in rows}
 
-    for row in rows:
-        index: Index = {"columns": row["columns"]}
 
-        if row["is_unique"]:
-            index["unique"] = True
-        if row["predicate"]:
-            index["where"] = row["predicate"]
-        if row["index_method"] != "btree":
-            index["using"] = row["index_method"]
+@helper
+def _index_from_row(row: dict[str, Any]) -> Index:
+    """One index, from one row of the pg_index query above.
 
-        indexes[row["index_name"]] = index
-
-    return indexes
+    Each of the three optional facts is written down only when it is true of
+    the index, because a declared index says nothing about the other two and
+    the differ compares the two dicts. btree is what a plain CREATE INDEX
+    builds, so naming it would make every ordinary index differ from its
+    declaration.
+    """
+    facts: list[tuple[str, Any]] = [
+        ("columns", row["columns"]),
+        *[("unique", True) for distinct in [row["is_unique"]] if distinct],
+        *[
+            ("where", predicate)
+            for predicate in [row["predicate"]]
+            if predicate
+        ],
+        *[
+            ("using", method)
+            for method in [row["index_method"]]
+            if method != "btree"
+        ],
+    ]
+    return dict(facts)  # type: ignore[return-value]
 
 
 @boundary
@@ -468,10 +634,26 @@ async def get_table_columns(
     See the note on the SQLite twin: this was documented as the inspector's
     and defined on Turso alone.
     """
-    if not await table_exists(connection, table_name, schema_name=NOTHING):
-        raise DeclaroError(f"Table '{table_name}' does not exist")
+    present = await table_exists(connection, table_name, schema_name=NOTHING)
+    return await _get_columns(connection, _WHEN_PRESENT[present](table_name), "public")
 
-    return await _get_columns(connection, table_name, "public")
+
+@helper
+def _refuse_absent_table(table_name: str) -> NoReturn:
+    """Nothing of this name is there, and no column list can say so."""
+    raise DeclaroError(f"Table '{table_name}' does not exist")
+
+
+@helper
+def _the_table_name(table_name: str) -> str:
+    """The table is there, so its name goes on to be read."""
+    return table_name
+
+
+_WHEN_PRESENT: dict[bool, Callable[[str], str]] = {
+    True: _the_table_name,
+    False: _refuse_absent_table,
+}
 
 
 @boundary
@@ -598,10 +780,9 @@ async def introspect_views(
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
     schema_name = resolved(schema_name, 'public')
-    views: dict[str, View] = {}
 
     # Regular views
-    rows = await connection.fetch(
+    plain = await connection.fetch(
         """
         SELECT viewname as name, definition as query
         FROM pg_views
@@ -610,15 +791,8 @@ async def introspect_views(
         schema_name,
     )
 
-    for row in rows:
-        views[row["name"]] = {
-            "name": row["name"],
-            "query": _normalize_view_query(row["query"]),
-            "materialized": False,
-        }
-
     # Materialized views
-    rows = await connection.fetch(
+    stored = await connection.fetch(
         """
         SELECT matviewname as name, definition as query
         FROM pg_matviews
@@ -627,14 +801,23 @@ async def introspect_views(
         schema_name,
     )
 
-    for row in rows:
-        views[row["name"]] = {
-            "name": row["name"],
-            "query": _normalize_view_query(row["query"]),
-            "materialized": True,
-        }
+    # The materialized ones are merged second, as they were written second
+    # before, so a name pg_views and pg_matviews both report reads as
+    # materialized.
+    return {
+        **{row["name"]: _view_from_row(row, False) for row in plain},
+        **{row["name"]: _view_from_row(row, True) for row in stored},
+    }
 
-    return views
+
+@helper
+def _view_from_row(row: dict[str, Any], materialized: bool) -> View:
+    """One view, from its catalogue row and which catalogue it came from."""
+    return {
+        "name": row["name"],
+        "query": _normalize_view_query(row["query"]),
+        "materialized": materialized,
+    }
 
 
 

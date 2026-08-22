@@ -50,12 +50,11 @@ from declaro_persistum.applier import apply
 from declaro_persistum.differ.core import diff
 from declaro_persistum.inspector import introspect
 from declaro_persistum.types import NOTHING
+from tests.conftest import probe_url
 
 pytestmark = [pytest.mark.precommit]
 
-PROBE_URL = os.environ.get(
-    "TEST_POSTGRESQL_URL", "postgresql://postgres:postgres@localhost/declaro_probe"
-)
+PROBE_URL = probe_url()
 
 TOUCHED = ("children", "parents", "others", "widgets")
 

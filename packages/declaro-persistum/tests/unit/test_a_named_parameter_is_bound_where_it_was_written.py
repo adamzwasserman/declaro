@@ -40,6 +40,7 @@ from declaro_persistum.query.executor import (
     _convert_to_asyncpg,
     _convert_to_turso,
 )
+from tests.conftest import probe_url
 
 
 @pytest.mark.parametrize(
@@ -243,7 +244,7 @@ async def test_asyncpg_accepts_and_answers_the_converted_statement() -> None:
 
     url = os.environ.get(
         "TEST_POSTGRESQL_URL",
-        "postgresql://postgres:postgres@localhost/declaro_probe",
+        probe_url(),
     )
     try:
         conn = await asyncpg.connect(url)

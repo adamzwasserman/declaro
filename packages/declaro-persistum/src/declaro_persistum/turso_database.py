@@ -55,7 +55,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -102,11 +102,38 @@ async def _pull_until_level(conn: Any) -> bool:
     primary moved on shows nothing after connect, gains the missing table on
     pull #1, and pull #2 returns False. One call was never enough.
     """
-    fetched_any = False
-    for _ in range(_MAX_PULL_BATCHES):
-        if not await conn.pull():
-            return fetched_any
-        fetched_any = True
+    return await _pull_batches(conn, _MAX_PULL_BATCHES, fetched_any=False)
+
+
+@boundary
+async def _pull_batches(conn: Any, budget: int, fetched_any: bool) -> bool:
+    """Pull one more batch while the budget allows, and report what happened.
+
+    `budget` counts the batches still allowed. It reaches zero only when the
+    primary has answered "there may be more" `_MAX_PULL_BATCHES` times, which
+    is the copy failing to converge rather than an ordinary pull.
+    """
+    return (
+        await _pull_one_more(conn, budget, fetched_any)
+        if budget > 0
+        else _out_of_batches(fetched_any)
+    )
+
+
+@boundary
+async def _pull_one_more(conn: Any, budget: int, fetched_any: bool) -> bool:
+    """Fetch one batch. Anything fetched means ask again; nothing means level."""
+    fetched = await conn.pull()
+    return (
+        await _pull_batches(conn, budget - 1, fetched_any=True)
+        if fetched
+        else fetched_any
+    )
+
+
+@helper
+def _out_of_batches(fetched_any: bool) -> bool:
+    """The bound was reached, so say the copy may not be converging."""
     logger.warning(
         "Pulled %d batches and the primary still reports more; the local copy "
         "may not be converging",
@@ -134,11 +161,7 @@ async def replicate_path(path: str, *, primary: str, token: str | None) -> None:
     did not get it is told, rather than left to infer it later from a missing
     table.
     """
-    if not primary:
-        raise ValueError(
-            f"cannot replicate {path}: no primary given. A local-only database "
-            f"has nothing to bring into conformity."
-        )
+    primary = _WITH_A_PRIMARY[bool(primary)](path, primary)
 
     import turso.aio.sync
 
@@ -149,6 +172,27 @@ async def replicate_path(path: str, *, primary: str, token: str | None) -> None:
     finally:
         with contextlib.suppress(Exception):
             await conn.close()
+
+@helper
+def _the_named_primary(_path: str, primary: str) -> str:
+    """A primary was given, so the caller's own value stands."""
+    return primary
+
+
+@helper
+def _refuse_a_path_with_no_primary(path: str, _primary: str) -> str:
+    """No primary, so there is nothing to bring this path into conformity with."""
+    raise ValueError(
+        f"cannot replicate {path}: no primary given. A local-only database "
+        f"has nothing to bring into conformity."
+    )
+
+
+# Whether the caller named a primary to replicate against.
+_WITH_A_PRIMARY: dict[bool, Callable[[str, str], str]] = {
+    True: _the_named_primary,
+    False: _refuse_a_path_with_no_primary,
+}
 
 _DEFAULT_RETRY_DELAY_S = 0.1
 

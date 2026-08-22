@@ -70,54 +70,40 @@ def diff_views(
             }
         )
 
-    # Changed views
-    for name in old_names & new_names:
-        old = old_views[name]
-        new = new_views[name]
-
-        old_materialized = old.get("materialized", False)
-        new_materialized = new.get("materialized", False)
-
-        # If materialized status changed, need drop + create
-        if old_materialized != new_materialized:
-            operations.append(
-                {
-                    "op": "drop_view",
-                    "table": "_views",
-                    "details": {"name": name, "materialized": old_materialized},
-                }
-            )
-            operations.append(
-                {
-                    "op": "create_view",
-                    "table": "_views",
-                    "details": new,
-                }
-            )
-        elif old.get("query") != new.get("query"):
-            # DROP THEN CREATE, ALWAYS. This emitted a bare `create_view` for a
-            # regular view on the reasoning that CREATE OR REPLACE would handle
-            # it. Nothing generates CREATE OR REPLACE: `create_view_sql` emits
-            # `CREATE VIEW IF NOT EXISTS`, which is a no-op against a view that
-            # already exists. So editing a view's query changed nothing and
-            # said it had. Measured 2026-08-14: the database went on serving
-            # the old definition after a migration that reported success.
-            operations.append(
-                {
-                    "op": "drop_view",
-                    "table": "_views",
-                    "details": {
-                        "name": name,
-                        "materialized": new_materialized,
-                    },
-                }
-            )
-            operations.append(
-                {
-                    "op": "create_view",
-                    "table": "_views",
-                    "details": new,
-                }
-            )
+    # A view whose definition changed is dropped and made again, whether what
+    # changed was its query or whether it is materialized. The two used to be
+    # separate branches emitting the same pair, differing only in which
+    # `materialized` flag the DROP carried, and it has to be the OLD one: the
+    # drop has to name the view as the database currently holds it.
+    #
+    # DROP THEN CREATE, ALWAYS. This emitted a bare `create_view` for a
+    # regular view, on the reasoning that CREATE OR REPLACE would handle it.
+    # Nothing generates CREATE OR REPLACE: `create_view_sql` emits `CREATE
+    # VIEW IF NOT EXISTS`, which is a no-op against a view that already
+    # exists. So editing a view's query changed nothing and said it had.
+    # Measured 2026-08-14: the database went on serving the old definition
+    # after a migration that reported success.
+    changed = [
+        name
+        for name in old_names & new_names
+        if old_views[name].get("materialized", False)
+        != new_views[name].get("materialized", False)
+        or old_views[name].get("query") != new_views[name].get("query")
+    ]
+    operations.extend(
+        op
+        for name in changed
+        for op in (
+            {
+                "op": "drop_view",
+                "table": "_views",
+                "details": {
+                    "name": name,
+                    "materialized": old_views[name].get("materialized", False),
+                },
+            },
+            {"op": "create_view", "table": "_views", "details": new_views[name]},
+        )
+    )
 
     return operations

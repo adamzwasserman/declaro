@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Protocol, TypedDict
 
 from declaro_persistum.boundary import boundary, helper
@@ -214,6 +214,20 @@ def _portable(value: Any) -> Any:
 
 
 @helper
+def _paged(sql: str, offset: int, limit: int | None) -> str:
+    """LIMIT and OFFSET, each written only when the caller asked for one.
+
+    A comprehension over a one-item list is how a clause that may or may not
+    be there gets built: no limit means no LIMIT, and offset 0 means no
+    OFFSET, which is the whole table from its start either way.
+    """
+    clauses = [f" LIMIT {limit}" for kept in [limit] if kept is not None] + [
+        f" OFFSET {offset}" for kept in [offset] if kept
+    ]
+    return sql + "".join(clauses)
+
+
+@helper
 async def postgres_read_rows(
     conn: FetchingConnection,
     table: str,
@@ -224,16 +238,52 @@ async def postgres_read_rows(
 ) -> list[tuple[Any, ...]]:
     """ORDER BY ctid is the stable order: physical row position."""
     col_list = ", ".join(f'"{c}"' for c in columns)
-    sql = f'SELECT {col_list} FROM "{table}" ORDER BY ctid'
-    if limit is not None:
-        sql += f" LIMIT {limit}"
-    if offset:
-        sql += f" OFFSET {offset}"
+    sql = _paged(f'SELECT {col_list} FROM "{table}" ORDER BY ctid', offset, limit)
     rows = await conn.fetch(sql)
     return [tuple(_portable(v) for v in row.values()) for row in rows]
 
 
+# WHETHER THERE ARE ROWS TO LOAD, AS A TABLE. An empty batch is an answer —
+# nothing moved — rather than a path around the statement, so both entries
+# return a count and the shared one says zero for either engine.
+_LoadsRows = Callable[
+    [Any, str, list[str], Sequence[tuple[Any, ...]]], Awaitable[int]
+]
+
+
+@helper
+async def _no_rows_loaded(
+    # BOTH TABLES HOLD THIS ONE FUNCTION, and the two engines hand it
+    # different connections. `Any` covered that and said nothing; naming both
+    # says which two, and `test_the_bulk_loader_says_what_it_takes` refuses
+    # `Any` on a connection for exactly this reason.
+    _conn: FetchingConnection | DbapiConnection,
+    _table: str,
+    _columns: list[str],
+    _rows: Sequence[tuple[Any, ...]],
+) -> int:
+    """An empty batch issues no statement, so no row moved."""
+    return 0
+
+
 @boundary
+async def _copied(
+    conn: FetchingConnection,
+    table: str,
+    columns: list[str],
+    rows: Sequence[tuple[Any, ...]],
+) -> int:
+    await conn.copy_records_to_table(table, columns=columns, records=rows)
+    return len(rows)
+
+
+_WHEN_POSTGRES_HAS_ROWS: dict[bool, _LoadsRows] = {
+    True: _copied,
+    False: _no_rows_loaded,
+}
+
+
+@helper
 async def postgres_load_rows(
     conn: FetchingConnection,
     table: str,
@@ -241,10 +291,7 @@ async def postgres_load_rows(
     rows: Sequence[tuple[Any, ...]],
 ) -> int:
     """COPY, not INSERT. That is the whole reason this dialect is separate."""
-    if not rows:
-        return 0
-    await conn.copy_records_to_table(table, columns=columns, records=rows)
-    return len(rows)
+    return await _WHEN_POSTGRES_HAS_ROWS[bool(rows)](conn, table, columns, rows)
 
 
 @boundary
@@ -330,29 +377,39 @@ async def dbapi_read_rows(
 ) -> list[tuple[Any, ...]]:
     """ORDER BY rowid is the stable order here."""
     col_list = ", ".join(f'"{c}"' for c in columns)
-    sql = f'SELECT {col_list} FROM "{table}" ORDER BY rowid'
-    if limit is not None:
-        sql += f" LIMIT {limit}"
-    if offset:
-        sql += f" OFFSET {offset}"
+    sql = _paged(f'SELECT {col_list} FROM "{table}" ORDER BY rowid', offset, limit)
     cursor = await conn.execute(sql, ())
     return [tuple(row) for row in await cursor.fetchall()]
 
 
 @boundary
+async def _inserted(
+    conn: DbapiConnection,
+    table: str,
+    columns: list[str],
+    rows: Sequence[tuple[Any, ...]],
+) -> int:
+    placeholders = ", ".join("?" for _ in columns)
+    col_list = ", ".join(f'"{c}"' for c in columns)
+    sql = f'INSERT INTO "{table}" ({col_list}) VALUES ({placeholders})'
+    await conn.executemany(sql, list(rows))
+    return len(rows)
+
+
+_WHEN_DBAPI_HAS_ROWS: dict[bool, _LoadsRows] = {
+    True: _inserted,
+    False: _no_rows_loaded,
+}
+
+
+@helper
 async def dbapi_load_rows(
     conn: DbapiConnection,
     table: str,
     columns: list[str],
     rows: Sequence[tuple[Any, ...]],
 ) -> int:
-    if not rows:
-        return 0
-    placeholders = ", ".join("?" for _ in columns)
-    col_list = ", ".join(f'"{c}"' for c in columns)
-    sql = f'INSERT INTO "{table}" ({col_list}) VALUES ({placeholders})'
-    await conn.executemany(sql, list(rows))
-    return len(rows)
+    return await _WHEN_DBAPI_HAS_ROWS[bool(rows)](conn, table, columns, rows)
 
 
 @boundary

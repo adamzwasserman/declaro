@@ -25,7 +25,6 @@ whatever it does wrong.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import pytest
@@ -34,12 +33,11 @@ from declaro_persistum.applier import apply
 from declaro_persistum.differ.core import diff
 from declaro_persistum.inspector import introspect
 from declaro_persistum.types import NOTHING
+from tests.conftest import probe_url
 
 pytestmark = [pytest.mark.precommit, pytest.mark.postgresql, pytest.mark.integration]
 
-PROBE_URL = os.environ.get(
-    "TEST_POSTGRESQL_URL", "postgresql://postgres:postgres@localhost/declaro_probe"
-)
+PROBE_URL = probe_url()
 
 PARENT: dict[str, Any] = {
     "columns": {"id": {"type": "integer", "primary_key": True}}

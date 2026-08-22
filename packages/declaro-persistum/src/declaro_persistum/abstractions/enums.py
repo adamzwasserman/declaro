@@ -12,6 +12,7 @@ Pattern:
     - FK constraint: {column} REFERENCES _dp_enum_{table}_{column}(value)
 """
 
+from collections.abc import Callable
 from typing import Any
 
 # Prefix for auto-generated enum lookup tables
@@ -94,12 +95,14 @@ def create_enum_table_sql(
         f")"
     )
 
-    # Insert all values
-    if values:
-        value_list = ", ".join(f"('{_escape_sql(v)}')" for v in values)
-        statements.append(
-            f'INSERT INTO "{lookup_name}" (value) VALUES {value_list}'
-        )
+    # An enum with no values needs no INSERT, so the comprehension over the
+    # nought-or-one case is the whole of it.
+    statements.extend(
+        f'INSERT INTO "{lookup_name}" (value) VALUES '
+        + ", ".join(f"('{_escape_sql(v)}')" for v in vs)
+        for vs in [values]
+        if vs
+    )
 
     return statements
 
@@ -186,17 +189,34 @@ def transform_column_for_enum(
     # Copy the column def
     new_def = dict(column_def)
 
-    # Remove literal_values (internal marker)
+    # A column declaring Literal values points at the lookup table instead of
+    # carrying a CHECK, and one that declares none is unchanged.
     literal_values = new_def.pop("literal_values", None)
+    return _AS_ENUM_COLUMN[bool(literal_values)](new_def, table, column)
 
-    if literal_values:
-        # Add FK reference instead of CHECK constraint
-        new_def["references"] = get_enum_fk_reference(table, column)
 
-        # Remove any CHECK constraint that might exist
-        new_def.pop("check", None)
+def _pointing_at_the_lookup(
+    column_def: dict[str, Any], table: str, column: str
+) -> dict[str, Any]:
+    """The FK replaces the CHECK, so any CHECK that was there comes off."""
+    return {
+        **{k: v for k, v in column_def.items() if k != "check"},
+        "references": get_enum_fk_reference(table, column),
+    }
 
-    return new_def
+
+def _as_declared(
+    column_def: dict[str, Any], _table: str, _column: str
+) -> dict[str, Any]:
+    """No Literal values, so nothing about this column changes."""
+    return column_def
+
+
+# Whether this column declared a Literal type.
+_AS_ENUM_COLUMN: dict[bool, Callable[[dict[str, Any], str, str], dict[str, Any]]] = {
+    True: _pointing_at_the_lookup,
+    False: _as_declared,
+}
 
 
 def expand_schema_enums(schema: dict[str, Any]) -> dict[str, Any]:
@@ -210,46 +230,42 @@ def expand_schema_enums(schema: dict[str, Any]) -> dict[str, Any]:
         - Enum lookup tables added
         - Column definitions updated with FK references
     """
-    expanded: dict[str, Any] = {}
-    enum_tables: dict[str, Any] = {}
+    # A table this loader already made is carried through untouched; every
+    # other table has each of its Literal columns turned into a foreign key
+    # and gains a lookup table to point at.
+    ours = {
+        name: table for name, table in schema.items() if is_enum_table(name)
+    }
+    theirs = {
+        name: table for name, table in schema.items() if not is_enum_table(name)
+    }
 
-    for table_name, table_def in schema.items():
-        # Skip if already an enum table
-        if is_enum_table(table_name):
-            expanded[table_name] = table_def
-            continue
+    # The filter has to sit above the call, because a comprehension evaluates
+    # its clauses in order and `generate_enum_table_schema` would otherwise
+    # run for a column that declares no Literal values.
+    enum_tables = {
+        lookup_name: lookup_table
+        for name, table in theirs.items()
+        for col_name, col_def in table.get("columns", {}).items()
+        if col_def.get("literal_values")
+        for lookup_name, lookup_table in generate_enum_table_schema(
+            name, col_name, col_def["literal_values"]
+        ).items()
+    }
 
-        columns = table_def.get("columns", {})
-        new_columns: dict[str, Any] = {}
+    expanded = {
+        name: {
+            **table,
+            "columns": {
+                col_name: transform_column_for_enum(col_def, name, col_name)
+                for col_name, col_def in table.get("columns", {}).items()
+            },
+        }
+        for name, table in theirs.items()
+    }
 
-        for col_name, col_def in columns.items():
-            literal_values = col_def.get("literal_values")
-
-            if literal_values:
-                # Generate lookup table
-                lookup_schema = generate_enum_table_schema(
-                    table_name, col_name, literal_values
-                )
-                enum_tables.update(lookup_schema)
-
-                # Transform column to use FK
-                new_columns[col_name] = transform_column_for_enum(
-                    col_def, table_name, col_name
-                )
-            else:
-                new_columns[col_name] = col_def
-
-        # Update table with transformed columns
-        new_table = dict(table_def)
-        new_table["columns"] = new_columns
-        expanded[table_name] = new_table
-
-    # Add enum lookup tables first (they need to exist before FK references)
-    result: dict[str, Any] = {}
-    result.update(enum_tables)
-    result.update(expanded)
-
-    return result
+    # The lookup tables come first, because the foreign keys point at them.
+    return {**enum_tables, **ours, **expanded}
 
 
 def diff_enum_values(

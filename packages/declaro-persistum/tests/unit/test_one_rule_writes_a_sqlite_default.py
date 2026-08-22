@@ -68,6 +68,34 @@ def test_a_plain_value_is_not_wrapped() -> None:
     assert sqlite_default(None) == "DEFAULT NULL"
 
 
+@pytest.mark.parametrize("shape", sorted(_DEFAULTS), ids=sorted(_DEFAULTS))
+def test_the_other_rebuilder_writes_it_the_same_way(shape: str) -> None:
+    """THE SECOND REBUILDER HAD ITS OWN RULE AND IT WAS THE WRONG ONE.
+
+    `table_reconstruction._generate_create_table_sql` wrote
+    `f"DEFAULT {col_def['default']}"` raw while every other renderer called
+    `sqlite_default`. Two consequences, both silent:
+
+    An expression default lost a layer of parentheses on each rebuild, because
+    `sqlite_default` wraps it twice and `PRAGMA table_info` strips one. The
+    differ then saw a change that was not one and migrated on every deploy.
+
+    A default whose type has no SQL spelling was formatted into the statement
+    instead of being refused, and this renderer runs AFTER the real table has
+    been dropped.
+    """
+    from declaro_persistum.abstractions.table_reconstruction import (
+        _generate_create_table_sql,
+    )
+
+    value = _DEFAULTS[shape]
+    rendered = _generate_create_table_sql(
+        "t", {"c": {"type": "text", "default": value}}, NOTHING
+    )
+
+    assert sqlite_default(value) in rendered, rendered
+
+
 def test_the_rebuild_has_no_default_rule_of_its_own() -> None:
     """The floor. A second copy can drift; a call cannot.
 

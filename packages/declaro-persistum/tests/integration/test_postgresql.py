@@ -36,12 +36,13 @@ from declaro_persistum.differ import diff
 from declaro_persistum.exceptions import MigrationError
 from declaro_persistum.inspector import introspect
 from declaro_persistum.types import NOTHING
+from tests.conftest import probe_url
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgresql, pytest.mark.integration]
 
 URL = os.environ.get(
     "TEST_POSTGRESQL_URL",
-    "postgresql://postgres:postgres@localhost/declaro_probe",
+    probe_url(),
 )
 
 

@@ -8,6 +8,7 @@ Pattern follows arrays.py and maps.py abstractions.
 """
 
 import json
+from collections.abc import Callable
 from typing import Any, Literal
 
 from declaro_persistum.types import Nothing, resolved
@@ -95,9 +96,8 @@ def create_matview_sql(
     statements.append(f'CREATE TABLE "{name}" AS {query}')
 
     # 3. Register in metadata
-    depends_json = "NULL"
-    if depends_on:
-        depends_json = f"'{json.dumps(depends_on)}'"
+    # No dependencies is SQL NULL; a list of them is the JSON of that list.
+    depends_json = f"'{json.dumps(depends_on)}'" if depends_on else "NULL"
 
     escaped_query = _escape_sql_string(query)
     statements.append(
@@ -142,21 +142,41 @@ def refresh_matview_sql(
     """
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
-    atomic = resolved(atomic, True)
-    if atomic:
-        # Atomic refresh: delete all rows, insert new ones
-        return [
-            f'DELETE FROM "{name}"',
-            f'INSERT INTO "{name}" {query}',
-            f"UPDATE {MATVIEW_METADATA_TABLE} SET last_refreshed_at = datetime('now') WHERE name = '{name}'",
-        ]
-    else:
-        # Non-atomic: drop and recreate (loses indexes)
-        return [
-            f'DROP TABLE IF EXISTS "{name}"',
-            f'CREATE TABLE "{name}" AS {query}',
-            f"UPDATE {MATVIEW_METADATA_TABLE} SET last_refreshed_at = datetime('now') WHERE name = '{name}'",
-        ]
+    return _REFILL[resolved(atomic, True)](name, query)
+
+
+def _refill_in_place(name: str, query: str) -> list[str]:
+    """Empty the table and put the new rows in it, keeping its indexes."""
+    return [
+        f'DELETE FROM "{name}"',
+        f'INSERT INTO "{name}" {query}',
+        _stamp_refreshed(name),
+    ]
+
+
+def _rebuild(name: str, query: str) -> list[str]:
+    """Drop the table and make it again, which loses its indexes."""
+    return [
+        f'DROP TABLE IF EXISTS "{name}"',
+        f'CREATE TABLE "{name}" AS {query}',
+        _stamp_refreshed(name),
+    ]
+
+
+def _stamp_refreshed(name: str) -> str:
+    """Record when this view was last filled."""
+    return (
+        f"UPDATE {MATVIEW_METADATA_TABLE} SET last_refreshed_at = "
+        f"datetime('now') WHERE name = '{name}'"
+    )
+
+
+# Which way the rows are replaced. Keeping the table means keeping its
+# indexes, so the two are not interchangeable and the caller says which.
+_REFILL: dict[bool, Callable[[str, str], list[str]]] = {
+    True: _refill_in_place,
+    False: _rebuild,
+}
 
 
 def generate_refresh_trigger_sql(

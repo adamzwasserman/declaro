@@ -314,6 +314,23 @@ FROM {closure_name}
 WHERE ancestor_id = :node_id"""
 
 
+_CLOSURE_KEYS = ("ancestor_id", "descendant_id", "depth")
+
+
+def _node_id(row: dict[str, Any]) -> Any:
+    """The row's own id, or the descendant it names when it carries neither."""
+    return row.get("id") or row.get("descendant_id")
+
+
+def _node(node_id: Any, row: dict[str, Any]) -> dict[str, Any]:
+    """One node, carrying everything from its row that is not closure plumbing."""
+    return {
+        "id": node_id,
+        "children": [],
+        **{k: v for k, v in row.items() if k not in _CLOSURE_KEYS},
+    }
+
+
 def build_tree(rows: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
     """
     Build tree structure from closure table data.
@@ -324,31 +341,34 @@ def build_tree(rows: list[dict[str, Any]]) -> dict[int, dict[str, Any]]:
     Returns:
         Dict mapping node IDs to node data with 'children' lists.
     """
-    if not rows:
-        return {}
+    named = [
+        (node_id, row)
+        for row in rows
+        for node_id in [_node_id(row)]
+        if node_id is not None
+    ]
+    # THE FIRST ROW NAMING A NODE DESCRIBES IT; later rows repeat the id with
+    # different closure columns. A dict keeps the last entry written, so the
+    # pairs are read backwards to leave the first one standing, and
+    # `dict.fromkeys` restores the order the nodes first appeared in.
+    first_row = dict(reversed(named))
+    nodes: dict[int, dict[str, Any]] = {
+        node_id: _node(node_id, first_row[node_id])
+        for node_id in dict.fromkeys(node_id for node_id, _ in named)
+    }
 
-    # Extract unique nodes
-    nodes: dict[int, dict[str, Any]] = {}
-
-    for row in rows:
-        node_id = row.get("id") or row.get("descendant_id")
-        if node_id is not None and node_id not in nodes:
-            nodes[node_id] = {
-                "id": node_id,
-                "children": [],
-                **{
-                    k: v
-                    for k, v in row.items()
-                    if k not in ("ancestor_id", "descendant_id", "depth")
-                },
-            }
-
-    # Build parent-child relationships from depth=1 entries
-    for row in rows:
-        if row.get("depth") == 1:
-            parent_id = row.get("ancestor_id")
-            child_id = row.get("descendant_id")
-            if parent_id in nodes and child_id in nodes:
-                nodes[parent_id]["children"].append(nodes[child_id])
+    # A depth-1 row is a parent-child edge. One naming a node outside this
+    # batch describes an edge to something that is not here, and is left out.
+    edges = [
+        (row["ancestor_id"], row["descendant_id"])
+        for row in rows
+        if row.get("depth") == 1
+        and row.get("ancestor_id") in nodes
+        and row.get("descendant_id") in nodes
+    ]
+    # APPENDED IN PLACE, which is what makes a node that hangs under two
+    # parents the same dict in both rather than two copies. The comprehension
+    # runs the appends; its result is a list of None and goes nowhere.
+    _ = [nodes[parent]["children"].append(nodes[child]) for parent, child in edges]
 
     return nodes

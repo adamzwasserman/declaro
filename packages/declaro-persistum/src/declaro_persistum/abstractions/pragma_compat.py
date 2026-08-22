@@ -28,9 +28,10 @@ async def _maybe_await(value: Any) -> Any:
 
     The drivers disagree: some return a cursor, some a coroutine yielding one.
     """
-    if inspect.isawaitable(value):
-        return await value
-    return value
+    # One driver hands back a cursor and another a coroutine yielding one, so
+    # awaiting a list of nought or one covers both without a branch.
+    awaited = [await v for v in [value] if inspect.isawaitable(v)]
+    return next(iter(awaited), value)
 
 
 @boundary
@@ -112,25 +113,27 @@ async def create_index_statements(connection: Any, table_name: str) -> list[str]
     Returns list of CREATE INDEX SQL statements.
     """
     index_list = await pragma_index_list(connection, table_name)
-    index_sqls = []
 
-    for row in index_list:
-        # row format: (seq, name, unique, origin, partial)
-        index_name = row[1]
-        origin = row[3]
+    # Origin "u" and "pk" are indexes SQLite made for a UNIQUE or PRIMARY KEY
+    # constraint. They belong to the constraint, not to a declaration anybody
+    # wrote, so they are not read back.
+    declared = [row[1] for row in index_list if row[3] not in ("u", "pk")]
 
-        # Skip auto-generated indexes (UNIQUE/PRIMARY KEY constraints)
-        if origin in ("u", "pk"):
-            continue
-
-        # Get CREATE INDEX statement from sqlite_master
-        cursor = await connection.execute(
-            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
-            (index_name,),
+    statements = [
+        await _maybe_await(
+            (
+                await _maybe_await(
+                    connection.execute(
+                        "SELECT sql FROM sqlite_master "
+                        "WHERE type = 'index' AND name = ?",
+                        (name,),
+                    )
+                )
+            ).fetchone()
         )
-        result = await cursor.fetchone()
+        for name in declared
+    ]
 
-        if result and result[0]:
-            index_sqls.append(result[0])
-
-    return index_sqls
+    # A partial index and a dropped one both read back as no SQL, and neither
+    # is a statement to return.
+    return [row[0] for row in statements if row and row[0]]

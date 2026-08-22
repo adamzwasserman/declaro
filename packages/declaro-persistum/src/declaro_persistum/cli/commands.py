@@ -5,7 +5,7 @@ Each command is an async function that returns an exit code.
 """
 
 import sys
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC
 from pathlib import Path
 from typing import Any
@@ -15,12 +15,267 @@ from declaro_persistum.exceptions import AmbiguityError
 from declaro_persistum.types import (
     NOTHING,
     Ambiguity,
+    ApplyResult,
     Decision,
     Dialect,
     DiffResult,
+    Operation,
     Schema,
     for_dialect,
 )
+
+# =============================================================================
+# The pieces every command is built from
+# =============================================================================
+#
+# THIS FILE HELD 69 CONDITIONALS, more than any other in the package. `umbra
+# audit` on 2026-08-21 counted 80 here and 73 branches nothing had ever taken,
+# which is what put the file at the top of the list.
+#
+# Nearly all of them were one of three shapes repeated across six commands:
+# print this line only when --verbose, stop here with an exit code, or choose
+# between two ways of finishing. Each shape is written once below and read as a
+# table, so the six commands share one copy instead of six.
+
+# What the remainder of a command does, once an earlier step has let it run.
+Rest = Callable[[], Awaitable[int]]
+
+
+@boundary
+def _print_it(message: str, stream: Any) -> None:
+    """This line was asked for, so it is printed."""
+    print(message, file=stream)
+
+
+@boundary
+def _print_nothing(_message: str, _stream: Any) -> None:
+    """This line was not asked for, so nothing is printed."""
+    return None
+
+
+# Whether the line is wanted.
+_WHEN_WANTED: dict[bool, Callable[[str, Any], None]] = {
+    True: _print_it,
+    False: _print_nothing,
+}
+
+
+def _note(wanted: bool, message: str, stream: Any) -> None:
+    """Print `message` on `stream` when `wanted`, and otherwise say nothing.
+
+    Almost every caller passes `verbose`, which is the twenty-odd `if verbose:`
+    blocks this file used to carry. Two pass something else: the warning line
+    that appears only when the applier produced one, and the `--init` line that
+    appears only when the guard it belongs to was crossed.
+    """
+    _WHEN_WANTED[wanted](message, stream)
+
+
+@boundary
+async def _that_is_the_answer(message: str, stream: Any, code: int, _rest: Rest) -> int:
+    """This step settles the command, so it says why and hands back its code."""
+    print(message, file=stream)
+    return code
+
+
+@boundary
+async def _carry_on(_message: str, _stream: Any, _code: int, rest: Rest) -> int:
+    """This step had nothing to say, so the rest of the command runs."""
+    return await rest()
+
+
+# Whether a step has already decided how the command ends.
+_WHEN_SETTLED: dict[bool, Callable[[str, Any, int, Rest], Awaitable[int]]] = {
+    True: _that_is_the_answer,
+    False: _carry_on,
+}
+
+
+@boundary
+async def _stop_at_drift(drift: list[dict[str, str]], _rest: Rest) -> int:
+    """The database no longer matches its snapshot, so the command stops."""
+    _print_drift_error(drift)
+    return 2
+
+
+@boundary
+async def _past_the_drift_check(_drift: list[dict[str, str]], rest: Rest) -> int:
+    """Nothing has drifted, so the rest of the command runs."""
+    return await rest()
+
+
+# Whether the drift check found anything.
+_WHEN_DRIFTED: dict[bool, Callable[[list[dict[str, str]], Rest], Awaitable[int]]] = {
+    True: _stop_at_drift,
+    False: _past_the_drift_check,
+}
+
+
+@boundary
+def _drift_against_the_snapshot(actual: Schema, schema_dir: str) -> list[dict[str, str]]:
+    """The snapshot is there and is being read, so compare the two."""
+    from declaro_persistum.loader import load_snapshot
+
+    return _check_drift(actual, load_snapshot(schema_dir))
+
+
+@boundary
+def _no_snapshot_to_compare(_actual: Schema, _schema_dir: str) -> list[dict[str, str]]:
+    """No snapshot, or --force, so there is nothing to have drifted from."""
+    return []
+
+
+# Whether a snapshot is going to be read at all.
+_WHEN_SNAPSHOT_READ: dict[bool, Callable[[Schema, str], list[dict[str, str]]]] = {
+    True: _drift_against_the_snapshot,
+    False: _no_snapshot_to_compare,
+}
+
+
+@boundary
+def _drift(actual: Schema, schema_dir: str, force: bool) -> list[dict[str, str]]:
+    """How the database differs from the snapshot, when there is one to read.
+
+    `declaro diff`, `declaro apply` and `declaro generate` all asked this the
+    same way, in three copies of the same eight lines.
+    """
+    snapshot_path = Path(schema_dir) / "snapshot.toml"
+    return _WHEN_SNAPSHOT_READ[snapshot_path.exists() and not force](actual, schema_dir)
+
+
+@helper
+def _the_modes_asked_for(
+    interactive: bool, unattended: bool, _is_tty: bool
+) -> tuple[bool, bool]:
+    """The operator named a mode on the command line, so it stands."""
+    return interactive, unattended
+
+
+@helper
+def _the_modes_the_terminal_implies(
+    _interactive: bool, _unattended: bool, is_tty: bool
+) -> tuple[bool, bool]:
+    """Neither flag was given: a terminal means ask, a pipe means do not."""
+    return is_tty, not is_tty
+
+
+# Whether the operator named a mode.
+_WHEN_MODE_GIVEN: dict[bool, Callable[[bool, bool, bool], tuple[bool, bool]]] = {
+    True: _the_modes_asked_for,
+    False: _the_modes_the_terminal_implies,
+}
+
+
+@helper
+def _modes(interactive: bool, unattended: bool, is_tty: bool) -> tuple[bool, bool]:
+    """Which of interactive and unattended this run is in."""
+    return _WHEN_MODE_GIVEN[interactive or unattended](interactive, unattended, is_tty)
+
+
+# What settles a diff that came back with ambiguities in it.
+Settle = Callable[
+    [DiffResult, str, Callable[[dict[str, Decision]], DiffResult]],
+    Awaitable[DiffResult],
+]
+
+
+@boundary
+async def _refuse_the_ambiguities(
+    result: DiffResult,
+    _schema_dir: str,
+    _rerun: Callable[[dict[str, Decision]], DiffResult],
+) -> DiffResult:
+    """Nobody is at the terminal to answer, so the command refuses."""
+    raise AmbiguityError(result["ambiguities"])
+
+
+@boundary
+async def _ask_the_operator(
+    result: DiffResult,
+    schema_dir: str,
+    rerun: Callable[[dict[str, Decision]], DiffResult],
+) -> DiffResult:
+    """Put each ambiguity to the operator, then diff again with the answers."""
+    return rerun(await _resolve_ambiguities_interactive(result["ambiguities"], schema_dir))
+
+
+@boundary
+async def _leave_them_alone(
+    result: DiffResult,
+    _schema_dir: str,
+    _rerun: Callable[[dict[str, Decision]], DiffResult],
+) -> DiffResult:
+    """Nothing to answer, or nothing that could answer it, so the diff stands."""
+    return result
+
+
+# WHO ANSWERS AN AMBIGUITY, over the whole of (any ambiguity, unattended,
+# interactive). Written out rather than nested, because the case that had never
+# been thought about was the last one: a run that is neither unattended nor
+# interactive kept the diff it already had, and that is now a line rather than a
+# gap between two `if`s.
+_ANSWER_AMBIGUITIES: dict[tuple[bool, bool, bool], Settle] = {
+    (False, False, False): _leave_them_alone,
+    (False, False, True): _leave_them_alone,
+    (False, True, False): _leave_them_alone,
+    (False, True, True): _leave_them_alone,
+    (True, True, True): _refuse_the_ambiguities,
+    (True, True, False): _refuse_the_ambiguities,
+    (True, False, True): _ask_the_operator,
+    (True, False, False): _leave_them_alone,
+}
+
+
+async def _settled(
+    result: DiffResult,
+    schema_dir: str,
+    unattended: bool,
+    interactive: bool,
+    rerun: Callable[[dict[str, Decision]], DiffResult],
+) -> DiffResult:
+    """The diff, once whatever can answer its ambiguities has answered them."""
+    return await _ANSWER_AMBIGUITIES[
+        (bool(result["ambiguities"]), unattended, interactive)
+    ](result, schema_dir, rerun)
+
+
+@boundary
+async def _aborted(_rest: Rest) -> int:
+    """The operator said no."""
+    print("Aborted.")
+    return 1
+
+
+@boundary
+async def _confirmed(rest: Rest) -> int:
+    """The operator said yes, so the rest of the command runs."""
+    return await rest()
+
+
+# Whether the operator typed y.
+_WHEN_CONFIRMED: dict[bool, Callable[[Rest], Awaitable[int]]] = {
+    True: _confirmed,
+    False: _aborted,
+}
+
+
+@boundary
+async def _ask_before_applying(rest: Rest) -> int:
+    """Somebody is at the terminal, so they are asked before anything is written."""
+    confirm = input("\nApply these changes? [y/N] ")
+    return await _WHEN_CONFIRMED[confirm.lower() == "y"](rest)
+
+
+# Whether there is anybody to ask before the migration runs.
+_WHEN_ASKING: dict[bool, Callable[[Rest], Awaitable[int]]] = {
+    True: _ask_before_applying,
+    False: _confirmed,
+}
+
+
+def _refusal_lines(headline: str, messages: list[str]) -> str:
+    """A headline and one indented line per message, as one block of text."""
+    return "\n".join([headline] + [f"  {message}" for message in messages])
 
 
 @boundary
@@ -44,62 +299,50 @@ async def cmd_diff(
     """
     from declaro_persistum.differ import diff
     from declaro_persistum.inspector import introspect
-    from declaro_persistum.loader import load_decisions, load_schema, load_snapshot
+    from declaro_persistum.loader import load_decisions, load_schema
 
     # Determine interactive mode
-    is_tty = sys.stdin.isatty() and sys.stdout.isatty()
-    if not interactive and not unattended:
-        interactive = is_tty
-        unattended = not is_tty
+    interactive, unattended = _modes(
+        interactive, unattended, sys.stdin.isatty() and sys.stdout.isatty()
+    )
 
-    if verbose:
-        print(f"Loading schema from {schema_dir}...")
+    _note(verbose, f"Loading schema from {schema_dir}...", sys.stdout)
 
     # Load target schema from TOML files
     target = load_schema(schema_dir)
 
-    if verbose:
-        print(f"Loaded {len(target)} tables from schema files")
+    _note(verbose, f"Loaded {len(target)} tables from schema files", sys.stdout)
 
     # Connect and introspect database
     connection = await _connect(connection_string, dialect)
     try:
         actual = await introspect(connection, dialect)
 
-        if verbose:
-            print(f"Introspected {len(actual)} tables from database")
+        _note(verbose, f"Introspected {len(actual)} tables from database", sys.stdout)
 
-        # Load expected snapshot and check for drift
-        snapshot_path = Path(schema_dir) / "snapshot.toml"
-        if snapshot_path.exists() and not force:
-            expected = load_snapshot(schema_dir)
-            drift = _check_drift(actual, expected)
-            if drift:
-                _print_drift_error(drift)
-                return 2
+        @boundary
+        async def show_the_diff() -> int:
+            """Diff, settle anything ambiguous, and print what would happen."""
+            result = diff(
+                actual, target, dialect=dialect, decisions=load_decisions(schema_dir)
+            )
+            _print_diff_result(
+                await _settled(
+                    result,
+                    schema_dir,
+                    unattended,
+                    interactive,
+                    lambda made: diff(
+                        actual, target, dialect=dialect, decisions=made
+                    ),
+                ),
+                verbose,
+            )
+            return 0
 
-        # Load any pre-made decisions
-        decisions = load_decisions(schema_dir)
-
-        # Compute diff
-        result = diff(actual, target, dialect=dialect, decisions=decisions)
-
-        # Handle ambiguities
-        if result["ambiguities"]:
-            if unattended:
-                raise AmbiguityError(result["ambiguities"])
-
-            if interactive:
-                decisions = await _resolve_ambiguities_interactive(
-                    result["ambiguities"], schema_dir
-                )
-                # Re-run diff with decisions
-                result = diff(actual, target, dialect=dialect, decisions=decisions)
-
-        # Display results
-        _print_diff_result(result, verbose)
-
-        return 0
+        # Load the expected snapshot and check for drift
+        drift = _drift(actual, schema_dir, force)
+        return await _WHEN_DRIFTED[bool(drift)](drift, show_the_diff)
 
     finally:
         await _disconnect(connection, dialect)
@@ -131,20 +374,17 @@ async def cmd_apply(
         clear_decisions,
         load_decisions,
         load_schema,
-        load_snapshot,
         save_snapshot,
     )
     from declaro_persistum.validator import validate_schema
 
     # Determine interactive mode
-    is_tty = sys.stdin.isatty() and sys.stdout.isatty()
-    if not interactive and not unattended:
-        interactive = is_tty
-        unattended = not is_tty
+    interactive, unattended = _modes(
+        interactive, unattended, sys.stdin.isatty() and sys.stdout.isatty()
+    )
 
     # Load schema and connect
-    if verbose:
-        print(f"Loading schema from {schema_dir}...", file=sys.stderr)
+    _note(verbose, f"Loading schema from {schema_dir}...", sys.stderr)
 
     target = load_schema(schema_dir)
 
@@ -168,97 +408,179 @@ async def cmd_apply(
     # want deferrable constraints, and refusing those would reject schemas
     # that work.
     invalid = validate_schema(target)["errors"]
-    if invalid:
-        print("Schema is not valid, and nothing has been applied:", file=sys.stderr)
-        for message in invalid:
-            print(f"  {message}", file=sys.stderr)
-        return 1
 
-    if verbose:
-        print(f"Loaded {len(target)} tables from schema files", file=sys.stderr)
+    @boundary
+    async def against_the_database() -> int:
+        """The schema passed the validator, so the database is opened."""
+        _note(verbose, f"Loaded {len(target)} tables from schema files", sys.stderr)
 
-    connection = await _connect(connection_string, dialect)
+        connection = await _connect(connection_string, dialect)
 
-    try:
-        actual = await introspect(connection, dialect)
+        try:
+            actual = await introspect(connection, dialect)
 
-        if verbose:
-            print(f"Introspected {len(actual)} tables from database", file=sys.stderr)
+            _note(
+                verbose,
+                f"Introspected {len(actual)} tables from database",
+                sys.stderr,
+            )
 
-        # Check drift
-        snapshot_path = Path(schema_dir) / "snapshot.toml"
-        if snapshot_path.exists() and not force:
-            expected = load_snapshot(schema_dir)
-            drift = _check_drift(actual, expected)
-            if drift:
-                _print_drift_error(drift)
-                return 2
-
-        # Compute diff
-        decisions = load_decisions(schema_dir)
-        result = diff(actual, target, dialect=dialect, decisions=decisions)
-
-        # Handle ambiguities
-        if result["ambiguities"]:
-            if unattended:
-                raise AmbiguityError(result["ambiguities"])
-            if interactive:
-                decisions = await _resolve_ambiguities_interactive(
-                    result["ambiguities"], schema_dir
+            @boundary
+            async def apply_the_diff() -> int:
+                """Diff, settle anything ambiguous, and run what comes out."""
+                result = await _settled(
+                    diff(
+                        actual,
+                        target,
+                        dialect=dialect,
+                        decisions=load_decisions(schema_dir),
+                    ),
+                    schema_dir,
+                    unattended,
+                    interactive,
+                    lambda made: diff(
+                        actual, target, dialect=dialect, decisions=made
+                    ),
                 )
-                result = diff(actual, target, dialect=dialect, decisions=decisions)
 
-        if not result["operations"]:
-            print("No changes to apply.")
-            return 0
+                @boundary
+                async def run_the_operations() -> int:
+                    """Write the DDL, then say what happened."""
+                    apply_result = await apply_operations(
+                        connection,
+                        result["operations"],
+                        result["execution_order"],
+                        dialect,
+                        dry_run=False,
+                    )
 
-        # Show what will be applied
-        _print_diff_result(result, verbose)
+                    @boundary
+                    def applied() -> int:
+                        """Every operation ran, so the record is brought up to date."""
+                        print(
+                            f"\n✓ Applied {apply_result['operations_applied']} "
+                            f"operations successfully"
+                        )
 
-        if dry_run:
-            print("\n(dry run - no changes applied)")
-            return 0
+                        # Update snapshot
+                        save_snapshot(schema_dir, target, dialect, applied_by=NOTHING)
+                        _note(
+                            verbose,
+                            f"Updated snapshot at {schema_dir}/snapshot.toml",
+                            sys.stdout,
+                        )
 
-        # Confirm if interactive
-        if interactive and not unattended:
-            confirm = input("\nApply these changes? [y/N] ")
-            if confirm.lower() != "y":
-                print("Aborted.")
-                return 1
+                        # SPEND THE DECISIONS. They answered questions this
+                        # apply asked, and keeping them means the next apply
+                        # never asks again: a decision keyed on a column name
+                        # goes on answering for any later rename that happens
+                        # to match. Nothing cleared them before, so
+                        # `pending.toml` survived every successful migration.
+                        clear_decisions(schema_dir)
+                        _note(verbose, "Cleared pending decisions", sys.stdout)
 
-        # Apply migrations
-        apply_result = await apply_operations(
-            connection,
-            result["operations"],
-            result["execution_order"],
-            dialect,
-            dry_run=False,
-        )
+                        return 0
 
-        if apply_result["success"]:
-            print(f"\n✓ Applied {apply_result['operations_applied']} operations successfully")
+                    @boundary
+                    def not_applied() -> int:
+                        """Something refused, and the applier said what."""
+                        print(f"\n✗ Migration failed: {apply_result['error']}")
+                        return 1
 
-            # Update snapshot
-            save_snapshot(schema_dir, target, dialect, applied_by=NOTHING)
-            if verbose:
-                print(f"Updated snapshot at {schema_dir}/snapshot.toml")
+                    # Whether the applier got through the whole plan.
+                    return {True: applied, False: not_applied}[
+                        apply_result["success"]
+                    ]()
 
-            # SPEND THE DECISIONS. They answered questions this apply asked,
-            # and keeping them means the next apply never asks again: a
-            # decision keyed on a column name goes on answering for any later
-            # rename that happens to match. Nothing cleared them before, so
-            # `pending.toml` survived every successful migration.
-            clear_decisions(schema_dir)
-            if verbose:
-                print("Cleared pending decisions")
+                @boundary
+                async def show_then_run() -> int:
+                    """Show the plan, then dry-run, ask or run it."""
+                    _print_diff_result(result, verbose)
+                    return await _WHEN_SETTLED[dry_run](
+                        "\n(dry run - no changes applied)",
+                        sys.stdout,
+                        0,
+                        lambda: _WHEN_ASKING[interactive and not unattended](
+                            run_the_operations
+                        ),
+                    )
 
-            return 0
-        else:
-            print(f"\n✗ Migration failed: {apply_result['error']}")
-            return 1
+                return await _WHEN_SETTLED[not result["operations"]](
+                    "No changes to apply.", sys.stdout, 0, show_then_run
+                )
 
-    finally:
-        await _disconnect(connection, dialect)
+            # Check drift
+            drift = _drift(actual, schema_dir, force)
+            return await _WHEN_DRIFTED[bool(drift)](drift, apply_the_diff)
+
+        finally:
+            await _disconnect(connection, dialect)
+
+    return await _WHEN_SETTLED[bool(invalid)](
+        _refusal_lines("Schema is not valid, and nothing has been applied:", invalid),
+        sys.stderr,
+        1,
+        against_the_database,
+    )
+
+
+@boundary
+async def _refuse_without_a_terminal(snapshot_path: Path, _rest: Rest) -> int:
+    """NO TERMINAL MEANS NO PROMPT.
+
+    `input()` raises EOFError on a pipe, in CI, in cron and in a container, and
+    taking a snapshot after a deploy is exactly the automated case. Measured
+    2026-08-17:
+
+        $ declaro ... snapshot < /dev/null
+        Error: EOF when reading a line
+
+    `cmd_diff` and `cmd_apply` already derive their behaviour from
+    `sys.stdin.isatty()`; this command was the one that did not. It refuses
+    rather than overwriting, and names the flag that proceeds, because a
+    snapshot is the record of what the database looked like and replacing it
+    unasked is how drift detection goes quiet.
+    """
+    print(
+        f"Error: a snapshot already exists at {snapshot_path} and "
+        f"there is no terminal to confirm overwriting it. "
+        f"Pass --force to overwrite.",
+        file=sys.stderr,
+    )
+    return 1
+
+
+@boundary
+async def _ask_about_overwriting(snapshot_path: Path, rest: Rest) -> int:
+    """Somebody is at the terminal, so they are asked."""
+    confirm = input(f"Overwrite existing snapshot at {snapshot_path}? [y/N] ")
+    return await _WHEN_CONFIRMED[confirm.lower() == "y"](rest)
+
+
+# Whether there is a terminal to put the question to.
+_WHEN_A_TERMINAL: dict[bool, Callable[[Path, Rest], Awaitable[int]]] = {
+    True: _ask_about_overwriting,
+    False: _refuse_without_a_terminal,
+}
+
+
+@boundary
+async def _confirm_the_overwrite(snapshot_path: Path, rest: Rest) -> int:
+    """A snapshot is already there, so overwriting it has to be agreed to."""
+    return await _WHEN_A_TERMINAL[sys.stdin.isatty()](snapshot_path, rest)
+
+
+@boundary
+async def _nothing_to_overwrite(_snapshot_path: Path, rest: Rest) -> int:
+    """No snapshot there, or --force given, so nothing needs agreeing to."""
+    return await rest()
+
+
+# Whether an existing snapshot stands in the way.
+_WHEN_OVERWRITING: dict[bool, Callable[[Path, Rest], Awaitable[int]]] = {
+    True: _confirm_the_overwrite,
+    False: _nothing_to_overwrite,
+}
 
 
 @boundary
@@ -282,50 +604,124 @@ async def cmd_snapshot(
 
     snapshot_path = Path(schema_dir) / "snapshot.toml"
 
-    if snapshot_path.exists() and not force:
-        # NO TERMINAL MEANS NO PROMPT. `input()` raises EOFError on a pipe, in
-        # CI, in cron and in a container, and taking a snapshot after a deploy
-        # is exactly the automated case. Measured 2026-08-17:
-        #
-        #     $ declaro ... snapshot < /dev/null
-        #     Error: EOF when reading a line
-        #
-        # `cmd_diff` and `cmd_apply` already derive their behaviour from
-        # `sys.stdin.isatty()`; this command was the one that did not. It
-        # refuses rather than overwriting, and names the flag that proceeds,
-        # because a snapshot is the record of what the database looked like
-        # and replacing it unasked is how drift detection goes quiet.
-        if not sys.stdin.isatty():
-            print(
-                f"Error: a snapshot already exists at {snapshot_path} and "
-                f"there is no terminal to confirm overwriting it. "
-                f"Pass --force to overwrite.",
-                file=sys.stderr,
+    @boundary
+    async def write_the_snapshot() -> int:
+        """Read the database and write down what is there."""
+        connection = await _connect(connection_string, dialect)
+        try:
+            actual = await introspect(connection, dialect)
+
+            save_snapshot(schema_dir, actual, dialect, applied_by=NOTHING)
+            print(f"✓ Snapshot saved to {snapshot_path}")
+
+            _note(
+                verbose,
+                "\n".join(
+                    [f"  Tables: {len(actual)}"]
+                    + [
+                        f"    {table}: "
+                        f"{len(actual[table].get('columns', {}))} columns"
+                        for table in sorted(actual.keys())
+                    ]
+                ),
+                sys.stdout,
             )
-            return 1
 
-        confirm = input(f"Overwrite existing snapshot at {snapshot_path}? [y/N] ")
-        if confirm.lower() != "y":
-            print("Aborted.")
-            return 1
+            return 0
 
-    connection = await _connect(connection_string, dialect)
-    try:
-        actual = await introspect(connection, dialect)
+        finally:
+            await _disconnect(connection, dialect)
 
-        save_snapshot(schema_dir, actual, dialect, applied_by=NOTHING)
-        print(f"✓ Snapshot saved to {snapshot_path}")
+    return await _WHEN_OVERWRITING[snapshot_path.exists() and not force](
+        snapshot_path, write_the_snapshot
+    )
 
-        if verbose:
-            print(f"  Tables: {len(actual)}")
-            for table in sorted(actual.keys()):
-                cols = len(actual[table].get("columns", {}))
-                print(f"    {table}: {cols} columns")
 
-        return 0
+@boundary
+def _print_the_warnings(warnings: list[str]) -> None:
+    """The schema drew warnings, so each one is named."""
+    print(
+        "\n".join(
+            [f"⚠ Schema has {len(warnings)} warning(s):"]
+            + [f"  - {warning}" for warning in warnings]
+        )
+    )
 
-    finally:
-        await _disconnect(connection, dialect)
+
+@boundary
+def _print_no_warnings(_warnings: list[str]) -> None:
+    """Nothing to warn about."""
+    return None
+
+
+# Whether the validator raised any warning.
+_WHEN_WARNINGS: dict[bool, Callable[[list[str]], None]] = {
+    True: _print_the_warnings,
+    False: _print_no_warnings,
+}
+
+
+@boundary
+def _warnings_are_fatal(_schema: Schema, _verbose: bool) -> int:
+    """--strict was given and the schema drew warnings, so it does not pass."""
+    return 2
+
+
+@boundary
+def _schema_passes(schema: Schema, verbose: bool) -> int:
+    """Nothing fatal, so the schema is good and --verbose lists it."""
+    print(f"✓ Schema valid ({len(schema)} tables)")
+    listing = [
+        f"  {table}: {len(schema[table].get('columns', {}))} columns"
+        for table in sorted(schema.keys())
+    ]
+    _note(verbose and bool(listing), "\n".join(listing), sys.stdout)
+    return 0
+
+
+# Whether a warning is enough to fail this run.
+_WHEN_WARNINGS_ARE_FATAL: dict[bool, Callable[[Schema, bool], int]] = {
+    True: _warnings_are_fatal,
+    False: _schema_passes,
+}
+
+
+@boundary
+def _report_the_errors(
+    _schema: Schema,
+    errors: list[str],
+    _warnings: list[str],
+    _strict: bool,
+    _verbose: bool,
+) -> int:
+    """The schema breaks a rule, so the rules it breaks are named."""
+    print(
+        "\n".join(
+            [f"✗ Schema validation failed with {len(errors)} error(s):"]
+            + [f"  - {error}" for error in errors]
+        )
+    )
+    return 1
+
+
+@boundary
+def _report_the_warnings(
+    schema: Schema,
+    _errors: list[str],
+    warnings: list[str],
+    strict: bool,
+    verbose: bool,
+) -> int:
+    """No errors, so what is left is warnings and how strictly they are read."""
+    _WHEN_WARNINGS[bool(warnings)](warnings)
+    return _WHEN_WARNINGS_ARE_FATAL[bool(warnings) and strict](schema, verbose)
+
+
+# Whether the validator found anything it calls an error.
+_WHEN_ERRORS: dict[bool, Callable[[Schema, list[str], list[str], bool, bool], int]] = {
+    True: _report_the_errors,
+    False: _report_the_warnings,
+}
 
 
 @boundary
@@ -355,26 +751,76 @@ def cmd_validate(
     result = validate_schema(schema)
     warnings, errors = result["warnings"], result["errors"]
 
-    if errors:
-        print(f"✗ Schema validation failed with {len(errors)} error(s):")
-        for error in errors:
-            print(f"  - {error}")
-        return 1
+    return _WHEN_ERRORS[bool(errors)](schema, errors, warnings, strict, verbose)
 
-    if warnings:
-        print(f"⚠ Schema has {len(warnings)} warning(s):")
-        for warning in warnings:
-            print(f"  - {warning}")
-        if strict:
-            return 2
 
-    print(f"✓ Schema valid ({len(schema)} tables)")
-    if verbose:
-        for table in sorted(schema.keys()):
-            cols = len(schema[table].get("columns", {}))
-            print(f"  {table}: {cols} columns")
+@helper
+def _schema_with_enums_expanded(schema: Schema) -> Schema:
+    """--expand-enums was given, so each Literal gains its lookup table."""
+    from declaro_persistum.abstractions.enums import expand_schema_enums
 
+    return expand_schema_enums(schema)
+
+
+@helper
+def _schema_as_written(schema: Schema) -> Schema:
+    """--expand-enums was not given, so the schema goes on as it came."""
+    return schema
+
+
+# Whether the enum lookup tables are being added to the target schema.
+_WHEN_ENUMS_EXPANDED: dict[bool, Callable[[Schema], Schema]] = {
+    True: _schema_with_enums_expanded,
+    False: _schema_as_written,
+}
+
+
+@boundary
+def _schema_without_foreign_keys(schema: Schema, verbose: bool) -> Schema:
+    """--no-fks was given, so the references come off before the diff."""
+    from declaro_persistum.fk_ordering import strip_foreign_keys
+
+    stripped = strip_foreign_keys(schema)
+    _note(verbose, "Stripped FK constraints from target schema (--no-fks)", sys.stdout)
+    return stripped
+
+
+@boundary
+def _schema_keeping_its_foreign_keys(schema: Schema, _verbose: bool) -> Schema:
+    """--no-fks was not given, so the references stay."""
+    return schema
+
+
+# Whether the foreign keys are being stripped before the diff.
+_WHEN_FKS_STRIPPED: dict[bool, Callable[[Schema, bool], Schema]] = {
+    True: _schema_without_foreign_keys,
+    False: _schema_keeping_its_foreign_keys,
+}
+
+
+@boundary
+async def _pushed_to_the_cloud(conn: Any, result: ApplyResult) -> int:
+    """The DDL ran on the local copy, so it goes up to the primary."""
+    await conn.push()
+    print(f"\nApplied {result['operations_applied']} operations to cloud DB")
+    _note(bool(result.get("error")), f"Warnings: {result.get('error')}", sys.stdout)
     return 0
+
+
+@boundary
+async def _not_pushed_to_the_cloud(_conn: Any, result: ApplyResult) -> int:
+    """The applier refused, so nothing is sent and it says why."""
+    print(
+        f"\nMigration failed: {result.get('error', 'Unknown error')}", file=sys.stderr
+    )
+    return 1
+
+
+# Whether the applier got through the whole plan.
+_WHEN_PUSHED: dict[bool, Callable[[Any, ApplyResult], Awaitable[int]]] = {
+    True: _pushed_to_the_cloud,
+    False: _not_pushed_to_the_cloud,
+}
 
 
 @boundary
@@ -410,31 +856,12 @@ async def cmd_migrate_remote(
     """
     from pathlib import Path
 
-    from declaro_persistum.abstractions.enums import expand_schema_enums
     from declaro_persistum.applier import apply as apply_operations
     from declaro_persistum.differ import diff
     from declaro_persistum.inspector import introspect
     from declaro_persistum.pydantic_loader import load_models_from_module
 
     schema_file = Path(schema_path)
-    if not schema_file.exists():
-        print(f"Error: Schema file not found: {schema_file}", file=sys.stderr)
-        return 1
-
-    # Load target schema from Pydantic models
-    target_schema = load_models_from_module(schema_file)
-    if not target_schema:
-        print("No @table decorated models found in schema file.", file=sys.stderr)
-        return 1
-
-    if expand_enums:
-        target_schema = expand_schema_enums(target_schema)
-
-    if no_fks:
-        from declaro_persistum.fk_ordering import strip_foreign_keys
-        target_schema = strip_foreign_keys(target_schema)
-        if verbose:
-            print("Stripped FK constraints from target schema (--no-fks)")
 
     # ASKED BEFORE THE NETWORK, WHICH IS THE POINT OF PUTTING IT HERE. This
     # command writes to a production cloud database, and it reached that
@@ -454,129 +881,243 @@ async def cmd_migrate_remote(
     # be a custom type or an enum.
     from declaro_persistum.validator import validate_schema
 
-    invalid = validate_schema(target_schema)["errors"]
-    if invalid:
-        print(
-            "Schema is not valid, and nothing has been sent to the remote:",
-            file=sys.stderr,
+    @boundary
+    async def with_the_models(loaded: Schema) -> int:
+        """The file held tables, so they are prepared and then checked."""
+        target_schema = _WHEN_FKS_STRIPPED[no_fks](
+            _WHEN_ENUMS_EXPANDED[expand_enums](loaded), verbose
         )
-        for message in invalid:
-            print(f"  {message}", file=sys.stderr)
-        return 1
+        invalid = validate_schema(target_schema)["errors"]
 
-    if verbose:
-        print(f"Loaded {len(target_schema)} tables from {schema_file}")
+        @boundary
+        async def against_the_cloud() -> int:
+            """The schema passed the validator, so the primary is reached."""
+            _note(
+                verbose,
+                f"Loaded {len(target_schema)} tables from {schema_file}",
+                sys.stdout,
+            )
 
-    # Connect via sync driver with a temp local file.
-    # pyturso has no direct-to-cloud connection — turso.aio.connect() is
-    # local-only.  turso.aio.sync.connect() requires a local path but
-    # syncs with cloud via push/pull.
-    import os
-    import tempfile
+            # Connect via sync driver with a temp local file.
+            # pyturso has no direct-to-cloud connection — turso.aio.connect() is
+            # local-only.  turso.aio.sync.connect() requires a local path but
+            # syncs with cloud via push/pull.
+            import os
+            import tempfile
 
-    import turso.aio.sync
+            import turso.aio.sync
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        local_path = os.path.join(tmpdir, "migrate_remote.db")
-        conn = await turso.aio.sync.connect(
-            local_path,
-            remote_url=remote_url,
-            auth_token=auth_token,
-        )
+            with tempfile.TemporaryDirectory() as tmpdir:
+                local_path = os.path.join(tmpdir, "migrate_remote.db")
+                conn = await turso.aio.sync.connect(
+                    local_path,
+                    remote_url=remote_url,
+                    auth_token=auth_token,
+                )
 
-        try:
-            # PULL UNTIL THE COPY IS LEVEL, not once, and never via `sync`.
-            #
-            # This was `try: await conn.sync() except Exception: await
-            # conn.pull()`, which had two defects in four lines.
-            #
-            # `ConnectionSync.sync` does not exist on pyturso. Measured
-            # 2026-08-17: `hasattr(ConnectionSync, "sync")` is False, so the
-            # first call raised AttributeError on every run and the `except`
-            # did the real work. An AttributeError means WE called something
-            # wrongly, and it was being used as feature detection.
-            #
-            # And one `pull()` fetches ONE batch. `_pull_until_level` exists
-            # because of that: a replica showed nothing after connect, gained
-            # the missing table on pull #1, and reported empty on pull #2.
-            # Pulling once here left the copy possibly behind, so the schema
-            # this command introspects could be missing tables the primary
-            # has, and the migration would propose creating them.
-            from declaro_persistum.turso_database import _pull_until_level
+                try:
+                    # PULL UNTIL THE COPY IS LEVEL, not once, and never via
+                    # `sync`.
+                    #
+                    # This was `try: await conn.sync() except Exception: await
+                    # conn.pull()`, which had two defects in four lines.
+                    #
+                    # `ConnectionSync.sync` does not exist on pyturso. Measured
+                    # 2026-08-17: `hasattr(ConnectionSync, "sync")` is False, so
+                    # the first call raised AttributeError on every run and the
+                    # `except` did the real work. An AttributeError means WE
+                    # called something wrongly, and it was being used as feature
+                    # detection.
+                    #
+                    # And one `pull()` fetches ONE batch. `_pull_until_level`
+                    # exists because of that: a replica showed nothing after
+                    # connect, gained the missing table on pull #1, and reported
+                    # empty on pull #2. Pulling once here left the copy possibly
+                    # behind, so the schema this command introspects could be
+                    # missing tables the primary has, and the migration would
+                    # propose creating them.
+                    from declaro_persistum.turso_database import _pull_until_level
 
-            await _pull_until_level(conn)
+                    await _pull_until_level(conn)
 
-            if verbose:
-                print("Replicated current schema from cloud")
+                    _note(verbose, "Replicated current schema from cloud", sys.stdout)
 
-            # Introspect cloud DB (via local replica)
-            current_schema = await introspect(conn, dialect)
+                    # Introspect cloud DB (via local replica)
+                    current_schema = await introspect(conn, dialect)
 
-            if verbose:
-                print(f"Introspected {len(current_schema)} tables from cloud DB")
-
-            # Diff
-            diff_result = diff(current_schema, target_schema, dialect=dialect, decisions=NOTHING)
-
-            if not diff_result["operations"]:
-                print("Cloud schema is up to date — no changes needed.")
-                return 0
-
-            # Safety guard: detect when pull failed silently
-            create_ops = [
-                op for op in diff_result["operations"]
-                if op["op"] == "create_table"
-            ]
-            if len(current_schema) == 0 and create_ops:
-                if not init:
-                    print(
-                        f"ABORT: Cloud DB appears empty (0 tables) but schema "
-                        f"defines {len(target_schema)} tables.\n"
-                        f"This would create all tables from scratch.\n\n"
-                        f"If the cloud DB is genuinely empty (first-time setup), "
-                        f"re-run with --init.\n"
-                        f"If the cloud DB should have tables, the sync/pull may "
-                        f"have failed — do NOT use --init or you will lose data.",
-                        file=sys.stderr,
+                    _note(
+                        verbose,
+                        f"Introspected {len(current_schema)} tables from cloud DB",
+                        sys.stdout,
                     )
-                    return 1
-                print(f"--init: creating {len(create_ops)} tables on empty cloud DB")
 
-            print(f"Found {len(diff_result['operations'])} schema differences:")
-            for op in diff_result["operations"]:
-                print(f"  - {op['op']} on {op.get('table', 'N/A')}")
+                    # Diff
+                    diff_result = diff(
+                        current_schema,
+                        target_schema,
+                        dialect=dialect,
+                        decisions=NOTHING,
+                    )
 
-            if diff_result.get("ambiguities"):
-                print(f"\nAmbiguous changes detected: {diff_result['ambiguities']}")
-                print("Aborting — resolve ambiguities first.")
-                return 1
+                    # Safety guard: detect when pull failed silently
+                    create_ops = [
+                        op
+                        for op in diff_result["operations"]
+                        if op["op"] == "create_table"
+                    ]
+                    # A cloud database that reads as empty while the schema
+                    # declares tables is the shape a failed pull leaves behind,
+                    # so creating them all is either the first deploy or data
+                    # loss, and --init is how the operator says which.
+                    from_scratch = len(current_schema) == 0 and bool(create_ops)
 
-            if dry_run:
-                print("\n(dry run — no changes applied)")
-                return 0
+                    @boundary
+                    async def apply_and_push() -> int:
+                        """Run the DDL on the local copy, then send it up."""
+                        result = await apply_operations(
+                            conn,
+                            diff_result["operations"],
+                            diff_result["execution_order"],
+                            dialect,
+                            dry_run=False,
+                        )
+                        return await _WHEN_PUSHED[result["success"]](conn, result)
 
-            # Apply DDL locally
-            result = await apply_operations(
-                conn,
-                diff_result["operations"],
-                diff_result["execution_order"],
-                dialect,
-            dry_run=False,
+                    @boundary
+                    async def show_the_differences() -> int:
+                        """List what will change, then refuse, rehearse or run."""
+                        _note(
+                            from_scratch and init,
+                            f"--init: creating {len(create_ops)} tables on "
+                            f"empty cloud DB",
+                            sys.stdout,
+                        )
+                        print(
+                            f"Found {len(diff_result['operations'])} "
+                            f"schema differences:"
+                        )
+                        print(
+                            "\n".join(
+                                f"  - {op['op']} on {op.get('table', 'N/A')}"
+                                for op in diff_result["operations"]
+                            )
+                        )
+                        return await _WHEN_SETTLED[
+                            bool(diff_result.get("ambiguities"))
+                        ](
+                            f"\nAmbiguous changes detected: "
+                            f"{diff_result.get('ambiguities')}\n"
+                            f"Aborting — resolve ambiguities first.",
+                            sys.stdout,
+                            1,
+                            lambda: _WHEN_SETTLED[dry_run](
+                                "\n(dry run — no changes applied)",
+                                sys.stdout,
+                                0,
+                                apply_and_push,
+                            ),
+                        )
+
+                    @boundary
+                    async def migrate_them() -> int:
+                        """There are operations, so the guard is asked first."""
+                        return await _WHEN_SETTLED[from_scratch and not init](
+                            f"ABORT: Cloud DB appears empty (0 tables) but schema "
+                            f"defines {len(target_schema)} tables.\n"
+                            f"This would create all tables from scratch.\n\n"
+                            f"If the cloud DB is genuinely empty (first-time "
+                            f"setup), re-run with --init.\n"
+                            f"If the cloud DB should have tables, the sync/pull "
+                            f"may have failed — do NOT use --init or you will "
+                            f"lose data.",
+                            sys.stderr,
+                            1,
+                            show_the_differences,
+                        )
+
+                    return await _WHEN_SETTLED[not diff_result["operations"]](
+                        "Cloud schema is up to date — no changes needed.",
+                        sys.stdout,
+                        0,
+                        migrate_them,
+                    )
+
+                finally:
+                    await conn.close()
+
+        return await _WHEN_SETTLED[bool(invalid)](
+            _refusal_lines(
+                "Schema is not valid, and nothing has been sent to the remote:",
+                invalid,
+            ),
+            sys.stderr,
+            1,
+            against_the_cloud,
         )
 
-            if result["success"]:
-                # Push DDL changes to cloud
-                await conn.push()
-                print(f"\nApplied {result['operations_applied']} operations to cloud DB")
-                if result.get("error"):
-                    print(f"Warnings: {result['error']}")
-                return 0
-            else:
-                print(f"\nMigration failed: {result.get('error', 'Unknown error')}", file=sys.stderr)
-                return 1
+    @boundary
+    async def with_the_schema_file() -> int:
+        """The file is there, so its @table models are read off it.
 
-        finally:
-            await conn.close()
+        The read sits behind the existence check because a missing file has to
+        be reported rather than raised.
+        """
+        loaded = load_models_from_module(schema_file)
+        return await _WHEN_SETTLED[not loaded](
+            "No @table decorated models found in schema file.",
+            sys.stderr,
+            1,
+            lambda: with_the_models(loaded),
+        )
+
+    return await _WHEN_SETTLED[not schema_file.exists()](
+        f"Error: Schema file not found: {schema_file}",
+        sys.stderr,
+        1,
+        with_the_schema_file,
+    )
+
+
+@helper
+def _refuse_the_unanswerable(ambiguities: list[Ambiguity]) -> None:
+    """`declaro generate` asks nobody and reads no decisions, so it refuses."""
+    raise AmbiguityError(ambiguities)
+
+
+@helper
+def _nothing_unanswerable(_ambiguities: list[Ambiguity]) -> None:
+    """The diff came back clear, so there is nothing to refuse."""
+    return None
+
+
+# Whether the diff produced an ambiguity this command cannot settle.
+_WHEN_UNANSWERABLE: dict[bool, Callable[[list[Ambiguity]], None]] = {
+    True: _refuse_the_unanswerable,
+    False: _nothing_unanswerable,
+}
+
+
+@boundary
+def _sql_to_a_file(sql: str, output: str | None) -> int:
+    """--output named a file, so the statements go there and stdout stays clean."""
+    Path(str(output)).write_text(sql)
+    print(f"✓ SQL written to {output}", file=sys.stderr)
+    return 0
+
+
+@boundary
+def _sql_to_stdout(sql: str, _output: str | None) -> int:
+    """No file was named, so the statements go to stdout to be piped."""
+    print(sql)
+    return 0
+
+
+# Whether --output named a file. `str(output)` is safe on the entry that reads
+# it, because the key is the very question of whether there is a name there.
+_WHEN_OUTPUT_NAMED: dict[bool, Callable[[str, str | None], int]] = {
+    True: _sql_to_a_file,
+    False: _sql_to_stdout,
+}
 
 
 @boundary
@@ -599,63 +1140,58 @@ async def cmd_generate(
     from declaro_persistum.applier import generate_sql
     from declaro_persistum.differ import diff
     from declaro_persistum.inspector import introspect
-    from declaro_persistum.loader import load_decisions, load_schema, load_snapshot
+    from declaro_persistum.loader import load_decisions, load_schema
 
-    if verbose:
-        print(f"Loading schema from {schema_dir}...", file=sys.stderr)
+    _note(verbose, f"Loading schema from {schema_dir}...", sys.stderr)
 
     target = load_schema(schema_dir)
 
-    if verbose:
-        print(f"Loaded {len(target)} tables from schema files", file=sys.stderr)
+    _note(verbose, f"Loaded {len(target)} tables from schema files", sys.stderr)
 
     connection = await _connect(connection_string, dialect)
 
     try:
         actual = await introspect(connection, dialect)
 
-        if verbose:
-            print(f"Introspected {len(actual)} tables from database", file=sys.stderr)
+        _note(verbose, f"Introspected {len(actual)} tables from database", sys.stderr)
+
+        @boundary
+        async def write_the_sql() -> int:
+            """Diff, then render the operations as statements."""
+            result = diff(
+                actual, target, dialect=dialect, decisions=load_decisions(schema_dir)
+            )
+
+            # Nothing here can answer an ambiguity, so the command refuses.
+            _WHEN_UNANSWERABLE[bool(result["ambiguities"])](result["ambiguities"])
+
+            @boundary
+            async def render() -> int:
+                """There are operations, so they become SQL."""
+                sql_statements = generate_sql(
+                    result["operations"],
+                    result["execution_order"],
+                    dialect,
+                )
+
+                # Output
+                _note(
+                    verbose,
+                    f"Generated {len(sql_statements)} statements",
+                    sys.stderr,
+                )
+
+                return _WHEN_OUTPUT_NAMED[bool(output)](
+                    "\n".join(sql_statements) + "\n", output
+                )
+
+            return await _WHEN_SETTLED[not result["operations"]](
+                "-- No changes needed", sys.stderr, 0, render
+            )
 
         # Check drift
-        snapshot_path = Path(schema_dir) / "snapshot.toml"
-        if snapshot_path.exists() and not force:
-            expected = load_snapshot(schema_dir)
-            drift = _check_drift(actual, expected)
-            if drift:
-                _print_drift_error(drift)
-                return 2
-
-        decisions = load_decisions(schema_dir)
-        result = diff(actual, target, dialect=dialect, decisions=decisions)
-
-        if result["ambiguities"]:
-            raise AmbiguityError(result["ambiguities"])
-
-        if not result["operations"]:
-            print("-- No changes needed", file=sys.stderr)
-            return 0
-
-        # Generate SQL
-        sql_statements = generate_sql(
-            result["operations"],
-            result["execution_order"],
-            dialect,
-        )
-
-        # Output
-        if verbose:
-            print(f"Generated {len(sql_statements)} statements", file=sys.stderr)
-
-        sql_output = "\n".join(sql_statements) + "\n"
-
-        if output:
-            Path(output).write_text(sql_output)
-            print(f"✓ SQL written to {output}", file=sys.stderr)
-        else:
-            print(sql_output)
-
-        return 0
+        drift = _drift(actual, schema_dir, force)
+        return await _WHEN_DRIFTED[bool(drift)](drift, write_the_sql)
 
     finally:
         await _disconnect(connection, dialect)
@@ -686,14 +1222,39 @@ def sqlite_path(connection_string: str) -> str:
     A user who typed a URL this CLI called valid is sent to look at disk
     permissions. Measured 2026-08-17.
     """
-    if connection_string.startswith(SQLITE_ABSOLUTE):
-        return connection_string[len(SQLITE_ABSOLUTE) - 1 :]
-    if connection_string.startswith(SQLITE_RELATIVE):
-        return connection_string[len(SQLITE_RELATIVE) :]
+    # A four-slash URL starts with both prefixes, so the absolute form is
+    # listed first and the first match wins, exactly as the two `if`s did.
+    cut = [
+        keep
+        for prefix, keep in (
+            (SQLITE_ABSOLUTE, len(SQLITE_ABSOLUTE) - 1),
+            (SQLITE_RELATIVE, len(SQLITE_RELATIVE)),
+        )
+        if connection_string.startswith(prefix)
+    ]
+    return _WHEN_A_SQLITE_URL[bool(cut)](connection_string, cut)
+
+
+@helper
+def _the_filename(connection_string: str, cut: list[int]) -> str:
+    """The URL names a file, so the prefix comes off and the path is left."""
+    return connection_string[cut[0] :]
+
+
+@helper
+def _not_a_sqlite_url(connection_string: str, _cut: list[int]) -> str:
+    """Neither form matched, so the two that work are named."""
     raise ValueError(
         f"{connection_string!r} is not a SQLite URL this CLI can open. Use "
         f"{SQLITE_RELATIVE}relative/path.db or {SQLITE_ABSOLUTE}absolute/path.db"
     )
+
+
+# Whether the string is one of the two SQLite URL forms.
+_WHEN_A_SQLITE_URL: dict[bool, Callable[[str, list[int]], str]] = {
+    True: _the_filename,
+    False: _not_a_sqlite_url,
+}
 
 
 @boundary
@@ -724,14 +1285,12 @@ CONNECTORS: dict[str, Any] = {
 }
 
 
-@boundary
 async def _connect(connection_string: str, dialect: Dialect) -> Any:
     """Open a connection for `dialect`."""
     connector = for_dialect(CONNECTORS, dialect, "Connectors")
     return await connector(connection_string)
 
 
-@boundary
 async def _disconnect(connection: Any, dialect: Dialect) -> None:
     """Close a connection.
 
@@ -748,51 +1307,60 @@ async def _disconnect(connection: Any, dialect: Dialect) -> None:
 @helper
 def _check_drift(actual: Schema, expected: Schema) -> list[dict[str, str]]:
     """Check for drift between actual and expected schemas."""
-    differences: list[dict[str, str]] = []
-
     actual_tables = set(actual.keys())
     expected_tables = set(expected.keys())
 
     # Tables in DB but not in snapshot
-    for table in actual_tables - expected_tables:
-        differences.append(
-            {
-                "symbol": "+",
-                "description": f"Table '{table}' exists in DB but not in snapshot",
-            }
-        )
+    added_tables = [
+        {
+            "symbol": "+",
+            "description": f"Table '{table}' exists in DB but not in snapshot",
+        }
+        for table in actual_tables - expected_tables
+    ]
 
     # Tables in snapshot but not in DB
-    for table in expected_tables - actual_tables:
-        differences.append(
-            {
-                "symbol": "-",
-                "description": f"Table '{table}' in snapshot but not in DB",
-            }
+    removed_tables = [
+        {
+            "symbol": "-",
+            "description": f"Table '{table}' in snapshot but not in DB",
+        }
+        for table in expected_tables - actual_tables
+    ]
+
+    # Column differences in common tables, still table by table so that the
+    # order an operator reads is the order the loops produced.
+    column_differences = [
+        difference
+        for table in actual_tables & expected_tables
+        for difference in _column_drift(
+            table,
+            set(actual[table].get("columns", {}).keys()),
+            set(expected[table].get("columns", {}).keys()),
         )
+    ]
 
-    # Column differences in common tables
-    for table in actual_tables & expected_tables:
-        actual_cols = set(actual[table].get("columns", {}).keys())
-        expected_cols = set(expected[table].get("columns", {}).keys())
+    return added_tables + removed_tables + column_differences
 
-        for col in actual_cols - expected_cols:
-            differences.append(
-                {
-                    "symbol": "+",
-                    "description": f"Column '{table}.{col}' exists in DB but not in snapshot",
-                }
-            )
 
-        for col in expected_cols - actual_cols:
-            differences.append(
-                {
-                    "symbol": "-",
-                    "description": f"Column '{table}.{col}' in snapshot but not in DB",
-                }
-            )
-
-    return differences
+@helper
+def _column_drift(
+    table: str, actual_cols: set[str], expected_cols: set[str]
+) -> list[dict[str, str]]:
+    """The columns one side of the comparison has and the other does not."""
+    return [
+        {
+            "symbol": "+",
+            "description": f"Column '{table}.{col}' exists in DB but not in snapshot",
+        }
+        for col in actual_cols - expected_cols
+    ] + [
+        {
+            "symbol": "-",
+            "description": f"Column '{table}.{col}' in snapshot but not in DB",
+        }
+        for col in expected_cols - actual_cols
+    ]
 
 
 @boundary
@@ -800,8 +1368,7 @@ def _print_drift_error(differences: list[dict[str, str]]) -> None:
     """Print drift error message."""
     print("⚠ Database schema has drifted from expected state\n")
     print("  Differences detected:\n")
-    for diff in differences:
-        print(f"    {diff['symbol']} {diff['description']}")
+    [print(f"    {diff['symbol']} {diff['description']}") for diff in differences]
     print("\n  Options:")
     print("    1. Run 'declaro snapshot' to update snapshot to current DB state")
     print("    2. Run with --force to proceed anyway")
@@ -855,30 +1422,168 @@ def _describe(op_type: str, table: str, details: dict[str, Any]) -> str:
     return phrase(table, details) if phrase else f"{op_type.upper()} on {table}"
 
 
+@helper
+def _operation_lines(position: int, op: Operation, verbose: bool) -> str:
+    """One operation, and under --verbose the details worth spelling out."""
+    details = op["details"]
+    return "\n".join(
+        [f"  {position + 1}. {_describe(op['op'], op['table'], details)}"]
+        + [
+            f"       {key}: {value}"
+            for key, value in details.items()
+            if verbose and key not in ("column", "index", "constraint", "new_name")
+        ]
+    )
+
+
 @boundary
+def _print_no_changes(_ops: list[Operation], _order: list[int], _verbose: bool) -> None:
+    """The diff is empty, so there is nothing to list."""
+    print("No changes needed.")
+
+
+@boundary
+def _print_the_operations(
+    ops: list[Operation], order: list[int], verbose: bool
+) -> None:
+    """Every operation in the order it will run."""
+    print(f"\nProposed changes ({len(ops)} operations):\n")
+    [
+        print(_operation_lines(position, ops[op_idx], verbose))
+        for position, op_idx in enumerate(order)
+    ]
+
+
+# Whether the diff produced anything at all.
+_WHEN_ANY_OPERATION: dict[bool, Callable[[list[Operation], list[int], bool], None]] = {
+    True: _print_the_operations,
+    False: _print_no_changes,
+}
+
+
 def _print_diff_result(result: DiffResult, verbose: bool) -> None:
     """Print diff result to console."""
     ops = result["operations"]
-    order = result["execution_order"]
+    _WHEN_ANY_OPERATION[bool(ops)](ops, result["execution_order"], verbose)
 
-    if not ops:
-        print("No changes needed.")
-        return
 
-    print(f"\nProposed changes ({len(ops)} operations):\n")
+@helper
+def _a_rename(amb: Ambiguity, now: str) -> Decision:
+    """The operator chose [1], so the column keeps its data under a new name."""
+    return {
+        "type": "rename",
+        "table": amb["table"],
+        "from_column": amb.get("from_column"),
+        "to_column": amb.get("to_column"),
+        "column": None,
+        "decided_at": now,
+    }
 
-    for i, op_idx in enumerate(order):
-        op = ops[op_idx]
-        op_type = op["op"]
-        table = op["table"]
-        details = op["details"]
 
-        print(f"  {i + 1}. {_describe(op_type, table, details)}")
+@helper
+def _a_drop(amb: Ambiguity, now: str) -> Decision:
+    """Anything other than [1], so the old column goes and the new one arrives."""
+    return {
+        "type": "drop",
+        "table": amb["table"],
+        "column": amb.get("from_column"),
+        "from_column": None,
+        "to_column": None,
+        "decided_at": now,
+    }
 
-        if verbose and details:
-            for key, value in details.items():
-                if key not in ("column", "index", "constraint", "new_name"):
-                    print(f"       {key}: {value}")
+
+# Whether the operator typed 1.
+_RENAME_OR_DROP: dict[bool, Callable[[Ambiguity, str], Decision]] = {
+    True: _a_rename,
+    False: _a_drop,
+}
+
+
+@boundary
+def _decide_a_rename(amb: Ambiguity) -> dict[str, Decision]:
+    """Ask whether the column was renamed or replaced, and record the answer."""
+    from datetime import datetime
+
+    print("   [1] Rename (preserves data)")
+    print("   [2] Drop + Add (loses data)")
+
+    choice = input("   Choice [1/2]: ").strip()
+
+    key = f"{amb['table']}_{amb.get('from_column', '')}"
+    return {key: _RENAME_OR_DROP[choice == "1"](amb, datetime.now(UTC).isoformat())}
+
+
+@helper
+def _abort_the_run() -> None:
+    """The operator chose [2]."""
+    raise KeyboardInterrupt("User aborted")
+
+
+@helper
+def _go_ahead_with_the_change() -> None:
+    """Anything other than [2] proceeds, and records no decision."""
+    return None
+
+
+# Whether the operator typed 2.
+_WHEN_ABORTED: dict[bool, Callable[[], None]] = {
+    True: _abort_the_run,
+    False: _go_ahead_with_the_change,
+}
+
+
+@boundary
+def _decide_a_type_change(_amb: Ambiguity) -> dict[str, Decision]:
+    """Ask whether to go through with a type change; [2] ends the run."""
+    print("   [1] Proceed with type change")
+    print("   [2] Abort")
+
+    choice = input("   Choice [1/2]: ").strip()
+
+    _WHEN_ABORTED[choice == "2"]()
+    return {}
+
+
+# ONE ENTRY PER KIND OF AMBIGUITY THE DIFFER DECLARES. `Ambiguity["type"]` is a
+# Literal of exactly these two, so the table is total and is read with []. The
+# chain this replaces ended in an unwritten `else` that printed the message,
+# printed a blank line and recorded nothing.
+_DECIDE: dict[str, Callable[[Ambiguity], dict[str, Decision]]] = {
+    "possible_rename": _decide_a_rename,
+    "type_change": _decide_a_type_change,
+}
+
+
+@boundary
+def _ask_about(position: int, amb: Ambiguity) -> dict[str, Decision]:
+    """Put one ambiguity to the operator and hand back what they decided."""
+    print(f"{position + 1}. {amb['message']}")
+    made = _DECIDE[amb["type"]](amb)
+    print()
+    return made
+
+
+@boundary
+def _save_the_decisions(schema_dir: str, decisions: dict[str, Decision]) -> None:
+    """Something was decided, so it is written down for the next run."""
+    from declaro_persistum.loader import save_decisions
+
+    save_decisions(schema_dir, decisions)
+    print(f"Decisions saved to {schema_dir}/migrations/pending.toml")
+
+
+@boundary
+def _save_nothing(_schema_dir: str, _decisions: dict[str, Decision]) -> None:
+    """Nothing was decided, so there is nothing to write down."""
+    return None
+
+
+# Whether any decision came out of the questions.
+_WHEN_ANY_DECISION: dict[bool, Callable[[str, dict[str, Decision]], None]] = {
+    True: _save_the_decisions,
+    False: _save_nothing,
+}
 
 
 @boundary
@@ -887,58 +1592,13 @@ async def _resolve_ambiguities_interactive(
     schema_dir: str,
 ) -> dict[str, Decision]:
     """Interactively resolve ambiguities and save decisions."""
-    from declaro_persistum.loader import save_decisions
-
-    decisions: dict[str, Decision] = {}
-
     print(f"\n{len(ambiguities)} ambiguous change(s) detected:\n")
 
-    for i, amb in enumerate(ambiguities):
-        print(f"{i + 1}. {amb['message']}")
+    answered = [_ask_about(position, amb) for position, amb in enumerate(ambiguities)]
+    decisions: dict[str, Decision] = {
+        key: decision for one in answered for key, decision in one.items()
+    }
 
-        if amb["type"] == "possible_rename":
-            print("   [1] Rename (preserves data)")
-            print("   [2] Drop + Add (loses data)")
-
-            choice = input("   Choice [1/2]: ").strip()
-
-            from datetime import datetime
-
-            key = f"{amb['table']}_{amb.get('from_column', '')}"
-            now = datetime.now(UTC).isoformat()
-            if choice == "1":
-                decisions[key] = {
-                    "type": "rename",
-                    "table": amb["table"],
-                    "from_column": amb.get("from_column"),
-                    "to_column": amb.get("to_column"),
-                    "column": None,
-                    "decided_at": now,
-                }
-            else:
-                decisions[key] = {
-                    "type": "drop",
-                    "table": amb["table"],
-                    "column": amb.get("from_column"),
-                    "from_column": None,
-                    "to_column": None,
-                    "decided_at": now,
-                }
-
-        elif amb["type"] == "type_change":
-            print("   [1] Proceed with type change")
-            print("   [2] Abort")
-
-            choice = input("   Choice [1/2]: ").strip()
-
-            if choice == "2":
-                raise KeyboardInterrupt("User aborted")
-
-        print()
-
-    # Save decisions
-    if decisions:
-        save_decisions(schema_dir, decisions)
-        print(f"Decisions saved to {schema_dir}/migrations/pending.toml")
+    _WHEN_ANY_DECISION[bool(decisions)](schema_dir, decisions)
 
     return decisions

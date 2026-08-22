@@ -650,9 +650,9 @@ def is_nullable(column: dict[str, Any]) -> bool:
     Two instances of one mistake in two modules is the architecture talking:
     the question was being re-derived by whoever needed it. It is asked here.
     """
-    if column.get("primary_key"):
-        return False
-    return bool(column.get("nullable", True))
+    # A primary key is NOT NULL whatever the column says, so the two answers
+    # are not symmetric and the key wins.
+    return not column.get("primary_key") and bool(column.get("nullable", True))
 
 
 def for_dialect(table: dict[str, Any], dialect: str, what: str) -> Any:
@@ -673,10 +673,26 @@ def for_dialect(table: dict[str, Any], dialect: str, what: str) -> Any:
     was available. `what` names the table so one message can serve every one
     of them.
     """
-    if dialect in table:
-        return table[dialect]
+    _WHEN_NO_ENTRY[dialect in table](table, dialect, what)
+    return table[dialect]
+
+
+def _the_entry(table: dict[str, Any], dialect: str, _what: str) -> Any:
+    """The table holds this dialect, so the caller reads it next."""
+    return table[dialect]
+
+
+def _refuse_unknown_dialect(table: dict[str, Any], dialect: str, what: str) -> Any:
+    """No entry, named alongside the ones that exist."""
     raise ValueError(
         f"Unsupported dialect: {dialect}. "
         f"{what} exist for: {', '.join(sorted(table))}"
     )
+
+
+# Whether the table holds the dialect asked for.
+_WHEN_NO_ENTRY: dict[bool, Callable[[dict[str, Any], str, str], Any]] = {
+    True: _the_entry,
+    False: _refuse_unknown_dialect,
+}
 

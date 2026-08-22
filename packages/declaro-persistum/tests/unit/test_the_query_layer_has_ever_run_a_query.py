@@ -52,12 +52,11 @@ from declaro_persistum.query.executor import (
     execute_scalar,
 )
 from declaro_persistum.types import NOTHING
+from tests.conftest import probe_url
 
 pytestmark = [pytest.mark.precommit, pytest.mark.integration]
 
-PROBE_URL = os.environ.get(
-    "TEST_POSTGRESQL_URL", "postgresql://postgres:postgres@localhost/declaro_probe"
-)
+PROBE_URL = probe_url()
 
 ROWS = [(1, "alice", 30), (2, "bob", 25), (3, "carol", 35)]
 

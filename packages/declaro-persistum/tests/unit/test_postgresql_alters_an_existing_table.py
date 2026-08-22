@@ -25,7 +25,8 @@ show.
 
 from __future__ import annotations
 
-import os
+import asyncio
+import uuid
 from typing import Any
 
 import pytest
@@ -34,12 +35,11 @@ from declaro_persistum.applier import apply
 from declaro_persistum.differ.core import diff
 from declaro_persistum.inspector import introspect
 from declaro_persistum.types import NOTHING
+from tests.conftest import probe_url
 
 pytestmark = [pytest.mark.precommit, pytest.mark.postgresql, pytest.mark.integration]
 
-PROBE_URL = os.environ.get(
-    "TEST_POSTGRESQL_URL", "postgresql://postgres:postgres@localhost/declaro_probe"
-)
+PROBE_URL = probe_url()
 
 TOUCHED = ("children", "widgets", "parents")
 
@@ -90,12 +90,56 @@ STEPS: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
 
 
 async def _connection() -> Any:
+    """A database this run owns, so two runners cannot collide.
+
+    EVERY TEST HERE DROPS AND CREATES THE SAME THREE TABLE NAMES. Two runs at
+    once interleave those drops and creates, and on 2026-08-22 three agents
+    working in parallel each saw `DuplicateTableError: relation "widgets"
+    already exists` on a different test, then each spent a run proving their
+    own change innocent. The names are fixed on purpose -- the tests are about
+    what the differ does to a named table -- so the boundary has to be the
+    database, which is what `conftest.postgresql_schema` already does for the
+    rest of the suite.
+    """
     import asyncpg
 
+    owned = f"{PROBE_URL}_{uuid.uuid4().hex[:12]}"
+    server, _, name = owned.rpartition("/")
     try:
-        return await asyncpg.connect(PROBE_URL)
+        admin = await asyncpg.connect(f"{server}/postgres")
     except (OSError, asyncpg.PostgresError) as unreachable:
         pytest.skip(f"no server at {PROBE_URL}: {unreachable}")
+    try:
+        await admin.execute(f'CREATE DATABASE "{name}"')
+    finally:
+        await admin.close()
+    _MADE.append(owned)
+    return await asyncpg.connect(owned)
+
+
+# The databases this module made, dropped when it is done with them.
+_MADE: list[str] = []
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _drop_what_this_module_made() -> Any:
+    """Every database `_connection` created, removed after the last test."""
+    yield
+    asyncio.run(_drop_them())
+
+
+async def _drop_them() -> None:
+    import asyncpg
+
+    server, _, _ = PROBE_URL.rpartition("/")
+    admin = await asyncpg.connect(f"{server}/postgres")
+    try:
+        [
+            await admin.execute(f'DROP DATABASE IF EXISTS "{url.rpartition("/")[2]}"')
+            for url in _MADE
+        ]
+    finally:
+        await admin.close()
 
 
 async def _clean(connection: Any) -> None:

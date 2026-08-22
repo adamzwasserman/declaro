@@ -117,24 +117,38 @@ def _like(pattern: str) -> Renderer:
     return render_like
 
 
+# WHAT AN EMPTY SET COMPARES TO. `IN ()` is a syntax error in every dialect.
+# An empty set matches nothing, and its negation matches everything; saying so
+# in SQL is clearer than raising, because an empty list is a legitimate thing
+# for a caller's loop to produce.
+_EMPTY_SET: dict[bool, str] = {False: "1 = 0", True: "1 = 1"}
+
+
 def _in(negated: bool) -> Renderer:
-    def render_in(column: str, operand: Sequence[Any], path: str) -> Rendered:
-        values = list(operand)
-        if not values:
-            # `IN ()` is a syntax error in every dialect. An empty set matches
-            # nothing, and its negation matches everything; saying so in SQL
-            # is clearer than raising, because an empty list is a legitimate
-            # thing for a caller's loop to produce.
-            return ("1 = 0", {}) if not negated else ("1 = 1", {})
+    def _no_values(_column: str, _values: list[Any], _path: str) -> Rendered:
+        """Nothing to list, so the comparison is written as a constant."""
+        return _EMPTY_SET[negated], {}
+
+    def _some_values(column: str, values: list[Any], path: str) -> Rendered:
+        """One placeholder per value, named by position under this path."""
         names = [_name(path, column, f"_{i}") for i in range(len(values))]
         placeholders = ", ".join(f":{n}" for n in names)
         keyword = "NOT IN" if negated else "IN"
-        # strict: `names` is built from `len(values)` three lines up, so a length
+        # strict: `names` is built from `len(values)` two lines up, so a length
         # mismatch is impossible unless that changes -- at which point this
         # raises instead of silently dropping the tail of the IN list.
         return f"{column} {keyword} ({placeholders})", dict(
             zip(names, values, strict=True)
         )
+
+    _WHEN_VALUES: dict[bool, Callable[[str, list[Any], str], Rendered]] = {
+        True: _some_values,
+        False: _no_values,
+    }
+
+    def render_in(column: str, operand: Sequence[Any], path: str) -> Rendered:
+        values = list(operand)
+        return _WHEN_VALUES[bool(values)](column, values, path)
 
     return render_in
 
@@ -185,14 +199,79 @@ COMBINATORS: dict[str, str] = {"and": " AND ", "or": " OR "}
 def _render_group(
     key: str, members: list[dict], path: str
 ) -> tuple[str, dict[str, Any]]:
-    parts: list[str] = []
-    params: dict[str, Any] = {}
-    for i, member in enumerate(members):
-        sql, member_params = render(member, f"{path}_{i}")
-        if sql:
-            parts.append(f"({sql})")
-            params.update(member_params)
+    # A MEMBER THAT RENDERS TO NOTHING CONTRIBUTES NOTHING: neither an empty
+    # pair of parentheses nor its parameters. An empty condition dict is the
+    # member that does this.
+    written = [
+        rendered
+        for i, member in enumerate(members)
+        for rendered in [render(member, f"{path}_{i}")]
+        if rendered[0]
+    ]
+    parts = [f"({sql})" for sql, _ in written]
+    params = {
+        name: value
+        for _, member_params in written
+        for name, value in member_params.items()
+    }
     return COMBINATORS[key].join(parts), params
+
+
+def _render_combinator(key: str, value: Any, here: str) -> list[Rendered]:
+    """`and` or `or`: one group, dropped when it renders to nothing."""
+    return [rendered for rendered in [_render_group(key, value, here)] if rendered[0]]
+
+
+def _render_equality(column: str, value: Any, here: str) -> list[Rendered]:
+    """`{"status": "active"}` — a bare value means equality, because that is
+    what a caller writing a plain value means."""
+    return [OPERATORS["eq"](column, value, here)]
+
+
+def _refuse_unknown_operators(column: str, unknown: list[str]) -> list[str]:
+    """An operator no entry answers for, named so the author sees the typo."""
+    raise ValueError(
+        f"Unknown operator {unknown[0]!r} on column {column!r}. "
+        f"Known operators: {', '.join(sorted(OPERATORS))}"
+    )
+
+
+def _the_known_operators(_column: str, unknown: list[str]) -> list[str]:
+    """Every operator named is in the table, so nothing is unknown."""
+    return unknown
+
+
+_WHEN_UNKNOWN_OPERATOR: dict[bool, Callable[[str, list[str]], list[str]]] = {
+    True: _the_known_operators,
+    False: _refuse_unknown_operators,
+}
+
+
+def _render_operators(column: str, value: dict[str, Any], here: str) -> list[Rendered]:
+    """A mapping names operators, and every one of them must be in the table."""
+    unknown = [op for op in value if op not in OPERATORS]
+    _WHEN_UNKNOWN_OPERATOR[not unknown](column, unknown)
+    return [OPERATORS[op](column, operand, here) for op, operand in value.items()]
+
+
+# A MAPPING NAMES OPERATORS; ANYTHING ELSE IS THE VALUE ITSELF.
+_RENDER_COLUMN: dict[bool, Callable[[str, Any, str], list[Rendered]]] = {
+    True: _render_operators,
+    False: _render_equality,
+}
+
+
+def _render_column(key: str, value: Any, here: str) -> list[Rendered]:
+    """A key that is not a combinator is a column name."""
+    return _RENDER_COLUMN[written_as(dict, value)](key, value, here)
+
+
+# WHAT A KEY IN A CONDITION DICT IS: either one of the two combinators, or a
+# column. Read with [], so the two are answered by the same lookup.
+_RENDER_ENTRY: dict[bool, Callable[[str, Any, str], list[Rendered]]] = {
+    True: _render_combinator,
+    False: _render_column,
+}
 
 
 def render(
@@ -206,37 +285,15 @@ def render(
     process has built (Rule 14: no default, because two nodes silently sharing
     a path collide their parameter names).
     """
-    parts: list[str] = []
-    params: dict[str, Any] = {}
-
-    for i, (key, value) in enumerate(condition.items()):
-        here = f"{path}_{i}"
-
-        if key in COMBINATORS:
-            sql, group_params = _render_group(key, value, here)
-            if sql:
-                parts.append(sql)
-                params.update(group_params)
-            continue
-
-        column = key
-        # A MAPPING NAMES OPERATORS; ANYTHING ELSE IS THE VALUE ITSELF.
-        if not written_as(dict, value):
-            # `{"status": "active"}` — a bare value means equality, because
-            # that is what a caller writing a plain value means.
-            sql, p = OPERATORS["eq"](column, value, here)
-            parts.append(sql)
-            params.update(p)
-            continue
-
-        for op, operand in value.items():
-            if op not in OPERATORS:
-                raise ValueError(
-                    f"Unknown operator {op!r} on column {column!r}. "
-                    f"Known operators: {', '.join(sorted(OPERATORS))}"
-                )
-            sql, p = OPERATORS[op](column, operand, here)
-            parts.append(sql)
-            params.update(p)
-
+    rendered = [
+        pair
+        for i, (key, value) in enumerate(condition.items())
+        for pair in _RENDER_ENTRY[key in COMBINATORS](key, value, f"{path}_{i}")
+    ]
+    parts = [sql for sql, _ in rendered]
+    params = {
+        name: value
+        for _, part_params in rendered
+        for name, value in part_params.items()
+    }
     return " AND ".join(parts), params

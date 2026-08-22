@@ -13,7 +13,8 @@ send and in what order — and nothing else.
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Any, NoReturn
 
 from declaro_persistum.abstractions.materialized_views import (
     MATVIEW_METADATA_TABLE,
@@ -72,6 +73,67 @@ async def _rows(connection: DbapiConnection, sql: str) -> list[tuple]:
 
 
 @helper
+def _marked_unique(column: Column) -> Column:
+    """The same column, carrying the UNIQUE index that covers it alone."""
+    return {**column, "unique": True}
+
+
+@helper
+def _as_read(column: Column) -> Column:
+    """No single-column UNIQUE index covers this one, so it is unchanged."""
+    return column
+
+
+# WHETHER A UNIQUE INDEX COVERS THIS COLUMN ALONE, as a table rather than a
+# branch. `unique_cols_from_index_rows` has already decided; this only writes
+# the answer down.
+_WHEN_UNIQUE: dict[bool, Callable[[Column], Column]] = {
+    True: _marked_unique,
+    False: _as_read,
+}
+
+
+@helper
+def _with_check(column: Column, expression: str) -> Column:
+    """The same column, carrying the CHECK expression read out of the DDL."""
+    return {**column, "check": expression}
+
+
+@helper
+def _as_declared(
+    name: str, column: Column, unique: set[str], checks: dict[str, str]
+) -> Column:
+    """One column, plus the two facts no PRAGMA reports about it.
+
+    A name in neither collection comes back exactly as
+    `columns_from_pragma_rows` read it. A CHECK the DDL names for a column no
+    PRAGMA reported belongs to no column here, and is dropped rather than
+    invented.
+    """
+    marked = _WHEN_UNIQUE[name in unique](column)
+    return [
+        *[_with_check(marked, checks[key]) for key in [name] if key in checks],
+        marked,
+    ][0]
+
+
+@helper
+def _checks_of(ddl_rows: list[tuple]) -> dict[str, str]:
+    """The column CHECK expressions in a stored CREATE TABLE.
+
+    The rows are what `sqlite_master` gave back for one table: none when the
+    table is not there, and one whose `sql` a caller cannot assume is set.
+    Both read as no checks.
+    """
+    return {
+        name: expression
+        for row in ddl_rows[:1]
+        if row[0]
+        for name, expression in checks_from_ddl(row[0]).items()
+    }
+
+
+@helper
 async def columns_of(connection: DbapiConnection, table: str) -> dict[str, Column]:
     """Column definitions, from PRAGMA table_info plus the unique indexes.
 
@@ -90,9 +152,7 @@ async def columns_of(connection: DbapiConnection, table: str) -> dict[str, Colum
         row[1]: await _rows(connection, f"PRAGMA index_info('{as_literal(row[1])}')")
         for row in index_rows
     }
-    for name in unique_cols_from_index_rows(index_rows, index_info):
-        if name in columns:
-            columns[name]["unique"] = True
+    unique = unique_cols_from_index_rows(index_rows, index_info)
 
     # A CHECK IS IN NO PRAGMA. SQLite keeps no catalogue of them: the only
     # record is the text of the CREATE TABLE in `sqlite_master`, so it is read
@@ -104,12 +164,12 @@ async def columns_of(connection: DbapiConnection, table: str) -> dict[str, Colum
         f"SELECT sql FROM sqlite_master WHERE type='table' "
         f"AND name='{as_literal(table)}'",
     )
-    if ddl_rows and ddl_rows[0][0]:
-        for name, expression in checks_from_ddl(ddl_rows[0][0]).items():
-            if name in columns:
-                columns[name]["check"] = expression
+    checks = _checks_of(ddl_rows)
 
-    return columns
+    return {
+        name: _as_declared(name, column, unique, checks)
+        for name, column in columns.items()
+    }
 
 
 @helper
@@ -151,10 +211,26 @@ async def get_table_columns(connection: DbapiConnection, table: str) -> dict[str
     existed on more than one engine. It was defined in `inspector/turso.py`
     alone, which is the shape that made `declaro generate` raise on SQLite.
     """
-    if not await table_exists(connection, table, schema_name=NOTHING):
-        raise DeclaroError(f"Table '{table}' does not exist")
+    present = await table_exists(connection, table, schema_name=NOTHING)
+    return await columns_of(connection, _WHEN_PRESENT[present](table))
 
-    return await columns_of(connection, table)
+
+@helper
+def _refuse_absent_table(table: str) -> NoReturn:
+    """Nothing of this name is there, and no column list can say so."""
+    raise DeclaroError(f"Table '{table}' does not exist")
+
+
+@helper
+def _the_table_name(table: str) -> str:
+    """The table is there, so its name goes on to be read."""
+    return table
+
+
+_WHEN_PRESENT: dict[bool, Callable[[str], str]] = {
+    True: _the_table_name,
+    False: _refuse_absent_table,
+}
 
 
 @helper
@@ -174,9 +250,14 @@ async def constraints_of(connection: DbapiConnection, table: str) -> dict[str, d
         f"SELECT sql FROM sqlite_master WHERE type='table' "
         f"AND name='{as_literal(table)}'",
     )
-    if rows and rows[0][0]:
-        return table_constraints_from_ddl(rows[0][0])
-    return {}
+    # No row means no such table, and a row whose `sql` is unset says nothing
+    # about constraints. Both read as none declared.
+    return {
+        name: constraint
+        for row in rows[:1]
+        if row[0]
+        for name, constraint in table_constraints_from_ddl(row[0]).items()
+    }
 
 
 @helper
@@ -212,14 +293,17 @@ async def matviews_of(connection: DbapiConnection) -> dict[str, tuple[str, str]]
         "SELECT name FROM sqlite_master WHERE type = 'table' "
         f"AND name = '{MATVIEW_METADATA_TABLE}'",
     )
-    if not present:
-        return {}
-    rows = await _rows(
-        connection,
-        "SELECT name, query, refresh_strategy "
-        f"FROM {MATVIEW_METADATA_TABLE} ORDER BY name",
-    )
-    return {name: (query, refresh) for name, query, refresh in rows}
+    # The second read happens once for a table that is there and not at all
+    # for one that is not, so an absent table asks the engine nothing further.
+    return {
+        name: (query, refresh)
+        for _ in present[:1]
+        for name, query, refresh in await _rows(
+            connection,
+            "SELECT name, query, refresh_strategy "
+            f"FROM {MATVIEW_METADATA_TABLE} ORDER BY name",
+        )
+    }
 
 
 @helper
@@ -269,16 +353,68 @@ async def introspect(
             for (name,) in tables
             if name not in backing
         }
-        if include_views:
-            return schema, await views_of(connection)
-        return schema
+        return await _WITH_VIEWS[bool(include_views)](connection, schema)
     except Exception as e:
         text = str(e).lower()
-        if "database" in text or "connection" in text:
-            raise DeclaroConnectionError(
-                f"Failed to introspect database: {e}", dialect="sqlite"
-            ) from e
-        raise
+        _WHEN_UNREACHABLE[any(word in text for word in ("database", "connection"))](e)
+
+
+@helper
+async def _schema_alone(
+    _connection: DbapiConnection, schema: Schema
+) -> Schema | tuple[Schema, dict[str, View]]:
+    """The caller asked for the tables, so the views are never read."""
+    return schema
+
+
+@helper
+async def _schema_and_views(
+    connection: DbapiConnection, schema: Schema
+) -> Schema | tuple[Schema, dict[str, View]]:
+    """The caller asked for the views as well, so they are read and returned."""
+    return schema, await views_of(connection)
+
+
+_WITH_VIEWS: dict[
+    bool,
+    Callable[
+        [DbapiConnection, Schema], Awaitable[Schema | tuple[Schema, dict[str, View]]]
+    ],
+] = {
+    True: _schema_and_views,
+    False: _schema_alone,
+}
+
+
+@helper
+def _as_connection_failure(error: Exception) -> NoReturn:
+    """The engine could not be reached, which is a failure of its own kind.
+
+    A caller can then tell "the database is unreachable" from "the database
+    says no" by the type, without reading the message (Rule 8).
+    """
+    raise DeclaroConnectionError(
+        f"Failed to introspect database: {error}", dialect="sqlite"
+    ) from error
+
+
+@helper
+def _the_error_as_it_came(error: Exception) -> NoReturn:
+    """The database answered and said no, so its own error goes back up.
+
+    Raised here rather than returned so that the caller's line is one lookup
+    with no `raise ... from` beside it, which would name the error as its own
+    cause on this path.
+    """
+    raise error
+
+
+# WHETHER THE DATABASE COULD BE REACHED AT ALL. Both entries end the call, one
+# with a typed failure and one with the engine's own.
+_WHEN_UNREACHABLE: dict[bool, Callable[[Exception], NoReturn]] = {
+    True: _as_connection_failure,
+    False: _the_error_as_it_came,
+}
 
 
 @boundary

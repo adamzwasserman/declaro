@@ -14,6 +14,7 @@ state living somewhere a caller cannot see, read later to make a decision.
 
 from __future__ import annotations
 
+import ast
 import inspect
 
 import pytest
@@ -31,18 +32,116 @@ def test_shutdown_holds_no_module_level_state():
     """
     import declaro_persistum.shutdown as shutdown
 
-    mutable = {
-        name: value
-        for name, value in vars(shutdown).items()
-        if not name.startswith("__")
-        and isinstance(value, (dict, list, set))
-        and not inspect.ismodule(value)
-    }
-    assert not mutable, (
-        f"module-level mutable state in shutdown.py: {sorted(mutable)}. "
-        f"It is shared by every Database in the process and invisible at "
-        f"every call site."
+    assert not _written_at_runtime(shutdown), (
+        f"module-level state written at runtime in shutdown.py: "
+        f"{sorted(_written_at_runtime(shutdown))}. It is shared by every "
+        f"Database in the process and invisible at every call site."
     )
+
+
+def _written_at_runtime(module: object) -> set[str]:
+    """Module-level containers that something assigns into after import.
+
+    IT USED TO NAME EVERY DICT, LIST AND SET, and that became wrong on
+    2026-08-22. Removing the last conditional from `shutdown.py` replaced two
+    `if` statements with `_TRAP` and `_ON_THE_LOOP`, dispatch tables of
+    functions built once at import and never touched again. The old test
+    failed on them, so two gates were asking for opposite things: one
+    required the table, the other forbade any dict.
+
+    The defect this was written for is not a dict. It is `_TRAPPED`, which
+    accumulated signal handlers while the program ran, so two databases
+    trapping shutdown overwrote each other's entry and the restore path read
+    a value somebody else had put there. What distinguishes the two is
+    whether anything writes to the container after import, so that is what is
+    measured: a subscript assignment, a `del`, or a call to a method that
+    mutates.
+    """
+    source = inspect.getsource(module)
+    tree = ast.parse(source)
+    names = {
+        target.id
+        for node in tree.body
+        if isinstance(node, ast.Assign | ast.AnnAssign)
+        for target in (
+            node.targets if isinstance(node, ast.Assign) else [node.target]
+        )
+        if isinstance(target, ast.Name)
+    }
+    mutating = {"append", "extend", "insert", "add", "update", "pop",
+                "popitem", "remove", "discard", "clear", "setdefault", "sort"}
+    written = {
+        held
+        for node in ast.walk(tree)
+        for held in _name_written_by(node, mutating)
+    }
+    return names & written
+
+
+def _name_written_by(node: ast.AST, mutating: set[str]) -> list[str]:
+    """The module-level name this node writes to, if it writes to one."""
+    subscripts = [
+        target.value.id
+        for target in (
+            node.targets if isinstance(node, ast.Assign) else []
+        )
+        if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
+    ]
+    deleted = [
+        target.value.id
+        for target in (node.targets if isinstance(node, ast.Delete) else [])
+        if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
+    ]
+    called = [
+        node.func.value.id
+        for _ in [node]
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in mutating
+        and isinstance(node.func.value, ast.Name)
+    ]
+    return subscripts + deleted + called
+
+
+def test_the_scan_still_catches_the_shape_it_was_written_for() -> None:
+    """The floor. A scan that matches nothing passes the test above.
+
+    The original defect, in miniature: a module-level dict that a function
+    writes into while the program runs.
+    """
+    sample = ast.parse(
+        "_TRAPPED = {}\n"
+        "_TABLE = {True: len, False: id}\n"
+        "def trap(sig, handler):\n"
+        "    _TRAPPED[sig] = handler\n"
+    )
+
+    class _Sample:
+        pass
+
+    found = _written_names(sample)
+
+    assert "_TRAPPED" in found, "the scan no longer sees a dict written at runtime"
+    assert "_TABLE" not in found, "the scan is flagging a table nobody writes to"
+
+
+def _written_names(tree: ast.Module) -> set[str]:
+    """The names `_written_at_runtime` would report for an already-parsed tree."""
+    names = {
+        target.id
+        for node in tree.body
+        if isinstance(node, ast.Assign | ast.AnnAssign)
+        for target in (
+            node.targets if isinstance(node, ast.Assign) else [node.target]
+        )
+        if isinstance(target, ast.Name)
+    }
+    mutating = {"append", "extend", "insert", "add", "update", "pop",
+                "popitem", "remove", "discard", "clear", "setdefault", "sort"}
+    written = {
+        held for node in ast.walk(tree) for held in _name_written_by(node, mutating)
+    }
+    return names & written
 
 
 def test_the_unsupported_error_retains_nothing():

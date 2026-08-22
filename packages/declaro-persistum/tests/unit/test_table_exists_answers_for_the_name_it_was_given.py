@@ -47,12 +47,11 @@ from typing import Any
 import pytest
 
 from declaro_persistum.inspector import table_exists
+from tests.conftest import probe_url
 
 pytestmark = [pytest.mark.precommit]
 
-PROBE_URL = os.environ.get(
-    "TEST_POSTGRESQL_URL", "postgresql://postgres:postgres@localhost/declaro_probe"
-)
+PROBE_URL = probe_url()
 
 # Whether the engine treats a quoted name as case-insensitive. Measured, not
 # assumed: PostgreSQL is the one that does not, and this package quotes every

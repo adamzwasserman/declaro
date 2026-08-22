@@ -47,6 +47,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any, TypedDict
 
 from declaro_persistum.boundary import boundary, helper
@@ -70,6 +71,42 @@ class Crew(TypedDict):
     stop: asyncio.Event
     tasks: list[asyncio.Task[None]]
     size: int
+
+
+@helper
+def _said_out_loud(orphan: BaseException) -> BaseException:
+    """Log one failure whose depositor stopped waiting, and hand it back."""
+    logger.warning(
+        "A write failed after its caller stopped waiting for it. "
+        "Nobody will see this exception except this line.",
+        exc_info=orphan,
+    )
+    return orphan
+
+
+@helper
+def _the_local_database(db: Database) -> Database:
+    """No primary, so a crew is exactly what this database is for."""
+    return db
+
+
+@helper
+def _refuse_a_crew_on_a_replica(_db: Database) -> Database:
+    """A replicated database cannot use one, and is told why."""
+    raise ValueError(
+        "A crew is for local databases only. A replicated database gets no "
+        "write concurrency from either journal mode — under MVCC no second "
+        "connection opens once anything is written, and under WAL the "
+        "engine rejects the second writer. Use `writing(db)` instead; it "
+        "serialises, which is the most a replica can do."
+    )
+
+
+# Whether this database replicates to a primary.
+_A_CREW_IS_FOR: dict[bool, Callable[[Database], Database]] = {
+    True: _refuse_a_crew_on_a_replica,
+    False: _the_local_database,
+}
 
 
 @helper
@@ -101,6 +138,51 @@ async def drainer(
     One connection, one job.
     """
     write_one = db["write_one"]
+
+    @helper
+    async def execute(write: PendingWrite) -> None:
+        # The engine's own way to run one write in a transaction,
+        # resolved at open from WRITERS and carried on the Database.
+        # The drainer knows a write has SQL and parameters; it does not
+        # know which statement opens a transaction, whether parameters
+        # go as a tuple or positionally, or whether there is a commit.
+        await write_one(conn, write["sql"], write["params"])
+
+    @helper
+    async def wait_for_work() -> None:
+        """Nothing is waiting, so sleep until a deposit or the stop signal.
+
+        `idle_s` still bounds the wait, so a drainer notices `stop` even when
+        nothing is ever deposited.
+        """
+        waiters = [
+            asyncio.create_task(room["arrived"].wait()),
+            asyncio.create_task(stop.wait()),
+        ]
+        _done, pending = await asyncio.wait(
+            waiters, timeout=idle_s, return_when=asyncio.FIRST_COMPLETED
+        )
+        [task.cancel() for task in pending]
+        return None
+
+    @helper
+    async def take_the_room() -> None:
+        """Writes are waiting, so hand them to the log and report the orphans."""
+        drained = await drain(room, execute, retry)
+        # A failure whose depositor cancelled its `collect` has no ticket
+        # to raise on. `drain` hands it back rather than dropping it, and
+        # this is the boundary, so this is where it becomes visible. The
+        # write reached the database; that its caller stopped listening
+        # does not make the engine's answer uninteresting.
+        [_said_out_loud(orphan) for orphan in drained["orphaned"]]
+        return None
+
+    # Whether anything is waiting in the room when the drainer looks.
+    next_pass: dict[bool, Callable[[], Awaitable[None]]] = {
+        True: take_the_room,
+        False: wait_for_work,
+    }
+
     try:
         while not stop.is_set():
             # CLEAR BEFORE CHECKING. The reverse order is a lost wakeup: a
@@ -117,42 +199,7 @@ async def drainer(
             # before the check is seen by the check; one landing after leaves
             # `arrived` set, so the wait returns at once.
             room["arrived"].clear()
-
-            if not room["writes"]:
-                # `idle_s` still bounds the wait, so a drainer notices `stop`
-                # even when nothing is ever deposited.
-                waiters = [
-                    asyncio.create_task(room["arrived"].wait()),
-                    asyncio.create_task(stop.wait()),
-                ]
-                _done, pending = await asyncio.wait(
-                    waiters, timeout=idle_s, return_when=asyncio.FIRST_COMPLETED
-                )
-                for task in pending:
-                    task.cancel()
-                continue
-
-            @helper
-            async def execute(write: PendingWrite) -> None:
-                # The engine's own way to run one write in a transaction,
-                # resolved at open from WRITERS and carried on the Database.
-                # The drainer knows a write has SQL and parameters; it does not
-                # know which statement opens a transaction, whether parameters
-                # go as a tuple or positionally, or whether there is a commit.
-                await write_one(conn, write["sql"], write["params"])
-
-            drained = await drain(room, execute, retry)
-            # A failure whose depositor cancelled its `collect` has no ticket
-            # to raise on. `drain` hands it back rather than dropping it, and
-            # this is the boundary, so this is where it becomes visible. The
-            # write reached the database; that its caller stopped listening
-            # does not make the engine's answer uninteresting.
-            for orphan in drained["orphaned"]:
-                logger.warning(
-                    "A write failed after its caller stopped waiting for it. "
-                    "Nobody will see this exception except this line.",
-                    exc_info=orphan,
-                )
+            await next_pass[bool(room["writes"])]()
     finally:
         await db["close_connection"](conn)
 
@@ -172,14 +219,7 @@ async def start_crew(
     Render tier and 64 on another, and a default here would be a number
     nobody chose applied to a machine nobody measured (Rule 14).
     """
-    if is_replicated(db):
-        raise ValueError(
-            "A crew is for local databases only. A replicated database gets no "
-            "write concurrency from either journal mode — under MVCC no second "
-            "connection opens once anything is written, and under WAL the "
-            "engine rejects the second writer. Use `writing(db)` instead; it "
-            "serialises, which is the most a replica can do."
-        )
+    db = _A_CREW_IS_FOR[is_replicated(db)](db)
 
     # EVERY CONNECTION IS OPEN BEFORE A SINGLE DRAINER STARTS. A failure here
     # raises to the caller, where it can be seen and handled, instead of

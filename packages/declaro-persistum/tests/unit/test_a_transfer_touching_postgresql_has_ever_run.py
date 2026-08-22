@@ -35,12 +35,11 @@ import pytest
 
 from declaro_persistum import close, open_postgresql, open_sqlite, writing
 from declaro_persistum.transfer import bulk_transfer
+from tests.conftest import probe_url
 
 pytestmark = [pytest.mark.precommit, pytest.mark.postgresql, pytest.mark.integration]
 
-PROBE_URL = os.environ.get(
-    "TEST_POSTGRESQL_URL", "postgresql://postgres:postgres@localhost/declaro_probe"
-)
+PROBE_URL = probe_url()
 
 MODELS = '''
 from uuid import UUID

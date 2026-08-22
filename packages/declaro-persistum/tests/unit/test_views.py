@@ -8,6 +8,7 @@ Tests the View TypedDict, loader parsing, and applier generation.
 import pytest
 
 from declaro_persistum.types import NOTHING, View
+from tests.conftest import probe_url
 
 
 class TestViewTypedDict:
@@ -230,7 +231,7 @@ async def _postgres():
 
     url = os.environ.get(
         "TEST_POSTGRESQL_URL",
-        "postgresql://postgres:postgres@localhost/declaro_probe",
+        probe_url(),
     )
     try:
         return await asyncpg.connect(url)

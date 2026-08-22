@@ -30,8 +30,8 @@ cannot drift unnoticed.
 from __future__ import annotations
 
 import ast
-import difflib
 import pathlib
+from typing import Any
 
 import pytest
 
@@ -115,24 +115,78 @@ def test_both_modules_use_the_shared_readers() -> None:
         assert "pragma_compat import" in text or "pragma_compat" in text, module
 
 
-def test_the_remaining_near_copy_is_recorded_not_forgotten() -> None:
-    """`generate_create_table_sql` and its twin are 84% alike and NOT merged.
+# A column definition for each property the two generators read, plus the
+# combinations that once diverged.
+_SHAPES: dict[str, dict[str, Any]] = {
+    "a plain column": {"c": {"type": "text"}},
+    "a primary key": {"id": {"type": "integer", "primary_key": True}},
+    "a composite key": {
+        "a": {"type": "integer", "primary_key": True},
+        "b": {"type": "integer", "primary_key": True},
+    },
+    "not null": {"c": {"type": "text", "nullable": False}},
+    "unique": {"c": {"type": "text", "unique": True}},
+    "a default": {"c": {"type": "text", "default": "'pending'"}},
+    "an expression default": {"c": {"type": "text", "default": "(datetime('now'))"}},
+    "a numeric default": {"c": {"type": "integer", "default": 0}},
+    "no default at all": {"c": {"type": "text", "default": None}},
+    "a check": {"c": {"type": "integer", "check": "c > 0"}},
+    "a reference": {"c": {"type": "integer", "references": "p.id"}},
+    "a reference with actions": {
+        "c": {
+            "type": "integer",
+            "references": "p.id",
+            "on_delete": "CASCADE",
+            "on_update": "SET NULL",
+        }
+    },
+    "every property at once": {
+        "id": {"type": "integer", "primary_key": True},
+        "c": {
+            "type": "text",
+            "nullable": False,
+            "unique": True,
+            "default": "(datetime('now'))",
+            "check": "length(c) > 0",
+            "references": "p.name",
+            "on_delete": "CASCADE",
+        },
+    },
+}
 
-    They differ in real behaviour, so merging them is a decision about which
-    behaviour is right. This holds the similarity where it is: a drift in
-    either direction means somebody changed one and not the other.
+
+@pytest.mark.parametrize("shape", sorted(_SHAPES), ids=sorted(_SHAPES))
+def test_the_two_generators_emit_the_same_sql(shape: str) -> None:
+    """The two create-table generators must agree on what they write.
+
+    IT USED TO COMPARE THEIR SOURCE TEXT, holding the similarity between 70
+    and 95 percent on the reasoning that drift in either direction meant
+    somebody had changed one and not the other. On 2026-08-22 both were
+    rewritten, independently, from `if` chains into dispatch tables. They came
+    out 51 percent alike while writing the same SQL, so the test failed on a
+    property nobody cares about and would have passed two generators that had
+    quietly diverged as long as they still read alike.
+
+    Comparing the output is the question the text was standing in for. It also
+    caught something the ratio never could: `table_reconstruction` wrote its
+    DEFAULT clause raw while the other called `sqlite_default`, so an
+    expression default lost a layer of parentheses on every rebuild.
     """
-    first, second = (_functions(m) for m in MODULES)
-    a = first.get("generate_create_table_sql")
-    b = second.get("_generate_create_table_sql")
+    from declaro_persistum.abstractions.reconstruction import (
+        generate_create_table_sql,
+    )
+    from declaro_persistum.abstractions.table_reconstruction import (
+        _generate_create_table_sql,
+    )
+    from declaro_persistum.types import NOTHING
 
-    assert a and b, "one of the two create-table generators is gone"
+    columns = _SHAPES[shape]
 
-    ratio = difflib.SequenceMatcher(None, a, b).ratio()
-    assert 0.70 <= ratio <= 0.95, (
-        f"the two create-table generators are now {ratio:.0%} alike, against "
-        f"84% on 2026-08-17. Above this they are a duplicate to merge; below "
-        f"it they have diverged and one of them changed alone."
+    assert generate_create_table_sql(
+        "t", columns, NOTHING
+    ) == _generate_create_table_sql("t", columns, NOTHING), (
+        f"the two create-table generators disagree on {shape}; a rebuild "
+        f"through one of them writes a table the other would not"
     )
 
 

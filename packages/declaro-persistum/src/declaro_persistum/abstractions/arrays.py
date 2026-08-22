@@ -12,6 +12,29 @@ from typing import Any
 from declaro_persistum.types import Dialect, Nothing, resolved
 
 
+def _refuse_unknown_dialect(dialect: str, known: dict) -> None:
+    """A dialect the table has no SQL for, named with the ones it has."""
+    raise ValueError(
+        f"cannot generate SQL for dialect {dialect!r}. "
+        f"Supported: {sorted(known)}."
+    )
+
+
+def _the_known_dialect(dialect: str, _known: dict) -> str:
+    """A dialect the table holds, handed back to look it up with."""
+    return dialect
+
+
+# Which of the two answers applies, so the table is read with [] and a dialect
+# it does not hold raises rather than returning None into the next line.
+_REFUSE_UNKNOWN_DIALECT: dict[bool, Callable[[str, dict], Any]] = {
+    True: _the_known_dialect,
+    False: _refuse_unknown_dialect,
+}
+
+
+
+
 def parse_array_type(type_str: str) -> str | None:
     """
     Parse array<element_type> type declaration.
@@ -25,9 +48,9 @@ def parse_array_type(type_str: str) -> str | None:
         parse_array_type("text") -> None
     """
     match = re.match(r"^array<(.+)>$", type_str.strip())
-    if match:
-        return match.group(1).strip()
-    return None
+    # A match object is one result or none, so reading it as a sequence of
+    # nought or one is the same question without the branch.
+    return next((m.group(1).strip() for m in [match] if m), None)
 
 
 def generate_junction_table(
@@ -182,12 +205,8 @@ def array_hydrate(rows: list[dict[str, Any]]) -> list[Any]:
     Returns:
         List of values sorted by position.
     """
-    if not rows:
-        return []
-
-    # Sort by position and extract values
-    sorted_rows = sorted(rows, key=lambda r: r["position"])
-    return [r["value"] for r in sorted_rows]
+    # No rows sorts to no rows, so the empty case needs no branch of its own.
+    return [r["value"] for r in sorted(rows, key=lambda r: r["position"])]
 
 
 def array_move_sql(parent_table: str, column_name: str) -> str:
@@ -252,12 +271,9 @@ def array_reindex_sql(parent_table: str, column_name: str, dialect: Dialect) -> 
     it could not be told from choosing it (Rule 14), and which engine this SQL
     is for is never something a caller can be assumed to have meant.
     """
-    generate = REINDEX_SQL.get(dialect)
-    if generate is None:
-        raise ValueError(
-            f"cannot generate reindex SQL for dialect {dialect!r}. "
-            f"Supported: {sorted(REINDEX_SQL)}."
-        )
+    # Read with [] so a dialect the table does not hold raises here.
+    _REFUSE_UNKNOWN_DIALECT[dialect in REINDEX_SQL](dialect, REINDEX_SQL)
+    generate = REINDEX_SQL[dialect]
     junction_name = f"{parent_table}_{column_name}"
     fk_column = f"{parent_table[:-1] if parent_table.endswith('s') else parent_table}_id"
     return generate(junction_name, fk_column)

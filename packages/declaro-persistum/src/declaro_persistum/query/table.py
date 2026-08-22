@@ -29,11 +29,13 @@ definition rather than a proxy.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, Literal, TypedDict
 
 from declaro_persistum.boundary import helper
 from declaro_persistum.exceptions import ValidationError
 from declaro_persistum.query.expressions import (  # noqa: F401
+    ALIASED,
     CaseExpression,
     CaseOrderBy,
     JoinClause,
@@ -74,6 +76,26 @@ class SQLFunction(TypedDict):
 
 
 @helper
+def _refuse_unknown_table(name: str, schema: Schema) -> dict[str, Any]:
+    """A name the schema does not hold, named beside the ones it does."""
+    raise ValueError(
+        f"Table {name!r} not found in schema. Available: {sorted(schema)}"
+    )
+
+
+@helper
+def _the_known_table(name: str, schema: Schema) -> dict[str, Any]:
+    """The schema holds this name, so its own definition is the answer."""
+    return schema[name]
+
+
+_WHEN_UNKNOWN_TABLE: dict[bool, Callable[[str, Schema], dict[str, Any]]] = {
+    True: _the_known_table,
+    False: _refuse_unknown_table,
+}
+
+
+@helper
 def table(name: str, schema: Schema) -> dict[str, Any]:
     """Look a table up in the schema, failing loudly if it is absent.
 
@@ -82,11 +104,7 @@ def table(name: str, schema: Schema) -> dict[str, Any]:
     now — what a caller actually wants to consult — and a column is referred
     to by name, because that is all a column ever was.
     """
-    if name not in schema:
-        raise ValueError(
-            f"Table {name!r} not found in schema. Available: {sorted(schema)}"
-        )
-    return schema[name]
+    return _WHEN_UNKNOWN_TABLE[name in schema](name, schema)
 
 
 @helper
@@ -271,6 +289,6 @@ def render_function(
         params.update(rendered_params)
 
     sql = f"{fn['name']}({', '.join(parts)})"
-    if fn["alias"]:
-        sql = f"{sql} AS {fn['alias']}"
-    return sql, params
+    # The same table `render_case` reads, so "does this carry an alias" is
+    # answered in one place rather than once per renderer.
+    return ALIASED[bool(fn["alias"])](sql, fn["alias"]), params

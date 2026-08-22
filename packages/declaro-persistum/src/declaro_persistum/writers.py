@@ -98,8 +98,7 @@ class WriteOne(Protocol):
     cannot disagree; `test_every_backend_can_be_opened` is what checks it.
     """
 
-    @boundary
-    async def __call__(
+    async def __call__(  # honest: ignore HC-R001: a Protocol member is a signature, and the four roles describe functions that run
         self, conn: Any, sql: str, params: Sequence[object]
     ) -> None:
         raise NotImplementedError("CODE NOT WRITTEN")

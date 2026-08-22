@@ -12,12 +12,59 @@ an expert stack tracer to figure out where they went wrong."
 # tuple that separates our defect from the engine's, and it can only do that
 # because the hierarchy exists. There is no composition available here.
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import Any
 
-from declaro_persistum.types import NOTHING, Nothing, resolved
+from declaro_persistum.types import NOTHING, Ambiguity, Nothing, Operation, resolved
 
-if TYPE_CHECKING:
-    from declaro_persistum.types import Ambiguity, Operation
+
+def _given(parts: tuple[str, ...]) -> list[str]:
+    """Every part that came out with something in it.
+
+    Six constructors assemble a message out of whichever context they were
+    handed, and each asked the same question once per field with its own `if`.
+    Each part is written as an expression now, and the empty ones drop out
+    here.
+    """
+    return [part for part in parts if part]
+
+
+def _shortened(text: str) -> str:
+    """SQL cut down for reading. The whole statement stays on the exception."""
+    return text if len(text) < 500 else text[:500] + "..."
+
+
+def _nowhere(_file: Any, _line: Any) -> str:
+    """Neither a file nor a line, so there is nowhere to point."""
+    return ""
+
+
+def _line_alone(_file: Any, line: Any) -> str:
+    """A line number and no file.
+
+    THIS USED TO PRINT NOTHING. The `if line` sat inside the `if file`, so a
+    caller who knew the line and not the file was told neither. A line number
+    on its own still narrows the search; dropping it in silence does not.
+    """
+    return f"\n\n  Line: {line}"
+
+
+def _file_alone(file: Any, _line: Any) -> str:
+    """A file and no line number."""
+    return f"\n\n  File: {file}"
+
+
+def _file_and_line(file: Any, line: Any) -> str:
+    """Both, which is the case a reader wants most."""
+    return f"\n\n  File: {file}, line {line}"
+
+
+_LOCATION: dict[tuple[bool, bool], Callable[[Any, Any], str]] = {
+    (False, False): _nowhere,
+    (False, True): _line_alone,
+    (True, False): _file_alone,
+    (True, True): _file_and_line,
+}
 
 
 class DeclaroError(Exception):
@@ -43,11 +90,7 @@ class SchemaError(DeclaroError):
         line = resolved(line, None)
         self.file = file
         self.line = line
-        location = ""
-        if file:
-            location = f"\n\n  File: {file}"
-            if line:
-                location += f", line {line}"
+        location = _LOCATION[(bool(file), bool(line))](file, line)
         super().__init__(f"{message}{location}")
 
 
@@ -59,12 +102,11 @@ class AmbiguityError(SchemaError):
     could be interpreted multiple ways (e.g., rename vs drop+add).
     """
 
-    def __init__(self, ambiguities: list["Ambiguity"]) -> None:
+    def __init__(self, ambiguities: list[Ambiguity]) -> None:
         self.ambiguities = ambiguities
-        messages = []
-        for amb in ambiguities:
-            messages.append(f"  - {amb['table']}: {amb['message']}")
-        ambiguity_list = "\n".join(messages)
+        ambiguity_list = "\n".join(
+            [f"  - {amb['table']}: {amb['message']}" for amb in ambiguities]
+        )
         super().__init__(
             f"Unresolved ambiguities detected ({len(ambiguities)} total):\n\n"
             f"{ambiguity_list}\n\n"
@@ -127,21 +169,24 @@ class DriftError(DeclaroError):
         self.last_snapshot = last_snapshot
         self.current_time = current_time
 
-        diff_lines = []
-        for diff in differences:
-            diff_lines.append(f"    {diff.get('symbol', '~')} {diff.get('description', 'Unknown')}")
-        diff_display = "\n".join(diff_lines)
+        diff_display = "\n".join(
+            [
+                f"    {diff.get('symbol', '~')} {diff.get('description', 'Unknown')}"
+                for diff in differences
+            ]
+        )
 
         # EACH TIMESTAMP STANDS ALONE. This read `if last_snapshot and
         # current_time`, so passing one without the other dropped BOTH, in
         # silence. "The database drifted, and I will not tell you when the
         # snapshot was taken because I do not know what time it is now" is not
         # a trade a caller would make.
-        stamps = [
-            f"  Last snapshot: {last_snapshot}" if last_snapshot else "",
-            f"  Current time:  {current_time}" if current_time else "",
-        ]
-        stamped = [line for line in stamps if line]
+        stamped = _given(
+            (
+                f"  Last snapshot: {last_snapshot}" if last_snapshot else "",
+                f"  Current time:  {current_time}" if current_time else "",
+            )
+        )
         timestamps = "\n\n" + "\n".join(stamped) if stamped else ""
 
         super().__init__(
@@ -173,9 +218,7 @@ class ConnectionError(DeclaroError):
         # sees it happen and no test reaches it.
         dialect = resolved(dialect, None)
         self.dialect = dialect
-        dialect_hint = ""
-        if dialect:
-            dialect_hint = f"\n\n  Dialect: {dialect}"
+        dialect_hint = f"\n\n  Dialect: {dialect}" if dialect else ""
         super().__init__(f"{message}{dialect_hint}")
 
 
@@ -191,7 +234,7 @@ class MigrationError(DeclaroError):
         self,
         message: str,
         *,
-        operation: "Operation | Nothing",
+        operation: Operation | Nothing,
         sql: str | Nothing,
         original_error: Exception | Nothing,
     ) -> None:
@@ -204,19 +247,16 @@ class MigrationError(DeclaroError):
         self.sql = sql
         self.original_error = original_error
 
-        details = []
-        if operation:
-            details.append(f"  Operation: {operation['op']} on {operation['table']}")
-        if sql:
-            # Truncate very long SQL
-            sql_display = sql if len(sql) < 500 else sql[:500] + "..."
-            details.append(f"  SQL: {sql_display}")
-        if original_error:
-            details.append(f"  Original error: {type(original_error).__name__}: {original_error}")  # honest: ignore HC-P005: the class name IS the message
-
-        details_str = "\n".join(details)
-        if details_str:
-            details_str = f"\n\n{details_str}"
+        details = _given(
+            (
+                f"  Operation: {operation['op']} on {operation['table']}" if operation else "",
+                f"  SQL: {_shortened(sql)}" if sql else "",
+                f"  Original error: {type(original_error).__name__}: {original_error}"  # honest: ignore HC-P005: the class name IS the message
+                if original_error
+                else "",
+            )
+        )
+        details_str = "\n\n" + "\n".join(details) if details else ""
 
         super().__init__(f"{message}{details_str}")
 
@@ -233,7 +273,7 @@ class RollbackError(MigrationError):
         self,
         message: str,
         *,
-        operation: "Operation | Nothing",
+        operation: Operation | Nothing,
         sql: str | Nothing,
         original_error: Exception | Nothing,
         rollback_error: Exception | Nothing,
@@ -245,13 +285,15 @@ class RollbackError(MigrationError):
         original_error = resolved(original_error, None)
         rollback_error = resolved(rollback_error, None)
         self.rollback_error = rollback_error
-        rollback_msg = ""
-        if rollback_error:
-            rollback_msg = (
+        rollback_msg = (
+            (
                 f"\n\n  CRITICAL: Rollback also failed!\n"
                 f"  Rollback error: {type(rollback_error).__name__}: {rollback_error}\n"  # honest: ignore HC-P005: the class name IS the message
                 f"  Manual database inspection required."
             )
+            if rollback_error
+            else ""
+        )
         super().__init__(
             f"{message}{rollback_msg}",
             operation=operation,
@@ -287,17 +329,14 @@ class ValidationError(SchemaError):
         self.column = column
         self.reference = reference
 
-        context = []
-        if table:
-            context.append(f"Table: {table}")
-        if column:
-            context.append(f"Column: {column}")
-        if reference:
-            context.append(f"Reference: {reference}")
-
-        context_str = ""
-        if context:
-            context_str = "\n  " + "\n  ".join(context)
+        context = _given(
+            (
+                f"Table: {table}" if table else "",
+                f"Column: {column}" if column else "",
+                f"Reference: {reference}" if reference else "",
+            )
+        )
+        context_str = "\n  " + "\n  ".join(context) if context else ""
 
         super().__init__(f"{message}{context_str}", file=NOTHING, line=NOTHING)
 
@@ -317,9 +356,7 @@ class LoaderError(SchemaError):
         # sees it happen and no test reaches it.
         path = resolved(path, None)
         self.path = path
-        path_str = ""
-        if path:
-            path_str = f"\n\n  Path: {path}"
+        path_str = f"\n\n  Path: {path}" if path else ""
         super().__init__(f"{message}{path_str}", file=NOTHING, line=NOTHING)
 
 
@@ -404,17 +441,16 @@ class TransferError(DeclaroError):
         self.table = table
         self.original_error = original_error
 
-        details = []
-        if phase:
-            details.append(f"Phase: {phase}")
-        if table:
-            details.append(f"Table: {table}")
-        if original_error:
-            details.append(f"Original error: {type(original_error).__name__}: {original_error}")  # honest: ignore HC-P005: the class name IS the message
-
-        details_str = ""
-        if details:
-            details_str = "\n\n  " + "\n  ".join(details)
+        details = _given(
+            (
+                f"Phase: {phase}" if phase else "",
+                f"Table: {table}" if table else "",
+                f"Original error: {type(original_error).__name__}: {original_error}"  # honest: ignore HC-P005: the class name IS the message
+                if original_error
+                else "",
+            )
+        )
+        details_str = "\n\n  " + "\n  ".join(details) if details else ""
 
         super().__init__(f"{message}{details_str}")
 
@@ -428,11 +464,13 @@ class NotSupportedError(DeclaroError):
     """
 
     def __init__(self, message: str, alternatives: list[str]) -> None:
-        if alternatives:
-            message += "\n\nOptions:\n" + "\n".join(
-                f"  {i + 1}. {alt}" for i, alt in enumerate(alternatives)
-            )
-        super().__init__(message)
+        options = (
+            "\n\nOptions:\n"
+            + "\n".join([f"  {i + 1}. {alt}" for i, alt in enumerate(alternatives)])
+            if alternatives
+            else ""
+        )
+        super().__init__(f"{message}{options}")
 
 
 A_BUG_IN_THIS_PACKAGE = (

@@ -7,7 +7,9 @@ Both SQLiteInspector and TursoInspector delegate shared logic here.
 
 import re
 from collections.abc import Callable
-from typing import Literal
+from functools import partial, reduce
+from itertools import accumulate
+from typing import Any, Literal
 
 from declaro_persistum.types import (
     Column,
@@ -50,89 +52,124 @@ _REWRAP: dict[bool, "Callable[[str], str]"] = {
 }
 
 
+# THE FK ACTIONS THIS PACKAGE CAN SPELL, keyed by the engine's own wording
+# with its spaces turned into underscores. `Column.on_delete` names these four
+# and no others, so an action outside the table -- `SET DEFAULT`, which both
+# engines accept in a table this package did not create -- has no spelling
+# here and reads back as none. That was true before this table existed and it
+# is written down rather than buried in a `.get` default.
+_FK_ACTIONS: dict[str, FKAction] = {
+    "cascade": "cascade",
+    "set_null": "set null",
+    "restrict": "restrict",
+    "no_action": "no action",
+}
+
+
 def normalize_fk_action(action: str | None) -> FKAction | None:
-    """Normalize FK action string to proper Literal type."""
-    if action is None or action == "NO ACTION":
-        return None
-    normalized = action.lower().replace(" ", "_")
-    action_map = {
-        "cascade": "cascade",
-        "set_null": "set null",
-        "restrict": "restrict",
-        "no_action": "no action",
-    }
-    return action_map.get(normalized)  # type: ignore[return-value]
+    """Normalize FK action string to proper Literal type.
+
+    `NO ACTION` as both engines write it is the absence of an action, so it
+    comes back as none: `test_no_action_is_the_absence_of_an_action.py` holds
+    that.
+    """
+    named = [
+        _FK_ACTIONS[spelling]
+        for text in [action]
+        if text is not None and text != "NO ACTION"
+        for spelling in [text.lower().replace(" ", "_")]
+        if spelling in _FK_ACTIONS
+    ]
+    return [*named, None][0]
+
+
+# THE DECLARED SPELLINGS SQLITE ACCEPTS, EACH BESIDE THE CLASS IT LANDS IN.
+# This was an if/elif chain whose order a reader had to hold in their head to
+# know which arm answered. The tuple is read in the order it is written and
+# the first answer wins, which is the only ordering that remains.
+_SQLITE_CLASS_BY_FRAGMENT: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("int",), "integer"),
+    (("char", "clob", "text"), "text"),
+    (("blob",), "blob"),
+    (("real", "floa", "doub"), "real"),
+)
 
 
 def normalize_sqlite_type(col_type: str) -> str:
-    """Normalize SQLite type to canonical form."""
-    if not col_type:
-        return "blob"
+    """Normalize SQLite type to canonical form.
 
-    col_type = col_type.lower().strip()
-
-    if "int" in col_type:
-        return "integer"
-    elif "char" in col_type or "clob" in col_type or "text" in col_type:
-        return "text"
-    elif "blob" in col_type or col_type == "":
-        return "blob"
-    elif "real" in col_type or "floa" in col_type or "doub" in col_type:
-        return "real"
-    else:
-        return "numeric"
-
-
+    A column declared with no type at all stores a blob, which is what SQLite
+    itself does with `CREATE TABLE t (c)`.
+    """
+    text = col_type.lower().strip()
+    answers = [
+        *["blob" for spelling in [text] if not spelling],
+        *[
+            canonical
+            for fragments, canonical in _SQLITE_CLASS_BY_FRAGMENT
+            if any(fragment in text for fragment in fragments)
+        ],
+        "numeric",
+    ]
+    return answers[0]
 
 
 def extract_view_query(create_statement: str) -> str:
     """Extract SELECT query from CREATE VIEW statement."""
     match = re.search(r"\bAS\s+(.+)$", create_statement, re.IGNORECASE | re.DOTALL)
-    if match:
-        return " ".join(match.group(1).split())
-    return ""
+    return " ".join(match.group(1).split()) if match else ""
+
+
+def _column_from_pragma_row(row: tuple) -> Column:
+    """One PRAGMA table_info row as a column definition.
+
+    A PK column is implicitly NOT NULL in SQL even when PRAGMA table_info
+    reports notnull=0 for it, so both facts set `nullable`.
+
+    PRAGMA table_info strips the outer parens off an expression default, so a
+    function call is re-wrapped to match the form the schema declares.
+    """
+    declared, not_null, default, is_pk = row[2], bool(row[3]), row[4], bool(row[5])
+    facts: list[tuple[str, Any]] = [
+        ("type", normalize_sqlite_type(declared)),
+        *[("nullable", False) for required in [not_null or is_pk] if required],
+        *[
+            ("default", applied_to_text(_rewrapped, value))
+            for value in [default]
+            if value is not None
+        ],
+        *[("primary_key", True) for keyed in [is_pk] if keyed],
+    ]
+    return dict(facts)  # type: ignore[return-value]
 
 
 def columns_from_pragma_rows(
     rows: list[tuple],
 ) -> dict[str, Column]:
     """Convert PRAGMA table_info rows to Column dict (pure)."""
-    columns: dict[str, Column] = {}
+    return {row[1]: _column_from_pragma_row(row) for row in rows}
 
-    for row in rows:
-        col_name = row[1]
-        col_type = row[2]
-        not_null = bool(row[3])
-        default = row[4]
-        is_pk = bool(row[5])
 
-        col: Column = {"type": normalize_sqlite_type(col_type)}
-
-        if not_null or is_pk:
-            # PK columns are implicitly NOT NULL in SQL even when
-            # PRAGMA table_info reports notnull=0 for them.
-            col["nullable"] = False
-
-        if default is not None:
-            # PRAGMA table_info strips outer parens from expression defaults.
-            # Re-wrap function-call expressions so they match the target schema form.
-            col["default"] = applied_to_text(_rewrapped, default)
-
-        if is_pk:
-            col["primary_key"] = True
-
-        columns[col_name] = col
-
-    return columns
+def _marked_unique(column: Column) -> Column:
+    """The column, carrying the flag its single-column unique index states."""
+    return {**column, "unique": True}
 
 
 def apply_unique_columns(
     columns: dict[str, Column], unique_cols: set[str]
 ) -> None:
-    """Mark unique columns (mutates columns in place)."""
-    for col_name in unique_cols:
-        if col_name in columns and not columns[col_name].get("primary_key"):
-            columns[col_name]["unique"] = True
+    """Mark unique columns (mutates columns in place).
+
+    A PK column is already unique and says so, so the flag is not repeated on
+    it.
+    """
+    columns.update(
+        {
+            name: _marked_unique(columns[name])
+            for name in unique_cols
+            if name in columns and not columns[name].get("primary_key")
+        }
+    )
 
 
 def unique_cols_from_index_rows(
@@ -140,19 +177,32 @@ def unique_cols_from_index_rows(
     index_info_rows: dict[str, list[tuple]],
 ) -> set[str]:
     """Extract single-column unique constraint columns from index data (pure)."""
-    unique_cols: set[str] = set()
+    return {
+        idx_cols[0][2]
+        for idx_row in index_rows
+        if bool(idx_row[2]) and idx_row[3] != "pk"
+        for idx_cols in [index_info_rows.get(idx_row[1], [])]
+        if len(idx_cols) == 1
+    }
 
-    for idx_row in index_rows:
-        idx_name = idx_row[1]
-        is_unique = bool(idx_row[2])
-        origin = idx_row[3]
 
-        if is_unique and origin != "pk":
-            idx_cols = index_info_rows.get(idx_name, [])
-            if len(idx_cols) == 1:
-                unique_cols.add(idx_cols[0][2])
+def _where_clause_of(sql: str) -> str:
+    """The partial-index condition a CREATE INDEX statement carries."""
+    return sql[sql.upper().index(" WHERE ") + 7 :].strip()
 
-    return unique_cols
+
+def _index_from_row(unique: bool, columns: list[str], sql: str | None) -> Index:
+    """One index, from its uniqueness, its columns and its own DDL."""
+    facts: list[tuple[str, Any]] = [
+        ("columns", columns),
+        *[("unique", True) for distinct in [unique] if distinct],
+        *[
+            ("where", _where_clause_of(text))
+            for text in [sql]
+            if text and " WHERE " in text.upper()
+        ],
+    ]
+    return dict(facts)  # type: ignore[return-value]
 
 
 def indexes_from_rows(
@@ -160,55 +210,37 @@ def indexes_from_rows(
     index_info_rows: dict[str, list[tuple]],
     index_sql: dict[str, str | None],
 ) -> dict[str, Index]:
-    """Build Index dict from index list/info/sql data (pure)."""
-    indexes: dict[str, Index] = {}
+    """Build Index dict from index list/info/sql data (pure).
 
-    for idx_row in index_rows:
-        idx_name = idx_row[1]
-        is_unique = bool(idx_row[2])
-        origin = idx_row[3]
+    A `pk` INDEX IS ALWAYS A CONSEQUENCE; A `u` INDEX IS ONLY SOMETIMES.
+    This skipped both, with the note: "they are consequences of a column
+    definition, not objects a caller declared, and reporting them would
+    make the differ try to recreate them."
 
-        idx_cols = index_info_rows.get(idx_name, [])
-        columns = [row[2] for row in idx_cols]
+    True of a single-column unique. SQLite creates the index itself for
+    `"email" TEXT UNIQUE`, and `apply_unique_columns` folds it back onto
+    the column as `unique: True`, so the fact lives on the column and
+    the index does not need to carry it.
 
-        # A `pk` INDEX IS ALWAYS A CONSEQUENCE; A `u` INDEX IS ONLY SOMETIMES.
-        # This skipped both, with the note: "they are consequences of a column
-        # definition, not objects a caller declared, and reporting them would
-        # make the differ try to recreate them."
-        #
-        # True of a single-column unique. SQLite creates the index itself for
-        # `"email" TEXT UNIQUE`, and `apply_unique_columns` folds it back onto
-        # the column as `unique: True`, so the fact lives on the column and
-        # the index does not need to carry it.
-        #
-        # A MULTI-COLUMN UNIQUE HAS NO COLUMN TO FOLD ONTO. It is a
-        # table-level constraint somebody wrote by hand, and skipping it lost
-        # the fact rather than moving it. Measured 2026-08-19 against a table
-        # this package did not create:
-        #
-        #     CREATE TABLE "t" (..., UNIQUE ("c","d"))
-        #     introspect -> indexes: None, and nothing on either column
-        #
-        # Invisible, so a rebuild wrote the table back without it and the
-        # duplicates it was refusing started being accepted.
-        if origin == "pk":
-            continue
-        if origin == "u" and len(columns) <= 1:
-            continue
+    A MULTI-COLUMN UNIQUE HAS NO COLUMN TO FOLD ONTO. It is a
+    table-level constraint somebody wrote by hand, and skipping it lost
+    the fact rather than moving it. Measured 2026-08-19 against a table
+    this package did not create:
 
-        index: Index = {"columns": columns}
+        CREATE TABLE "t" (..., UNIQUE ("c","d"))
+        introspect -> indexes: None, and nothing on either column
 
-        if is_unique:
-            index["unique"] = True
-
-        sql = index_sql.get(idx_name)
-        if sql and " WHERE " in sql.upper():
-            where_idx = sql.upper().index(" WHERE ")
-            index["where"] = sql[where_idx + 7:].strip()
-
-        indexes[idx_name] = index
-
-    return indexes
+    Invisible, so a rebuild wrote the table back without it and the
+    duplicates it was refusing started being accepted.
+    """
+    return {
+        name: _index_from_row(unique, columns, index_sql.get(name))
+        for idx_row in index_rows
+        for name, unique, origin in [(idx_row[1], bool(idx_row[2]), idx_row[3])]
+        if origin != "pk"
+        for columns in [[row[2] for row in index_info_rows.get(name, [])]]
+        if not (origin == "u" and len(columns) <= 1)
+    }
 
 
 def fk_list_from_pragma_rows(rows: list[tuple]) -> list[dict[str, str]]:
@@ -243,6 +275,53 @@ def as_literal(name: str) -> str:
     return name.replace("\'", "\'\'")
 
 
+def _with_foreign_key(
+    columns: dict[str, Column], fk: dict[str, str]
+) -> dict[str, Column]:
+    """The columns, with one key folded onto the column it leaves from.
+
+    A FOLD RATHER THAN A COMPREHENSION, because two keys can leave the same
+    column. Each one is merged onto the answer the one before it gave, which
+    is what the loop this replaced did; building every column from the
+    original would let the second key drop the first key's action.
+    """
+    name = fk["from"]
+    merged = [
+        (name, _pointing_at(columns[name], fk))
+        for present in [name]
+        if present in columns
+    ]
+    return {**columns, **dict(merged)}
+
+
+def _pointing_at(column: Column, fk: dict[str, str]) -> Column:
+    """One column, carrying the key that leaves it.
+
+    An action the engine reports as NO ACTION, or in words this package has
+    no spelling for, is left off rather than written down as something else.
+    """
+    facts: list[tuple[str, Any]] = [
+        *column.items(),
+        ("references", f"{fk['table']}.{fk['to']}"),
+        *[
+            ("on_delete", action)
+            for action in [normalize_fk_action(fk.get("on_delete"))]
+            if action
+        ],
+        *[
+            ("on_update", action)
+            for action in [normalize_fk_action(fk.get("on_update"))]
+            if action
+        ],
+    ]
+    return dict(facts)  # type: ignore[return-value]
+
+
+def _without_primary_key(column: Column) -> Column:
+    """A member of a composite key, whose flag now sits on the table."""
+    return {key: value for key, value in column.items() if key != "primary_key"}
+
+
 def assemble_table(
     columns: dict[str, Column],
     indexes: dict[str, Index],
@@ -250,35 +329,24 @@ def assemble_table(
     constraints: dict[str, dict[str, str]],
 ) -> Table:
     """Merge FK info into columns and build Table dict (pure)."""
-    for fk in foreign_keys:
-        col_name = fk["from"]
-        if col_name in columns:
-            columns[col_name]["references"] = f"{fk['table']}.{fk['to']}"
-            on_delete = normalize_fk_action(fk.get("on_delete"))
-            if on_delete:
-                columns[col_name]["on_delete"] = on_delete
-            on_update = normalize_fk_action(fk.get("on_update"))
-            if on_update:
-                columns[col_name]["on_update"] = on_update
+    columns.update(reduce(_with_foreign_key, foreign_keys, dict(columns)))
 
-    table: Table = {"columns": columns}
+    # A SINGLE PK STAYS ON ITS COLUMN; two or more become the table's key and
+    # come off the columns, so the two spellings do not both describe it.
+    named = [name for name, col in columns.items() if col.get("primary_key")]
+    composite = named if len(named) > 1 else []
+    columns.update({name: _without_primary_key(columns[name]) for name in composite})
 
-    pk_columns = [name for name, col in columns.items() if col.get("primary_key")]
-    if len(pk_columns) > 1:
-        table["primary_key"] = pk_columns
-        for col_name in pk_columns:
-            del columns[col_name]["primary_key"]
-
-    if indexes:
-        table["indexes"] = indexes
-
-    # REQUIRED, NOT DEFAULTED. A caller that forgets them gets a TypeError
-    # rather than a table reported as having none, which is the state that
-    # made a declared constraint be proposed on every deploy.
-    if constraints:
-        table["constraints"] = constraints  # type: ignore[typeddict-item]
-
-    return table
+    # REQUIRED, NOT DEFAULTED. A caller that forgets constraints gets a
+    # TypeError rather than a table reported as having none, which is the
+    # state that made a declared constraint be proposed on every deploy.
+    facts: list[tuple[str, Any]] = [
+        ("columns", columns),
+        *[("primary_key", composite) for keys in [composite] if keys],
+        *[("indexes", indexes) for declared in [indexes] if declared],
+        *[("constraints", constraints) for declared in [constraints] if declared],
+    ]
+    return dict(facts)  # type: ignore[return-value]
 
 
 def views_from_rows(
@@ -305,21 +373,125 @@ def views_from_rows(
     `matviews` maps name to (query, refresh_strategy), read from the metadata
     table by the caller. I/O stays with the caller; this stays pure.
     """
-    views: dict[str, View] = {}
-    for name, sql in rows:
-        views[name] = {
-            "name": name,
-            "query": extract_view_query(sql),
-            "materialized": False,
-        }
-    for name, (query, refresh) in matviews.items():
-        views[name] = {
-            "name": name,
-            "query": query,
-            "materialized": True,
-            "refresh": refresh,
-        }
-    return views
+    return {
+        **{
+            name: {
+                "name": name,
+                "query": extract_view_query(sql),
+                "materialized": False,
+            }
+            for name, sql in rows
+        },
+        **{
+            name: {
+                "name": name,
+                "query": query,
+                "materialized": True,
+                "refresh": refresh,
+            }
+            for name, (query, refresh) in matviews.items()
+        },
+    }
+
+
+# =============================================================================
+# Reading SQL text: depth, quotes and the two scanners built on them
+# =============================================================================
+
+# WHAT ONE CHARACTER DOES TO THE PARENTHESIS DEPTH. Everything else does
+# nothing, which the sum over a one-element list says without a branch.
+_DEPTH_CHANGE: dict[str, int] = {"(": 1, ")": -1}
+
+
+def _depth_delta(char: str) -> int:
+    """How far this character moves the parenthesis depth: 1, -1 or 0."""
+    return sum(_DEPTH_CHANGE[opener] for opener in [char] if opener in _DEPTH_CHANGE)
+
+
+def _paren_depths(text: str) -> list[int]:
+    """The depth after each character, with the depth before any of them first.
+
+    `_paren_depths(t)[i + 1]` is the depth once `t[i]` has been read, so the
+    positions where the outermost pair closes are the ones holding zero.
+    """
+    return list(accumulate((_depth_delta(char) for char in text), initial=0))
+
+
+def _no_body(_create_statement: str) -> None:
+    """The statement has no opening parenthesis, so it declares no body."""
+    return None
+
+
+def _body_between(create_statement: str) -> str | None:
+    """What the first parenthesis holds, or None when it never closes."""
+    start = create_statement.find("(")
+    depths = _paren_depths(create_statement[start:])
+    closes = [offset for offset, depth in enumerate(depths[1:]) if depth == 0]
+    bodies = [create_statement[start + 1 : start + offset] for offset in closes[:1]]
+    return [*bodies, None][0]
+
+
+_TABLE_BODY: dict[bool, Callable[[str], str | None]] = {
+    True: _no_body,
+    False: _body_between,
+}
+
+
+def _table_body(create_statement: str) -> str | None:
+    """What sits between the outermost parentheses of a CREATE TABLE."""
+    return _TABLE_BODY[create_statement.find("(") == -1](create_statement)
+
+
+def _keeps_the_text(text: str) -> str:
+    """No leading CHECK keyword, so the expression is already alone."""
+    return text
+
+
+def _drops_the_keyword(text: str) -> str:
+    """PostgreSQL spells the whole clause, so the keyword comes off."""
+    return text[len("CHECK") :].strip()
+
+
+_CHECK_PREFIX: dict[bool, Callable[[str], str]] = {
+    True: _drops_the_keyword,
+    False: _keeps_the_text,
+}
+
+
+def _closes_before_the_end(text: str) -> bool:
+    """Whether the opening parenthesis is matched before the last character.
+
+    `(a OR b) AND c` closes at position 7 of 14, so its parens wrap a part
+    rather than the whole and stripping them would change what it means.
+    """
+    depths = _paren_depths(text)
+    closes = [offset for offset, depth in enumerate(depths[1:]) if depth == 0]
+    return closes[:1] not in ([], [len(text) - 1])
+
+
+def _as_written(text: str) -> str:
+    """The parentheses do not wrap the whole expression, so they stay."""
+    return text
+
+
+def _one_layer_off(text: str) -> str:
+    """The outer pair wraps everything, so it comes off and the rest is asked."""
+    return _unwrapped(text[1:-1].strip())
+
+
+_UNWRAP: dict[bool, Callable[[str], str]] = {
+    True: _one_layer_off,
+    False: _as_written,
+}
+
+
+def _unwrapped(text: str) -> str:
+    """Outer parens off, as many times as a pair wraps the whole expression."""
+    return _UNWRAP[
+        text.startswith("(")
+        and text.endswith(")")
+        and not _closes_before_the_end(text)
+    ](text)
 
 
 def normalize_check(expression: str) -> str:
@@ -339,20 +511,185 @@ def normalize_check(expression: str) -> str:
     would turn it into `a OR b) AND c` and change what it means.
     """
     text = " ".join(expression.split())
-    if text.upper().startswith("CHECK"):
-        text = text[len("CHECK") :].strip()
+    return _unwrapped(_CHECK_PREFIX[text.upper().startswith("CHECK")](text))
 
-    while text.startswith("(") and text.endswith(")"):
-        depth = 0
-        for position, char in enumerate(text):
-            if char == "(":
-                depth += 1
-            elif char == ")":
-                depth -= 1
-                if depth == 0 and position != len(text) - 1:
-                    return text
-        text = text[1:-1].strip()
-    return text
+
+# SQLite quotes an identifier four ways, and three of them can hold a space
+# or a comma: "name", `name`, [name]. Taking `clause.split()[0]` ended the
+# name at its first space, and a splitter tracking only ' and " split
+# a clause in half at the comma inside `[a,b]`.
+_CLOSING = {'"': '"', "`": "`", "[": "]"}
+
+# The same four openers, read the other way: which character ends the name
+# this one begins. `'` is here and not in _CLOSING because a string literal
+# opens a quote for the splitter but is not an identifier.
+_OPENING = {"'": "'", '"': '"', "`": "`", "[": "]"}
+
+# THE CHECK SCANNER READS ONLY STRING LITERALS. A quoted identifier there is
+# ordinary text between parens, and treating `[` as a quote inside a column
+# clause would swallow `DECIMAL[10]`.
+_LITERAL_QUOTES = {"'": "'", '"': '"'}
+
+# (parenthesis depth, the character that would close the open quote).
+_ScanState = tuple[int, str]
+
+
+def _still_open(quote: str, _char: str) -> str:
+    """This character is not the one that closes the open quote."""
+    return quote
+
+
+def _now_closed(_quote: str, _char: str) -> str:
+    """The character matched the open quote, so nothing is quoted after it."""
+    return ""
+
+
+_QUOTE_AFTER: dict[bool, Callable[[str, str], str]] = {
+    True: _now_closed,
+    False: _still_open,
+}
+
+
+def _inside_quote(
+    _openers: dict[str, str], depth: int, quote: str, char: str
+) -> _ScanState:
+    """Depth is frozen inside a quoted name or a string literal."""
+    return depth, _QUOTE_AFTER[char == quote](quote, char)
+
+
+def _outside_quote(
+    openers: dict[str, str], depth: int, _quote: str, char: str
+) -> _ScanState:
+    """A parenthesis moves the depth and an opener starts a quote.
+
+    No character does both: `(` and `)` are in neither opener table.
+    """
+    return depth + _depth_delta(char), "".join(
+        openers[opener] for opener in [char] if opener in openers
+    )
+
+
+_SCAN_STEP: dict[bool, Callable[[dict[str, str], int, str, str], _ScanState]] = {
+    True: _inside_quote,
+    False: _outside_quote,
+}
+
+
+def _step(openers: dict[str, str], state: _ScanState, char: str) -> _ScanState:
+    """The state one character further on."""
+    depth, quote = state
+    return _SCAN_STEP[bool(quote)](openers, depth, quote, char)
+
+
+def _scanned(text: str, openers: dict[str, str]) -> list[_ScanState]:
+    """The state standing before each character of `text`, and after the last."""
+    return list(accumulate(text, partial(_step, openers), initial=(0, "")))
+
+
+def _quoted_identifier(text: str, closing: str) -> tuple[str, bool] | None:
+    """The name inside a quote, or None when the quote never closes."""
+    end = text.find(closing, 1)
+    named = [(text[1:end], True) for position in [end] if position != -1]
+    return [*named, None][0]
+
+
+def _bare_identifier(text: str) -> tuple[str, bool]:
+    """The name up to the first space, comma or parenthesis."""
+    ends = [
+        position
+        for position, char in enumerate(text)
+        if char.isspace() or char in "(,"
+    ]
+    stopped = [(text[:position], False) for position in ends[:1]]
+    return [*stopped, (text, False)][0]
+
+
+def _leading_identifier(clause: str) -> tuple[str, bool] | None:
+    """The column name a clause opens with, and whether it was quoted.
+
+    Returns None for an empty clause. The QUOTED flag matters: a bare leading
+    `CHECK` or `PRIMARY` starts a table-level constraint, and a quoted one is
+    a column called that.
+
+    FOUND BY FUZZING, with SQLite choosing the inputs:
+
+        CREATE TABLE t (id TEXT, "CHECK" INTEGER CHECK ("CHECK" > 0))
+
+    is a legal table with a column named CHECK, and treating the name as a
+    keyword dropped its constraint -- which means comparing it against None on
+    every deploy, the migration loop this scanner exists to avoid. I would not
+    have thought of that column name.
+    """
+    text = clause.lstrip()
+    answers = [
+        *[_quoted_identifier(text, _CLOSING[char]) for char in text[:1] if char in _CLOSING],
+        *[_bare_identifier(text) for char in text[:1] if char not in _CLOSING],
+        None,
+    ]
+    return answers[0]
+
+
+def _split_top_level(body: str) -> list[str]:
+    """Split on commas that are not inside parentheses or a string literal."""
+    states = _scanned(body, _OPENING)
+    cuts = [
+        position
+        for position, char in enumerate(body)
+        if char == "," and states[position] == (0, "")
+    ]
+    bounds = [-1, *cuts, len(body)]
+    # Each cut paired with the next one. `zip(bounds, bounds[1:], strict=True)`
+    # cannot express this: the two always differ in length by one, so strict
+    # raises on every call. Indexing says what is meant and needs no flag.
+    segments = [
+        body[bounds[i] + 1 : bounds[i + 1]] for i in range(len(bounds) - 1)
+    ]
+    # EVERY SEGMENT BEFORE A COMMA IS A CLAUSE, even an empty one, so `a,,b`
+    # keeps its middle. What follows the last comma is a clause only when
+    # something follows it, so a trailing comma adds nothing.
+    return [segment.strip() for segment in segments[:-1]] + [
+        segment.strip() for segment in segments[-1:] if segment
+    ]
+
+
+def _before(clause: str, position: int) -> str:
+    """The character in front of this one, or a space at the start."""
+    return clause[position - 1] if position else " "
+
+
+def _expression_at(clause: str, position: int) -> str | None:
+    """The CHECK expression starting at `position`, normalised."""
+    rest = clause[position + 5 :].lstrip()
+    return applied_to_text(normalize_check, _table_body(rest))
+
+
+def _check_in(clause: str) -> str | None:
+    """The CHECK expression in one column clause, or None.
+
+    Finds the KEYWORD, not the substring: `checksum TEXT` names no constraint,
+    and a default of `'CHECK (x > 1)'` is a value.
+    """
+    states = _scanned(clause, _LITERAL_QUOTES)
+    starts = [
+        position
+        for position in range(len(clause))
+        if states[position] == (0, "")
+        and clause[position : position + 5].upper() == "CHECK"
+        and not _before(clause, position).isalnum()
+        and _before(clause, position) != "_"
+        and clause[position + 5 : position + 6] in (" ", "(")
+        and clause[position + 5 :].lstrip().startswith("(")
+    ]
+    found: list[Any] = [_expression_at(clause, position) for position in starts[:1]]
+    return [*found, None][0]
+
+
+# The keywords that open a table-level clause. A leading one of these names no
+# column, and a QUOTED one does, which is why `_leading_identifier` reports
+# both the name and how it was written.
+_TABLE_LEVEL_KEYWORDS = frozenset(
+    {"CHECK", "PRIMARY", "FOREIGN", "UNIQUE", "CONSTRAINT"}
+)
 
 
 def table_constraints_from_ddl(create_statement: str) -> dict[str, dict[str, str]]:
@@ -375,26 +712,28 @@ def table_constraints_from_ddl(create_statement: str) -> dict[str, dict[str, str
     `constraint_clause` writes `CONSTRAINT "<name>"`.
     """
     body = _table_body(create_statement)
-    if body is None:
-        return {}
-
-    constraints: dict[str, dict[str, str]] = {}
-    for clause in _split_top_level(body):
-        stripped = clause.strip()
-        if not stripped.upper().startswith("CONSTRAINT"):
-            continue
-        remainder = stripped[len("CONSTRAINT") :].strip()
-        leading = _leading_identifier(remainder)
-        if leading is None:
-            continue
-        name, _quoted = leading
-        rest = remainder[remainder.index(name) + len(name) :].lstrip('" ').strip()
-        if not rest.upper().startswith("CHECK"):
-            continue
-        expression = _check_in(rest)
-        if expression is not None:
-            constraints[name] = {"type": "check", "expression": expression}
-    return constraints
+    named = [
+        (remainder, leading)
+        for clause in _split_top_level("" if body is None else body)
+        for stripped in [clause.strip()]
+        if stripped.upper().startswith("CONSTRAINT")
+        for remainder in [stripped[len("CONSTRAINT") :].strip()]
+        for leading in [_leading_identifier(remainder)]
+        if leading is not None
+    ]
+    checked = [
+        (name, _check_in(rest))
+        for remainder, (name, _quoted) in named
+        for rest in [
+            remainder[remainder.index(name) + len(name) :].lstrip('" ').strip()
+        ]
+        if rest.upper().startswith("CHECK")
+    ]
+    return {
+        name: {"type": "check", "expression": expression}
+        for name, expression in checked
+        if expression is not None
+    }
 
 
 def checks_from_ddl(create_statement: str) -> dict[str, str]:
@@ -413,151 +752,13 @@ def checks_from_ddl(create_statement: str) -> dict[str, str]:
     default of `'CHECK (x > 1)'` is a value and `s IN ('x', 'y')` closes twice.
     """
     body = _table_body(create_statement)
-    if body is None:
-        return {}
-
-    checks: dict[str, str] = {}
-    for clause in _split_top_level(body):
-        leading = _leading_identifier(clause)
-        if leading is None:
-            continue
-        column, was_quoted = leading
-        if not was_quoted and column.upper() in (
-            "CHECK",
-            "PRIMARY",
-            "FOREIGN",
-            "UNIQUE",
-            "CONSTRAINT",
-        ):
-            continue
-        expression = _check_in(clause)
-        if expression is not None:
-            checks[column] = expression
-    return checks
-
-
-# SQLite quotes an identifier four ways, and three of them can hold a space
-# or a comma: "name", `name`, [name]. Taking `clause.split()[0]` ended the
-# name at its first space, and `_split_top_level` tracking only ' and " split
-# a clause in half at the comma inside `[a,b]`.
-_CLOSING = {'"': '"', "`": "`", "[": "]"}
-
-# The same four openers, read the other way: which character ends the name
-# this one begins. `'` is here and not in _CLOSING because a string literal
-# opens a quote for the splitter but is not an identifier.
-_OPENING = {"'": "'", '"': '"', "`": "`", "[": "]"}
-
-
-def _leading_identifier(clause: str) -> tuple[str, bool] | None:
-    """The column name a clause opens with, and whether it was quoted.
-
-    Returns None for an empty clause. The QUOTED flag matters: a bare leading
-    `CHECK` or `PRIMARY` starts a table-level constraint, and a quoted one is
-    a column called that.
-
-    FOUND BY FUZZING, with SQLite choosing the inputs:
-
-        CREATE TABLE t (id TEXT, "CHECK" INTEGER CHECK ("CHECK" > 0))
-
-    is a legal table with a column named CHECK, and treating the name as a
-    keyword dropped its constraint -- which means comparing it against None on
-    every deploy, the migration loop this scanner exists to avoid. I would not
-    have thought of that column name.
-    """
-    text = clause.lstrip()
-    if not text:
-        return None
-
-    closing = _CLOSING.get(text[0])
-    if closing:
-        end = text.find(closing, 1)
-        return (text[1:end], True) if end != -1 else None
-
-    for position, char in enumerate(text):
-        if char.isspace() or char in "(,":
-            return text[:position], False
-    return text, False
-
-
-def _table_body(create_statement: str) -> str | None:
-    """What sits between the outermost parentheses of a CREATE TABLE."""
-    start = create_statement.find("(")
-    if start == -1:
-        return None
-    depth = 0
-    for position in range(start, len(create_statement)):
-        char = create_statement[position]
-        if char == "(":
-            depth += 1
-        elif char == ")":
-            depth -= 1
-            if depth == 0:
-                return create_statement[start + 1 : position]
-    return None
-
-
-def _split_top_level(body: str) -> list[str]:
-    """Split on commas that are not inside parentheses or a string literal."""
-    parts: list[str] = []
-    current: list[str] = []
-    depth = 0
-    quote: str | None = None
-    for char in body:
-        if quote:
-            current.append(char)
-            if char == quote:
-                quote = None
-            continue
-        # THE QUOTE TABLE ALREADY EXISTS, thirty lines above. This was an
-        # if/elif chain re-deciding which characters open a quoted name, so
-        # the two could disagree about `[name]` and only one would be fixed.
-        if char in _OPENING:
-            quote = _OPENING[char]
-        elif char == "(":
-            depth += 1
-        elif char == ")":
-            depth -= 1
-        elif char == "," and depth == 0:
-            parts.append("".join(current).strip())
-            current = []
-            continue
-        current.append(char)
-    if current:
-        parts.append("".join(current).strip())
-    return parts
-
-
-def _check_in(clause: str) -> str | None:
-    """The CHECK expression in one column clause, or None.
-
-    Finds the KEYWORD, not the substring: `checksum TEXT` names no constraint,
-    and a default of `'CHECK (x > 1)'` is a value.
-    """
-    depth = 0
-    quote: str | None = None
-    position = 0
-    while position < len(clause):
-        char = clause[position]
-        if quote:
-            if char == quote:
-                quote = None
-            position += 1
-            continue
-        if char in "'\"":
-            quote = char
-            position += 1
-            continue
-        if char == "(":
-            depth += 1
-        elif char == ")":
-            depth -= 1
-        elif depth == 0 and clause[position : position + 5].upper() == "CHECK":
-            before = clause[position - 1] if position else " "
-            after = clause[position + 5 : position + 6]
-            if not before.isalnum() and before != "_" and (after in (" ", "(")):
-                rest = clause[position + 5 :].lstrip()
-                if rest.startswith("("):
-                    inner = _table_body(rest)
-                    return normalize_check(inner) if inner is not None else None
-        position += 1
-    return None
+    return {
+        column: expression
+        for clause in _split_top_level("" if body is None else body)
+        for leading in [_leading_identifier(clause)]
+        if leading is not None
+        for column, was_quoted in [leading]
+        if was_quoted or column.upper() not in _TABLE_LEVEL_KEYWORDS
+        for expression in [_check_in(clause)]
+        if expression is not None
+    }

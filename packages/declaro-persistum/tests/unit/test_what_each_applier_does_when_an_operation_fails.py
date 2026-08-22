@@ -39,12 +39,11 @@ from declaro_persistum.applier import postgresql as pg_applier
 from declaro_persistum.applier import sqlite as sqlite_applier
 from declaro_persistum.applier import turso as turso_applier
 from declaro_persistum.exceptions import MigrationError
+from tests.conftest import probe_url
 
 pytestmark = [pytest.mark.precommit]
 
-PROBE_URL = os.environ.get(
-    "TEST_POSTGRESQL_URL", "postgresql://postgres:postgres@localhost/declaro_probe"
-)
+PROBE_URL = probe_url()
 
 MODES = {
     "sqlite": "all_or_nothing",

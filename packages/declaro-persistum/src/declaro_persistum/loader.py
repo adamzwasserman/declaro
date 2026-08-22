@@ -8,6 +8,7 @@ import re
 import tomllib
 from collections.abc import Callable
 from datetime import UTC, datetime
+from itertools import islice
 from pathlib import Path
 from typing import Any, cast
 
@@ -26,7 +27,54 @@ from declaro_persistum.types import (
     View,
     resolved,
     type_of,
+    written_as,
 )
+
+# THE THREE ROOT FILES THAT ARE NOT A DECLARATION. `snapshot.toml` is what
+# was last applied and `pending.toml` is an unanswered question, so reading
+# either as a declaration would compare a state against itself. `schema.toml`
+# is a declaration and is read just before this list is used, so it is here
+# only to keep it from being read twice.
+_NOT_A_DECLARATION = ("snapshot.toml", "pending.toml", "schema.toml")
+
+
+@helper
+def _refuse_a_missing_directory(schema_path: Path) -> Path:
+    """The caller named a directory that is not there."""
+    raise LoaderError("Schema directory does not exist", path=str(schema_path))
+
+
+@helper
+def _the_directory(schema_path: Path) -> Path:
+    """The directory is there, so it is the one to read."""
+    return schema_path
+
+
+_THE_SCHEMA_DIRECTORY: dict[bool, Callable[[Path], Path]] = {
+    True: _the_directory,
+    False: _refuse_a_missing_directory,
+}
+
+
+@helper
+def _refuse_an_empty_schema(_schema: Schema, schema_path: Path) -> Schema:
+    """Every file was read and none of them declared a table."""
+    raise LoaderError(
+        f"No schema files found. Expected .toml files in {schema_path} or {schema_path}/tables/",
+        path=str(schema_path),
+    )
+
+
+@helper
+def _the_schema(schema: Schema, _schema_path: Path) -> Schema:
+    """At least one table was declared, so this is the schema."""
+    return schema
+
+
+_A_SCHEMA_WAS_FOUND: dict[bool, Callable[[Schema, Path], Schema]] = {
+    True: _the_schema,
+    False: _refuse_an_empty_schema,
+}
 
 
 @boundary
@@ -52,42 +100,33 @@ def load_schema(schema_dir: str | Path) -> Schema:
     Raises:
         LoaderError: If files cannot be read or parsed
     """
-    schema_path = Path(schema_dir)
+    named = Path(schema_dir)
+    schema_path = _THE_SCHEMA_DIRECTORY[named.exists()](named)
 
-    if not schema_path.exists():
-        raise LoaderError("Schema directory does not exist", path=str(schema_path))
+    # THE READING ORDER, AS A LIST. `tables/` first, then `schema.toml`, then
+    # every other `.toml` in the root. A later file wins over an earlier one
+    # declaring the same table, which is what the three `dict.update` calls
+    # this replaces did.
+    #
+    # `glob` on a directory that is not there yields nothing, and so does
+    # `glob` on a file, so `tables/` needs no test before it is read.
+    declarations = [
+        *(schema_path / "tables").glob("*.toml"),
+        *[root for root in [schema_path / "schema.toml"] if root.exists()],
+        *[
+            other
+            for other in schema_path.glob("*.toml")
+            if other.name not in _NOT_A_DECLARATION
+        ],
+    ]
 
-    schema: Schema = {}
+    schema: Schema = {
+        table_name: table
+        for toml_file in declarations
+        for table_name, table in _load_toml_file(toml_file).items()
+    }
 
-    # Check for tables/ subdirectory
-    tables_dir = schema_path / "tables"
-    if tables_dir.exists() and tables_dir.is_dir():
-        for toml_file in tables_dir.glob("*.toml"):
-            table_schema = _load_toml_file(toml_file)
-            schema.update(table_schema)
-
-    # Also check for schema.toml in root
-    schema_file = schema_path / "schema.toml"
-    if schema_file.exists():
-        root_schema = _load_toml_file(schema_file)
-        schema.update(root_schema)
-
-    # Check for any .toml files in root (except snapshot and pending)
-    for toml_file in schema_path.glob("*.toml"):
-        if toml_file.name in ("snapshot.toml", "pending.toml"):
-            continue
-        if toml_file.name == "schema.toml":
-            continue  # Already handled
-        table_schema = _load_toml_file(toml_file)
-        schema.update(table_schema)
-
-    if not schema:
-        raise LoaderError(
-            f"No schema files found. Expected .toml files in {schema_path} or {schema_path}/tables/",
-            path=str(schema_path),
-        )
-
-    return schema
+    return _A_SCHEMA_WAS_FOUND[bool(schema)](schema, schema_path)
 
 
 @boundary
@@ -101,20 +140,68 @@ def _load_toml_file(path: Path) -> Schema:
     except OSError as e:
         raise LoaderError(f"Cannot read file: {e}", path=str(path)) from e
 
-    # Filter out metadata keys
-    schema: Schema = {}
-    for key, value in data.items():
-        if key.startswith("_"):
-            continue
-        if isinstance(value, dict) and "columns" in value:
-            schema[key] = _normalize_table(value, key)
-        elif isinstance(value, dict) and any(isinstance(v, dict) and "type" in v for v in value.values()):
-            # Might be a table without explicit columns section
-            # Check if it has column-like structure
-            # It's columns directly
-            schema[key] = {"columns": _normalize_columns(value, key)}
+    return {
+        key: _READ_A_TABLE[spelling](value, key)
+        for key, value in data.items()
+        for spelling in _spelling_of(key, value)
+    }
 
-    return schema
+
+@recognizer
+def _declares_a_columns_section(value: Any) -> bool:
+    """The long spelling: `[users.columns]` with the columns under it."""
+    return written_as(dict, value) and "columns" in value
+
+
+@recognizer
+def _declares_columns_directly(value: Any) -> bool:
+    """The short spelling: the entries under `[users]` are the columns."""
+    return written_as(dict, value) and any(
+        written_as(dict, v) and "type" in v for v in value.values()
+    )
+
+
+# THE TWO SPELLINGS OF A TABLE, IN THE ORDER THEY ARE TRIED. A file entry
+# written in the long spelling also looks like the short one when a column is
+# called `columns`, so the long spelling is asked first.
+_TABLE_SPELLINGS: dict[str, Callable[[Any], bool]] = {
+    "columns section": _declares_a_columns_section,
+    "columns directly": _declares_columns_directly,
+}
+
+
+@recognizer
+def _spelling_of(key: str, value: Any) -> list[str]:
+    """Which spelling this file entry is written in, as a list of nought or one.
+
+    A key starting with `_` is metadata rather than a table, and an entry in
+    neither spelling is not a table either. Both come back empty, so the
+    comprehension reading this passes over them, which is what the `continue`
+    and the missing `else` did before.
+    """
+    return [
+        name
+        for name, is_written_that_way in _TABLE_SPELLINGS.items()
+        if not key.startswith("_") and is_written_that_way(value)
+    ][:1]
+
+
+@helper
+def _table_from_a_columns_section(value: Any, key: str) -> Table:
+    """Read the long spelling, which carries the table's other fields too."""
+    return _normalize_table(value, key)
+
+
+@helper
+def _table_from_columns_alone(value: Any, key: str) -> Table:
+    """Read the short spelling, which carries columns and nothing else."""
+    return cast(Table, {"columns": _normalize_columns(value, key)})
+
+
+_READ_A_TABLE: dict[str, Callable[[Any, str], Table]] = {
+    "columns section": _table_from_a_columns_section,
+    "columns directly": _table_from_columns_alone,
+}
 
 
 # A PRIMARY KEY IS ONE NAME OR SEVERAL, AND BOTH MEAN A LIST. Two spellings
@@ -303,6 +390,24 @@ _TABLE_READERS: dict[str, Callable[[Any, str], Any]] = {
 }
 
 
+@helper
+def _refuse_a_missing_snapshot(snapshot_path: Path) -> Path:
+    """There is no snapshot, so there is no state to compare against."""
+    raise LoaderError("Snapshot file does not exist", path=str(snapshot_path))
+
+
+@helper
+def _the_snapshot(snapshot_path: Path) -> Path:
+    """The snapshot is there, so it is the file to read."""
+    return snapshot_path
+
+
+_THE_SNAPSHOT_FILE: dict[bool, Callable[[Path], Path]] = {
+    True: _the_snapshot,
+    False: _refuse_a_missing_snapshot,
+}
+
+
 @boundary
 def load_snapshot(schema_dir: str | Path) -> Schema:
     """
@@ -317,10 +422,8 @@ def load_snapshot(schema_dir: str | Path) -> Schema:
     Raises:
         LoaderError: If snapshot doesn't exist or is invalid
     """
-    snapshot_path = Path(schema_dir) / "snapshot.toml"
-
-    if not snapshot_path.exists():
-        raise LoaderError("Snapshot file does not exist", path=str(snapshot_path))
+    named = Path(schema_dir) / "snapshot.toml"
+    snapshot_path = _THE_SNAPSHOT_FILE[named.exists()](named)
 
     try:
         content = snapshot_path.read_text()
@@ -328,15 +431,12 @@ def load_snapshot(schema_dir: str | Path) -> Schema:
     except tomllib.TOMLDecodeError as e:
         raise LoaderError(f"Invalid snapshot TOML: {e}", path=str(snapshot_path)) from e
 
-    # Extract schema (everything except _meta)
-    schema: Schema = {}
-    for key, value in data.items():
-        if key == "_meta":
-            continue
-        if isinstance(value, dict):
-            schema[key] = _normalize_table(value, key)
-
-    return schema
+    # Everything except `_meta`, which is the stamp rather than a table.
+    return {
+        key: _normalize_table(value, key)
+        for key, value in data.items()
+        if key != "_meta" and isinstance(value, dict)
+    }
 
 
 @boundary
@@ -365,16 +465,16 @@ def save_snapshot(
     snapshot_path = schema_path / "snapshot.toml"
 
     # Build snapshot data with metadata
+    # WHO APPLIED IT IS WRITTEN ONLY WHEN THERE IS A NAME. The comprehension
+    # over a list of nought or one is the whole of that.
     data: dict[str, Any] = {
         "_meta": {
             "version": "1.0.0",
             "applied_at": datetime.now(UTC).isoformat(),
             "dialect": dialect,
+            **{field: applied_by for field in ["applied_by"] if applied_by},
         }
     }
-
-    if applied_by:
-        data["_meta"]["applied_by"] = applied_by
 
     # Add all tables
     data.update(schema)
@@ -387,22 +487,15 @@ def save_snapshot(
     snapshot_path.write_text(content)
 
 
+@helper
+def _no_pending_file(_pending_path: Path) -> dict[str, Decision]:
+    """There is no pending file, so nothing is waiting to be decided."""
+    return {}
+
+
 @boundary
-def load_decisions(schema_dir: str | Path) -> dict[str, Decision]:
-    """
-    Load pending decisions file.
-
-    Args:
-        schema_dir: Path to schema directory
-
-    Returns:
-        Dict of decision_id -> Decision
-    """
-    pending_path = Path(schema_dir) / "migrations" / "pending.toml"
-
-    if not pending_path.exists():
-        return {}
-
+def _read_pending_decisions(pending_path: Path) -> dict[str, Decision]:
+    """Read the decisions an operator has already answered."""
     try:
         content = pending_path.read_text()
         data = tomllib.loads(content)
@@ -423,20 +516,39 @@ def load_decisions(schema_dir: str | Path) -> dict[str, Decision]:
             path=str(pending_path),
         ) from unreadable
 
-    decisions: dict[str, Decision] = {}
+    return {
+        key: {
+            "type": value.get("type", "keep"),
+            "table": value.get("table", ""),
+            "from_column": value.get("from_column"),
+            "to_column": value.get("to_column"),
+            "column": value.get("column"),
+            "decided_at": value.get("decided_at", ""),
+        }
+        for key, value in data.get("decisions", {}).items()
+        if isinstance(value, dict)
+    }
 
-    for key, value in data.get("decisions", {}).items():
-        if isinstance(value, dict):
-            decisions[key] = {
-                "type": value.get("type", "keep"),
-                "table": value.get("table", ""),
-                "from_column": value.get("from_column"),
-                "to_column": value.get("to_column"),
-                "column": value.get("column"),
-                "decided_at": value.get("decided_at", ""),
-            }
 
-    return decisions
+_THE_PENDING_DECISIONS: dict[bool, Callable[[Path], dict[str, Decision]]] = {
+    True: _read_pending_decisions,
+    False: _no_pending_file,
+}
+
+
+@boundary
+def load_decisions(schema_dir: str | Path) -> dict[str, Decision]:
+    """
+    Load pending decisions file.
+
+    Args:
+        schema_dir: Path to schema directory
+
+    Returns:
+        Dict of decision_id -> Decision
+    """
+    pending_path = Path(schema_dir) / "migrations" / "pending.toml"
+    return _THE_PENDING_DECISIONS[pending_path.exists()](pending_path)
 
 
 @boundary
@@ -471,11 +583,14 @@ def save_decisions(schema_dir: str | Path, decisions: dict[str, Any]) -> None:
 
     pending_path = migrations_dir / "pending.toml"
 
-    # Add timestamps to decisions
+    # Add timestamps to decisions. `setdefault` is the whole of "write it if
+    # it is not already there", so the test and the write are one call.
     timestamp = datetime.now(UTC).isoformat()
-    for decision in decisions.values():
-        if isinstance(decision, dict) and "decided_at" not in decision:
-            decision["decided_at"] = timestamp
+    _stamped = [
+        decision.setdefault("decided_at", timestamp)
+        for decision in decisions.values()
+        if isinstance(decision, dict)
+    ]
 
     # TOML HAS NO NULL, AND THE PROMPT WRITES ONE ON EVERY DECISION.
     # `_resolve_ambiguities_interactive` sets every key on every decision and
@@ -542,6 +657,58 @@ def _is_valid_identifier(name: str) -> bool:
 
 
 
+_VALID_REFRESH_STRATEGIES = {"on_demand", "on_commit", "manual", "trigger", "hybrid"}
+
+# EVERY WAY A VIEW CAN BE WRONG, IN THE ORDER THEY ARE ASKED. Each entry is
+# the question and the complaint it produces. Five `if ... raise` blocks said
+# the same five things, and each one hid its own answer inside a branch.
+_VIEW_FAULTS: tuple[tuple[Callable[[View], bool], Callable[[View], str]], ...] = (
+    (
+        lambda view: not view.get("query"),
+        lambda _view: "View must have a 'query'",
+    ),
+    (
+        lambda view: not _is_valid_identifier(view.get("name", "")),
+        lambda view: f"View name '{view.get('name', '')}' is not a valid identifier",
+    ),
+    (
+        lambda view: bool(view.get("refresh")) and not view.get("materialized"),
+        lambda _view: "View 'refresh' requires 'materialized' to be true",
+    ),
+    (
+        lambda view: bool(view.get("refresh"))
+        and view.get("refresh") not in _VALID_REFRESH_STRATEGIES,
+        lambda view: (
+            f"View refresh must be one of {_VALID_REFRESH_STRATEGIES}, "
+            f"got '{view.get('refresh')}'"
+        ),
+    ),
+    (
+        lambda view: bool(view.get("trigger_sources"))
+        and view.get("refresh") not in ("trigger", "hybrid"),
+        lambda _view: "View 'trigger_sources' requires refresh='trigger' or 'hybrid'",
+    ),
+)
+
+
+@helper
+def _refuse_a_broken_view(complaints: list[str]) -> list[str]:
+    """The first fault found, named the way it was named before."""
+    raise ValueError(complaints[0])
+
+
+@helper
+def _the_valid_view(complaints: list[str]) -> list[str]:
+    """No fault was found, so there is nothing to say."""
+    return complaints
+
+
+_A_VIEW_IS_BROKEN: dict[bool, Callable[[list[str]], list[str]]] = {
+    True: _refuse_a_broken_view,
+    False: _the_valid_view,
+}
+
+
 @helper
 def validate_view(view: View) -> None:
     """
@@ -553,26 +720,13 @@ def validate_view(view: View) -> None:
     Raises:
         ValueError: If validation fails
     """
-    if not view.get("query"):
-        raise ValueError("View must have a 'query'")
-
-    name = view.get("name", "")
-    if not _is_valid_identifier(name):
-        raise ValueError(f"View name '{name}' is not a valid identifier")
-
-    refresh = view.get("refresh")
-    if refresh and not view.get("materialized"):
-        raise ValueError("View 'refresh' requires 'materialized' to be true")
-
-    # Validate refresh strategy values
-    valid_strategies = {"on_demand", "on_commit", "manual", "trigger", "hybrid"}
-    if refresh and refresh not in valid_strategies:
-        raise ValueError(
-            f"View refresh must be one of {valid_strategies}, got '{refresh}'"
+    # `islice` keeps the questions lazy, so a later one is never asked about a
+    # view an earlier one has already refused. The five `if ... raise` blocks
+    # stopped at the first fault and so does this.
+    complaints = list(
+        islice(
+            (complain(view) for is_wrong, complain in _VIEW_FAULTS if is_wrong(view)),
+            1,
         )
-
-    # trigger_sources requires trigger or hybrid strategy
-    if view.get("trigger_sources") and refresh not in ("trigger", "hybrid"):
-        raise ValueError(
-            "View 'trigger_sources' requires refresh='trigger' or 'hybrid'"
-        )
+    )
+    _A_VIEW_IS_BROKEN[bool(complaints)](complaints)

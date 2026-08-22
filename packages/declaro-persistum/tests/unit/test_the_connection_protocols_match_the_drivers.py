@@ -41,6 +41,7 @@ from declaro_persistum.types import (
     DbapiCursor,
     FetchingConnection,
 )
+from tests.conftest import probe_url
 
 
 @pytest.mark.sqlite
@@ -90,7 +91,7 @@ async def test_asyncpg_is_a_fetching_connection() -> None:
 
     url = os.environ.get(
         "TEST_POSTGRESQL_URL",
-        "postgresql://postgres:postgres@localhost/declaro_probe",
+        probe_url(),
     )
     try:
         conn = await asyncpg.connect(url)
@@ -118,7 +119,7 @@ async def test_asyncpg_is_not_a_dbapi_connection() -> None:
 
     url = os.environ.get(
         "TEST_POSTGRESQL_URL",
-        "postgresql://postgres:postgres@localhost/declaro_probe",
+        probe_url(),
     )
     try:
         conn = await asyncpg.connect(url)

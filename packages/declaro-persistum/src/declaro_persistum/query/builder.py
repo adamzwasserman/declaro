@@ -7,9 +7,10 @@ All functions are pure and return Query objects.
 
 import re
 from collections.abc import Callable
+from types import NoneType
 from typing import Any, TypedDict
 
-from declaro_persistum.types import Nothing, resolved, written_as
+from declaro_persistum.types import Nothing, resolved, type_of, written_as
 
 
 class Query(TypedDict):
@@ -26,6 +27,61 @@ class Query(TypedDict):
     params: dict[str, Any]
     dialect: str | None
 
+
+# ---------------------------------------------------------------------------
+# The shapes a WHERE clause arrives in
+# ---------------------------------------------------------------------------
+
+
+def _no_clause(_where: Any, given: dict[str, Any], _path: str) -> tuple[str, dict[str, Any]]:
+    """Nothing was given, so there is no SQL and no parameter of ours."""
+    return "", given
+
+
+def _written_clause(
+    where: Any, given: dict[str, Any], _path: str
+) -> tuple[str, dict[str, Any]]:
+    """Raw SQL with `:name` placeholders. It brings no parameters of its own."""
+    return str(where), given
+
+
+def _built_clause(
+    where: Any, given: dict[str, Any], path: str
+) -> tuple[str, dict[str, Any]]:
+    """The condition language, rendered into SQL and the params it names.
+
+    The caller's params win. A dict-built name is derived from the path and
+    cannot collide with one a caller chose, so an overlap means the caller
+    meant it.
+    """
+    from declaro_persistum.query.conditions import render
+
+    sql, built = render(where, path)
+    return sql, {**built, **given}
+
+
+def _refuse_a_clause(
+    where: Any, _given: dict[str, Any], _path: str
+) -> tuple[str, dict[str, Any]]:
+    """Anything else. A WHERE is text or a mapping and nothing third."""
+    raise TypeError(
+        f"a WHERE clause is raw SQL text or a condition mapping, and "
+        f"{type_of(where).__name__} is neither: {where!r}"
+    )
+
+
+# The type of the clause is the key, so `str` and `dict` are each an entry and
+# `object` is the entry every other type reaches along its own class hierarchy.
+# A subclass of either -- and a library can hand back one -- finds its parent
+# before it finds `object`.
+_CLAUSE_SHAPES: dict[
+    type, Callable[[Any, dict[str, Any], str], tuple[str, dict[str, Any]]]
+] = {
+    NoneType: _no_clause,
+    str: _written_clause,
+    dict: _built_clause,
+    object: _refuse_a_clause,
+}
 
 
 def _clause(
@@ -49,20 +105,47 @@ def _clause(
     caller's, and merging is done here so no caller has to remember which.
     """
     given = dict(params or {})
-    if where is None:
-        return "", given
-    # A CLAUSE IS WRITTEN AS TEXT OR AS A MAPPING, and text brings no
-    # parameters of its own.
-    if written_as(str, where):
-        return where, given
+    reader = [
+        _CLAUSE_SHAPES[kind]
+        for kind in type_of(where).__mro__
+        if kind in _CLAUSE_SHAPES
+    ]
+    return reader[0](where, given, path)
 
-    from declaro_persistum.query.conditions import render
 
-    sql, built = render(where, path)
-    # The caller's params win. A dict-built name is derived from the path and
-    # cannot collide with one a caller chose, so an overlap means the caller
-    # meant it.
-    return sql, {**built, **given}
+# ---------------------------------------------------------------------------
+# ORDER BY, as a table rather than a branch per column
+# ---------------------------------------------------------------------------
+
+
+def _descending(col: str) -> str:
+    """A leading minus asks for DESC, and the name is what follows it."""
+    return f"{_quote_column(col[1:])} DESC"
+
+
+def _ascending(col: str) -> str:
+    """No minus, so the column sorts upwards."""
+    return f"{_quote_column(col)} ASC"
+
+
+_ORDER_DIRECTION: dict[bool, Callable[[str], str]] = {
+    True: _descending,
+    False: _ascending,
+}
+
+
+def _join_sql(join: dict[str, str]) -> str:
+    """One JOIN clause. A join that does not name its type is an INNER one."""
+    return f'{join.get("type", "INNER")} JOIN "{join["table"]}" ON {join["on"]}'
+
+
+def _returning(columns: list[str] | None) -> list[str]:
+    """The RETURNING clause, or no clause when no columns were asked for."""
+    return [
+        "RETURNING " + ", ".join(f'"{c}"' for c in cols)
+        for cols in [columns]
+        if cols
+    ]
 
 
 def select(
@@ -114,55 +197,38 @@ def select(
     having = resolved(having, None)
     params = params or {}
 
-    # Build column list
-    if not columns or columns == ("*",):
-        cols_sql = "*"
-    else:
-        cols_sql = ", ".join(_quote_column(c) for c in columns)
+    # NAMING NOTHING SELECTS EVERYTHING, and the join says so on its own: an
+    # empty column list joins to the empty string. `_quote_column` passes a
+    # lone `*` through, so both spellings of "everything" agree.
+    cols_sql = ", ".join(_quote_column(c) for c in columns) or "*"
 
-    # Start building SQL
-    sql_parts = [f"SELECT {cols_sql}", f'FROM "{from_table}"']
-
-    # Add joins
-    if joins:
-        for join in joins:
-            join_type = join.get("type", "INNER")
-            join_table = join["table"]
-            join_on = join["on"]
-            sql_parts.append(f'{join_type} JOIN "{join_table}" ON {join_on}')
-
-    # Add WHERE
+    # WHERE is rendered before HAVING because each merges into the params the
+    # one before it produced.
     where_sql, params = _clause(where, params, "w")
-    if where_sql:
-        sql_parts.append(f"WHERE {where_sql}")
-
-    # Add GROUP BY
-    if group_by:
-        group_cols = ", ".join(_quote_column(c) for c in group_by)
-        sql_parts.append(f"GROUP BY {group_cols}")
-
-    # Add HAVING
     having_sql, params = _clause(having, params, "h")
-    if having_sql:
-        sql_parts.append(f"HAVING {having_sql}")
 
-    # Add ORDER BY
-    if order_by:
-        order_parts = []
-        for col in order_by:
-            if col.startswith("-"):
-                order_parts.append(f"{_quote_column(col[1:])} DESC")
-            else:
-                order_parts.append(f"{_quote_column(col)} ASC")
-        sql_parts.append(f"ORDER BY {', '.join(order_parts)}")
+    group_sql = ", ".join(_quote_column(c) for c in (group_by or []))
+    order_sql = ", ".join(
+        _ORDER_DIRECTION[c.startswith("-")](c) for c in (order_by or [])
+    )
 
-    # Add LIMIT
-    if limit is not None:
-        sql_parts.append(f"LIMIT {limit}")
-
-    # Add OFFSET
-    if offset is not None:
-        sql_parts.append(f"OFFSET {offset}")
+    # THE STATEMENT IS THE CLAUSES THAT ARE PRESENT, joined. A clause a caller
+    # did not ask for contributes nothing rather than being skipped by a
+    # branch, and the order they are written in here is the order SQL requires.
+    sql_parts = [
+        f"SELECT {cols_sql}",
+        f'FROM "{from_table}"',
+        *(_join_sql(join) for join in (joins or [])),
+        *[f"WHERE {clause}" for clause in [where_sql] if clause],
+        *[f"GROUP BY {group_sql}" for cols in [group_by] if cols],
+        *[f"HAVING {clause}" for clause in [having_sql] if clause],
+        *[f"ORDER BY {order_sql}" for cols in [order_by] if cols],
+        # `is not None` rather than truthiness: 0 is a real limit and a real
+        # offset, and reading either as absent drops a clause the caller asked
+        # for.
+        *[f"LIMIT {n}" for n in [limit] if n is not None],
+        *[f"OFFSET {n}" for n in [offset] if n is not None],
+    ]
 
     return {
         "sql": " ".join(sql_parts),
@@ -188,6 +254,57 @@ _ROWS: dict[bool, Callable[[Any], list[Any]]] = {
     False: _many_rows,
 }
 
+
+def _refuse_no_rows(_values_list: list[Any]) -> list[Any]:
+    """An INSERT with no rows names no columns and binds nothing."""
+    raise ValueError("values cannot be empty")
+
+
+def _the_rows(values_list: list[Any]) -> list[Any]:
+    """At least one row, which is what the columns are read from."""
+    return values_list
+
+
+_WHEN_NO_ROWS: dict[bool, Callable[[list[Any]], list[Any]]] = {
+    True: _refuse_no_rows,
+    False: _the_rows,
+}
+
+
+def _named_binding(
+    columns: list[str], values_list: list[Any]
+) -> tuple[str, dict[str, Any]]:
+    """One row binds by column name, so the SQL reads as the row does."""
+    placeholders = ", ".join(f":{c}" for c in columns)
+    return f"({placeholders})", values_list[0]
+
+
+def _numbered_binding(
+    columns: list[str], values_list: list[Any]
+) -> tuple[str, dict[str, Any]]:
+    """Several rows need a name per column per row, so the row number joins it.
+
+    A row that omits a column binds NULL for it. The columns come from the
+    first row, so a later row carrying an extra key contributes nothing.
+    """
+    groups = ", ".join(
+        "(" + ", ".join(f":{c}_{i}" for c in columns) + ")"
+        for i, _row in enumerate(values_list)
+    )
+    params = {
+        f"{c}_{i}": row.get(c)
+        for i, row in enumerate(values_list)
+        for c in columns
+    }
+    return groups, params
+
+
+_BINDING: dict[
+    bool, Callable[[list[str], list[Any]], tuple[str, dict[str, Any]]]
+] = {
+    True: _named_binding,
+    False: _numbered_binding,
+}
 
 
 def insert(
@@ -221,50 +338,61 @@ def insert(
     # ONE ROW OR SEVERAL, AND BOTH MEAN SEVERAL. Two spellings of one thing
     # is a vocabulary, resolved here into the single form the rest reads.
     values_list = _ROWS[written_as(dict, values)](values)
-
-    if not values_list:
-        raise ValueError("values cannot be empty")
+    values_list = _WHEN_NO_ROWS[not values_list](values_list)
 
     # Get columns from first row
     columns = list(values_list[0].keys())
     cols_sql = ", ".join(f'"{c}"' for c in columns)
 
-    # Build VALUES clause
-    params: dict[str, Any] = {}
+    values_sql, params = _BINDING[len(values_list) == 1](columns, values_list)
 
-    if len(values_list) == 1:
-        # Single row - use named parameters
-        placeholders = ", ".join(f":{c}" for c in columns)
-        values_sql = f"({placeholders})"
-        params = values_list[0]
-    else:
-        # Multiple rows - use indexed parameters
-        value_groups = []
-        for i, row in enumerate(values_list):
-            row_placeholders = []
-            for c in columns:
-                param_name = f"{c}_{i}"
-                row_placeholders.append(f":{param_name}")
-                params[param_name] = row.get(c)
-            value_groups.append(f"({', '.join(row_placeholders)})")
-        values_sql = ", ".join(value_groups)
-
-    sql_parts = [f'INSERT INTO "{into_table}" ({cols_sql})', f"VALUES {values_sql}"]
-
-    # Add ON CONFLICT
-    if on_conflict:
-        sql_parts.append(f"ON CONFLICT {on_conflict}")
-
-    # Add RETURNING
-    if returning:
-        ret_cols = ", ".join(f'"{c}"' for c in returning)
-        sql_parts.append(f"RETURNING {ret_cols}")
+    sql_parts = [
+        f'INSERT INTO "{into_table}" ({cols_sql})',
+        f"VALUES {values_sql}",
+        *[f"ON CONFLICT {clause}" for clause in [on_conflict] if clause],
+        *_returning(returning),
+    ]
 
     return {
         "sql": " ".join(sql_parts),
         "params": params,
         "dialect": None,
     }
+
+
+def _refuse_nothing_to_set(_set_values: dict[str, Any]) -> dict[str, Any]:
+    """An UPDATE that sets no column has nothing to say."""
+    raise ValueError("set_values cannot be empty")
+
+
+def _the_set_values(set_values: dict[str, Any]) -> dict[str, Any]:
+    """At least one column, which is what the SET clause is built from."""
+    return set_values
+
+
+_WHEN_NOTHING_TO_SET: dict[bool, Callable[[dict[str, Any]], dict[str, Any]]] = {
+    True: _refuse_nothing_to_set,
+    False: _the_set_values,
+}
+
+
+def _refuse_a_missing_where(statement: str, _where: Any) -> Any:
+    """Required on purpose: a statement with no WHERE touches every row, and
+    a caller who means that should have to say so."""
+    raise ValueError(
+        f"where clause is required for {statement} (use '1=1' for all rows)"
+    )
+
+
+def _the_where(_statement: str, where: Any) -> Any:
+    """A clause was given, so it is what the statement narrows on."""
+    return where
+
+
+_WHEN_NO_WHERE: dict[bool, Callable[[str, Any], Any]] = {
+    True: _refuse_a_missing_where,
+    False: _the_where,
+}
 
 
 def update(
@@ -297,28 +425,17 @@ def update(
     # sees it happen and no test reaches it.
     params = resolved(params, None)
     returning = resolved(returning, None)
-    if not set_values:
-        raise ValueError("set_values cannot be empty")
+    # SET is asked about before WHERE, and a test pins that order.
+    set_values = _WHEN_NOTHING_TO_SET[not set_values](set_values)
+    where = _WHEN_NO_WHERE[not where]("UPDATE", where)
 
-    if not where:
-        # Required on purpose: an UPDATE with no WHERE rewrites every row, and
-        # a caller who means that should have to say so.
-        raise ValueError("where clause is required for UPDATE (use '1=1' for all rows)")
-
-    # Build SET clause
-    set_parts = []
-    all_params: dict[str, Any] = {}
-
-    for col, val in set_values.items():
-        param_name = f"set_{col}"
-        set_parts.append(f'"{col}" = :{param_name}')
-        all_params[param_name] = val
-
-    # Add WHERE params
-    if params:
-        all_params.update(params)
-
-    set_sql = ", ".join(set_parts)
+    # `set_` namespaces the bindings so a SET column and a WHERE parameter can
+    # both be called `id`.
+    set_sql = ", ".join(f'"{col}" = :set_{col}' for col in set_values)
+    all_params: dict[str, Any] = {
+        f"set_{col}": val for col, val in set_values.items()
+    }
+    all_params.update(params or {})
 
     # THE MERGED PARAMS, NOT A LOCAL NOBODY READS. This said
     #
@@ -339,12 +456,13 @@ def update(
     # the caller's `params`, which `all_params` already had.
     where_sql, where_params = _clause(where, params, "w")
     all_params.update(where_params)
-    sql_parts = [f'UPDATE "{table}"', f"SET {set_sql}", f"WHERE {where_sql}"]
 
-    # Add RETURNING
-    if returning:
-        ret_cols = ", ".join(f'"{c}"' for c in returning)
-        sql_parts.append(f"RETURNING {ret_cols}")
+    sql_parts = [
+        f'UPDATE "{table}"',
+        f"SET {set_sql}",
+        f"WHERE {where_sql}",
+        *_returning(returning),
+    ]
 
     return {
         "sql": " ".join(sql_parts),
@@ -381,16 +499,14 @@ def delete(
     # sees it happen and no test reaches it.
     params = resolved(params, None)
     returning = resolved(returning, None)
-    if not where:
-        raise ValueError("where clause is required for DELETE (use '1=1' for all rows)")
+    where = _WHEN_NO_WHERE[not where]("DELETE", where)
 
     where_sql, params = _clause(where, params, "w")
-    sql_parts = [f'DELETE FROM "{from_table}"', f"WHERE {where_sql}"]
-
-    # Add RETURNING
-    if returning:
-        ret_cols = ", ".join(f'"{c}"' for c in returning)
-        sql_parts.append(f"RETURNING {ret_cols}")
+    sql_parts = [
+        f'DELETE FROM "{from_table}"',
+        f"WHERE {where_sql}",
+        *_returning(returning),
+    ]
 
     return {
         "sql": " ".join(sql_parts),
@@ -433,6 +549,46 @@ def is_expression(col: str) -> bool:
     return bool(_EXPRESSION.search(col))
 
 
+def _is_star(col: str) -> bool:
+    """A lone `*` names every column, so quoting it would name one called `*`."""
+    return col == "*"
+
+
+def _the_star(_col: str) -> str:
+    """Every column, written the way SQL writes it."""
+    return "*"
+
+
+def _as_written(col: str) -> str:
+    """An expression is evaluated by the engine, so it goes through as typed."""
+    return col
+
+
+def _is_qualified(col: str) -> bool:
+    """`table.column`, which is two identifiers rather than one."""
+    return "." in col
+
+
+def _as_qualified(col: str) -> str:
+    """Quote each half of `table.column`. Only the first dot splits."""
+    table, name = col.split(".", 1)
+    return f'"{table}"."{name}"'
+
+
+def _as_name(col: str) -> str:
+    """An ordinary column name, quoted whole."""
+    return f'"{col}"'
+
+
+# THE RULES IN ORDER, first match winning, and `_as_name` closing the list so
+# every column has an answer without a rule having to guess.
+_QUOTING: tuple[tuple[Callable[[str], bool], Callable[[str], str]], ...] = (
+    (_is_star, _the_star),
+    (is_expression, _as_written),
+    (_is_qualified, _as_qualified),
+)
+
+
 def _quote_column(col: str) -> str:
     """Quote a column name, handling table.column notation.
 
@@ -457,26 +613,20 @@ def _quote_column(col: str) -> str:
     would not make that safe either, because a quoted expression is not an
     expression, it is a wrong answer.
     """
-    if col == "*":
-        return "*"
-    if is_expression(col):
-        return col
-    if "." in col:
-        parts = col.split(".", 1)
-        return f'"{parts[0]}"."{parts[1]}"'
-    return f'"{col}"'
+    matched = [render for applies, render in _QUOTING if applies(col)]
+    return [*matched, _as_name][0](col)
 
 
 # Query composition helpers
 
 
 def with_limit(query: Query, limit: int) -> Query:
-    """Add or replace LIMIT on a query."""
-    sql = query["sql"]
+    """Add or replace LIMIT on a query.
 
-    # Remove existing LIMIT if present
-    if " LIMIT " in sql:
-        sql = sql.split(" LIMIT ")[0]
+    Splitting on " LIMIT " needs no guard: a query that carries none splits
+    into one piece, which is the query itself.
+    """
+    sql = query["sql"].split(" LIMIT ")[0]
 
     return {
         "sql": f"{sql} LIMIT {limit}",
@@ -486,14 +636,12 @@ def with_limit(query: Query, limit: int) -> Query:
 
 
 def with_offset(query: Query, offset: int) -> Query:
-    """Add or replace OFFSET on a query."""
-    sql = query["sql"]
+    """Add or replace OFFSET on a query.
 
-    # Remove existing OFFSET if present
-    if " OFFSET " in sql:
-        parts = sql.split(" OFFSET ")
-        sql = parts[0]
-        # Preserve anything after OFFSET value (shouldn't be anything, but just in case)
+    Anything written after the OFFSET value is dropped, which is what the
+    split has always done.
+    """
+    sql = query["sql"].split(" OFFSET ")[0]
 
     return {
         "sql": f"{sql} OFFSET {offset}",

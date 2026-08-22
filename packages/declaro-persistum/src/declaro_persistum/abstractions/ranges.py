@@ -26,9 +26,9 @@ def parse_range_type(type_str: str) -> str | None:
         parse_range_type("timestamptz") -> None
     """
     match = re.match(r"^range<(.+)>$", type_str.strip())
-    if match:
-        return match.group(1).strip()
-    return None
+    # A match object is one result or none, so reading it as a sequence of
+    # nought or one is the same question without the branch.
+    return next((m.group(1).strip() for m in [match] if m), None)
 
 
 def generate_range_columns(

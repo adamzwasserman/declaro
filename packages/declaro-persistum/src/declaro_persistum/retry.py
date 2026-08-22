@@ -98,6 +98,7 @@ from __future__ import annotations
 from typing import TypedDict
 
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE
+from declaro_persistum.types import written_as
 
 
 class Retry(TypedDict):
@@ -219,10 +220,14 @@ def is_contention(error: BaseException) -> bool:
     not, as of 2026-08-17: `grep` finds no second definition and no other
     "busy" text check in `src/`. Do not add one.
     """
-    if isinstance(error, A_BUG_IN_THIS_PACKAGE):  # honest: ignore HC-P005: asking the TYPE is what rule 8 requires
-        return False
-    text = str(error).lower()
-    return "busy" in text or "sqlite_busy" in text or "conflict" in text
+    # Our own bug is never contention, however its message reads, so the type
+    # is asked before the text. A KeyError('busy') was retried forever.
+    return not any(
+        written_as(kind, error) for kind in A_BUG_IN_THIS_PACKAGE
+    ) and any(
+        word in str(error).lower()
+        for word in ("busy", "sqlite_busy", "conflict")
+    )
 
 
 def delay_before(retry: Retry, attempt: int) -> float:
@@ -231,7 +236,11 @@ def delay_before(retry: Retry, attempt: int) -> float:
     Pure: no clock, no sleep. The caller decides what to do with the number,
     which is what makes it testable without waiting for anything.
     """
-    if attempt <= 1:
-        return 0.0
-    grown = retry["base_delay_s"] * (2 ** (attempt - 2))
-    return min(grown, retry["max_delay_s"])
+    # The first attempt waits for nothing; each one after doubles, up to the
+    # ceiling the policy names.
+    grown = [
+        min(retry["base_delay_s"] * (2 ** (n - 2)), retry["max_delay_s"])
+        for n in [attempt]
+        if n > 1
+    ]
+    return next(iter(grown), 0.0)

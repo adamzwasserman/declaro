@@ -53,6 +53,7 @@ from declaro_persistum.abstractions.enums import expand_schema_enums
 from declaro_persistum.differ.core import diff
 from declaro_persistum.inspector import introspect
 from declaro_persistum.types import NOTHING, Operation
+from tests.conftest import probe_url
 
 # asyncio mode is AUTO, so async tests are collected without a mark. Marking
 # the module would warn on the one synchronous test below.
@@ -294,9 +295,7 @@ async def test_the_change_leaves_the_declared_tables_present(
 # The same cases against a real PostgreSQL server
 # ---------------------------------------------------------------------------
 
-PROBE_URL = os.environ.get(
-    "TEST_POSTGRESQL_URL", "postgresql://postgres:postgres@localhost/declaro_probe"
-)
+PROBE_URL = probe_url()
 
 # Every table any case names. Dropped before and after each one, so a case
 # that fails halfway cannot poison the next. Read off the cases rather than

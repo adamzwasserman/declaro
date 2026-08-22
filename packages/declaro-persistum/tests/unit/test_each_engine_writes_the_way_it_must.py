@@ -34,12 +34,11 @@ from declaro_persistum.writers import (
     sqlite_write_one,
     turso_write_one,
 )
+from tests.conftest import probe_url
 
 pytestmark = [pytest.mark.precommit]
 
-PROBE_URL = os.environ.get(
-    "TEST_POSTGRESQL_URL", "postgresql://postgres:postgres@localhost/declaro_probe"
-)
+PROBE_URL = probe_url()
 
 CREATE = 'CREATE TABLE "widgets" (id INTEGER PRIMARY KEY, name TEXT)'
 

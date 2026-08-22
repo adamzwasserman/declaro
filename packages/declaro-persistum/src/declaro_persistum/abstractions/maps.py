@@ -12,6 +12,29 @@ from typing import Any
 from declaro_persistum.types import Dialect, Nothing, resolved
 
 
+def _refuse_unknown_dialect(dialect: str, known: dict) -> None:
+    """A dialect the table has no SQL for, named with the ones it has."""
+    raise ValueError(
+        f"cannot generate SQL for dialect {dialect!r}. "
+        f"Supported: {sorted(known)}."
+    )
+
+
+def _the_known_dialect(dialect: str, _known: dict) -> str:
+    """A dialect the table holds, handed back to look it up with."""
+    return dialect
+
+
+# Which of the two answers applies, so the table is read with [] and a dialect
+# it does not hold raises rather than returning None into the next line.
+_REFUSE_UNKNOWN_DIALECT: dict[bool, Callable[[str, dict], Any]] = {
+    True: _the_known_dialect,
+    False: _refuse_unknown_dialect,
+}
+
+
+
+
 def parse_map_type(type_str: str) -> tuple[str, str] | None:
     """
     Parse map<key_type, value_type> type declaration.
@@ -25,9 +48,11 @@ def parse_map_type(type_str: str) -> tuple[str, str] | None:
         parse_map_type("text") -> None
     """
     match = re.match(r"^map<\s*([^,]+?)\s*,\s*(.+?)\s*>$", type_str.strip())
-    if match:
-        return (match.group(1).strip(), match.group(2).strip())
-    return None
+    # A match object is one result or none, so reading it as a sequence of
+    # nought or one is the same question without the branch.
+    return next(
+        ((m.group(1).strip(), m.group(2).strip()) for m in [match] if m), None
+    )
 
 
 def generate_junction_table(
@@ -118,12 +143,9 @@ def map_set_sql(parent_table: str, column_name: str, dialect: Dialect) -> str:
     PostgreSQL form, and `dialect` defaulted to "postgresql" so forgetting it
     looked identical to choosing it.
     """
-    generate = SET_SQL.get(dialect)
-    if generate is None:
-        raise ValueError(
-            f"cannot generate map-set SQL for dialect {dialect!r}. "
-            f"Supported: {sorted(SET_SQL)}."
-        )
+    # Read with [] so a dialect the table does not hold raises here.
+    _REFUSE_UNKNOWN_DIALECT[dialect in SET_SQL](dialect, SET_SQL)
+    generate = SET_SQL[dialect]
     junction_name = f"{parent_table}_{column_name}"
     fk_column = f"{parent_table[:-1] if parent_table.endswith('s') else parent_table}_id"
     return generate(junction_name, fk_column)
@@ -224,7 +246,5 @@ def map_hydrate(rows: list[dict[str, Any]]) -> dict[str, Any]:
     Returns:
         Dict mapping keys to values.
     """
-    if not rows:
-        return {}
-
+    # No rows is an empty result, which the comprehension already gives.
     return {r["key"]: r["value"] for r in rows}
