@@ -790,17 +790,25 @@ _META_INDEXES: dict[bool, Callable[[Any], dict[str, Any]]] = {
 
 
 @helper
-def _not_a_table(_model_cls: type, _table_name: Any) -> tuple[str, Table] | None:
-    """No `__tablename__`, so this class declares no table to convert.
+def _not_a_table(_model_cls: type, _table_name: Any) -> list[tuple[str, Table]]:
+    """No tables, because this class carries no `__tablename__`.
 
-    The caller filters on the result, so None is the answer rather than an
-    absence. `pydantic_model_to_table` is public and a test asserts it.
+    NOUGHT OR ONE, NOT A VALUE OR NONE. Both halves answered `tuple | None`,
+    which made this one a function whose body was `return None`: a scanner
+    cannot tell that from a function nobody finished, and neither can a
+    reader. A list says how many tables the class declared, and empty is an
+    answer somebody wrote.
+
+    `pydantic_model_to_table` keeps returning `tuple | None`, because a test
+    asserts it and its caller filters on it.
     """
-    return None  # noqa: RET501
+    return []
 
 
 @helper
-def _the_declared_table(model_cls: type, table_name: Any) -> tuple[str, Table] | None:
+def _the_declared_table(
+    model_cls: type, table_name: Any
+) -> list[tuple[str, Table]]:
     """The table one decorated model declares.
 
     Use typing.get_type_hints rather than reading __annotations__ directly:
@@ -872,10 +880,10 @@ def _the_declared_table(model_cls: type, table_name: Any) -> tuple[str, Table] |
         **_META_INDEXES[bool(indexes)](indexes),
         **_META_ENTRY[bool(constraints)]("constraints", constraints),
     }
-    return table_name, table
+    return [(table_name, table)]
 
 
-_WHEN_NOT_A_TABLE: dict[bool, Callable[[type, Any], tuple[str, Table] | None]] = {
+_WHEN_NOT_A_TABLE: dict[bool, Callable[[type, Any], list[tuple[str, Table]]]] = {
     True: _not_a_table,
     False: _the_declared_table,
 }
@@ -892,7 +900,8 @@ def pydantic_model_to_table(model_cls: type) -> tuple[str, Table] | None:
         Tuple of (table_name, Table) or None if not a table model
     """
     table_name = getattr(model_cls, "__tablename__", None)
-    return _WHEN_NOT_A_TABLE[table_name is None](model_cls, table_name)
+    declared = _WHEN_NOT_A_TABLE[table_name is None](model_cls, table_name)
+    return next(iter(declared), None)
 
 
 @helper
