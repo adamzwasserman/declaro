@@ -281,7 +281,7 @@ def field(**declared: Unpack[ColumnFacets]) -> Any:
 
 
 @helper
-def _refuse_unknown_facets(unknown: list[str]) -> None:
+def _refuse_unknown_facets(unknown: list[str]) -> list[str]:
     """A facet no column has, named so the author can see the typo.
 
     `Unpack[ColumnFacets]` says this at edit time. This says it at import,
@@ -295,13 +295,14 @@ def _refuse_unknown_facets(unknown: list[str]) -> None:
 
 
 @helper
-def _accept_known_facets(_unknown: list[str]) -> None:
-    """Every facet named is one a column has."""
+def _the_known_facets(unknown: list[str]) -> list[str]:
+    """Every facet named is one a column has, so none is unknown."""
+    return unknown
 
 
-_WHEN_UNKNOWN_FACET: dict[bool, Callable[[list[str]], None]] = {
+_WHEN_UNKNOWN_FACET: dict[bool, Callable[[list[str]], list[str]]] = {
     True: _refuse_unknown_facets,
-    False: _accept_known_facets,
+    False: _the_known_facets,
 }
 
 

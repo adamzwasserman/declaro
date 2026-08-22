@@ -341,7 +341,7 @@ def _get_operation_dependencies(
     return []
 
 
-def _refuse_cycle(operations: list[Operation], stuck: set[int]) -> None:
+def _refuse_cycle(operations: list[Operation], stuck: set[int]) -> list[Operation]:
     """Nothing is ready and operations remain, so they wait on each other.
 
     THE STUCK SET IS THE ANSWER, so no search is needed. `_find_cycle` used to
@@ -357,12 +357,15 @@ def _refuse_cycle(operations: list[Operation], stuck: set[int]) -> None:
 # WHETHER ANYTHING IS READY, AS A TABLE RATHER THAN A BRANCH. One key, two
 # entries, and the refusal is a value in the table rather than a path through
 # an `if`.
-def _proceed(_operations: list[Operation], _stuck: set[int]) -> None:
-    """Something is ready, so there is nothing to refuse."""
+def _the_ready_operations(
+    operations: list[Operation], _stuck: set[int]
+) -> list[Operation]:
+    """Something is ready, so the operations are handed back unchanged."""
+    return operations
 
 
-_WHEN_READY: dict[bool, Callable[[list[Operation], set[int]], None]] = {
-    True: _proceed,
+_WHEN_READY: dict[bool, Callable[[list[Operation], set[int]], list[Operation]]] = {
+    True: _the_ready_operations,
     False: _refuse_cycle,
 }
 

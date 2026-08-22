@@ -185,8 +185,8 @@ def _column_from_table(
     about none of it. Nothing later can tell that from a column the author
     meant to be TEXT.
     """
-    _REFUSE_UNTYPED[("type" in col_data)](col_name, table_name, col_data)
-    declared: Column = {"type": col_data["type"]}
+    typed = _REFUSE_UNTYPED[("type" in col_data)](col_name, table_name, col_data)
+    declared: Column = {"type": typed["type"]}
     declared.update(
         {name: col_data[name] for name in _COLUMN_FIELDS if name in col_data}  # type: ignore[typeddict-item]
     )
@@ -202,7 +202,9 @@ def _column_from_type_name(
 
 
 @helper
-def _refuse_untyped(col_name: str, table_name: str, col_data: dict[str, Any]) -> None:
+def _refuse_untyped(
+    col_name: str, table_name: str, col_data: dict[str, Any]
+) -> dict[str, Any]:
     """A column table with no `type` key."""
     raise LoaderError(
         f"Column '{col_name}' in table '{table_name}' declares no type. It "
@@ -212,14 +214,15 @@ def _refuse_untyped(col_name: str, table_name: str, col_data: dict[str, Any]) ->
 
 
 @helper
-def _accept_typed(
-    _col_name: str, _table_name: str, _col_data: dict[str, Any]
-) -> None:
-    """A column table carrying `type`, so there is nothing to refuse."""
+def _the_typed_column(
+    _col_name: str, _table_name: str, col_data: dict[str, Any]
+) -> dict[str, Any]:
+    """A column table carrying `type`, handed back to be read."""
+    return col_data
 
 
-_REFUSE_UNTYPED: dict[bool, Callable[[str, str, dict[str, Any]], None]] = {
-    True: _accept_typed,
+_REFUSE_UNTYPED: dict[bool, Callable[[str, str, dict[str, Any]], dict[str, Any]]] = {
+    True: _the_typed_column,
     False: _refuse_untyped,
 }
 
@@ -234,7 +237,9 @@ _COLUMN_FROM: dict[type, Callable[[str, str, Any], Column]] = {
 
 
 @helper
-def _refuse_unknown_columns(unknown: dict[str, str], table_name: str) -> None:
+def _refuse_unknown_columns(
+    unknown: dict[str, str], table_name: str
+) -> dict[str, str]:
     """Columns written in neither spelling, named so the author can find them.
 
     They used to produce no column, no error and no warning, so the author
@@ -249,13 +254,14 @@ def _refuse_unknown_columns(unknown: dict[str, str], table_name: str) -> None:
 
 
 @helper
-def _accept_known_columns(_unknown: dict[str, str], _table_name: str) -> None:
-    """Every column is written in one of the two spellings."""
+def _the_known_columns(unknown: dict[str, str], _table_name: str) -> dict[str, str]:
+    """Every column is written in one of the two spellings, so none is unknown."""
+    return unknown
 
 
-_WHEN_UNKNOWN: dict[bool, Callable[[dict[str, str], str], None]] = {
+_WHEN_UNKNOWN: dict[bool, Callable[[dict[str, str], str], dict[str, str]]] = {
     True: _refuse_unknown_columns,
-    False: _accept_known_columns,
+    False: _the_known_columns,
 }
 
 

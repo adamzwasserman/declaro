@@ -227,7 +227,7 @@ _RENDER_ARGUMENT: dict[str | None, Any] = {
 
 
 @helper
-def _refuse_unknown_kind(kind: str | None) -> None:
+def _refuse_unknown_kind(kind: str | None) -> str | None:
     """A tag no renderer answers for, named so the author sees the typo."""
     raise ValidationError(
         f"a query argument is tagged {kind!r}, which nothing renders. The "
@@ -240,12 +240,13 @@ def _refuse_unknown_kind(kind: str | None) -> None:
 
 
 @helper
-def _accept_known_kind(_kind: str | None) -> None:
-    """The tag is one the table answers for."""
+def _the_known_kind(kind: str | None) -> str | None:
+    """The tag is one the table answers for, handed back to look it up with."""
+    return kind
 
 
 _WHEN_UNKNOWN_KIND: dict[bool, Any] = {
-    True: _accept_known_kind,
+    True: _the_known_kind,
     False: _refuse_unknown_kind,
 }
 
@@ -264,8 +265,8 @@ def render_function(
 
     for i, arg in enumerate(fn["args"]):
         kind = kind_of(arg)
-        _WHEN_UNKNOWN_KIND[kind in _RENDER_ARGUMENT](kind)
-        sql, rendered_params = _RENDER_ARGUMENT[kind](arg, f"{path}_a{i}", dialect)
+        known = _WHEN_UNKNOWN_KIND[kind in _RENDER_ARGUMENT](kind)
+        sql, rendered_params = _RENDER_ARGUMENT[known](arg, f"{path}_a{i}", dialect)
         parts.append(sql)
         params.update(rendered_params)
 
