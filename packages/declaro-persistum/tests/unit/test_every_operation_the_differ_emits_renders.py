@@ -45,7 +45,7 @@ from declaro_persistum.abstractions.enums import expand_schema_enums
 from declaro_persistum.applier import SQL_GENERATORS, generate_sql
 from declaro_persistum.differ.core import diff
 from declaro_persistum.differ.extended import diff_views
-from declaro_persistum.types import Operation
+from declaro_persistum.types import NOTHING, Operation
 
 pytestmark = pytest.mark.precommit
 
@@ -62,7 +62,7 @@ BASE: dict[str, Any] = {
 
 
 def _ops(current: dict[str, Any], target: dict[str, Any]) -> list[Operation]:
-    return diff(current, target, dialect="sqlite")["operations"]
+    return diff(current, target, dialect="sqlite", decisions=NOTHING)["operations"]
 
 
 def _corpus() -> dict[str, Operation]:

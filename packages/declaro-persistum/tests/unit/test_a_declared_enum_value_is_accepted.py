@@ -45,6 +45,7 @@ import pytest
 from declaro_persistum.abstractions.enums import expand_schema_enums
 from declaro_persistum.applier import apply
 from declaro_persistum.differ import diff
+from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.precommit, pytest.mark.sqlite]
 
@@ -61,7 +62,7 @@ SCHEMA = {
 def _plan(dialect: str):
     """Expansion and diff, from the functions that do them in production."""
     expanded = expand_schema_enums(SCHEMA)
-    return expanded, diff({}, expanded, dialect=dialect)
+    return expanded, diff({}, expanded, dialect=dialect, decisions=NOTHING)
 
 
 async def _migrated(path) -> aiosqlite.Connection:
@@ -169,7 +170,7 @@ async def test_a_value_with_a_quote_in_it_survives(tmp_path) -> None:
         }
     }
     expanded = expand_schema_enums(schema)
-    plan = diff({}, expanded, dialect="sqlite")
+    plan = diff({}, expanded, dialect="sqlite", decisions=NOTHING)
 
     conn = await aiosqlite.connect(str(tmp_path / "quote.db"))
     try:
@@ -191,7 +192,7 @@ async def test_running_the_migration_twice_does_not_duplicate(tmp_path) -> None:
     expanded, _ = _plan("sqlite")
     conn = await aiosqlite.connect(str(path))
     try:
-        plan = diff(expanded, expanded, dialect="sqlite")
+        plan = diff(expanded, expanded, dialect="sqlite", decisions=NOTHING)
         assert plan["operations"] == [], (
             f"an unchanged schema still emits operations: {plan['operations']}"
         )

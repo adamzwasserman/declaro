@@ -12,6 +12,8 @@ import re
 from datetime import UTC, datetime
 from typing import TypedDict
 
+from declaro_persistum.types import Nothing, resolved
+
 
 class LatencyRecord(TypedDict):
     """One timing record per execute() call."""
@@ -126,9 +128,12 @@ def build_record(
     duration_ms: float,
     success: bool,
     sql: str,
-    error: str = "",
+    error: str | Nothing,
 ) -> LatencyRecord:
     """Build a LatencyRecord from execution metadata."""
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    error = resolved(error, '')
     return {
         "ts": datetime.now(UTC).isoformat(),
         "tier": tier,

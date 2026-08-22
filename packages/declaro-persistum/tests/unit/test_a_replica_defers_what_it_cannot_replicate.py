@@ -24,12 +24,13 @@ import pytest
 
 from declaro_persistum.differ import diff
 from declaro_persistum.migrations import partition_replica_operations
+from declaro_persistum.types import NOTHING
 
 pytestmark = pytest.mark.precommit
 
 
 def _plan(current: dict, target: dict):
-    plan = diff(current, target, dialect="turso")
+    plan = diff(current, target, dialect="turso", decisions=NOTHING)
     return plan["operations"], plan["execution_order"]
 
 

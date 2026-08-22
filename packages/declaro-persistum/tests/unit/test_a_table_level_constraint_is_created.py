@@ -54,6 +54,7 @@ import pytest
 from declaro_persistum.applier import apply
 from declaro_persistum.applier.shared import create_table_sql
 from declaro_persistum.differ.core import diff
+from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.precommit]
 
@@ -137,7 +138,7 @@ def test_the_constraint_is_named_in_the_create() -> None:
 async def test_the_constraint_reaches_the_database(dialect: str) -> None:
     connection = await ENGINES[dialect]()
     try:
-        plan = diff({}, DECLARED, dialect=dialect)
+        plan = diff({}, DECLARED, dialect=dialect, decisions=NOTHING)
         await apply(
             connection,
             plan["operations"],
@@ -173,7 +174,7 @@ async def test_the_constraint_is_enforced(dialect: str) -> None:
     """
     connection = await ENGINES[dialect]()
     try:
-        plan = diff({}, DECLARED, dialect=dialect)
+        plan = diff({}, DECLARED, dialect=dialect, decisions=NOTHING)
         await apply(
             connection,
             plan["operations"],
@@ -235,7 +236,7 @@ async def test_a_declared_constraint_converges(dialect: str, expression: str) ->
     }
     connection = await ENGINES[dialect]()
     try:
-        plan = diff({}, declared, dialect=dialect)
+        plan = diff({}, declared, dialect=dialect, decisions=NOTHING)
         await apply(
             connection,
             plan["operations"],
@@ -248,8 +249,7 @@ async def test_a_declared_constraint_converges(dialect: str, expression: str) ->
         remaining = diff(
             {n: actual[n] for n in declared if n in actual},
             declared,
-            dialect=dialect,
-        )["operations"]
+            dialect=dialect, decisions=NOTHING)["operations"]
 
         assert remaining == [], (
             f"{expression!r} on {dialect} migrates on every deploy: "
@@ -282,7 +282,7 @@ async def test_a_changed_constraint_is_still_noticed(dialect: str) -> None:
 
     connection = await ENGINES[dialect]()
     try:
-        plan = diff({}, declared("lo < hi"), dialect=dialect)
+        plan = diff({}, declared("lo < hi"), dialect=dialect, decisions=NOTHING)
         await apply(
             connection,
             plan["operations"],
@@ -295,8 +295,7 @@ async def test_a_changed_constraint_is_still_noticed(dialect: str) -> None:
         changed = diff(
             {n: actual[n] for n in actual},
             declared("lo > hi"),
-            dialect=dialect,
-        )["operations"]
+            dialect=dialect, decisions=NOTHING)["operations"]
 
         assert [o["op"] for o in changed] == ["drop_constraint", "add_constraint"], (
             changed
@@ -330,7 +329,7 @@ async def test_postgresql_creates_the_constraint_too() -> None:
                 },
             }
         }
-        plan = diff({}, declared, dialect="postgresql")
+        plan = diff({}, declared, dialect="postgresql", decisions=NOTHING)
         await apply(
             connection,
             plan["operations"],
@@ -372,7 +371,7 @@ async def test_postgresql_does_not_propose_a_constraint_it_already_has() -> None
                 },
             }
         }
-        plan = diff({}, declared, dialect="postgresql")
+        plan = diff({}, declared, dialect="postgresql", decisions=NOTHING)
         await apply(
             connection,
             plan["operations"],
@@ -385,8 +384,7 @@ async def test_postgresql_does_not_propose_a_constraint_it_already_has() -> None
         remaining = diff(
             {n: actual[n] for n in declared if n in actual},
             declared,
-            dialect="postgresql",
-        )["operations"]
+            dialect="postgresql", decisions=NOTHING)["operations"]
 
         assert remaining == [], [(o["op"], o["details"]) for o in remaining]
     finally:

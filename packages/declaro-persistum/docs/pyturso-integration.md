@@ -179,7 +179,7 @@ TursoPool (pool.py)
     |
     v
 TursoAsyncConnection (pool.py)
-    |-- execute()        delegates to _write_holder.conn
+    |-- execute(, query=NOTHING, connection=NOTHING, row_factory=NOTHING)        delegates to _write_holder.conn
     |-- commit()         local commit only
     |
     v

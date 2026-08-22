@@ -52,7 +52,7 @@ import pytest
 from declaro_persistum.abstractions.enums import expand_schema_enums
 from declaro_persistum.differ.core import diff
 from declaro_persistum.inspector import introspect
-from declaro_persistum.types import Operation
+from declaro_persistum.types import NOTHING, Operation
 
 # asyncio mode is AUTO, so async tests are collected without a mark. Marking
 # the module would warn on the one synchronous test below.
@@ -172,7 +172,7 @@ CASES: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
 
 
 def _operations_of(current: dict[str, Any], target: dict[str, Any]) -> set[str]:
-    return {o["op"] for o in diff(current, target, dialect="sqlite")["operations"]}
+    return {o["op"] for o in diff(current, target, dialect="sqlite", decisions=NOTHING)["operations"]}
 
 
 def test_the_cases_cover_the_operations_they_claim_to() -> None:
@@ -211,7 +211,7 @@ async def _apply_plan(
 ) -> None:
     from declaro_persistum.applier import apply
 
-    plan = diff(current, target, dialect=dialect)
+    plan = diff(current, target, dialect=dialect, decisions=NOTHING)
     await apply(
         connection,
         plan["operations"],
@@ -226,8 +226,7 @@ async def _converged(connection: Any, target: dict, dialect: str) -> list:
     return diff(
         {name: actual[name] for name in target if name in actual},
         target,
-        dialect=dialect,
-    )["operations"]
+        dialect=dialect, decisions=NOTHING)["operations"]
 
 
 @pytest.mark.parametrize(

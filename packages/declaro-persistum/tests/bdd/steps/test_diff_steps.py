@@ -29,6 +29,7 @@ from declaro_persistum.differ import (
     topological_sort,
 )
 from declaro_persistum.differ.toposort import build_dependency_graph
+from declaro_persistum.types import NOTHING
 
 scenarios("../features/schema/diff.feature")
 
@@ -125,8 +126,8 @@ def _when_diff(ctx):
 
 @when("the schemas are diffed twice")
 def _when_diff_twice(ctx):
-    ctx["result"] = diff(ctx["current"], ctx["target"], dialect="postgresql")
-    ctx["result_again"] = diff(ctx["current"], ctx["target"], dialect="postgresql")
+    ctx["result"] = diff(ctx["current"], ctx["target"], dialect="postgresql", decisions=NOTHING)
+    ctx["result_again"] = diff(ctx["current"], ctx["target"], dialect="postgresql", decisions=NOTHING)
 
 
 @then(parsers.parse('there is a create_table operation for "{name}"'))

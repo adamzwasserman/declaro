@@ -47,6 +47,7 @@ from declaro_persistum.applier.shared import column_definition
 from declaro_persistum.differ.core import diff
 from declaro_persistum.inspector import introspect
 from declaro_persistum.pydantic_loader import load_schema_from_models
+from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.precommit]
 
@@ -149,7 +150,7 @@ async def test_the_defaults_survive_a_round_trip(dialect: str) -> None:
         connection = await aiosqlite.connect(os.path.join(tempfile.mkdtemp(), "d.db"))
 
     try:
-        plan = diff({}, declared, dialect=dialect)
+        plan = diff({}, declared, dialect=dialect, decisions=NOTHING)
         await apply(
             connection,
             plan["operations"],
@@ -160,8 +161,7 @@ async def test_the_defaults_survive_a_round_trip(dialect: str) -> None:
 
         actual = await introspect(connection, dialect)
         remaining = diff(
-            {n: actual[n] for n in declared if n in actual}, declared, dialect=dialect
-        )["operations"]
+            {n: actual[n] for n in declared if n in actual}, declared, dialect=dialect, decisions=NOTHING)["operations"]
 
         assert remaining == [], (
             f"the declared defaults migrate on every deploy: "
@@ -194,7 +194,7 @@ async def test_the_defaults_actually_apply_to_a_row(dialect: str) -> None:
         connection = await aiosqlite.connect(os.path.join(tempfile.mkdtemp(), "r.db"))
 
     try:
-        plan = diff({}, declared, dialect=dialect)
+        plan = diff({}, declared, dialect=dialect, decisions=NOTHING)
         await apply(
             connection,
             plan["operations"],

@@ -46,6 +46,7 @@ import pytest
 from declaro_persistum.applier import apply
 from declaro_persistum.differ import diff
 from declaro_persistum.inspector import introspect
+from declaro_persistum.types import NOTHING
 
 pytestmark = pytest.mark.precommit
 
@@ -62,7 +63,7 @@ def _table(column: dict) -> dict:
 
 def _ops(before: dict, after: dict, dialect: str) -> list[str]:
     return [
-        o["op"] for o in diff(_table(before), _table(after), dialect=dialect)["operations"]
+        o["op"] for o in diff(_table(before), _table(after), dialect=dialect, decisions=NOTHING)["operations"]
     ]
 
 
@@ -149,7 +150,7 @@ async def test_a_declared_check_survives_the_round_trip() -> None:
     conn = await aiosqlite.connect(path)
     try:
         declared = _table({"type": "integer", "check": "c > 0"})
-        plan = diff({}, declared, dialect="sqlite")
+        plan = diff({}, declared, dialect="sqlite", decisions=NOTHING)
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite",
                     dry_run=False)
         await conn.commit()
@@ -157,7 +158,7 @@ async def test_a_declared_check_survives_the_round_trip() -> None:
         actual = await introspect(conn, "sqlite")
 
         assert actual["t"]["columns"]["c"].get("check") == "c > 0"
-        assert diff({"t": actual["t"]}, declared, dialect="sqlite")["operations"] == []
+        assert diff({"t": actual["t"]}, declared, dialect="sqlite", decisions=NOTHING)["operations"] == []
     finally:
         await conn.close()
         os.unlink(path)
@@ -170,7 +171,7 @@ async def test_a_tightened_check_is_enforced_afterwards() -> None:
     path = tempfile.mktemp(suffix=".db")
     conn = await aiosqlite.connect(path)
     try:
-        plan = diff({}, _table({"type": "integer", "check": "c > 0"}), dialect="sqlite")
+        plan = diff({}, _table({"type": "integer", "check": "c > 0"}), dialect="sqlite", decisions=NOTHING)
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite",
                     dry_run=False)
         await conn.execute("INSERT INTO t VALUES ('1', 50)")
@@ -178,7 +179,7 @@ async def test_a_tightened_check_is_enforced_afterwards() -> None:
 
         actual = await introspect(conn, "sqlite")
         plan = diff({"t": actual["t"]}, _table({"type": "integer", "check": "c > 10"}),
-                    dialect="sqlite")
+                    dialect="sqlite", decisions=NOTHING)
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite",
                     dry_run=False)
         await conn.commit()
@@ -204,7 +205,7 @@ async def test_tightening_onto_data_that_violates_it_fails_loudly() -> None:
     path = tempfile.mktemp(suffix=".db")
     conn = await aiosqlite.connect(path)
     try:
-        plan = diff({}, _table({"type": "integer", "check": "c > 0"}), dialect="sqlite")
+        plan = diff({}, _table({"type": "integer", "check": "c > 0"}), dialect="sqlite", decisions=NOTHING)
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite",
                     dry_run=False)
         await conn.execute("INSERT INTO t VALUES ('1', 5)")
@@ -212,7 +213,7 @@ async def test_tightening_onto_data_that_violates_it_fails_loudly() -> None:
 
         actual = await introspect(conn, "sqlite")
         plan = diff({"t": actual["t"]}, _table({"type": "integer", "check": "c > 10"}),
-                    dialect="sqlite")
+                    dialect="sqlite", decisions=NOTHING)
 
         from declaro_persistum.exceptions import MigrationError
 
@@ -270,14 +271,14 @@ async def test_a_removed_unique_is_gone_from_the_database() -> None:
         with_unique = _table({"type": "text", "unique": True})
         without = _table({"type": "text"})
 
-        plan = diff({}, with_unique, dialect="sqlite")
+        plan = diff({}, with_unique, dialect="sqlite", decisions=NOTHING)
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite",
                     dry_run=False)
         await conn.execute("INSERT INTO t VALUES ('1', 'x')")
         await conn.commit()
 
         actual = await introspect(conn, "sqlite")
-        plan = diff({"t": actual["t"]}, without, dialect="sqlite")
+        plan = diff({"t": actual["t"]}, without, dialect="sqlite", decisions=NOTHING)
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite",
                     dry_run=False)
         await conn.commit()
@@ -300,14 +301,14 @@ async def test_an_added_unique_constrains_the_database() -> None:
     path = tempfile.mktemp(suffix=".db")
     conn = await aiosqlite.connect(path)
     try:
-        plan = diff({}, _table({"type": "text"}), dialect="sqlite")
+        plan = diff({}, _table({"type": "text"}), dialect="sqlite", decisions=NOTHING)
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite",
                     dry_run=False)
         await conn.commit()
 
         actual = await introspect(conn, "sqlite")
         plan = diff({"t": actual["t"]}, _table({"type": "text", "unique": True}),
-                    dialect="sqlite")
+                    dialect="sqlite", decisions=NOTHING)
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite",
                     dry_run=False)
         await conn.commit()
@@ -330,21 +331,21 @@ async def test_the_two_step_route_to_dropping_a_unique_column_works() -> None:
     path = tempfile.mktemp(suffix=".db")
     conn = await aiosqlite.connect(path)
     try:
-        plan = diff({}, _table({"type": "text", "unique": True}), dialect="sqlite")
+        plan = diff({}, _table({"type": "text", "unique": True}), dialect="sqlite", decisions=NOTHING)
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite",
                     dry_run=False)
         await conn.execute("INSERT INTO t VALUES ('1', 'x')")
         await conn.commit()
 
         actual = await introspect(conn, "sqlite")
-        plan = diff({"t": actual["t"]}, _table({"type": "text"}), dialect="sqlite")
+        plan = diff({"t": actual["t"]}, _table({"type": "text"}), dialect="sqlite", decisions=NOTHING)
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite",
                     dry_run=False)
         await conn.commit()
 
         actual = await introspect(conn, "sqlite")
         gone = {"t": {"columns": {"id": {"type": "text", "primary_key": True}}}}
-        plan = diff({"t": actual["t"]}, gone, dialect="sqlite")
+        plan = diff({"t": actual["t"]}, gone, dialect="sqlite", decisions=NOTHING)
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite",
                     dry_run=False)
         await conn.commit()
@@ -393,8 +394,8 @@ def test_a_unique_index_on_the_current_side_is_folded_too() -> None:
         }
     }
 
-    assert diff(by_index, by_column, dialect="sqlite")["operations"] == []
-    assert diff(by_column, by_index, dialect="sqlite")["operations"] == []
+    assert diff(by_index, by_column, dialect="sqlite", decisions=NOTHING)["operations"] == []
+    assert diff(by_column, by_index, dialect="sqlite", decisions=NOTHING)["operations"] == []
 
 
 def test_a_multi_column_unique_index_marks_no_single_column_unique() -> None:
@@ -416,7 +417,7 @@ def test_a_multi_column_unique_index_marks_no_single_column_unique() -> None:
         }
     }
 
-    assert diff(pair, neither, dialect="sqlite")["operations"] == []
+    assert diff(pair, neither, dialect="sqlite", decisions=NOTHING)["operations"] == []
 
     from declaro_persistum.differ.core import _with_unique_folded
 
@@ -516,4 +517,4 @@ def test_postgresql_does_not_loop_on_an_expression_it_rewrote(declared, stored) 
     current = {"t": {"columns": {"c": {"type": "text", "check": stored}}}}
     target = {"t": {"columns": {"c": {"type": "text", "check": declared}}}}
 
-    assert diff(current, target, dialect="postgresql")["operations"] == []
+    assert diff(current, target, dialect="postgresql", decisions=NOTHING)["operations"] == []

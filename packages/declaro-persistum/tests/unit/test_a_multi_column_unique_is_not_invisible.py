@@ -45,6 +45,7 @@ from typing import Any
 import pytest
 
 from declaro_persistum.inspector import introspect
+from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.precommit]
 
@@ -207,7 +208,7 @@ async def test_a_declared_multi_column_unique_converges(dialect: str) -> None:
 
     connection = await ENGINES[dialect]()
     try:
-        plan = diff({}, DECLARED, dialect=dialect)
+        plan = diff({}, DECLARED, dialect=dialect, decisions=NOTHING)
         await apply(
             connection,
             plan["operations"],
@@ -220,8 +221,7 @@ async def test_a_declared_multi_column_unique_converges(dialect: str) -> None:
         remaining = diff(
             {n: actual[n] for n in DECLARED if n in actual},
             DECLARED,
-            dialect=dialect,
-        )["operations"]
+            dialect=dialect, decisions=NOTHING)["operations"]
 
         assert actual["t"]["indexes"]["ix_cd"]["columns"] == ["c", "d"]
         assert remaining == [], [(o["op"], o["table"]) for o in remaining]

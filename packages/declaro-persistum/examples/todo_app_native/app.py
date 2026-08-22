@@ -215,8 +215,7 @@ async def index(request: Request):
                 "created_at",
                 from_table="todos",
                 order_by=["-created_at"], where=NOTHING, params=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
-            conn,
-        )
+            conn, row_factory=NOTHING)
 
     return templates.TemplateResponse("index.html", {
         "request": request,
@@ -232,15 +231,13 @@ async def create_todo(request: Request, title: str = Form(...)):
     async with get_connection() as conn:
         await execute(
             insert("todos", {"id": todo_id, "title": title, "completed": 0}, returning=NOTHING, on_conflict=NOTHING),
-            conn,
-        )
+            conn, row_factory=NOTHING)
         await commit(conn)
 
         todo = await execute_one(
             select("id", "title", "completed", from_table="todos",
                    where={"id": todo_id}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
-            conn,
-        )
+            conn, row_factory=NOTHING)
 
     return templates.TemplateResponse("partials/todo_item.html", {
         "request": request,
@@ -253,21 +250,18 @@ async def toggle_todo(request: Request, todo_id: str):
     async with get_connection() as conn:
         current = await execute_one(
             select("completed", from_table="todos", where={"id": todo_id}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
-            conn,
-        )
+            conn, row_factory=NOTHING)
         new_completed = 0 if current["completed"] else 1
 
         await execute(
             update("todos", {"completed": new_completed}, where={"id": todo_id}, params=NOTHING, returning=NOTHING),
-            conn,
-        )
+            conn, row_factory=NOTHING)
         await commit(conn)
 
         todo = await execute_one(
             select("id", "title", "completed", from_table="todos",
                    where={"id": todo_id}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
-            conn,
-        )
+            conn, row_factory=NOTHING)
 
     return templates.TemplateResponse("partials/todo_item.html", {
         "request": request,
@@ -278,7 +272,7 @@ async def toggle_todo(request: Request, todo_id: str):
 async def delete_todo(todo_id: str):
     """Delete a todo."""
     async with get_connection() as conn:
-        await execute(delete("todos", where={"id": todo_id}, params=NOTHING, returning=NOTHING), conn)
+        await execute(delete("todos", where={"id": todo_id}, params=NOTHING, returning=NOTHING), conn, row_factory=NOTHING)
         await commit(conn)
 
     return ""

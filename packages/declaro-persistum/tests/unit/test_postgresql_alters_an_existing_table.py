@@ -33,6 +33,7 @@ import pytest
 from declaro_persistum.applier import apply
 from declaro_persistum.differ.core import diff
 from declaro_persistum.inspector import introspect
+from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.precommit, pytest.mark.postgresql, pytest.mark.integration]
 
@@ -107,8 +108,7 @@ async def _deploy(connection: Any, declared: dict[str, Any]) -> None:
     plan = diff(
         {n: actual[n] for n in declared if n in actual},
         declared,
-        dialect="postgresql",
-    )
+        dialect="postgresql", decisions=NOTHING)
     await apply(
         connection,
         plan["operations"],
@@ -152,8 +152,7 @@ async def test_the_change_converges(
         remaining = diff(
             {n: actual[n] for n in after if n in actual},
             after,
-            dialect="postgresql",
-        )["operations"]
+            dialect="postgresql", decisions=NOTHING)["operations"]
 
         assert remaining == [], (
             f"{label} migrates on every deploy: "

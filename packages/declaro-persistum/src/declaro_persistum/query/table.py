@@ -150,7 +150,7 @@ def now_(alias: str | Nothing) -> SQLFunction:
 @helper
 def case_(
     *whens: tuple[dict[str, Any], Any],
-    else_: Any = None,
+    else_: Any | Nothing,
     alias: str | Nothing,
 ) -> CaseExpression:
     """A CASE expression.
@@ -164,6 +164,9 @@ def case_(
     only shape that needed `.as_()` instead, which is why that method outlived
     its usefulness.
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    else_ = resolved(else_, None)
     # THE VISIBLE RESOLVE. A default would hide this inside the
     # signature, where no reader sees it happen and no test reaches it.
     else_ = resolved(else_, None)

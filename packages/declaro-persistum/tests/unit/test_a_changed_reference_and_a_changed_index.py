@@ -49,6 +49,7 @@ import pytest
 from declaro_persistum.applier import apply
 from declaro_persistum.differ.core import diff
 from declaro_persistum.inspector import introspect
+from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.precommit]
 
@@ -123,8 +124,7 @@ async def _done(connection: Any, dialect: str) -> None:
 async def _deploy(connection: Any, dialect: str, declared: dict) -> None:
     actual = await introspect(connection, dialect)
     plan = diff(
-        {n: actual[n] for n in declared if n in actual}, declared, dialect=dialect
-    )
+        {n: actual[n] for n in declared if n in actual}, declared, dialect=dialect, decisions=NOTHING)
     await apply(
         connection, plan["operations"], plan["execution_order"], dialect, dry_run=False
     )
@@ -133,8 +133,7 @@ async def _deploy(connection: Any, dialect: str, declared: dict) -> None:
 def test_a_changed_reference_emits_a_drop_and_an_add() -> None:
     """The branch itself, before any engine sees it."""
     operations = diff(
-        _fk_schema("parents"), _fk_schema("others"), dialect="sqlite"
-    )["operations"]
+        _fk_schema("parents"), _fk_schema("others"), dialect="sqlite", decisions=NOTHING)["operations"]
 
     assert [o["op"] for o in operations] == ["drop_foreign_key", "add_foreign_key"]
 
@@ -142,8 +141,7 @@ def test_a_changed_reference_emits_a_drop_and_an_add() -> None:
 def test_the_drop_names_the_reference_being_replaced() -> None:
     """Without it, a rebuild cannot tell which key it is removing."""
     operations = diff(
-        _fk_schema("parents"), _fk_schema("others"), dialect="sqlite"
-    )["operations"]
+        _fk_schema("parents"), _fk_schema("others"), dialect="sqlite", decisions=NOTHING)["operations"]
 
     assert operations[0]["details"]["references"] == "parents.id", operations[0]
     assert operations[1]["details"]["references"] == "others.id", operations[1]
@@ -162,8 +160,7 @@ async def test_a_repointed_reference_applies_and_converges(dialect: str) -> None
         remaining = diff(
             {n: actual[n] for n in declared if n in actual},
             declared,
-            dialect=dialect,
-        )["operations"]
+            dialect=dialect, decisions=NOTHING)["operations"]
 
         assert remaining == [], [(o["op"], o["table"]) for o in remaining]
     finally:
@@ -190,15 +187,14 @@ async def test_the_repointed_reference_points_where_it_was_told(
 
 def test_a_changed_index_emits_a_drop_and_an_add() -> None:
     operations = diff(
-        _index_schema(["a"]), _index_schema(["a", "b"]), dialect="sqlite"
-    )["operations"]
+        _index_schema(["a"]), _index_schema(["a", "b"]), dialect="sqlite", decisions=NOTHING)["operations"]
 
     assert [o["op"] for o in operations] == ["drop_index", "add_index"]
 
 
 def test_the_drop_comes_before_the_add() -> None:
     """Creating the replacement first is a name collision, not a change."""
-    plan = diff(_index_schema(["a"]), _index_schema(["a", "b"]), dialect="sqlite")
+    plan = diff(_index_schema(["a"]), _index_schema(["a", "b"]), dialect="sqlite", decisions=NOTHING)
     ordered = [plan["operations"][i]["op"] for i in plan["execution_order"]]
 
     assert ordered.index("drop_index") < ordered.index("add_index"), ordered
@@ -217,8 +213,7 @@ async def test_a_changed_index_applies_and_converges(dialect: str) -> None:
         remaining = diff(
             {n: actual[n] for n in declared if n in actual},
             declared,
-            dialect=dialect,
-        )["operations"]
+            dialect=dialect, decisions=NOTHING)["operations"]
 
         assert actual["widgets"]["indexes"]["ix"]["columns"] == ["a", "b"]
         assert remaining == [], [(o["op"], o["table"]) for o in remaining]
@@ -229,10 +224,10 @@ async def test_a_changed_index_applies_and_converges(dialect: str) -> None:
 def test_an_unchanged_index_emits_nothing() -> None:
     """The control on both. A differ emitting drop-and-add for everything
     would satisfy every test above."""
-    assert diff(_index_schema(["a"]), _index_schema(["a"]), dialect="sqlite")[
+    assert diff(_index_schema(["a"]), _index_schema(["a"]), dialect="sqlite", decisions=NOTHING)[
         "operations"
     ] == []
-    assert diff(_fk_schema("parents"), _fk_schema("parents"), dialect="sqlite")[
+    assert diff(_fk_schema("parents"), _fk_schema("parents"), dialect="sqlite", decisions=NOTHING)[
         "operations"
     ] == []
 

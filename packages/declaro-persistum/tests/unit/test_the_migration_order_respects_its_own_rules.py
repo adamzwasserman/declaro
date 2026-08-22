@@ -41,6 +41,7 @@ from declaro_persistum.differ.toposort import (
     topological_sort,
 )
 from declaro_persistum.exceptions import CycleError
+from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.precommit]
 
@@ -67,7 +68,7 @@ def _position(ordered: list[Any], op: str, table: str) -> int:
 
 
 def _plan(current: dict[str, Any], target: dict[str, Any]) -> list[Any]:
-    return diff(current, target, dialect="sqlite")["operations"]
+    return diff(current, target, dialect="sqlite", decisions=NOTHING)["operations"]
 
 
 PARENT = {"columns": {"id": {"type": "integer", "primary_key": True}}}

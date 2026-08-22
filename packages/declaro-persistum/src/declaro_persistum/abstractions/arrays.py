@@ -9,7 +9,7 @@ import re
 from collections.abc import Callable
 from typing import Any
 
-from declaro_persistum.types import Dialect
+from declaro_persistum.types import Dialect, Nothing, resolved
 
 
 def parse_array_type(type_str: str) -> str | None:
@@ -34,7 +34,7 @@ def generate_junction_table(
     parent_table: str,
     column_name: str,
     element_type: str,
-    parent_pk: str = "id",
+    parent_pk: str | Nothing,
 ) -> dict[str, Any]:
     """
     Generate junction table schema for array column.
@@ -48,6 +48,9 @@ def generate_junction_table(
     Returns:
         Schema dict with junction table definition.
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    parent_pk = resolved(parent_pk, 'id')
     junction_name = f"{parent_table}_{column_name}"
     fk_column = f"{parent_table[:-1] if parent_table.endswith('s') else parent_table}_id"
 

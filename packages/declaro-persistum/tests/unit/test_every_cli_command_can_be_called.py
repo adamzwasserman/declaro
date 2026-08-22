@@ -45,6 +45,7 @@ import sys
 import pytest
 
 from declaro_persistum.cli import commands
+from declaro_persistum.types import NOTHING
 
 pytestmark = pytest.mark.precommit
 
@@ -199,8 +200,7 @@ def test_the_one_door_renders_sql_for_every_dialect(dialect: str) -> None:
                 }
             }
         },
-        dialect=dialect,
-    )
+        dialect=dialect, decisions=NOTHING)
 
     statements = generate_sql(plan["operations"], plan["execution_order"], dialect)
 

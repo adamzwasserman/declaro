@@ -7,14 +7,23 @@ Detects changes that could be interpreted multiple ways:
 """
 
 from declaro_persistum.applier.shared import same_type
-from declaro_persistum.types import Ambiguity, Column, Decision, Dialect, Schema, Table
+from declaro_persistum.types import (
+    Ambiguity,
+    Column,
+    Decision,
+    Dialect,
+    Nothing,
+    Schema,
+    Table,
+    resolved,
+)
 
 
 def detect_ambiguities(
     current: Schema,
     target: Schema,
     dialect: Dialect,
-    decisions: dict[str, Decision] | None = None,
+    decisions: dict[str, Decision] | None | Nothing,
 ) -> list[Ambiguity]:
     """
     Detect ambiguous changes that require human decision.
@@ -30,10 +39,13 @@ def detect_ambiguities(
     Example:
         >>> current = {"users": {"columns": {"name": {"type": "text"}}}}
         >>> target = {"users": {"columns": {"full_name": {"type": "text"}}}}
-        >>> ambiguities = detect_ambiguities(current, target, dialect="postgresql")
+        >>> ambiguities = detect_ambiguities(current, target, dialect="postgresql", decisions=NOTHING)
         >>> print(ambiguities[0]["type"])
         'possible_rename'
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    decisions = resolved(decisions, None)
     decisions = decisions or {}
     ambiguities: list[Ambiguity] = []
 

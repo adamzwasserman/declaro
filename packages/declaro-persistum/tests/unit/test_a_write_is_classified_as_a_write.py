@@ -39,6 +39,7 @@ from declaro_persistum.instrumentation import (
     format_jsonl,
     is_write_op,
 )
+from declaro_persistum.types import NOTHING
 
 pytestmark = pytest.mark.precommit
 
@@ -121,8 +122,7 @@ def test_something_nobody_taught_it_is_other_not_a_guess() -> None:
 def test_a_record_carries_what_the_docs_promise() -> None:
     """README names seven fields. A missing one breaks a consumer's parser."""
     record = build_record(
-        tier="local", op="insert", duration_ms=1.5, success=True, sql="INSERT INTO t"
-    )
+        tier="local", op="insert", duration_ms=1.5, success=True, sql="INSERT INTO t", error=NOTHING)
 
     assert set(record) == {
         "ts",
@@ -137,8 +137,7 @@ def test_a_record_carries_what_the_docs_promise() -> None:
 
 def test_a_successful_record_carries_no_error() -> None:
     record = build_record(
-        tier="local", op="select", duration_ms=0.1, success=True, sql="SELECT 1"
-    )
+        tier="local", op="select", duration_ms=0.1, success=True, sql="SELECT 1", error=NOTHING)
 
     assert record["success"] is True
     assert record["error"] == ""
@@ -182,8 +181,7 @@ def test_the_line_survives_a_quote_in_the_sql() -> None:
             op="insert",
             duration_ms=1.0,
             success=True,
-            sql="INSERT INTO t VALUES ('it\"s')",
-        )
+            sql="INSERT INTO t VALUES ('it\"s')", error=NOTHING)
     )
 
     assert json.loads(line)["sql"] == "INSERT INTO t VALUES ('it\"s')"
@@ -197,8 +195,7 @@ def test_emitting_writes_one_line_to_the_logger(caplog) -> None:
         emit_record(
             logger,
             build_record(
-                tier="local", op="select", duration_ms=2.0, success=True, sql="SELECT 1"
-            ),
+                tier="local", op="select", duration_ms=2.0, success=True, sql="SELECT 1", error=NOTHING),
         )
 
     assert len(caplog.records) == 1, caplog.records

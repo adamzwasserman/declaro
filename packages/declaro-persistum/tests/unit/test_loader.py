@@ -11,6 +11,7 @@ from declaro_persistum.loader import (
     save_decisions,
     save_snapshot,
 )
+from declaro_persistum.types import NOTHING
 
 
 class TestLoadSchema:
@@ -157,7 +158,7 @@ class TestSnapshot:
             }
         }
 
-        save_snapshot(temp_schema_dir, schema, "postgresql")
+        save_snapshot(temp_schema_dir, schema, "postgresql", applied_by=NOTHING)
 
         # Verify file exists
         snapshot_path = temp_schema_dir / "snapshot.toml"

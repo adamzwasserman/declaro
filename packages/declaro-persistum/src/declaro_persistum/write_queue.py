@@ -120,6 +120,7 @@ from typing import Any, TypedDict
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE
 from declaro_persistum.retry import Retry, delay_before, is_contention
+from declaro_persistum.types import NOTHING
 
 
 class PendingWrite(TypedDict):

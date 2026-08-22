@@ -1,7 +1,7 @@
 """
 Core diff logic for schema comparison.
 
-Implements the main diff() function that computes operations needed
+Implements the main diff(, current=NOTHING, target=NOTHING, dialect=NOTHING, decisions=NOTHING) function that computes operations needed
 to transform current schema to target schema.
 """
 
@@ -19,12 +19,14 @@ from declaro_persistum.types import (
     Dialect,
     DiffResult,
     Index,
+    Nothing,
     Operation,
     Schema,
     Table,
     applied_to_text,
     is_nullable,
     is_our_table,
+    resolved,
     spelling_of,
 )
 
@@ -35,7 +37,7 @@ def diff(
     target: Schema,
     *,
     dialect: Dialect,
-    decisions: dict[str, Decision] | None = None,
+    decisions: dict[str, Decision] | None | Nothing,
 ) -> DiffResult:
     """
     Compute operations needed to transform current schema to target schema.
@@ -82,10 +84,13 @@ def diff(
     Example:
         >>> current = {"users": {"columns": {"id": {"type": "integer"}}}}
         >>> target = {"users": {"columns": {"id": {"type": "integer"}, "email": {"type": "text"}}}}
-        >>> result = diff(current, target, dialect="postgresql")
+        >>> result = diff(current, target, dialect="postgresql", decisions=NOTHING)
         >>> print(result["operations"][0]["op"])
         'add_column'
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    decisions = resolved(decisions, None)
     decisions = decisions or {}
     operations: list[Operation] = []
 

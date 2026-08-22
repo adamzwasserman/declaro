@@ -6,6 +6,8 @@ Tests portable map patterns using junction tables with key/value columns.
 
 from typing import Any
 
+from declaro_persistum.types import NOTHING
+
 
 class TestMapTypeParsing:
     """Tests for parsing map type declarations."""
@@ -57,7 +59,7 @@ class TestMapJunctionTableGeneration:
         """Generate junction table schema for map."""
         from declaro_persistum.abstractions.maps import generate_junction_table
 
-        schema = generate_junction_table("users", "metadata", "text", "text")
+        schema = generate_junction_table("users", "metadata", "text", "text", parent_pk=NOTHING)
         assert "users_metadata" in schema
         table = schema["users_metadata"]
 
@@ -81,7 +83,7 @@ class TestMapJunctionTableGeneration:
         """Map junction table has unique key per parent."""
         from declaro_persistum.abstractions.maps import generate_junction_table
 
-        schema = generate_junction_table("users", "settings", "text", "text")
+        schema = generate_junction_table("users", "settings", "text", "text", parent_pk=NOTHING)
         table = schema["users_settings"]
 
         # Should have unique constraint on (user_id, key)
@@ -91,7 +93,7 @@ class TestMapJunctionTableGeneration:
         """Generate junction table with JSONB value."""
         from declaro_persistum.abstractions.maps import generate_junction_table
 
-        schema = generate_junction_table("users", "preferences", "text", "jsonb")
+        schema = generate_junction_table("users", "preferences", "text", "jsonb", parent_pk=NOTHING)
         table = schema["users_preferences"]
 
         assert table["columns"]["value"]["type"] == "jsonb"

@@ -58,7 +58,7 @@ For pyturso specifically:
 
 | what the caller does | is it a sibling? |
 |---|---|
-| `cur = await conn.execute("SELECT …")`, never fetched | **No.** `execute()` does not step a row-returning statement. |
+| `cur = await conn.execute("SELECT …")`, never fetched | **No.** `execute(, query=NOTHING, connection=NOTHING, row_factory=NOTHING)` does not step a row-returning statement. |
 | one `fetchone()` that returns a row | **Yes**, and it stays one |
 | drained, finalized, or closed | no longer counted |
 
@@ -89,7 +89,7 @@ The real fix is the one their own FIXME names — commit at the writer's own hal
 
 `honest-persist` has required this from the beginning, for unrelated reasons:
 
-- §7.4 — `execute(query, conn) -> [Row]`, rows are plain dicts, **no lazy loading**
+- §7.4 — `execute(query, conn, row_factory=NOTHING) -> [Row]`, rows are plain dicts, **no lazy loading**
 - §10 — no lazy loading; a query returns what it says it returns
 
 A conformant implementation materialises the result before `execute` returns, so the cursor is drained inside the call. **A partially-read cursor therefore cannot be alive when the next operation runs, and the object both failure modes require does not exist.** The case table above confirms it from the other side: "reader fully drained → write" is durable, and full drainage is the only read shape the rule permits.

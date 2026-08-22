@@ -49,6 +49,7 @@ import pytest
 from declaro_persistum.applier import apply
 from declaro_persistum.differ.core import diff
 from declaro_persistum.inspector import introspect
+from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.precommit]
 
@@ -106,7 +107,7 @@ ENGINES = {"sqlite": _sqlite, "turso": _turso}
 
 
 async def _apply(connection: Any, dialect: str, current: dict, target: dict) -> None:
-    plan = diff(current, target, dialect=dialect)
+    plan = diff(current, target, dialect=dialect, decisions=NOTHING)
     await apply(
         connection, plan["operations"], plan["execution_order"], dialect, dry_run=False
     )
@@ -150,8 +151,7 @@ async def test_the_rebuild_converges(dialect: str) -> None:
         remaining = diff(
             {n: rebuilt[n] for n in declared if n in rebuilt},
             declared,
-            dialect=dialect,
-        )["operations"]
+            dialect=dialect, decisions=NOTHING)["operations"]
 
         assert remaining == [], [(o["op"], o["table"]) for o in remaining]
     finally:

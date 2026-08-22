@@ -96,7 +96,9 @@ async def main():
 
     async with writing(db) as conn:
         await execute(
-            insert("users", {"id": str(uuid4()), "email": "alice@example.com"}, returning=NOTHING, on_conflict=NOTHING), conn
+            insert("users", {"id": str(uuid4()), "email": "alice@example.com"},
+                   returning=NOTHING, on_conflict=NOTHING),
+            conn, row_factory=NOTHING,
         )
         await conn.commit()
 
@@ -107,7 +109,7 @@ async def main():
                    params=NOTHING, order_by=NOTHING, limit=NOTHING,
                    offset=NOTHING, joins=NOTHING, group_by=NOTHING,
                    having=NOTHING),
-            conn,
+            conn, row_factory=NOTHING,
         )
 
     await close(db)
@@ -116,7 +118,7 @@ async def main():
 asyncio.run(main())
 ```
 
-`select`, `insert`, `update`, `delete` and `raw` build a `Query`. `execute(query, conn)` runs it. A query is data until something executes it, which is why it can be built, inspected and tested without a database.
+`select`, `insert`, `update`, `delete` and `raw` build a `Query`. `execute(query, conn, row_factory=NOTHING)` runs it. A query is data until something executes it, which is why it can be built, inspected and tested without a database.
 
 **`writing` commits when the block ends cleanly, and rolls back if it raises.** The `await conn.commit()` above is therefore optional; a second commit is harmless, so writing it explicitly still works. It did NOT commit until 2026-08-14, and a block that forgot lost its write and reported nothing.
 

@@ -47,7 +47,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from declaro_persistum.types import written_as
+from declaro_persistum.types import NOTHING, Nothing, resolved, written_as
 
 __all__ = ["OPERATORS", "COMBINATORS", "Rendered", "Renderer", "render"]
 
@@ -79,7 +79,10 @@ Renderer = Callable[[str, Any, str], Rendered]
 _SAFE = str.maketrans({".": "_", "-": "_", " ": "_", '"': "", "'": ""})
 
 
-def _name(path: str, column: str, suffix: str = "") -> str:
+def _name(path: str, column: str, suffix: str | Nothing) -> str:
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    suffix = resolved(suffix, '')
     return f"{path}_{column.translate(_SAFE)}{suffix}"
 
 
@@ -93,7 +96,7 @@ def _binary(op: str) -> Renderer:
     """
 
     def render_binary(column: str, operand: Any, path: str) -> Rendered:
-        name = _name(path, column)
+        name = _name(path, column, suffix=NOTHING)
         return f"{column} {op} :{name}", {name: operand}
 
     return render_binary
@@ -108,7 +111,7 @@ def _like(pattern: str) -> Renderer:
     """
 
     def render_like(column: str, operand: Any, path: str) -> Rendered:
-        name = _name(path, column)
+        name = _name(path, column, suffix=NOTHING)
         return f"{column} LIKE :{name}", {name: pattern.format(operand)}
 
     return render_like

@@ -172,7 +172,7 @@ sequenceDiagram
     participant CLI as declaro CLI
     participant Loader as load_schema()
     participant Inspector as introspect_db()
-    participant Differ as diff()
+    participant Differ as diff(, current=NOTHING, target=NOTHING, dialect=NOTHING, decisions=NOTHING)
     participant Applier as apply()
     participant DB as Database
     participant Repo as Git Repo
@@ -194,7 +194,7 @@ sequenceDiagram
         Dev->>CLI: --force or abort
     end
     
-    CLI->>Differ: diff(actual, target)
+    CLI->>Differ: diff(actual, target, dialect=NOTHING, decisions=NOTHING)
     Differ-->>CLI: DiffResult{ops, deps, order}
     
     alt ambiguities exist
@@ -1131,7 +1131,7 @@ class SchemaDiffer:
     def __init__(self):
         self._cache = {}  # Hidden state!
     
-    def diff(self, current, target):
+    def diff(self, current, target, dialect=NOTHING, decisions=NOTHING):
         # Behavior depends on self._cache - not pure!
         ...
 ```
@@ -1384,21 +1384,21 @@ from hypothesis import given, strategies as st
 @given(st.dictionaries(st.text(), st.text()))
 def test_diff_empty_to_schema_creates_all_tables(target):
     """Diffing empty schema to any target creates tables for all keys."""
-    result = diff(current={}, target=target, dialect="postgresql")
+    result = diff(current={}, target=target, dialect="postgresql", decisions=NOTHING)
     created_tables = {op["table"] for op in result["operations"] if op["op"] == "create_table"}
     assert created_tables == set(target.keys())
 
 @given(st.dictionaries(st.text(), st.text()))
 def test_diff_schema_to_empty_drops_all_tables(current):
     """Diffing any schema to empty drops all tables."""
-    result = diff(current=current, target={}, dialect="postgresql")
+    result = diff(current=current, target={}, dialect="postgresql", decisions=NOTHING)
     dropped_tables = {op["table"] for op in result["operations"] if op["op"] == "drop_table"}
     assert dropped_tables == set(current.keys())
 
 def test_diff_identical_schemas_produces_no_operations():
     """Identical schemas produce empty operation list."""
     schema = {"users": {"columns": {"id": {"type": "integer"}}}}
-    result = diff(current=schema, target=schema)
+    result = diff(current=schema, target=schema, dialect=NOTHING, decisions=NOTHING)
     assert result["operations"] == []
 ```
 
@@ -1433,7 +1433,7 @@ async def test_full_migration_cycle(pg_connection):
     }
     
     # Diff and apply
-    diff_result = diff(current=initial, target=target, dialect="postgresql")
+    diff_result = diff(current=initial, target=target, dialect="postgresql", decisions=NOTHING)
     await apply(
         pg_connection,
         diff_result["operations"],
@@ -1457,7 +1457,7 @@ def test_destructive_operation_requires_confirmation():
     target = {"users": {"columns": {}}}  # Column removed
     
     # Without decision, should raise or flag
-    result = diff(current=current, target=target)
+    result = diff(current=current, target=target, dialect=NOTHING, decisions=NOTHING)
     assert any(a["type"] == "confirm_drop" for a in result["ambiguities"])
 
 def test_rename_annotation_prevents_data_loss():
@@ -1465,7 +1465,7 @@ def test_rename_annotation_prevents_data_loss():
     current = {"users": {"columns": {"name": {"type": "text"}}}}
     target = {"users": {"columns": {"full_name": {"type": "text", "renamed_from": "name"}}}}
     
-    result = diff(current=current, target=target)
+    result = diff(current=current, target=target, dialect=NOTHING, decisions=NOTHING)
     ops = result["operations"]
     
     assert any(op["op"] == "rename_column" for op in ops)

@@ -62,6 +62,7 @@ from declaro_persistum.applier import apply
 from declaro_persistum.differ.core import diff
 from declaro_persistum.inspector import introspect
 from declaro_persistum.inspector.turso import declared_name
+from declaro_persistum.types import NOTHING
 
 # asyncio mode is AUTO, so async tests need no mark. Marking the module would
 # warn on every synchronous test below.
@@ -84,8 +85,7 @@ async def _deploy(connection: Any, dialect: str, declared: dict) -> dict:
     plan = diff(
         {name: actual[name] for name in declared if name in actual},
         declared,
-        dialect=dialect,
-    )
+        dialect=dialect, decisions=NOTHING)
     return await apply(
         connection,
         plan["operations"],
@@ -305,8 +305,7 @@ async def test_a_reference_to_a_capitalised_table_converges(dialect: str) -> Non
         remaining = diff(
             {n: actual[n] for n in FK_SCHEMA if n in actual},
             FK_SCHEMA,
-            dialect=dialect,
-        )["operations"]
+            dialect=dialect, decisions=NOTHING)["operations"]
 
         assert remaining == [], (
             f"{dialect} rebuilds Post on every deploy: "
@@ -418,8 +417,7 @@ async def test_a_capitalised_index_converges(dialect: str) -> None:
         remaining = diff(
             {n: actual[n] for n in INDEXED if n in actual},
             INDEXED,
-            dialect=dialect,
-        )["operations"]
+            dialect=dialect, decisions=NOTHING)["operations"]
 
         assert remaining == [], [(o["op"], o["table"]) for o in remaining]
     finally:

@@ -20,9 +20,11 @@ from declaro_persistum.types import (
     Column,
     Decision,
     Dialect,
+    Nothing,
     Schema,
     Table,
     View,
+    resolved,
     spelling_of,
 )
 
@@ -337,7 +339,7 @@ def save_snapshot(
     schema: Schema,
     dialect: Dialect,
     *,
-    applied_by: str | None = None,
+    applied_by: str | None | Nothing,
 ) -> None:
     """
     Save schema as snapshot file.
@@ -348,6 +350,9 @@ def save_snapshot(
         dialect: Database dialect
         applied_by: User/system identifier
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    applied_by = resolved(applied_by, None)
     schema_path = Path(schema_dir)
     schema_path.mkdir(parents=True, exist_ok=True)
 

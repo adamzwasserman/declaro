@@ -33,6 +33,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from declaro_persistum.inspector.shared import checks_from_ddl
+from declaro_persistum.types import NOTHING
 
 pytestmark = pytest.mark.precommit
 
@@ -145,7 +146,7 @@ async def test_the_schema_converges_whatever_sqlite_accepted(column, template) -
         await conn.commit()
 
         actual = await introspect(conn, "sqlite")
-        again = diff(actual, actual, dialect="sqlite")
+        again = diff(actual, actual, dialect="sqlite", decisions=NOTHING)
 
         assert again["operations"] == [], (
             f"{statement}\nproduced {[(o['op'], o['details']) for o in again['operations']]}"

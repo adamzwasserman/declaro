@@ -47,6 +47,7 @@ import pytest
 from declaro_persistum.applier import apply
 from declaro_persistum.differ import diff
 from declaro_persistum.inspector import introspect
+from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.precommit]
 
@@ -254,12 +255,12 @@ def test_every_compared_property_has_values_to_try() -> None:
 
 
 async def _converges(connection, dialect: str, declared: dict) -> list:
-    plan = diff({}, declared, dialect=dialect)
+    plan = diff({}, declared, dialect=dialect, decisions=NOTHING)
     await apply(
         connection, plan["operations"], plan["execution_order"], dialect, dry_run=False
     )
     actual = await introspect(connection, dialect)
-    return diff({"t": actual["t"]}, declared, dialect=dialect)["operations"]
+    return diff({"t": actual["t"]}, declared, dialect=dialect, decisions=NOTHING)["operations"]
 
 
 def _cases():
@@ -330,13 +331,13 @@ async def _object_converges(connection, dialect: str, declared: dict) -> list:
     one. A foreign key needs two, and comparing only `t` would miss a parent
     the migration got wrong.
     """
-    plan = diff({}, declared, dialect=dialect)
+    plan = diff({}, declared, dialect=dialect, decisions=NOTHING)
     await apply(
         connection, plan["operations"], plan["execution_order"], dialect, dry_run=False
     )
     actual = await introspect(connection, dialect)
     current = {name: actual[name] for name in declared if name in actual}
-    return diff(current, declared, dialect=dialect)["operations"]
+    return diff(current, declared, dialect=dialect, decisions=NOTHING)["operations"]
 
 
 @pytest.mark.sqlite

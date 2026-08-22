@@ -75,27 +75,26 @@ async def conn():
 async def test_execute_returns_every_matching_row(conn) -> None:
     rows = await execute(
         select("id", "name", from_table="t", where={"n": {"gt": 5}}, order_by=["id"], params=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
-        conn,
-    )
+        conn, row_factory=NOTHING)
 
     assert rows == [{"id": "1", "name": "a"}, {"id": "2", "name": "b"}]
 
 
 async def test_execute_one_returns_the_first_row(conn) -> None:
-    row = await execute_one(select("id", from_table="t", order_by=["id"], where=NOTHING, params=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)
+    row = await execute_one(select("id", from_table="t", order_by=["id"], where=NOTHING, params=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn, row_factory=NOTHING)
 
     assert row == {"id": "1"}
 
 
 async def test_execute_one_returns_none_when_nothing_matches(conn) -> None:
     """None, not an empty dict, so `if row:` means what a caller expects."""
-    row = await execute_one(select("id", from_table="t", where={"n": {"gt": 999}}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)
+    row = await execute_one(select("id", from_table="t", where={"n": {"gt": 999}}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn, row_factory=NOTHING)
 
     assert row is None
 
 
 async def test_execute_returns_an_empty_list_when_nothing_matches(conn) -> None:
-    rows = await execute(select("id", from_table="t", where={"n": {"gt": 999}}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)
+    rows = await execute(select("id", from_table="t", where={"n": {"gt": 999}}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn, row_factory=NOTHING)
 
     assert rows == []
 
@@ -119,7 +118,7 @@ async def test_execute_many_reports_how_many_it_wrote(conn) -> None:
     await conn.commit()
 
     assert written == 2
-    assert len(await execute(select("id", from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)) == 4
+    assert len(await execute(select("id", from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn, row_factory=NOTHING)) == 4
 
 
 async def test_a_where_clause_binds_rather_than_inlines(conn) -> None:
@@ -127,7 +126,7 @@ async def test_a_where_clause_binds_rather_than_inlines(conn) -> None:
     await conn.execute("INSERT INTO t VALUES ('5', \"it's\", 50)")
     await conn.commit()
 
-    rows = await execute(select("n", from_table="t", where={"name": "it's"}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)
+    rows = await execute(select("n", from_table="t", where={"name": "it's"}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn, row_factory=NOTHING)
 
     assert rows == [{"n": 50}]
 
@@ -226,7 +225,7 @@ async def test_a_query_does_not_change_how_the_connection_behaves(conn) -> None:
     """The caller's connection is theirs. Borrow it and give it back."""
     before = conn.row_factory
 
-    await execute(select("id", from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)
+    await execute(select("id", from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn, row_factory=NOTHING)
 
     assert conn.row_factory is before, (
         f"row_factory was {before!r} and is now {conn.row_factory!r}, so every "
@@ -236,7 +235,7 @@ async def test_a_query_does_not_change_how_the_connection_behaves(conn) -> None:
 
 async def test_a_caller_still_gets_tuples_from_their_own_cursor(conn) -> None:
     """The consequence, stated as the caller sees it rather than as an attribute."""
-    await execute(select("id", from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)
+    await execute(select("id", from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn, row_factory=NOTHING)
 
     cursor = await conn.execute("SELECT COUNT(*) FROM t")
     row = await cursor.fetchone()
@@ -257,14 +256,14 @@ async def test_a_caller_who_set_their_own_factory_keeps_it(conn) -> None:
 
     conn.row_factory = mine
 
-    await execute(select("id", from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)
+    await execute(select("id", from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn, row_factory=NOTHING)
 
     assert conn.row_factory is mine
 
 
 async def test_the_rows_are_still_dicts(conn) -> None:
     """The floor. Never setting the factory at all would pass the three above."""
-    rows = await execute(select("id", from_table="t", order_by=["id"], where=NOTHING, params=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)
+    rows = await execute(select("id", from_table="t", order_by=["id"], where=NOTHING, params=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn, row_factory=NOTHING)
 
     assert rows == [{"id": "1"}, {"id": "2"}]
 

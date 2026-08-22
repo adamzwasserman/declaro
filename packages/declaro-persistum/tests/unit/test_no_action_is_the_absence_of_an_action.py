@@ -37,6 +37,7 @@ import pytest
 from declaro_persistum import close, open_sqlite, reading, writing
 from declaro_persistum.differ.core import diff
 from declaro_persistum.inspector import INSPECTORS
+from declaro_persistum.types import NOTHING
 
 
 async def _live_schema(tmp_path: pathlib.Path, ddl: tuple[str, ...]) -> dict:
@@ -89,7 +90,7 @@ async def test_declaring_no_action_migrates_nothing(
                   f'"author_id" INTEGER REFERENCES "author"("id"){clause})'),
     )
 
-    result = diff(live, _declared(on_delete="no action"), dialect="sqlite")
+    result = diff(live, _declared(on_delete="no action"), dialect="sqlite", decisions=NOTHING)
 
     assert result["operations"] == []
 
@@ -109,7 +110,7 @@ async def test_declaring_nothing_against_the_same_database_migrates_nothing(
                   '"author_id" INTEGER REFERENCES "author"("id"))'),
     )
 
-    result = diff(live, _declared(), dialect="sqlite")
+    result = diff(live, _declared(), dialect="sqlite", decisions=NOTHING)
 
     assert result["operations"] == []
 
@@ -129,7 +130,7 @@ async def test_a_real_cascade_is_still_seen_as_a_change(
                   '"author_id" INTEGER REFERENCES "author"("id"))'),
     )
 
-    result = diff(live, _declared(on_delete="cascade"), dialect="sqlite")
+    result = diff(live, _declared(on_delete="cascade"), dialect="sqlite", decisions=NOTHING)
 
     assert [op["op"] for op in result["operations"]] == [
         "drop_foreign_key",

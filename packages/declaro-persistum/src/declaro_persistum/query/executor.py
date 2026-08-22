@@ -10,7 +10,7 @@ from collections.abc import Callable
 from typing import Any, TypeVar
 
 from declaro_persistum.query.builder import Query
-from declaro_persistum.types import written_as
+from declaro_persistum.types import Nothing, resolved, written_as
 
 T = TypeVar("T")
 
@@ -62,7 +62,7 @@ async def execute(
     query: Query,
     connection: Any,
     *,
-    row_factory: Callable[[dict[str, Any]], T] | None = None,
+    row_factory: Callable[[dict[str, Any]], T] | None | Nothing,
 ) -> list[T] | list[dict[str, Any]]:
     """
     Execute a query and return all results.
@@ -77,9 +77,12 @@ async def execute(
 
     Example:
         >>> q = select("*", from_table="users", where="active = :active", params={"active": True}, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
-        >>> users = await execute(q, conn)
+        >>> users = await execute(q, conn, row_factory=NOTHING)
         >>> print(users[0]["email"])
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    row_factory = resolved(row_factory, None)
     sql, params = _prepare_query(query, connection)
     rows = await _execute_fetch(connection, sql, params)
 
@@ -92,7 +95,7 @@ async def execute_one(
     query: Query,
     connection: Any,
     *,
-    row_factory: Callable[[dict[str, Any]], T] | None = None,
+    row_factory: Callable[[dict[str, Any]], T] | None | Nothing,
 ) -> T | dict[str, Any] | None:
     """
     Execute a query and return single result or None.
@@ -107,10 +110,13 @@ async def execute_one(
 
     Example:
         >>> q = select("*", from_table="users", where="id = :id", params={"id": 1}, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
-        >>> user = await execute_one(q, conn)
+        >>> user = await execute_one(q, conn, row_factory=NOTHING)
         >>> if user:
         ...     print(user["email"])
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    row_factory = resolved(row_factory, None)
     sql, params = _prepare_query(query, connection)
     row = await _execute_fetch_one(connection, sql, params)
 

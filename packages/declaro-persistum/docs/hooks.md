@@ -19,7 +19,7 @@ def scope_to_owner(query: Query, owner: str) -> Query:
 q = select("id", from_table="items", where={"status": "active"}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
 
 async with reading(db) as conn:
-    rows = await execute(scope_to_owner(q, current_user_id), conn)
+    rows = await execute(scope_to_owner(q, current_user_id), conn, row_factory=NOTHING)
 ```
 
 Measured on a two-row table: the unscoped query returns both rows, the scoped one returns Alice's. The function is pure, so its test is `assert scope_to_owner(q, "alice") == expected` with no database in sight.
@@ -34,7 +34,7 @@ def log_audit(rows: list, sql: str) -> list:
     return rows
 
 async with reading(db) as conn:
-    rows = log_audit(await execute(q, conn), q["sql"])
+    rows = log_audit(await execute(q, conn, row_factory=NOTHING), q["sql"])
 ```
 
 ## Soft delete

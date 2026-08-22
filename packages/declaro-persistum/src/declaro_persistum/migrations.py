@@ -758,7 +758,7 @@ async def apply_migrations_async(
     # Compute diff. Tables and views are diffed by different functions because
     # they are different things: a table is reconciled column by column, a view
     # is replaced whole when its query changes.
-    diff_result = diff(current_schema, target_schema, dialect=dialect)
+    diff_result = diff(current_schema, target_schema, dialect=dialect, decisions=NOTHING)
 
     # VIEWS GO LAST, AND THEIR INDICES GO INTO THE ORDER OR NOTHING RUNS THEM.
     # `execution_order` is the differ's topological sort over the TABLE

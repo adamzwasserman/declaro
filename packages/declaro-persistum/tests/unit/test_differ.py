@@ -4,7 +4,7 @@
 from declaro_persistum.differ.ambiguity import detect_ambiguities
 from declaro_persistum.differ.core import diff
 from declaro_persistum.differ.toposort import build_dependency_graph, topological_sort
-from declaro_persistum.types import Schema
+from declaro_persistum.types import NOTHING, Schema
 
 
 class TestDiff:
@@ -12,18 +12,18 @@ class TestDiff:
 
     def test_diff_empty_schemas(self):
         """Diffing two empty schemas produces no operations."""
-        result = diff(current={}, target={}, dialect="postgresql")
+        result = diff(current={}, target={}, dialect="postgresql", decisions=NOTHING)
         assert result["operations"] == []
         assert result["ambiguities"] == []
 
     def test_diff_identical_schemas(self, simple_schema):
         """Diffing identical schemas produces no operations."""
-        result = diff(current=simple_schema, target=simple_schema, dialect="postgresql")
+        result = diff(current=simple_schema, target=simple_schema, dialect="postgresql", decisions=NOTHING)
         assert result["operations"] == []
 
     def test_diff_create_table(self, simple_schema):
         """Adding a new table creates CREATE TABLE operation."""
-        result = diff(current={}, target=simple_schema, dialect="postgresql")
+        result = diff(current={}, target=simple_schema, dialect="postgresql", decisions=NOTHING)
 
         assert len(result["operations"]) >= 1
         create_ops = [op for op in result["operations"] if op["op"] == "create_table"]
@@ -32,7 +32,7 @@ class TestDiff:
 
     def test_diff_drop_table(self, simple_schema):
         """Removing a table creates DROP TABLE operation."""
-        result = diff(current=simple_schema, target={}, dialect="postgresql")
+        result = diff(current=simple_schema, target={}, dialect="postgresql", decisions=NOTHING)
 
         drop_ops = [op for op in result["operations"] if op["op"] == "drop_table"]
         assert len(drop_ops) == 1
@@ -47,7 +47,7 @@ class TestDiff:
             "users": {"columns": {"id": {"type": "uuid"}, "email": {"type": "text"}}}
         }
 
-        result = diff(current=current, target=target, dialect="postgresql")
+        result = diff(current=current, target=target, dialect="postgresql", decisions=NOTHING)
 
         add_ops = [op for op in result["operations"] if op["op"] == "add_column"]
         assert len(add_ops) == 1
@@ -63,7 +63,7 @@ class TestDiff:
             "users": {"columns": {"id": {"type": "uuid"}}}
         }
 
-        result = diff(current=current, target=target, dialect="postgresql")
+        result = diff(current=current, target=target, dialect="postgresql", decisions=NOTHING)
 
         drop_ops = [op for op in result["operations"] if op["op"] == "drop_column"]
         assert len(drop_ops) == 1
@@ -78,7 +78,7 @@ class TestDiff:
             "users": {"columns": {"full_name": {"type": "text", "renamed_from": "name"}}}
         }
 
-        result = diff(current=current, target=target, dialect="postgresql")
+        result = diff(current=current, target=target, dialect="postgresql", decisions=NOTHING)
 
         rename_ops = [op for op in result["operations"] if op["op"] == "rename_column"]
         assert len(rename_ops) == 1
@@ -94,7 +94,7 @@ class TestDiff:
             "users": {"columns": {"count": {"type": "bigint"}}}
         }
 
-        result = diff(current=current, target=target, dialect="postgresql")
+        result = diff(current=current, target=target, dialect="postgresql", decisions=NOTHING)
 
         alter_ops = [op for op in result["operations"] if op["op"] == "alter_column"]
         assert len(alter_ops) == 1
@@ -113,7 +113,7 @@ class TestDiff:
             }
         }
 
-        result = diff(current=current, target=target, dialect="postgresql")
+        result = diff(current=current, target=target, dialect="postgresql", decisions=NOTHING)
 
         add_idx_ops = [op for op in result["operations"] if op["op"] == "add_index"]
         assert len(add_idx_ops) == 1
@@ -135,7 +135,7 @@ class TestDiff:
             },
         }
 
-        result = diff(current=current, target=target, dialect="postgresql")
+        result = diff(current=current, target=target, dialect="postgresql", decisions=NOTHING)
 
         fk_ops = [op for op in result["operations"] if op["op"] == "add_foreign_key"]
         assert len(fk_ops) == 1
@@ -154,7 +154,7 @@ class TestAmbiguityDetection:
             "users": {"columns": {"full_name": {"type": "text"}}}
         }
 
-        ambiguities = detect_ambiguities(current, target, "postgresql")
+        ambiguities = detect_ambiguities(current, target, "postgresql", decisions=NOTHING)
 
         assert len(ambiguities) >= 1
         assert any(a["type"] == "possible_rename" for a in ambiguities)
@@ -171,7 +171,7 @@ class TestAmbiguityDetection:
         current: Schema = {"users": {"columns": {"count": {"type": "integer"}}}}
         target: Schema = {"users": {"columns": {"total": {"type": "text"}}}}
 
-        ambiguities = detect_ambiguities(current, target, "postgresql")
+        ambiguities = detect_ambiguities(current, target, "postgresql", decisions=NOTHING)
 
         rename_amb = [a for a in ambiguities if a["type"] == "possible_rename"]
         assert len(rename_amb) == 1
@@ -187,7 +187,7 @@ class TestAmbiguityDetection:
             "users": {"columns": {"full_name": {"type": "text", "renamed_from": "name"}}}
         }
 
-        ambiguities = detect_ambiguities(current, target, "postgresql")
+        ambiguities = detect_ambiguities(current, target, "postgresql", decisions=NOTHING)
 
         assert len(ambiguities) == 0
 
@@ -200,7 +200,7 @@ class TestAmbiguityDetection:
             "users": {"columns": {"full_name": {"type": "text", "is_new": True}}}
         }
 
-        ambiguities = detect_ambiguities(current, target, "postgresql")
+        ambiguities = detect_ambiguities(current, target, "postgresql", decisions=NOTHING)
 
         rename_amb = [a for a in ambiguities if a["type"] == "possible_rename"]
         assert len(rename_amb) == 0

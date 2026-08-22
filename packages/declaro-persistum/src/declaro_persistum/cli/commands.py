@@ -12,7 +12,15 @@ from typing import Any
 
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import AmbiguityError
-from declaro_persistum.types import Ambiguity, Decision, Dialect, DiffResult, Schema, for_dialect
+from declaro_persistum.types import (
+    NOTHING,
+    Ambiguity,
+    Decision,
+    Dialect,
+    DiffResult,
+    Schema,
+    for_dialect,
+)
 
 
 @boundary
@@ -231,7 +239,7 @@ async def cmd_apply(
             print(f"\n✓ Applied {apply_result['operations_applied']} operations successfully")
 
             # Update snapshot
-            save_snapshot(schema_dir, target, dialect)
+            save_snapshot(schema_dir, target, dialect, applied_by=NOTHING)
             if verbose:
                 print(f"Updated snapshot at {schema_dir}/snapshot.toml")
 
@@ -305,7 +313,7 @@ async def cmd_snapshot(
     try:
         actual = await introspect(connection, dialect)
 
-        save_snapshot(schema_dir, actual, dialect)
+        save_snapshot(schema_dir, actual, dialect, applied_by=NOTHING)
         print(f"✓ Snapshot saved to {snapshot_path}")
 
         if verbose:
@@ -508,7 +516,7 @@ async def cmd_migrate_remote(
                 print(f"Introspected {len(current_schema)} tables from cloud DB")
 
             # Diff
-            diff_result = diff(current_schema, target_schema, dialect=dialect)
+            diff_result = diff(current_schema, target_schema, dialect=dialect, decisions=NOTHING)
 
             if not diff_result["operations"]:
                 print("Cloud schema is up to date — no changes needed.")

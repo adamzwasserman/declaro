@@ -6,6 +6,8 @@ Tests closure table pattern for O(1) hierarchy queries.
 
 from typing import Any
 
+from declaro_persistum.types import NOTHING
+
 
 class TestClosureTableGeneration:
     """Tests for generating closure tables."""
@@ -14,7 +16,7 @@ class TestClosureTableGeneration:
         """Generate closure table schema."""
         from declaro_persistum.abstractions.hierarchy import generate_closure_table
 
-        schema = generate_closure_table("categories")
+        schema = generate_closure_table("categories", pk_column=NOTHING)
         assert "categories_closure" in schema
         table = schema["categories_closure"]
 
@@ -44,7 +46,7 @@ class TestClosureTableGeneration:
         """Closure table has performance indexes."""
         from declaro_persistum.abstractions.hierarchy import generate_closure_table
 
-        schema = generate_closure_table("categories")
+        schema = generate_closure_table("categories", pk_column=NOTHING)
         table = schema["categories_closure"]
 
         assert "indexes" in table
@@ -56,7 +58,7 @@ class TestClosureTableGeneration:
         """Closure table has unique (ancestor, descendant) constraint."""
         from declaro_persistum.abstractions.hierarchy import generate_closure_table
 
-        schema = generate_closure_table("categories")
+        schema = generate_closure_table("categories", pk_column=NOTHING)
         table = schema["categories_closure"]
 
         # Primary key or unique constraint on (ancestor_id, descendant_id)
@@ -217,7 +219,7 @@ class TestReferentialIntegrity:
         """Deleting node cascades to closure entries."""
         from declaro_persistum.abstractions.hierarchy import generate_closure_table
 
-        schema = generate_closure_table("categories")
+        schema = generate_closure_table("categories", pk_column=NOTHING)
         table = schema["categories_closure"]
 
         # Both FK columns should cascade delete

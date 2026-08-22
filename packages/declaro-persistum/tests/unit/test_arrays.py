@@ -6,6 +6,8 @@ Tests portable array patterns using junction tables with position column.
 
 from typing import Any
 
+from declaro_persistum.types import NOTHING
+
 
 class TestArrayTypeParsing:
     """Tests for parsing array type declarations."""
@@ -54,7 +56,7 @@ class TestJunctionTableGeneration:
         """Generate junction table schema."""
         from declaro_persistum.abstractions.arrays import generate_junction_table
 
-        schema = generate_junction_table("users", "tags", "text")
+        schema = generate_junction_table("users", "tags", "text", parent_pk=NOTHING)
         assert "users_tags" in schema
         table = schema["users_tags"]
 
@@ -87,7 +89,7 @@ class TestJunctionTableGeneration:
         """Junction table has position index."""
         from declaro_persistum.abstractions.arrays import generate_junction_table
 
-        schema = generate_junction_table("users", "tags", "text")
+        schema = generate_junction_table("users", "tags", "text", parent_pk=NOTHING)
         table = schema["users_tags"]
 
         assert "indexes" in table

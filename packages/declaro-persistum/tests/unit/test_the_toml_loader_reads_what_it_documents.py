@@ -34,6 +34,7 @@ import pytest
 
 from declaro_persistum.exceptions import LoaderError
 from declaro_persistum.loader import load_schema
+from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.precommit]
 
@@ -160,7 +161,7 @@ expression = "lo < hi"
             os.path.join(tempfile.mkdtemp(), "t.db")
         )
         try:
-            plan = diff({}, schema, dialect="sqlite")
+            plan = diff({}, schema, dialect="sqlite", decisions=NOTHING)
             await apply(
                 connection,
                 plan["operations"],

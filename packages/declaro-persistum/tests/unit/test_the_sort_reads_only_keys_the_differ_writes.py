@@ -40,6 +40,7 @@ from declaro_persistum.abstractions.enums import expand_schema_enums
 from declaro_persistum.differ import toposort
 from declaro_persistum.differ.core import diff
 from declaro_persistum.differ.extended import diff_views
+from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.precommit]
 
@@ -81,7 +82,7 @@ def _every_operation() -> dict[str, dict]:
     }
 
     def ops(current, target):
-        return diff(current, target, dialect="sqlite")["operations"]
+        return diff(current, target, dialect="sqlite", decisions=NOTHING)["operations"]
 
     produced = [
         *ops({}, {"users": USERS}),

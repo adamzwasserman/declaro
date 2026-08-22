@@ -154,7 +154,7 @@ async def test_an_update_through_the_executor_lands() -> None:
         await conn.execute("INSERT INTO t VALUES ('x', 0)")
         await conn.commit()
 
-        await execute(update("t", {"a": 1}, where={"id": "x"}, params=NOTHING, returning=NOTHING), conn)
+        await execute(update("t", {"a": 1}, where={"id": "x"}, params=NOTHING, returning=NOTHING), conn, row_factory=NOTHING)
         await conn.commit()
 
         cursor = await conn.execute("SELECT a FROM t")

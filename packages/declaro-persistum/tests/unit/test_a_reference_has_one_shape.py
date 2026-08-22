@@ -18,6 +18,7 @@ contract what the code actually does.
 
 from declaro_persistum.applier.shared import apply_reconstruction_changes
 from declaro_persistum.differ.core import diff
+from declaro_persistum.types import NOTHING
 
 
 def _columns() -> dict:
@@ -54,8 +55,7 @@ def test_the_differ_emits_that_shape() -> None:
                 }
             },
         },
-        dialect="sqlite",
-    )
+        dialect="sqlite", decisions=NOTHING)
 
     keys = [
         op["details"]["references"]

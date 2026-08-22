@@ -12,10 +12,12 @@ Closure table pattern:
 
 from typing import Any
 
+from declaro_persistum.types import Nothing, resolved
+
 
 def generate_closure_table(
     table_name: str,
-    pk_column: str = "id",
+    pk_column: str | Nothing,
 ) -> dict[str, Any]:
     """
     Generate closure table schema for hierarchical data.
@@ -27,6 +29,9 @@ def generate_closure_table(
     Returns:
         Schema dict with closure table definition.
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    pk_column = resolved(pk_column, 'id')
     closure_name = f"{table_name}_closure"
 
     return {

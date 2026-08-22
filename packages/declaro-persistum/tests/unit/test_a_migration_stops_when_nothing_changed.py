@@ -76,7 +76,7 @@ DECLARED = {
 @pytest.mark.parametrize("dialect", DIALECTS)
 def test_a_round_trip_emits_no_operations(dialect: str) -> None:
     """The measured defect, in one assertion, on every engine."""
-    plan = diff(INTROSPECTED, DECLARED, dialect=dialect)
+    plan = diff(INTROSPECTED, DECLARED, dialect=dialect, decisions=NOTHING)
 
     assert plan["operations"] == [], (
         "an unchanged schema still migrates: "
@@ -92,7 +92,7 @@ def test_an_integer_default_matches_the_string_the_engine_returns(
     current = {"t": {"columns": {"c": {"type": "integer", "default": "0"}}}}
     target = {"t": {"columns": {"c": {"type": "integer", "default": 0}}}}
 
-    assert diff(current, target, dialect=dialect)["operations"] == []
+    assert diff(current, target, dialect=dialect, decisions=NOTHING)["operations"] == []
 
 
 @pytest.mark.parametrize("dialect", DIALECTS)
@@ -104,7 +104,7 @@ def test_a_primary_key_is_not_null_without_being_told_twice(
                                        "primary_key": True}}}}
     target = {"t": {"columns": {"c": {"type": "text", "primary_key": True}}}}
 
-    assert diff(current, target, dialect=dialect)["operations"] == []
+    assert diff(current, target, dialect=dialect, decisions=NOTHING)["operations"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -118,7 +118,7 @@ def test_a_real_default_change_is_still_emitted(dialect: str) -> None:
     current = {"t": {"columns": {"c": {"type": "integer", "default": "0"}}}}
     target = {"t": {"columns": {"c": {"type": "integer", "default": 1}}}}
 
-    ops = diff(current, target, dialect=dialect)["operations"]
+    ops = diff(current, target, dialect=dialect, decisions=NOTHING)["operations"]
 
     assert [o["op"] for o in ops] == ["alter_column"], ops
 
@@ -129,7 +129,7 @@ def test_adding_a_default_is_still_emitted(dialect: str) -> None:
     current = {"t": {"columns": {"c": {"type": "integer"}}}}
     target = {"t": {"columns": {"c": {"type": "integer", "default": 0}}}}
 
-    ops = diff(current, target, dialect=dialect)["operations"]
+    ops = diff(current, target, dialect=dialect, decisions=NOTHING)["operations"]
 
     assert [o["op"] for o in ops] == ["alter_column"], ops
 
@@ -139,7 +139,7 @@ def test_removing_a_default_is_still_emitted(dialect: str) -> None:
     current = {"t": {"columns": {"c": {"type": "integer", "default": "0"}}}}
     target = {"t": {"columns": {"c": {"type": "integer"}}}}
 
-    ops = diff(current, target, dialect=dialect)["operations"]
+    ops = diff(current, target, dialect=dialect, decisions=NOTHING)["operations"]
 
     assert [o["op"] for o in ops] == ["alter_column"], ops
 
@@ -150,7 +150,7 @@ def test_a_real_nullability_change_is_still_emitted(dialect: str) -> None:
     current = {"t": {"columns": {"c": {"type": "text", "nullable": True}}}}
     target = {"t": {"columns": {"c": {"type": "text", "nullable": False}}}}
 
-    ops = diff(current, target, dialect=dialect)["operations"]
+    ops = diff(current, target, dialect=dialect, decisions=NOTHING)["operations"]
 
     assert [o["op"] for o in ops] == ["alter_column"], ops
 
@@ -162,7 +162,7 @@ def test_dropping_a_primary_key_is_still_a_change(dialect: str) -> None:
                                        "primary_key": True}}}}
     target = {"t": {"columns": {"c": {"type": "text", "nullable": True}}}}
 
-    ops = diff(current, target, dialect=dialect)["operations"]
+    ops = diff(current, target, dialect=dialect, decisions=NOTHING)["operations"]
 
     assert ops, "dropping a primary key emitted nothing"
 
@@ -173,7 +173,7 @@ def test_a_quoted_string_default_is_not_a_number(dialect: str) -> None:
     current = {"t": {"columns": {"c": {"type": "text", "default": "'0'"}}}}
     target = {"t": {"columns": {"c": {"type": "text", "default": 0}}}}
 
-    ops = diff(current, target, dialect=dialect)["operations"]
+    ops = diff(current, target, dialect=dialect, decisions=NOTHING)["operations"]
 
     assert [o["op"] for o in ops] == ["alter_column"], ops
 
@@ -184,7 +184,7 @@ def test_a_boolean_default_still_folds(dialect: str) -> None:
     current = {"t": {"columns": {"c": {"type": "boolean", "default": "false"}}}}
     target = {"t": {"columns": {"c": {"type": "boolean", "default": "FALSE"}}}}
 
-    assert diff(current, target, dialect=dialect)["operations"] == []
+    assert diff(current, target, dialect=dialect, decisions=NOTHING)["operations"] == []
 
 
 @pytest.mark.parametrize("dialect", DIALECTS)
@@ -192,7 +192,7 @@ def test_a_float_default_matches_its_string(dialect: str) -> None:
     current = {"t": {"columns": {"c": {"type": "real", "default": "1.5"}}}}
     target = {"t": {"columns": {"c": {"type": "real", "default": 1.5}}}}
 
-    assert diff(current, target, dialect=dialect)["operations"] == []
+    assert diff(current, target, dialect=dialect, decisions=NOTHING)["operations"] == []
 
 
 @pytest.mark.parametrize("dialect", DIALECTS)
@@ -201,7 +201,7 @@ def test_an_expression_default_is_compared_verbatim(dialect: str) -> None:
     current = {"t": {"columns": {"c": {"type": "timestamptz", "default": "now()"}}}}
     target = {"t": {"columns": {"c": {"type": "timestamptz", "default": "now()"}}}}
 
-    assert diff(current, target, dialect=dialect)["operations"] == []
+    assert diff(current, target, dialect=dialect, decisions=NOTHING)["operations"] == []
 
 
 @pytest.mark.parametrize("dialect", DIALECTS)
@@ -223,7 +223,7 @@ def test_a_boolean_is_not_folded_into_the_number_one(dialect: str) -> None:
     current = {"t": {"columns": {"c": {"type": "boolean", "default": "1"}}}}
     target = {"t": {"columns": {"c": {"type": "boolean", "default": True}}}}
 
-    ops = diff(current, target, dialect=dialect)["operations"]
+    ops = diff(current, target, dialect=dialect, decisions=NOTHING)["operations"]
 
     assert [o["op"] for o in ops] == ["alter_column"], (
         f"a boolean folded into a number, which `same_default` says is "
@@ -267,6 +267,8 @@ import tempfile  # noqa: E402
 
 import pytest as _pytest  # noqa: E402
 
+from declaro_persistum.types import NOTHING
+
 VOCABULARY = {
     "t": {
         "columns": {
@@ -294,13 +296,13 @@ async def test_a_sqlite_round_trip_emits_no_operations() -> None:
     path = tempfile.mktemp(suffix=".db")
     conn = await aiosqlite.connect(path)
     try:
-        plan = diff({}, VOCABULARY, dialect="sqlite")
+        plan = diff({}, VOCABULARY, dialect="sqlite", decisions=NOTHING)
         await apply(
             conn, plan["operations"], plan["execution_order"], "sqlite",
             dry_run=False,
         )
         actual = await introspect(conn, "sqlite")
-        second = diff({"t": actual["t"]}, VOCABULARY, dialect="sqlite")
+        second = diff({"t": actual["t"]}, VOCABULARY, dialect="sqlite", decisions=NOTHING)
 
         assert second["operations"] == [], (
             "an unchanged schema migrates on every deploy: "
@@ -326,14 +328,14 @@ async def test_a_boolean_default_survives_the_write_and_the_read() -> None:
     path = tempfile.mktemp(suffix=".db")
     conn = await aiosqlite.connect(path)
     try:
-        plan = diff({}, schema, dialect="sqlite")
+        plan = diff({}, schema, dialect="sqlite", decisions=NOTHING)
         await apply(
             conn, plan["operations"], plan["execution_order"], "sqlite",
             dry_run=False,
         )
         actual = await introspect(conn, "sqlite")
 
-        assert diff({"t": actual["t"]}, schema, dialect="sqlite")["operations"] == [], (
+        assert diff({"t": actual["t"]}, schema, dialect="sqlite", decisions=NOTHING)["operations"] == [], (
             f"declared {schema['t']['columns']['flag']['default']!r}, read back "
             f"{actual['t']['columns']['flag'].get('default')!r}"
         )
@@ -397,7 +399,7 @@ def test_a_translated_default_matches_what_the_engine_stored(dialect: str) -> No
     current = {"t": {"columns": {"made_at": {"type": "timestamptz",
                                             "default": stored}}}}
 
-    assert diff(current, TRANSLATED, dialect=dialect)["operations"] == []
+    assert diff(current, TRANSLATED, dialect=dialect, decisions=NOTHING)["operations"] == []
 
 
 def test_postgresql_needs_no_translation_and_still_matches() -> None:
@@ -405,7 +407,7 @@ def test_postgresql_needs_no_translation_and_still_matches() -> None:
     current = {"t": {"columns": {"made_at": {"type": "timestamptz",
                                             "default": "now()"}}}}
 
-    assert diff(current, TRANSLATED, dialect="postgresql")["operations"] == []
+    assert diff(current, TRANSLATED, dialect="postgresql", decisions=NOTHING)["operations"] == []
 
 
 def test_a_real_default_change_survives_the_translation() -> None:
@@ -413,7 +415,7 @@ def test_a_real_default_change_survives_the_translation() -> None:
     current = {"t": {"columns": {"made_at": {"type": "timestamptz",
                                             "default": "'2020-01-01'"}}}}
 
-    ops = diff(current, TRANSLATED, dialect="sqlite")["operations"]
+    ops = diff(current, TRANSLATED, dialect="sqlite", decisions=NOTHING)["operations"]
 
     assert [o["op"] for o in ops] == ["alter_column"], ops
 
@@ -452,7 +454,7 @@ def test_a_quoted_literal_keeps_its_case(dialect: str) -> None:
     current = {"t": {"columns": {"c": {"type": "text", "default": "'Pending'"}}}}
     target = {"t": {"columns": {"c": {"type": "text", "default": "'pending'"}}}}
 
-    ops = diff(current, target, dialect=dialect)["operations"]
+    ops = diff(current, target, dialect=dialect, decisions=NOTHING)["operations"]
 
     assert [o["op"] for o in ops] == ["alter_column"], (
         f"'Pending' and 'pending' are different values and the change was "
@@ -468,7 +470,7 @@ def test_a_bare_keyword_still_folds(dialect: str) -> None:
     target = {"t": {"columns": {"c": {"type": "timestamptz",
                                       "default": "current_timestamp"}}}}
 
-    assert diff(current, target, dialect=dialect)["operations"] == []
+    assert diff(current, target, dialect=dialect, decisions=NOTHING)["operations"] == []
 
 
 @pytest.mark.parametrize("dialect", DIALECTS)
@@ -487,7 +489,7 @@ def test_a_space_inside_a_string_default_is_not_cosmetic(dialect: str) -> None:
     current = {"t": {"columns": {"c": {"type": "text", "default": "'a ('"}}}}
     target = {"t": {"columns": {"c": {"type": "text", "default": "'a('"}}}}
 
-    ops = diff(current, target, dialect=dialect)["operations"]
+    ops = diff(current, target, dialect=dialect, decisions=NOTHING)["operations"]
 
     assert [o["op"] for o in ops] == ["alter_column"], (
         f"two different string defaults were folded together: {ops}"
@@ -502,4 +504,4 @@ def test_a_space_outside_quotes_still_folds(dialect: str) -> None:
     target = {"t": {"columns": {"c": {"type": "text",
                                       "default": "(datetime('now'))"}}}}
 
-    assert diff(current, target, dialect=dialect)["operations"] == []
+    assert diff(current, target, dialect=dialect, decisions=NOTHING)["operations"] == []

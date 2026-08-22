@@ -33,12 +33,13 @@ gate, and six of the package's surviving conditionals.
 import pytest
 
 from declaro_persistum.differ.core import diff
+from declaro_persistum.types import NOTHING
 
 _ID = {"id": {"type": "integer"}}
 
 
 def _ambiguities(current: dict, target: dict) -> list[dict]:
-    return diff(current, target, dialect="sqlite")["ambiguities"]
+    return diff(current, target, dialect="sqlite", decisions=NOTHING)["ambiguities"]
 
 
 @pytest.mark.parametrize(

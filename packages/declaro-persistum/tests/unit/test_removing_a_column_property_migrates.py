@@ -42,6 +42,7 @@ import pytest
 from declaro_persistum.applier import apply
 from declaro_persistum.differ.core import diff
 from declaro_persistum.inspector import introspect
+from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.precommit]
 
@@ -94,8 +95,7 @@ ENGINES = {"sqlite": _sqlite, "turso": _turso}
 async def _migrate(connection: Any, dialect: str) -> None:
     actual = await introspect(connection, dialect)
     plan = diff(
-        {n: actual[n] for n in PLAIN if n in actual}, PLAIN, dialect=dialect
-    )
+        {n: actual[n] for n in PLAIN if n in actual}, PLAIN, dialect=dialect, decisions=NOTHING)
     await apply(
         connection, plan["operations"], plan["execution_order"], dialect,
         dry_run=False,
@@ -180,8 +180,7 @@ async def test_the_removal_converges(dialect: str, _prop: str, ddl: str) -> None
 
         actual = await introspect(connection, dialect)
         remaining = diff(
-            {n: actual[n] for n in PLAIN if n in actual}, PLAIN, dialect=dialect
-        )["operations"]
+            {n: actual[n] for n in PLAIN if n in actual}, PLAIN, dialect=dialect, decisions=NOTHING)["operations"]
 
         assert remaining == [], [(o["op"], o["details"]) for o in remaining]
     finally:

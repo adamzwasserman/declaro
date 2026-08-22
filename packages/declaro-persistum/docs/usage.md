@@ -536,6 +536,7 @@ emit_record(logger, build_record(
     duration_ms=(time.perf_counter() - started) * 1000,
     success=True,
     sql=sql,
+    error=NOTHING,
 ))
 ```
 
@@ -619,7 +620,7 @@ async def appender():
 `execute` is your own write function, so the room never touches a connection:
 
 ```python
-async def execute(w):
+async def execute(w, connection=NOTHING, row_factory=NOTHING):
     async with writing(db) as conn:
         await conn.execute(w["sql"], w["params"])
         await conn.commit()
@@ -844,7 +845,7 @@ target = load_schema_from_models("./models")
 current = await introspect(conn, "postgresql")
 
 # Compute diff
-result = diff(current, target, dialect="postgresql")
+result = diff(current, target, dialect="postgresql", decisions=NOTHING)
 
 print(f"Operations: {len(result['operations'])}")
 for i in result["execution_order"]:
@@ -1075,7 +1076,7 @@ def filter_by(table: str, **lookups) -> Query:
     return select("*", from_table=table, where=lookups, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
 
 async with reading(db) as conn:
-    active = await execute(filter_by("users", status="active"), conn)
+    active = await execute(filter_by("users", status="active"), conn, row_factory=NOTHING)
 ```
 
 `select` takes `where` as data — a dict of column to value, or a SQL string with `params` — plus `order_by`, `limit`, `offset`, `joins`, `group_by` and `having`. See [Query Builder](#query-builder).
@@ -1619,7 +1620,7 @@ For each modified table, column sets are compared similarly.
 When column is dropped and similar one added, it might be a rename:
 
 ```python
-result = diff(current, target, dialect="postgresql")
+result = diff(current, target, dialect="postgresql", decisions=NOTHING)
 
 if result['ambiguities']:
     for amb in result['ambiguities']:
