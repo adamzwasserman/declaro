@@ -345,9 +345,17 @@ async def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
 
     @helper
     async def nothing_to_refresh(_db: Database) -> None:
+        """A database with no primary has nothing to pull from.
+
+        THE EMPTY BODY IS THE ANSWER. `refresh` is one of the callables a
+        `Database` carries, and every engine has to offer it; a local Turso
+        file has no remote to read, so the honest implementation does
+        nothing and this says so rather than leaving a reader to work it out.
+        """
         return None
 
     async def release(_db: Database) -> None:
+        """A database with no primary has nothing to replicate at shutdown."""
         return None
 
     # ONCE, HERE, SERIALLY. See `negotiate_journal_mode`: this is the whole of

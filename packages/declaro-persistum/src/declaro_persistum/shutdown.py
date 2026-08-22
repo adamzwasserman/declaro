@@ -40,6 +40,12 @@ logger = logging.getLogger(__name__)
 
 @helper
 def _noop() -> None:
+    """Restore nothing, because nothing was trapped.
+
+    `trap` hands back the function that undoes it. When no handler could be
+    installed -- not the main thread -- there is nothing to undo, and the
+    caller still gets something to call.
+    """
     return None
 
 
