@@ -42,19 +42,22 @@ Rest = Callable[[], Awaitable[int]]
 
 
 @boundary
-def _print_it(message: str, stream: Any) -> None:
+def _print_it(message: str, stream: Any) -> int:
     """This line was asked for, so it is printed."""
     print(message, file=stream)
+    return 1
 
 
 @boundary
-def _print_nothing(_message: str, _stream: Any) -> None:
+def _print_nothing(_message: str, _stream: Any) -> int:
     """This line was not asked for, so nothing is printed."""
-    return None
+    return 0
 
 
 # Whether the line is wanted.
-_WHEN_WANTED: dict[bool, Callable[[str, Any], None]] = {
+# How many lines printed: one or none. Both halves answer, so neither is a
+# function with an empty body.
+_WHEN_WANTED: dict[bool, Callable[[str, Any], int]] = {
     True: _print_it,
     False: _print_nothing,
 }
@@ -638,7 +641,7 @@ async def cmd_snapshot(
 
 
 @boundary
-def _print_the_warnings(warnings: list[str]) -> None:
+def _print_the_warnings(warnings: list[str]) -> int:
     """The schema drew warnings, so each one is named."""
     print(
         "\n".join(
@@ -646,16 +649,19 @@ def _print_the_warnings(warnings: list[str]) -> None:
             + [f"  - {warning}" for warning in warnings]
         )
     )
+    return 1
 
 
 @boundary
-def _print_no_warnings(_warnings: list[str]) -> None:
+def _print_no_warnings(_warnings: list[str]) -> int:
     """Nothing to warn about."""
-    return None
+    return 0
 
 
 # Whether the validator raised any warning.
-_WHEN_WARNINGS: dict[bool, Callable[[list[str]], None]] = {
+# How many warnings printed. Both halves answer, so neither is a
+# function with an empty body.
+_WHEN_WARNINGS: dict[bool, Callable[[list[str]], int]] = {
     True: _print_the_warnings,
     False: _print_no_warnings,
 }
@@ -1079,19 +1085,22 @@ async def cmd_migrate_remote(
 
 
 @helper
-def _refuse_the_unanswerable(ambiguities: list[Ambiguity]) -> None:
+def _refuse_the_unanswerable(ambiguities: list[Ambiguity]) -> int:
     """`declaro generate` asks nobody and reads no decisions, so it refuses."""
     raise AmbiguityError(ambiguities)
+    return 1
 
 
 @helper
-def _nothing_unanswerable(_ambiguities: list[Ambiguity]) -> None:
+def _nothing_unanswerable(_ambiguities: list[Ambiguity]) -> int:
     """The diff came back clear, so there is nothing to refuse."""
-    return None
+    return 0
 
 
 # Whether the diff produced an ambiguity this command cannot settle.
-_WHEN_UNANSWERABLE: dict[bool, Callable[[list[Ambiguity]], None]] = {
+# How many ambiguities refused. Both halves answer, so neither is a
+# function with an empty body.
+_WHEN_UNANSWERABLE: dict[bool, Callable[[list[Ambiguity]], int]] = {
     True: _refuse_the_unanswerable,
     False: _nothing_unanswerable,
 }
@@ -1515,19 +1524,22 @@ def _decide_a_rename(amb: Ambiguity) -> dict[str, Decision]:
 
 
 @helper
-def _abort_the_run() -> None:
+def _abort_the_run() -> int:
     """The operator chose [2]."""
     raise KeyboardInterrupt("User aborted")
+    return 1
 
 
 @helper
-def _go_ahead_with_the_change() -> None:
+def _go_ahead_with_the_change() -> int:
     """Anything other than [2] proceeds, and records no decision."""
-    return None
+    return 0
 
 
 # Whether the operator typed 2.
-_WHEN_ABORTED: dict[bool, Callable[[], None]] = {
+# How many runs aborted. Both halves answer, so neither is a
+# function with an empty body.
+_WHEN_ABORTED: dict[bool, Callable[[], int]] = {
     True: _abort_the_run,
     False: _go_ahead_with_the_change,
 }
@@ -1565,22 +1577,25 @@ def _ask_about(position: int, amb: Ambiguity) -> dict[str, Decision]:
 
 
 @boundary
-def _save_the_decisions(schema_dir: str, decisions: dict[str, Decision]) -> None:
+def _save_the_decisions(schema_dir: str, decisions: dict[str, Decision]) -> int:
     """Something was decided, so it is written down for the next run."""
     from declaro_persistum.loader import save_decisions
 
     save_decisions(schema_dir, decisions)
     print(f"Decisions saved to {schema_dir}/migrations/pending.toml")
+    return 1
 
 
 @boundary
-def _save_nothing(_schema_dir: str, _decisions: dict[str, Decision]) -> None:
+def _save_nothing(_schema_dir: str, _decisions: dict[str, Decision]) -> int:
     """Nothing was decided, so there is nothing to write down."""
-    return None
+    return 0
 
 
 # Whether any decision came out of the questions.
-_WHEN_ANY_DECISION: dict[bool, Callable[[str, dict[str, Decision]], None]] = {
+# How many decision files written. Both halves answer, so neither is a
+# function with an empty body.
+_WHEN_ANY_DECISION: dict[bool, Callable[[str, dict[str, Decision]], int]] = {
     True: _save_the_decisions,
     False: _save_nothing,
 }

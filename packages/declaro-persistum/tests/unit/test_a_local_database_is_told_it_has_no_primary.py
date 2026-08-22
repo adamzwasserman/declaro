@@ -92,8 +92,14 @@ async def test_the_opportunistic_pass_declines_instead_of_raising() -> None:
 async def test_the_inert_callables_are_present_and_safe() -> None:
     """The other half. They are unreachable, not absent.
 
-    A `None` here would make every caller check before calling, which is the
-    shape the record was built to avoid.
+    A missing entry would make every caller check before calling, which is
+    the shape the record was built to avoid.
+
+    THEY REPORT HOW MANY PASSES THEY RAN, and for a database with no primary
+    that is none. It used to be `None`, which made the implementation a
+    function with an empty body: a scanner could not tell it from code
+    nobody had written, and a reader could not tell it from a line somebody
+    had deleted. Zero says the same thing and says it on purpose.
     """
     database = await _local()
     try:
@@ -101,6 +107,8 @@ async def test_the_inert_callables_are_present_and_safe() -> None:
         assert callable(database["refresh_once"])
 
         assert await database["replicate_once"](database) is True
-        assert await database["refresh_once"](database) is None
+        assert await database["refresh_once"](database) == 0, (
+            "a database with no primary pulled something"
+        )
     finally:
         await close(database)

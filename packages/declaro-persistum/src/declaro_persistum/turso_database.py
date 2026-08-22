@@ -388,19 +388,19 @@ async def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
         return True
 
     @helper
-    async def nothing_to_refresh(_db: Database) -> None:
-        """A database with no primary has nothing to pull from.
+    async def nothing_to_refresh(_db: Database) -> int:
+        """No passes: a local file has no remote to pull from.
 
-        THE EMPTY BODY IS THE ANSWER. `refresh` is one of the callables a
-        `Database` carries, and every engine has to offer it; a local Turso
-        file has no remote to read, so the honest implementation does
-        nothing and this says so rather than leaving a reader to work it out.
+        `refresh` is a callable every `Database` carries, so an engine with
+        nothing to do still has to answer. The answer is the number of passes
+        it ran, and here that is none.
         """
-        return None
+        return 0
 
-    async def release(_db: Database) -> None:
-        """A database with no primary has nothing to replicate at shutdown."""
-        return None
+    @helper
+    async def release(_db: Database) -> int:
+        """No passes: a local file has no primary to replicate to."""
+        return 0
 
     # ONCE, HERE, SERIALLY. See `negotiate_journal_mode`: this is the whole of
     # the fix for the crew race, and the recorded mode is what the engine
@@ -494,16 +494,18 @@ async def _open_replicated(
             return False
 
     @helper
-    async def refresh_once(_db: Database) -> None:
+    async def refresh_once(_db: Database) -> int:
         # KEEPS ASKING UNTIL THE PRIMARY REPORTS NOTHING FURTHER. This called
         # `pull()` exactly once. pyturso's pull fetches ONE batch and returns
         # "there may be more", so a copy more than one batch behind was left
         # part-way and reported current.
         await _pull_until_level(held)
+        return 1
 
     @boundary
-    async def release(_db: Database) -> None:
+    async def release(_db: Database) -> int:
         await held.close()
+        return 1
 
     return new_database(
         path=path,

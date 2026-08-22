@@ -816,7 +816,7 @@ _TRANSFER_ORDER: dict[bool, Callable[[list[str], list[str]], list[str]]] = {
 @boundary
 async def _turn_fk_checks_off(
     loader: BulkLoader, conn: Any, circular_refs: list[str]
-) -> None:
+) -> int:
     """DISABLING IS A PRECONDITION, NOT A COURTESY, so a failure stops the run.
 
     This was a warning, and the transfer then proceeded with checks still on:
@@ -843,14 +843,17 @@ async def _turn_fk_checks_off(
 @boundary
 async def _leave_fk_checks_on(
     _loader: BulkLoader, _conn: Any, _circular_refs: list[str]
-) -> None:
+) -> int:
     """No cycle, so every table has a load order its keys are happy with."""
-    return None
+    return 0
 
 
+# HOW MANY CONNECTIONS HAD ENFORCEMENT TURNED OFF: one or none. Both halves
+# answer it, so neither is a function with no body, and the count is what the
+# restore step needs to know afterwards.
 _WHEN_THERE_ARE_CYCLES: dict[
     bool,
-    Callable[[BulkLoader, Any, list[str]], Coroutine[Any, Any, None]],
+    Callable[[BulkLoader, Any, list[str]], Coroutine[Any, Any, int]],
 ] = {
     True: _turn_fk_checks_off,
     False: _leave_fk_checks_on,
@@ -858,7 +861,7 @@ _WHEN_THERE_ARE_CYCLES: dict[
 
 
 @boundary
-async def _turn_fk_checks_back_on(loader: BulkLoader, conn: Any) -> None:
+async def _turn_fk_checks_back_on(loader: BulkLoader, conn: Any) -> int:
     """TEARDOWN, so this does NOT raise: it runs in a `finally` and would
     replace whatever failure is already in flight with its own.
 
@@ -878,17 +881,18 @@ async def _turn_fk_checks_back_on(loader: BulkLoader, conn: Any) -> None:
             exc,
             exc_info=True,
         )
-    return None
+    return 1
 
 
 @boundary
-async def _leave_the_checks_as_they_are(_loader: BulkLoader, _conn: Any) -> None:
+async def _leave_the_checks_as_they_are(_loader: BulkLoader, _conn: Any) -> int:
     """They were never turned off, so there is nothing to put back."""
-    return None
+    return 0
 
 
+# How many connections had enforcement put back: one or none.
 _WHEN_THE_CHECKS_WERE_TURNED_OFF: dict[
-    bool, Callable[[BulkLoader, Any], Coroutine[Any, Any, None]]
+    bool, Callable[[BulkLoader, Any], Coroutine[Any, Any, int]]
 ] = {
     True: _turn_fk_checks_back_on,
     False: _leave_the_checks_as_they_are,

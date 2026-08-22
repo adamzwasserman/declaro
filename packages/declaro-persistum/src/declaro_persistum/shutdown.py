@@ -40,18 +40,20 @@ logger = logging.getLogger(__name__)
 
 
 @helper
-def _noop() -> None:
-    """Restore nothing, because nothing was trapped.
+def _noop() -> int:
+    """No handlers restored, because none was trapped.
 
-    `trap` hands back the function that undoes it. When no handler could be
-    installed -- not the main thread -- there is nothing to undo, and the
-    caller still gets something to call.
+    `trap_shutdown` hands back the function that undoes it. When no handler
+    could be installed -- not the main thread -- there is nothing to undo,
+    and the caller still gets something to call. How many it put back is a
+    true answer either way, where returning nothing left the two cases
+    looking identical.
     """
-    return None
+    return 0
 
 
 @helper
-def trap_shutdown(db: Database) -> Callable[[], None]:
+def trap_shutdown(db: Database) -> Callable[[], int]:
     """Install SIGTERM/SIGINT handlers that replicate before the process exits.
 
     Returns a callable that puts back whatever handlers were there before.
@@ -67,13 +69,13 @@ def trap_shutdown(db: Database) -> Callable[[], None]:
 
 
 @helper
-def _trap_nothing(_db: Database) -> Callable[[], None]:
+def _trap_nothing(_db: Database) -> Callable[[], int]:
     """This database was not opened asking to replicate, so nothing is trapped."""
     return _noop
 
 
 @boundary
-def _trap_signals(db: Database) -> Callable[[], None]:
+def _trap_signals(db: Database) -> Callable[[], int]:
     """Install the handlers, and hand back the function that removes them."""
     replaced: list[tuple[int, object]] = []
 
@@ -115,11 +117,15 @@ def _trap_signals(db: Database) -> Callable[[], None]:
             pass
 
     @boundary
-    def restore() -> None:
-        for sig, previous in replaced:
-            with contextlib.suppress(ValueError, OSError, TypeError):
-                signal.signal(sig, previous)
+    def restore() -> int:
+        """Put back what was replaced, and say how many."""
+        put_back = [
+            sig
+            for sig, previous in replaced
+            if _restored(sig, previous)
+        ]
         replaced.clear()
+        return len(put_back)
 
     return restore
 
@@ -143,7 +149,16 @@ _ON_THE_LOOP: dict[bool, Callable[[asyncio.AbstractEventLoop, Any], None]] = {
 }
 
 # Whether this database was opened asking to replicate at shutdown.
-_TRAP: dict[bool, Callable[[Database], Callable[[], None]]] = {
+_TRAP: dict[bool, Callable[[Database], Callable[[], int]]] = {
     True: _trap_signals,
     False: _trap_nothing,
 }
+
+
+@boundary
+def _restored(sig: int, previous: object) -> bool:
+    """Put one handler back. False when the platform refuses it."""
+    with contextlib.suppress(ValueError, OSError, TypeError):
+        signal.signal(sig, previous)  # type: ignore[arg-type]
+        return True
+    return False

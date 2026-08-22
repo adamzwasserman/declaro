@@ -159,8 +159,13 @@ Connect = Callable[["Database"], Awaitable[Any]]
 ForDDL = Callable[["Database"], "AbstractAsyncContextManager[Any]"]
 CloseConnection = Callable[[Any], Awaitable[None]]
 ReplicateOnce = Callable[["Database"], Awaitable[bool]]
-RefreshOnce = Callable[["Database"], Awaitable[None]]
-Release = Callable[["Database"], Awaitable[None]]
+# HOW MANY PASSES RAN, NOT NOTHING. Both were `Awaitable[None]`, so the
+# implementation for an engine with nothing to do was a function with an empty
+# body, which reads to a scanner as code nobody wrote and to a reader as a
+# line that might have been deleted. A count is a true answer either way, and
+# `flush` could report whether it sent anything.
+RefreshOnce = Callable[["Database"], Awaitable[int]]
+Release = Callable[["Database"], Awaitable[int]]
 Sleep = Callable[[float], Awaitable[None]]
 
 

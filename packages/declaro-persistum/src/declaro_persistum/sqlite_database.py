@@ -52,13 +52,15 @@ async def _nothing_to_replicate(_db: Database) -> bool:
 
 
 @helper
-async def _nothing_to_refresh(_db: Database) -> None:
-    return None
+async def _nothing_to_refresh(_db: Database) -> int:
+    """No passes, because SQLite has no replica to pull from."""
+    return 0
 
 
 @helper
-async def _release(_db: Database) -> None:
-    return None
+async def _release(_db: Database) -> int:
+    """No passes, because SQLite has no primary to replicate to at shutdown."""
+    return 0
 
 
 @helper

@@ -95,7 +95,10 @@ class Commit(Protocol):
     # incompatible signature. The PostgreSQL commit is a genuine no-op,
     # because asyncpg owns its transaction, so it is the one implementation
     # that has nothing to read. Every caller passes positionally.
-    async def __call__(self, conn: DbapiConnection | FetchingConnection, /) -> None:
+    # HOW MANY COMMITS IT SENT: one, or none. Returning nothing made the
+    # PostgreSQL implementation a function with an empty body, which reads to
+    # a scanner as code nobody wrote. The count is true for both.
+    async def __call__(self, conn: DbapiConnection | FetchingConnection, /) -> int:
         """Make the work so far durable.
 
         asyncpg owns its transaction and has nothing to do here; the DB-API
@@ -307,9 +310,9 @@ async def postgres_delete_rows(conn: FetchingConnection, table: str) -> int:
 
 
 @boundary
-async def postgres_commit(_conn: FetchingConnection) -> None:
-    """Nothing to do. asyncpg's transaction context commits on exit."""
-    return None
+async def postgres_commit(_conn: FetchingConnection) -> int:
+    """No commit sent: asyncpg's transaction context commits on exit."""
+    return 0
 
 
 @boundary
@@ -428,8 +431,10 @@ async def dbapi_delete_rows(conn: DbapiConnection, table: str) -> int:
 
 
 @boundary
-async def dbapi_commit(conn: DbapiConnection) -> None:
+async def dbapi_commit(conn: DbapiConnection) -> int:
+    """One commit sent."""
     await conn.commit()
+    return 1
 
 
 @boundary
