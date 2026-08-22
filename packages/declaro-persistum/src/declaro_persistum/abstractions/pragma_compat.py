@@ -13,6 +13,8 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
+from declaro_persistum.boundary import boundary, helper
+
 __all__ = [
     "pragma_table_info",
     "pragma_index_list",
@@ -31,11 +33,13 @@ async def _maybe_await(value: Any) -> Any:
     return value
 
 
+@boundary
 async def _rows(conn: Any, query: str) -> list[tuple]:
     cursor = await _maybe_await(conn.execute(query))
     return list(await _maybe_await(cursor.fetchall()) or [])
 
 
+@helper
 def as_identifier(name: str) -> str:
     """An identifier as a quoted name, double quotes doubled.
 
@@ -52,21 +56,25 @@ def as_identifier(name: str) -> str:
     return name.replace('"', '""')
 
 
+@helper
 async def pragma_table_info(conn: Any, table: str) -> list[tuple]:
     """Columns of `table`."""
     return await _rows(conn, f'PRAGMA table_info("{as_identifier(table)}")')
 
 
+@helper
 async def pragma_index_list(conn: Any, table: str) -> list[tuple]:
     """Indexes on `table`."""
     return await _rows(conn, f'PRAGMA index_list("{as_identifier(table)}")')
 
 
+@helper
 async def pragma_index_info(conn: Any, index_name: str) -> list[tuple]:
     """Columns covered by `index_name`."""
     return await _rows(conn, f'PRAGMA index_info("{as_identifier(index_name)}")')
 
 
+@helper
 async def pragma_foreign_key_list(conn: Any, table: str) -> list[tuple]:
     """Foreign keys declared on `table`."""
     return await _rows(conn, f'PRAGMA foreign_key_list("{as_identifier(table)}")')
@@ -89,12 +97,14 @@ async def pragma_foreign_key_list(conn: Any, table: str) -> list[tuple]:
 #
 # They live here because this is where the pragmas they read live.
 
+@helper
 async def table_column_names(connection: Any, table_name: str) -> list[str]:
     """Get list of column names for a table ."""
     rows = await pragma_table_info(connection, table_name)
     return [row[1] for row in rows]  # Column name is at index 1
 
 
+@boundary
 async def create_index_statements(connection: Any, table_name: str) -> list[str]:
     """
     Get CREATE INDEX statements for all indexes on a table .

@@ -32,6 +32,7 @@ from __future__ import annotations
 from typing import Any, Literal, TypedDict
 
 from declaro_persistum.boundary import helper
+from declaro_persistum.exceptions import ValidationError
 from declaro_persistum.query.expressions import (  # noqa: F401
     CaseExpression,
     CaseOrderBy,
@@ -44,7 +45,7 @@ from declaro_persistum.query.expressions import (  # noqa: F401
     render_order_term,
     render_subquery,
 )
-from declaro_persistum.types import Dialect, Nothing, Schema, resolved
+from declaro_persistum.types import NOTHING, Dialect, Nothing, Schema, resolved
 
 __all__ = [
     "SQLFunction",
@@ -215,6 +216,37 @@ def _render_literal(
 _RENDER_ARGUMENT: dict[str | None, Any] = {
     "case": _render_case_argument,
     "subquery": _render_subquery_argument,
+    # THE UNTAGGED CASE IS A MEMBER, NOT A FALLBACK. This was the second
+    # argument of a `.get`, so the two tags the table declares and every tag
+    # it does not were the same question. An argument tagged `{"kind":
+    # "windo"}` rendered as `UPPER({'kind': 'windo', 'over': 'x'})`: a Python
+    # dict repr inside a SQL statement, unbound and unescaped, with the
+    # engine the first thing to see the mistake.
+    None: _render_literal,
+}
+
+
+@helper
+def _refuse_unknown_kind(kind: str | None) -> None:
+    """A tag no renderer answers for, named so the author sees the typo."""
+    raise ValidationError(
+        f"a query argument is tagged {kind!r}, which nothing renders. The "
+        f"tags that render are {sorted(k for k in _RENDER_ARGUMENT if k)}, "
+        f"and an argument carrying no tag is written as it stands.",
+        table=NOTHING,
+        column=NOTHING,
+        reference=NOTHING,
+    )
+
+
+@helper
+def _accept_known_kind(_kind: str | None) -> None:
+    """The tag is one the table answers for."""
+
+
+_WHEN_UNKNOWN_KIND: dict[bool, Any] = {
+    True: _accept_known_kind,
+    False: _refuse_unknown_kind,
 }
 
 
@@ -231,8 +263,9 @@ def render_function(
     params: dict[str, Any] = {}
 
     for i, arg in enumerate(fn["args"]):
-        render = _RENDER_ARGUMENT.get(kind_of(arg), _render_literal)
-        sql, rendered_params = render(arg, f"{path}_a{i}", dialect)
+        kind = kind_of(arg)
+        _WHEN_UNKNOWN_KIND[kind in _RENDER_ARGUMENT](kind)
+        sql, rendered_params = _RENDER_ARGUMENT[kind](arg, f"{path}_a{i}", dialect)
         parts.append(sql)
         params.update(rendered_params)
 

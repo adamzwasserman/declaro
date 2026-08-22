@@ -28,6 +28,7 @@ from declaro_persistum.types import (
     Operation,
     changed_to,
     spelling_of,
+    written_as,
 )
 
 # =============================================================================
@@ -203,6 +204,27 @@ NO_EQUIVALENT = MappingProxyType({
 
 
 @helper
+def _the_dialects_spelling(spelled: dict[str, str], key: str, _value: Any) -> Any:
+    """This engine writes the expression its own way."""
+    return spelled[key]
+
+
+@helper
+def _as_declared(_spelled: dict[str, str], _key: str, value: Any) -> Any:
+    """No engine-specific spelling, so what the author wrote stands."""
+    return value
+
+
+# WHETHER THIS ENGINE RESPELLS THE EXPRESSION. The dialect is a closed
+# vocabulary and is read by subscript; the expression is not, and both of its
+# cases are named rather than one hiding in a `.get` fallback.
+_SPELLED_FOR: dict[bool, Callable[[dict[str, str], str, Any], Any]] = {
+    True: _the_dialects_spelling,
+    False: _as_declared,
+}
+
+
+@helper
 def _untranslated_default(value: Any, _dialect: str, _column: str) -> Any:
     """A number, a flag or nothing: the same in every dialect.
 
@@ -223,22 +245,25 @@ def _translate_text_default(value: str, dialect: str, column: str) -> Any:
             f"spell. {refusal}."
         )
 
-    return EXPRESSION_DEFAULTS.get(dialect, {}).get(key, value)
+    spelled = EXPRESSION_DEFAULTS[dialect]
+    return _SPELLED_FOR[key in spelled](spelled, key, value)
 
 
-# ONLY TEXT CARRIES A DIALECT SPELLING, keyed by the type rather than tested
-# by a guard that returned early.
-_TRANSLATE_DEFAULT: dict[type, Callable[[Any, str, str], Any]] = {
-    str: _translate_text_default,
+# ONLY TEXT CARRIES A DIALECT SPELLING, and both cases are written out. This
+# was a `.get` whose second argument answered for every type the table does
+# not name, which reads the same as the fallbacks removed everywhere else
+# today. Naming the other case says it is an answer rather than a silence: a
+# number is a number in every dialect and nothing about it varies.
+_TRANSLATE_DEFAULT: dict[bool, Callable[[Any, str, str], Any]] = {
+    True: _translate_text_default,
+    False: _untranslated_default,
 }
 
 
 @helper
 def _translate_default(value: Any, dialect: str, column: str) -> Any:
     """The declared default, spelled for `dialect`, or a refusal naming both."""
-    return _TRANSLATE_DEFAULT.get(spelling_of(value), _untranslated_default)(
-        value, dialect, column
-    )
+    return _TRANSLATE_DEFAULT[written_as(str, value)](value, dialect, column)
 
 
 @helper
@@ -309,9 +334,25 @@ _SQLITE_DEFAULT: dict[type, Callable[[Any], str]] = {
 
 
 @helper
+def _accept_spellable_default(_value: Any) -> None:
+    """A default this table has a spelling for."""
+
+
+# THE REFUSAL HAPPENS BEFORE THE LOOKUP, so the table is read by subscript.
+# It was the second argument of a `.get`, which closed the space rather than
+# re-opening it, but a reader cannot tell those two apart at a glance and
+# neither can a scan.
+_WHEN_UNSPELLABLE: dict[bool, Callable[[Any], None]] = {
+    True: _accept_spellable_default,
+    False: _refuse_unspellable_default,
+}
+
+
+@helper
 def sqlite_default(value: Any) -> str:
     """The text that follows DEFAULT in a SQLite CREATE TABLE."""
-    return _SQLITE_DEFAULT.get(spelling_of(value), _refuse_unspellable_default)(value)
+    _WHEN_UNSPELLABLE[spelling_of(value) in _SQLITE_DEFAULT](value)
+    return _SQLITE_DEFAULT[spelling_of(value)](value)
 
 
 @helper

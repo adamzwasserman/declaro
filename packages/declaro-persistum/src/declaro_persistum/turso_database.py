@@ -59,6 +59,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.database import (
     Database,
     ShutdownPolicy,
@@ -89,6 +90,7 @@ DIALECT: Dialect = "turso"
 _BUSY_TIMEOUT_S = 5.0
 
 
+@boundary
 async def _pull_until_level(conn: Any) -> bool:
     """Keep pulling until the primary reports nothing further.
 
@@ -113,6 +115,7 @@ async def _pull_until_level(conn: Any) -> bool:
     return fetched_any
 
 
+@boundary
 async def replicate_path(path: str, *, primary: str, token: str | None) -> None:
     """Bring a PATH into conformity with its primary, creating it if absent.
 
@@ -150,6 +153,7 @@ async def replicate_path(path: str, *, primary: str, token: str | None) -> None:
 _DEFAULT_RETRY_DELAY_S = 0.1
 
 
+@boundary
 async def _set_journal_mode(conn: Any, mode: str) -> str:
     """Request a journal mode and report what the engine granted.
 
@@ -163,6 +167,7 @@ async def _set_journal_mode(conn: Any, mode: str) -> str:
     return row[0] if row else "unknown"
 
 
+@boundary
 async def negotiate_journal_mode(path: str, mode: str) -> str:
     """Ask the file for a journal mode, once, and report what was granted.
 
@@ -200,6 +205,7 @@ async def negotiate_journal_mode(path: str, mode: str) -> str:
         await conn.close()
 
 
+@boundary
 async def connect_local(db: Database) -> Any:
     """Open a connection to a local database. Nothing else.
 
@@ -213,6 +219,7 @@ async def connect_local(db: Database) -> Any:
 
 
 @asynccontextmanager
+@boundary
 async def migrating(db: Database) -> AsyncIterator[Any]:
     """Open a connection for DDL. ALWAYS WAL, even on a local database.
 
@@ -254,10 +261,12 @@ async def migrating(db: Database) -> AsyncIterator[Any]:
 
 
 
+@boundary
 async def _close_connection(conn: Any) -> None:
     await conn.close()
 
 
+@boundary
 async def open_turso(
     path: str,
     primary: str | None | Nothing,
@@ -311,6 +320,7 @@ async def open_turso(
     return db
 
 
+@boundary
 async def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
     """A local database: MVCC, no lock, a connection per `writing` block.
 
@@ -329,9 +339,11 @@ async def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
     None someone has to check for.
     """
 
+    @helper
     async def nothing_to_replicate(_db: Database) -> bool:
         return True
 
+    @helper
     async def nothing_to_refresh(_db: Database) -> None:
         return None
 
@@ -367,6 +379,7 @@ async def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
     )
 
 
+@boundary
 async def _open_replicated(
     path: str, primary: str, token: str | None, shutdown: ShutdownPolicy
 ) -> Database:
@@ -381,15 +394,18 @@ async def _open_replicated(
     held = await turso.aio.sync.connect(path, remote_url=primary, auth_token=token)
     await _set_journal_mode(held, "wal")
 
+    @boundary
     async def connect(_db: Database) -> Any:
         return held
 
+    @helper
     async def close_connection(_conn: Any) -> None:
         # The held connection outlives every write. `close(db)` releases it.
         return None
 
+    @boundary
     async def replicate_once(_db: Database) -> bool:
-        try:  # honest: ignore HC-P002: a network failure is a fault as data
+        try:
             await held.push()
             return True
         except A_BUG_IN_THIS_PACKAGE:
@@ -425,6 +441,7 @@ async def _open_replicated(
             )
             return False
 
+    @helper
     async def refresh_once(_db: Database) -> None:
         # KEEPS ASKING UNTIL THE PRIMARY REPORTS NOTHING FURTHER. This called
         # `pull()` exactly once. pyturso's pull fetches ONE batch and returns
@@ -432,6 +449,7 @@ async def _open_replicated(
         # part-way and reported current.
         await _pull_until_level(held)
 
+    @boundary
     async def release(_db: Database) -> None:
         await held.close()
 

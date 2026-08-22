@@ -32,6 +32,7 @@ import uuid
 from collections.abc import Callable, Sequence
 from typing import Any, Protocol, TypedDict
 
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.types import (
     DbapiConnection,
     FetchingConnection,
@@ -118,6 +119,7 @@ class ReadProgress(Protocol):
 
 
 class WriteProgress(Protocol):
+    @helper
     async def __call__(
         self,
         conn: DbapiConnection | FetchingConnection,
@@ -201,6 +203,7 @@ class BulkLoader(TypedDict):
 _PORTABLE: dict[type, Callable[[Any], Any]] = {uuid.UUID: str}
 
 
+@helper
 def _portable(value: Any) -> Any:
     """UUIDs become strings so a SQLite or Turso target accepts them.
 
@@ -210,6 +213,7 @@ def _portable(value: Any) -> Any:
     return translated_by(_PORTABLE, value)
 
 
+@helper
 async def postgres_read_rows(
     conn: FetchingConnection,
     table: str,
@@ -229,6 +233,7 @@ async def postgres_read_rows(
     return [tuple(_portable(v) for v in row.values()) for row in rows]
 
 
+@boundary
 async def postgres_load_rows(
     conn: FetchingConnection,
     table: str,
@@ -242,25 +247,30 @@ async def postgres_load_rows(
     return len(rows)
 
 
+@boundary
 async def postgres_count_rows(conn: FetchingConnection, table: str) -> int:
     return int(await conn.fetchval(f'SELECT COUNT(*) FROM "{table}"'))
 
 
+@boundary
 async def postgres_delete_rows(conn: FetchingConnection, table: str) -> int:
     # asyncpg returns the tag "DELETE N".
     result = await conn.execute(f'DELETE FROM "{table}"')
     return int(result.split()[-1]) if result else 0
 
 
+@boundary
 async def postgres_commit(_conn: FetchingConnection) -> None:
     """Nothing to do. asyncpg's transaction context commits on exit."""
     return None
 
 
+@boundary
 async def postgres_ensure_progress(conn: FetchingConnection) -> None:
     await conn.execute(_CREATE_PROGRESS_TABLE_SQL)
 
 
+@boundary
 async def postgres_read_progress(conn: FetchingConnection, table: str) -> dict[str, Any] | None:
     row = await conn.fetchrow(
         f'SELECT * FROM "{TRANSFER_STATE_TABLE}" WHERE table_name = $1',
@@ -269,6 +279,7 @@ async def postgres_read_progress(conn: FetchingConnection, table: str) -> dict[s
     return dict(row) if row else None
 
 
+@boundary
 async def postgres_write_progress(
     conn: FetchingConnection,
     table: str,
@@ -295,10 +306,12 @@ async def postgres_write_progress(
     )
 
 
+@boundary
 async def postgres_disable_fk_checks(conn: FetchingConnection) -> None:
     await conn.execute("SET session_replication_role = 'replica'")
 
 
+@boundary
 async def postgres_enable_fk_checks(conn: FetchingConnection) -> None:
     await conn.execute("SET session_replication_role = 'origin'")
 
@@ -306,6 +319,7 @@ async def postgres_enable_fk_checks(conn: FetchingConnection) -> None:
 # ------------------------------------------------- SQLite and Turso (DB-API)
 
 
+@boundary
 async def dbapi_read_rows(
     conn: DbapiConnection,
     table: str,
@@ -325,6 +339,7 @@ async def dbapi_read_rows(
     return [tuple(row) for row in await cursor.fetchall()]
 
 
+@boundary
 async def dbapi_load_rows(
     conn: DbapiConnection,
     table: str,
@@ -340,12 +355,14 @@ async def dbapi_load_rows(
     return len(rows)
 
 
+@boundary
 async def dbapi_count_rows(conn: DbapiConnection, table: str) -> int:
     cursor = await conn.execute(f'SELECT COUNT(*) FROM "{table}"', ())
     row = await cursor.fetchone()
     return int(row[0]) if row else 0
 
 
+@boundary
 async def dbapi_delete_rows(conn: DbapiConnection, table: str) -> int:
     # Counted first: DELETE without a WHERE reports no row count here.
     count = await dbapi_count_rows(conn, table)
@@ -353,15 +370,18 @@ async def dbapi_delete_rows(conn: DbapiConnection, table: str) -> int:
     return count
 
 
+@boundary
 async def dbapi_commit(conn: DbapiConnection) -> None:
     await conn.commit()
 
 
+@boundary
 async def dbapi_ensure_progress(conn: DbapiConnection) -> None:
     await conn.execute(_CREATE_PROGRESS_TABLE_SQL, ())
     await conn.commit()
 
 
+@boundary
 async def dbapi_read_progress(conn: DbapiConnection, table: str) -> dict[str, Any] | None:
     """A cursor and a tuple, where asyncpg gives a row that is already a map."""
     cursor = await conn.execute(
@@ -373,6 +393,7 @@ async def dbapi_read_progress(conn: DbapiConnection, table: str) -> dict[str, An
     return dict(zip(_PROGRESS_COLUMNS, row, strict=True)) if row else None
 
 
+@boundary
 async def dbapi_write_progress(
     conn: DbapiConnection,
     table: str,
@@ -400,10 +421,12 @@ async def dbapi_write_progress(
     await conn.commit()
 
 
+@boundary
 async def dbapi_disable_fk_checks(conn: DbapiConnection) -> None:
     await conn.execute("PRAGMA foreign_keys = OFF", ())
 
 
+@boundary
 async def dbapi_enable_fk_checks(conn: DbapiConnection) -> None:
     await conn.execute("PRAGMA foreign_keys = ON", ())
 
