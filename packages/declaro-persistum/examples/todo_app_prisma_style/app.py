@@ -64,6 +64,7 @@ from declaro_persistum.query import (
     select,
     update,
 )
+from declaro_persistum.types import NOTHING
 
 SCHEMA_DIR = Path(__file__).parent / "schema"
 
@@ -214,8 +215,7 @@ async def index(request: Request):
                 "completed",
                 "created_at",
                 from_table="todos",
-                order_by=["-created_at"],
-            ),
+                order_by=["-created_at"], where=NOTHING, params=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
             conn,
         )
 
@@ -232,14 +232,14 @@ async def create_todo(request: Request, title: str = Form(...)):
 
     async with get_connection() as conn:
         await execute(
-            insert("todos", {"id": todo_id, "title": title, "completed": 0}),
+            insert("todos", {"id": todo_id, "title": title, "completed": 0}, returning=NOTHING, on_conflict=NOTHING),
             conn,
         )
         await commit(conn)
 
         todo = await execute_one(
             select("id", "title", "completed", from_table="todos",
-                   where={"id": todo_id}),
+                   where={"id": todo_id}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
             conn,
         )
 
@@ -253,20 +253,20 @@ async def toggle_todo(request: Request, todo_id: str):
     """Toggle todo completion status."""
     async with get_connection() as conn:
         current = await execute_one(
-            select("completed", from_table="todos", where={"id": todo_id}),
+            select("completed", from_table="todos", where={"id": todo_id}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
             conn,
         )
         new_completed = 0 if current["completed"] else 1
 
         await execute(
-            update("todos", {"completed": new_completed}, where={"id": todo_id}),
+            update("todos", {"completed": new_completed}, where={"id": todo_id}, params=NOTHING, returning=NOTHING),
             conn,
         )
         await commit(conn)
 
         todo = await execute_one(
             select("id", "title", "completed", from_table="todos",
-                   where={"id": todo_id}),
+                   where={"id": todo_id}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
             conn,
         )
 
@@ -279,7 +279,7 @@ async def toggle_todo(request: Request, todo_id: str):
 async def delete_todo(todo_id: str):
     """Delete a todo."""
     async with get_connection() as conn:
-        await execute(delete("todos", where={"id": todo_id}), conn)
+        await execute(delete("todos", where={"id": todo_id}, params=NOTHING, returning=NOTHING), conn)
         await commit(conn)
 
     return ""
@@ -289,7 +289,7 @@ async def get_count(request: Request):
     """Get todo counts for the footer."""
     async with get_connection() as conn:
         active_count = await execute_scalar(
-            select("COUNT(*) AS c", from_table="todos", where={"completed": 0}),
+            select("COUNT(*) AS c", from_table="todos", where={"completed": 0}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
             conn,
         )
 
