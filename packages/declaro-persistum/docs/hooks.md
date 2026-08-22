@@ -16,7 +16,7 @@ def scope_to_owner(query: Query, owner: str) -> Query:
         "params": {**query["params"], "owner": owner},
     }
 
-q = select("id", from_table="items", where={"status": "active"})
+q = select("id", from_table="items", where={"status": "active"}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
 
 async with reading(db) as conn:
     rows = await execute(scope_to_owner(q, current_user_id), conn)
@@ -45,13 +45,13 @@ The old document made much of a pre-hook that could rewrite a DELETE into an UPD
 from declaro_persistum import Query, delete, update
 
 def soft(query: Query) -> Query:
-    """Callers write `delete(...)`; the table never loses a row."""
+    """Callers write `delete(..., where=NOTHING, params=NOTHING, returning=NOTHING)`; the table never loses a row."""
     if not query["sql"].startswith("DELETE FROM"):
         return query
     head, _, where = query["sql"].partition(" WHERE ")
     table = head.split('"')[1]
     return update(table, {"deleted_at": "now()"},
-                  where=where, params=query["params"])
+                  where=where, params=query["params"], returning=NOTHING)
 ```
 
 ```text

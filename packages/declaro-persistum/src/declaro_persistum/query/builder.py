@@ -9,7 +9,7 @@ import re
 from collections.abc import Callable
 from typing import Any, TypedDict
 
-from declaro_persistum.types import written_as
+from declaro_persistum.types import Nothing, resolved, written_as
 
 
 class Query(TypedDict):
@@ -68,14 +68,14 @@ def _clause(
 def select(
     *columns: str,
     from_table: str,
-    where: str | dict[str, Any] | None = None,
-    params: dict[str, Any] | None = None,
-    order_by: list[str] | None = None,
-    limit: int | None = None,
-    offset: int | None = None,
-    joins: list[dict[str, str]] | None = None,
-    group_by: list[str] | None = None,
-    having: str | dict[str, Any] | None = None,
+    where: str | dict[str, Any] | Nothing,
+    params: dict[str, Any] | Nothing,
+    order_by: list[str] | Nothing,
+    limit: int | Nothing,
+    offset: int | Nothing,
+    joins: list[dict[str, str]] | Nothing,
+    group_by: list[str] | Nothing,
+    having: str | dict[str, Any] | Nothing,
 ) -> Query:
     """
     Build a SELECT query.
@@ -98,10 +98,20 @@ def select(
         Query dict that can be executed
 
     Example:
-        >>> q = select("id", "email", from_table="users", where="id = :id", params={"id": 1})
+        >>> q = select("id", "email", from_table="users", where="id = :id", params={"id": 1}, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
         >>> print(q["sql"])
         SELECT "id", "email" FROM "users" WHERE id = :id
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    where = resolved(where, None)
+    params = resolved(params, None)
+    order_by = resolved(order_by, None)
+    limit = resolved(limit, None)
+    offset = resolved(offset, None)
+    joins = resolved(joins, None)
+    group_by = resolved(group_by, None)
+    having = resolved(having, None)
     params = params or {}
 
     # Build column list
@@ -184,8 +194,8 @@ def insert(
     into_table: str,
     values: dict[str, Any] | list[dict[str, Any]],
     *,
-    returning: list[str] | None = None,
-    on_conflict: str | None = None,
+    returning: list[str] | Nothing,
+    on_conflict: str | Nothing,
 ) -> Query:
     """
     Build an INSERT query.
@@ -200,10 +210,14 @@ def insert(
         Query dict that can be executed
 
     Example:
-        >>> q = insert("users", {"email": "test@example.com", "name": "Test"})
+        >>> q = insert("users", {"email": "test@example.com", "name": "Test"}, returning=NOTHING, on_conflict=NOTHING)
         >>> print(q["sql"])
         INSERT INTO "users" ("email", "name") VALUES (:email, :name)
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    returning = resolved(returning, None)
+    on_conflict = resolved(on_conflict, None)
     # ONE ROW OR SEVERAL, AND BOTH MEAN SEVERAL. Two spellings of one thing
     # is a vocabulary, resolved here into the single form the rest reads.
     values_list = _ROWS[written_as(dict, values)](values)
@@ -258,8 +272,8 @@ def update(
     set_values: dict[str, Any],
     *,
     where: str | dict[str, Any],
-    params: dict[str, Any] | None = None,
-    returning: list[str] | None = None,
+    params: dict[str, Any] | Nothing,
+    returning: list[str] | Nothing,
 ) -> Query:
     """
     Build an UPDATE query.
@@ -275,10 +289,14 @@ def update(
         Query dict that can be executed
 
     Example:
-        >>> q = update("users", {"name": "New Name"}, where="id = :id", params={"id": 1})
+        >>> q = update("users", {"name": "New Name"}, where="id = :id", params={"id": 1}, returning=NOTHING)
         >>> print(q["sql"])
         UPDATE "users" SET "name" = :name WHERE id = :id
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    params = resolved(params, None)
+    returning = resolved(returning, None)
     if not set_values:
         raise ValueError("set_values cannot be empty")
 
@@ -310,7 +328,7 @@ def update(
     # the caller's original `params` BEFORE `_clause` ran. So a dict WHERE
     # rendered `:w_0_id` and bound nothing:
     #
-    #     update("t", {"a": 1}, where={"id": "x"})
+    #     update("t", {"a": 1}, where={"id": "x"}, params=NOTHING, returning=NOTHING)
     #     sql    'UPDATE "t" SET "a" = :set_a WHERE id = :w_0_id'
     #     params {'set_a': 1}
     #     sqlite3.ProgrammingError: You did not supply a value for binding
@@ -339,8 +357,8 @@ def delete(
     from_table: str,
     *,
     where: str | dict[str, Any],
-    params: dict[str, Any] | None = None,
-    returning: list[str] | None = None,
+    params: dict[str, Any] | Nothing,
+    returning: list[str] | Nothing,
 ) -> Query:
     """
     Build a DELETE query.
@@ -355,10 +373,14 @@ def delete(
         Query dict that can be executed
 
     Example:
-        >>> q = delete("users", where="id = :id", params={"id": 1})
+        >>> q = delete("users", where="id = :id", params={"id": 1}, returning=NOTHING)
         >>> print(q["sql"])
         DELETE FROM "users" WHERE id = :id
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    params = resolved(params, None)
+    returning = resolved(returning, None)
     if not where:
         raise ValueError("where clause is required for DELETE (use '1=1' for all rows)")
 
@@ -377,7 +399,7 @@ def delete(
     }
 
 
-def raw(sql: str, params: dict[str, Any] | None = None) -> Query:
+def raw(sql: str, params: dict[str, Any] | Nothing) -> Query:
     """
     Create a query from raw SQL.
 
@@ -391,6 +413,9 @@ def raw(sql: str, params: dict[str, Any] | None = None) -> Query:
     Returns:
         Query dict
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    params = resolved(params, None)
     return {
         "sql": sql,
         "params": params or {},
@@ -417,7 +442,7 @@ def _quote_column(col: str) -> str:
     as a string LITERAL, so the query succeeded and returned the text of the
     expression:
 
-        select("COUNT(*) AS c", from_table="t")
+        select("COUNT(*) AS c", from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
         ->  SELECT "COUNT(*) AS c" FROM "t"
         ->  'COUNT(*) AS c'
 

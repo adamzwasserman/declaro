@@ -2,7 +2,7 @@
 
     from declaro_persistum.query import select, insert, update, delete, table
 
-    q = select("users", ["id", "email"], where={"status": "active"})
+    q = select("users", ["id", "email"], where={"status": "active"}, from_table=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
 
 A WHERE clause is a DICT, not a Python expression:
 
@@ -64,6 +64,7 @@ from declaro_persistum.query.table import (
     sum_,
     table,
 )
+from declaro_persistum.types import NOTHING
 
 __all__ = [
     # building

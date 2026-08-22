@@ -76,7 +76,7 @@ async def execute(
         List of rows as dicts, or transformed by row_factory
 
     Example:
-        >>> q = select("*", from_table="users", where="active = :active", params={"active": True})
+        >>> q = select("*", from_table="users", where="active = :active", params={"active": True}, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
         >>> users = await execute(q, conn)
         >>> print(users[0]["email"])
     """
@@ -106,7 +106,7 @@ async def execute_one(
         Single row as dict (or transformed), or None if no results
 
     Example:
-        >>> q = select("*", from_table="users", where="id = :id", params={"id": 1})
+        >>> q = select("*", from_table="users", where="id = :id", params={"id": 1}, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
         >>> user = await execute_one(q, conn)
         >>> if user:
         ...     print(user["email"])
@@ -137,7 +137,7 @@ async def execute_scalar(
         Single scalar value from first column of first row
 
     Example:
-        >>> q = select("count(*)", from_table="users")
+        >>> q = select("count(*)", from_table="users", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
         >>> count = await execute_scalar(q, conn)
         >>> print(f"Total users: {count}")
     """
@@ -164,7 +164,7 @@ async def execute_many(
         Total number of rows affected
 
     Example:
-        >>> q = insert("users", {"email": ":email", "name": ":name"})
+        >>> q = insert("users", {"email": ":email", "name": ":name"}, returning=NOTHING, on_conflict=NOTHING)
         >>> rows = await execute_many(q, conn, [
         ...     {"email": "a@b.com", "name": "A"},
         ...     {"email": "c@d.com", "name": "C"},
@@ -437,7 +437,7 @@ def _first_value(row: Any) -> Any:
     `row[0]` was here, and a row arrives as a MAPPING from these drivers, so
     that is a lookup for the key `0` and raises:
 
-        total = await execute_scalar(select("COUNT(*) AS c", ...), conn)
+        total = await execute_scalar(select("COUNT(*) AS c", ..., from_table=NOTHING, where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)
         KeyError: 0
 
     Measured on SQLite 2026-08-17. `COUNT(*)` is the commonest scalar query

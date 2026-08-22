@@ -900,7 +900,7 @@ orders = table("orders", schema)
 # Basic SELECT with dot notation — no conn parameter
 results = await (
     users
-    .select(users.id, users.email, users.name)
+    .select(users.id, users.email, users.name, from_table=NOTHING, where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
     .where(users.status == "active")
     .order_by(users.created_at.desc())
     .limit(10)
@@ -911,7 +911,7 @@ results = await (
 # Single row
 user = await (
     users
-    .select(users.id, users.email)
+    .select(users.id, users.email, from_table=NOTHING, where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
     .where(users.id == ":id")
     .params(id=user_id)
     .execute_one()
@@ -921,7 +921,7 @@ user = await (
 # With JOIN (column-to-column comparison in ON clause)
 results = await (
     orders
-    .select(orders.id, orders.total, users.email)
+    .select(orders.id, orders.total, users.email, from_table=NOTHING, where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
     .join(users, on=orders.user_id == users.id)
     .where(orders.status == "pending")
     .execute()
@@ -931,7 +931,7 @@ results = await (
 # LEFT JOIN
 results = await (
     orders
-    .select(orders.id, users.email)
+    .select(orders.id, users.email, from_table=NOTHING, where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
     .join(users, on=orders.user_id == users.id, type="left")
     .execute()
 )
@@ -944,7 +944,7 @@ results = await (
 # Complex conditions with AND/OR
 results = await (
     users
-    .select(users.id, users.email)
+    .select(users.id, users.email, from_table=NOTHING, where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
     .where(
         (users.status == "active") &
         (users.role.in_(["admin", "editor"]) | users.is_superuser == True)
@@ -973,7 +973,7 @@ await (
 ```python
 await (
     users
-    .update(name=":name", updated_at=now_())
+    .update(name=":name", updated_at=now_(), table=NOTHING, set_values=NOTHING, where=NOTHING, params=NOTHING, returning=NOTHING)
     .where(users.id == ":id")
     .params(id=user_id, name="New Name")
     .execute()
@@ -985,7 +985,7 @@ await (
 ```python
 await (
     users
-    .delete()
+    .delete(, from_table=NOTHING, where=NOTHING, params=NOTHING, returning=NOTHING)
     .where(users.id == ":id")
     .params(id=user_id)
     .execute()
@@ -1000,7 +1000,7 @@ from declaro_persistum.query import count_
 # Count with condition
 count = await (
     users
-    .select(count_("*"))
+    .select(count_("*"), from_table=NOTHING, where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
     .where(users.status == "active")
     .execute_scalar()
 )
@@ -1051,7 +1051,7 @@ class UserRow(TypedDict):
 
 user: UserRow | None = await (
     users
-    .select(users.id, users.email, users.name)
+    .select(users.id, users.email, users.name, from_table=NOTHING, where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
     .where(users.id == ":id")
     .params(id=user_id)
     .execute_one()
@@ -1072,7 +1072,7 @@ from declaro_persistum import execute, reading, select
 
 # The Django-style filter, as a function over the one query builder.
 def filter_by(table: str, **lookups) -> Query:
-    return select("*", from_table=table, where=lookups)
+    return select("*", from_table=table, where=lookups, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
 
 async with reading(db) as conn:
     active = await execute(filter_by("users", status="active"), conn)

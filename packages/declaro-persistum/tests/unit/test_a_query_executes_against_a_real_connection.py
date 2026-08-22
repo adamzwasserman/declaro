@@ -48,6 +48,7 @@ from declaro_persistum.query.executor import (
     execute_one,
     execute_scalar,
 )
+from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.precommit, pytest.mark.sqlite]
 
@@ -73,7 +74,7 @@ async def conn():
 
 async def test_execute_returns_every_matching_row(conn) -> None:
     rows = await execute(
-        select("id", "name", from_table="t", where={"n": {"gt": 5}}, order_by=["id"]),
+        select("id", "name", from_table="t", where={"n": {"gt": 5}}, order_by=["id"], params=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
         conn,
     )
 
@@ -81,27 +82,27 @@ async def test_execute_returns_every_matching_row(conn) -> None:
 
 
 async def test_execute_one_returns_the_first_row(conn) -> None:
-    row = await execute_one(select("id", from_table="t", order_by=["id"]), conn)
+    row = await execute_one(select("id", from_table="t", order_by=["id"], where=NOTHING, params=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)
 
     assert row == {"id": "1"}
 
 
 async def test_execute_one_returns_none_when_nothing_matches(conn) -> None:
     """None, not an empty dict, so `if row:` means what a caller expects."""
-    row = await execute_one(select("id", from_table="t", where={"n": {"gt": 999}}), conn)
+    row = await execute_one(select("id", from_table="t", where={"n": {"gt": 999}}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)
 
     assert row is None
 
 
 async def test_execute_returns_an_empty_list_when_nothing_matches(conn) -> None:
-    rows = await execute(select("id", from_table="t", where={"n": {"gt": 999}}), conn)
+    rows = await execute(select("id", from_table="t", where={"n": {"gt": 999}}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)
 
     assert rows == []
 
 
 async def test_a_row_factory_transforms_every_row(conn) -> None:
     names = await execute(
-        select("name", from_table="t", order_by=["name"]),
+        select("name", from_table="t", order_by=["name"], where=NOTHING, params=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
         conn,
         row_factory=lambda r: r["name"].upper(),
     )
@@ -111,14 +112,14 @@ async def test_a_row_factory_transforms_every_row(conn) -> None:
 
 async def test_execute_many_reports_how_many_it_wrote(conn) -> None:
     written = await execute_many(
-        insert("t", {"id": ":id", "name": ":name", "n": ":n"}),
+        insert("t", {"id": ":id", "name": ":name", "n": ":n"}, returning=NOTHING, on_conflict=NOTHING),
         conn,
         [{"id": "3", "name": "c", "n": 30}, {"id": "4", "name": "d", "n": 40}],
     )
     await conn.commit()
 
     assert written == 2
-    assert len(await execute(select("id", from_table="t"), conn)) == 4
+    assert len(await execute(select("id", from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)) == 4
 
 
 async def test_a_where_clause_binds_rather_than_inlines(conn) -> None:
@@ -126,7 +127,7 @@ async def test_a_where_clause_binds_rather_than_inlines(conn) -> None:
     await conn.execute("INSERT INTO t VALUES ('5', \"it's\", 50)")
     await conn.commit()
 
-    rows = await execute(select("n", from_table="t", where={"name": "it's"}), conn)
+    rows = await execute(select("n", from_table="t", where={"name": "it's"}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)
 
     assert rows == [{"n": 50}]
 
@@ -138,14 +139,14 @@ async def test_a_where_clause_binds_rather_than_inlines(conn) -> None:
 
 async def test_execute_scalar_returns_the_single_value(conn) -> None:
     """The measured defect. `row[0]` on a dict row is a key lookup."""
-    total = await execute_scalar(select("COUNT(*) AS c", from_table="t"), conn)
+    total = await execute_scalar(select("COUNT(*) AS c", from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)
 
     assert total == 2
 
 
 async def test_execute_scalar_returns_none_when_nothing_matches(conn) -> None:
     value = await execute_scalar(
-        select("id", from_table="t", where={"n": {"gt": 999}}), conn
+        select("id", from_table="t", where={"n": {"gt": 999}}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn
     )
 
     assert value is None
@@ -160,7 +161,7 @@ async def test_execute_scalar_reads_the_first_column_not_a_key_named_zero(
     a lookup that happens to miss.
     """
     name = await execute_scalar(
-        select("name", from_table="t", where={"id": "1"}), conn
+        select("name", from_table="t", where={"id": "1"}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn
     )
 
     assert name == "a"
@@ -225,7 +226,7 @@ async def test_a_query_does_not_change_how_the_connection_behaves(conn) -> None:
     """The caller's connection is theirs. Borrow it and give it back."""
     before = conn.row_factory
 
-    await execute(select("id", from_table="t"), conn)
+    await execute(select("id", from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)
 
     assert conn.row_factory is before, (
         f"row_factory was {before!r} and is now {conn.row_factory!r}, so every "
@@ -235,7 +236,7 @@ async def test_a_query_does_not_change_how_the_connection_behaves(conn) -> None:
 
 async def test_a_caller_still_gets_tuples_from_their_own_cursor(conn) -> None:
     """The consequence, stated as the caller sees it rather than as an attribute."""
-    await execute(select("id", from_table="t"), conn)
+    await execute(select("id", from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)
 
     cursor = await conn.execute("SELECT COUNT(*) FROM t")
     row = await cursor.fetchone()
@@ -256,14 +257,14 @@ async def test_a_caller_who_set_their_own_factory_keeps_it(conn) -> None:
 
     conn.row_factory = mine
 
-    await execute(select("id", from_table="t"), conn)
+    await execute(select("id", from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)
 
     assert conn.row_factory is mine
 
 
 async def test_the_rows_are_still_dicts(conn) -> None:
     """The floor. Never setting the factory at all would pass the three above."""
-    rows = await execute(select("id", from_table="t", order_by=["id"]), conn)
+    rows = await execute(select("id", from_table="t", order_by=["id"], where=NOTHING, params=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)
 
     assert rows == [{"id": "1"}, {"id": "2"}]
 
@@ -292,7 +293,7 @@ async def test_a_scalar_works_when_the_caller_uses_a_mapping_factory(conn) -> No
 
     conn.row_factory = as_dict
 
-    total = await execute_scalar(select("COUNT(*) AS c", from_table="t"), conn)
+    total = await execute_scalar(select("COUNT(*) AS c", from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn)
 
     assert total == 2, (
         f"a scalar query returned {total!r} when the caller's connection "

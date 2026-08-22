@@ -44,6 +44,7 @@ import tempfile
 import pytest
 
 from declaro_persistum.query import delete, select, update
+from declaro_persistum.types import NOTHING
 
 pytestmark = pytest.mark.precommit
 
@@ -54,7 +55,7 @@ def _rendered(query) -> tuple[str, dict]:
 
 def test_an_update_binds_every_placeholder_it_renders() -> None:
     """The measured defect. A rendered `:name` with no value cannot run."""
-    sql, params = _rendered(update("t", {"a": 1}, where={"id": "x"}))
+    sql, params = _rendered(update("t", {"a": 1}, where={"id": "x"}, params=NOTHING, returning=NOTHING))
 
     missing = [
         token
@@ -66,14 +67,14 @@ def test_an_update_binds_every_placeholder_it_renders() -> None:
 
 def test_the_where_value_is_the_one_that_was_passed() -> None:
     """Binding something is not the same as binding the right thing."""
-    _sql, params = _rendered(update("t", {"a": 1}, where={"id": "x"}))
+    _sql, params = _rendered(update("t", {"a": 1}, where={"id": "x"}, params=NOTHING, returning=NOTHING))
 
     assert "x" in params.values(), params
 
 
 def test_the_set_values_survive_the_merge() -> None:
     """The obvious way to fix this is to return `_clause`'s dict and lose SET."""
-    _sql, params = _rendered(update("t", {"a": 1, "b": 2}, where={"id": "x"}))
+    _sql, params = _rendered(update("t", {"a": 1, "b": 2}, where={"id": "x"}, params=NOTHING, returning=NOTHING))
 
     assert params["set_a"] == 1 and params["set_b"] == 2, params
 
@@ -81,7 +82,7 @@ def test_the_set_values_survive_the_merge() -> None:
 def test_a_string_where_still_works() -> None:
     """The form that hid the defect, which must keep working."""
     _sql, params = _rendered(
-        update("t", {"a": 1}, where="id = :id", params={"id": "x"})
+        update("t", {"a": 1}, where="id = :id", params={"id": "x"}, returning=NOTHING)
     )
 
     assert params == {"set_a": 1, "id": "x"}
@@ -90,9 +91,9 @@ def test_a_string_where_still_works() -> None:
 @pytest.mark.parametrize(
     "builder",
     [
-        lambda: select("a", from_table="t", where={"id": "x"}),
-        lambda: delete("t", where={"id": "x"}),
-        lambda: update("t", {"a": 1}, where={"id": "x"}),
+        lambda: select("a", from_table="t", where={"id": "x"}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
+        lambda: delete("t", where={"id": "x"}, params=NOTHING, returning=NOTHING),
+        lambda: update("t", {"a": 1}, where={"id": "x"}, params=NOTHING, returning=NOTHING),
     ],
     ids=["select", "delete", "update"],
 )
@@ -117,7 +118,7 @@ def test_an_update_runs_against_a_real_engine() -> None:
     conn.execute("CREATE TABLE t (id TEXT, a INTEGER)")
     conn.execute("INSERT INTO t VALUES ('x', 0), ('y', 0)")
 
-    q = update("t", {"a": 1}, where={"id": "x"})
+    q = update("t", {"a": 1}, where={"id": "x"}, params=NOTHING, returning=NOTHING)
     conn.execute(q["sql"], q["params"])
 
     assert conn.execute("SELECT a FROM t WHERE id = 'x'").fetchone()[0] == 1
@@ -131,7 +132,7 @@ def test_a_multi_condition_where_binds_all_of_them() -> None:
     conn.execute("CREATE TABLE t (id TEXT, n INTEGER, a INTEGER)")
     conn.execute("INSERT INTO t VALUES ('x', 1, 0), ('x', 2, 0)")
 
-    q = update("t", {"a": 9}, where={"id": "x", "n": 2})
+    q = update("t", {"a": 9}, where={"id": "x", "n": 2}, params=NOTHING, returning=NOTHING)
     conn.execute(q["sql"], q["params"])
 
     assert conn.execute("SELECT a FROM t WHERE n = 2").fetchone()[0] == 9
@@ -153,7 +154,7 @@ async def test_an_update_through_the_executor_lands() -> None:
         await conn.execute("INSERT INTO t VALUES ('x', 0)")
         await conn.commit()
 
-        await execute(update("t", {"a": 1}, where={"id": "x"}), conn)
+        await execute(update("t", {"a": 1}, where={"id": "x"}, params=NOTHING, returning=NOTHING), conn)
         await conn.commit()
 
         cursor = await conn.execute("SELECT a FROM t")

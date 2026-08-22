@@ -96,14 +96,17 @@ async def main():
 
     async with writing(db) as conn:
         await execute(
-            insert("users", {"id": str(uuid4()), "email": "alice@example.com"}), conn
+            insert("users", {"id": str(uuid4()), "email": "alice@example.com"}, returning=NOTHING, on_conflict=NOTHING), conn
         )
         await conn.commit()
 
     async with reading(db) as conn:
         rows = await execute(
             select("id", "email", from_table="users",
-                   where={"email": "alice@example.com"}),
+                   where={"email": "alice@example.com"},
+                   params=NOTHING, order_by=NOTHING, limit=NOTHING,
+                   offset=NOTHING, joins=NOTHING, group_by=NOTHING,
+                   having=NOTHING),
             conn,
         )
 

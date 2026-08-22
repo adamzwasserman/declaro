@@ -32,6 +32,7 @@ import tempfile
 import pytest
 
 from declaro_persistum.query.builder import select
+from declaro_persistum.types import NOTHING
 
 pytestmark = pytest.mark.precommit
 
@@ -47,7 +48,7 @@ EXPRESSIONS = [
 
 @pytest.mark.parametrize("expression", EXPRESSIONS)
 def test_an_expression_is_not_wrapped_in_quotes(expression: str) -> None:
-    sql = select(expression, from_table="t")["sql"]
+    sql = select(expression, from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)["sql"]
 
     assert f'"{expression}"' not in sql, (
         f"the expression was quoted as an identifier, so the engine returns "
@@ -66,7 +67,7 @@ def test_an_expression_evaluates_against_a_real_engine(expression: str) -> None:
     conn.execute("CREATE TABLE t (id TEXT, n INTEGER, amount INTEGER)")
     conn.execute("INSERT INTO t VALUES ('1', 5, 100), ('2', 7, 200)")
 
-    value = conn.execute(select(expression, from_table="t")["sql"]).fetchone()[0]
+    value = conn.execute(select(expression, from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)["sql"]).fetchone()[0]
 
     assert value != expression, (
         f"the engine returned the text of the expression rather than its "
@@ -81,7 +82,7 @@ def test_a_count_is_the_number_of_rows() -> None:
     conn.execute("CREATE TABLE t (id TEXT)")
     conn.execute("INSERT INTO t VALUES ('1'), ('2'), ('3')")
 
-    sql = select("COUNT(*) AS c", from_table="t")["sql"]
+    sql = select("COUNT(*) AS c", from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)["sql"]
 
     assert conn.execute(sql).fetchone()[0] == 3
 
@@ -96,7 +97,7 @@ def test_a_count_is_the_number_of_rows() -> None:
 )
 def test_a_plain_column_is_still_quoted(column: str) -> None:
     """Quoting is what lets a column be named `order` or `select`."""
-    sql = select(column, from_table="t")["sql"]
+    sql = select(column, from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)["sql"]
 
     assert f'"{column}"' in sql, sql
 
@@ -106,24 +107,24 @@ def test_a_reserved_word_column_still_works_against_an_engine() -> None:
     conn.execute('CREATE TABLE t ("order" INTEGER)')
     conn.execute("INSERT INTO t VALUES (7)")
 
-    sql = select("order", from_table="t")["sql"]
+    sql = select("order", from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)["sql"]
 
     assert conn.execute(sql).fetchone()[0] == 7
 
 
 def test_a_qualified_column_is_quoted_in_both_halves() -> None:
-    sql = select("users.id", from_table="users")["sql"]
+    sql = select("users.id", from_table="users", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)["sql"]
 
     assert '"users"."id"' in sql, sql
 
 
 def test_a_star_is_left_alone() -> None:
-    assert '"*"' not in select("*", from_table="t")["sql"]
+    assert '"*"' not in select("*", from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)["sql"]
 
 
 def test_a_column_named_like_a_function_is_still_a_column() -> None:
     """`count` with no parentheses is a column name, and must stay quoted."""
-    sql = select("count", from_table="t")["sql"]
+    sql = select("count", from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)["sql"]
 
     assert '"count"' in sql, sql
 
@@ -148,7 +149,7 @@ async def test_a_scalar_count_comes_back_as_a_number() -> None:
         await conn.execute("INSERT INTO t VALUES ('1'), ('2')")
         await conn.commit()
 
-        assert await execute_scalar(select("COUNT(*) AS c", from_table="t"), conn) == 2
+        assert await execute_scalar(select("COUNT(*) AS c", from_table="t", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), conn) == 2
     finally:
         await conn.close()
         os.unlink(path)

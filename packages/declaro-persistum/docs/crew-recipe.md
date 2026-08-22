@@ -75,7 +75,7 @@ async def start_crew(room, path, size):
 # --- the caller -----------------------------------------------------------
 
 room = new_room()
-ticket = deposit(room, insert("cards", {"id": 1, "title": "x"}))   # returns at once
+ticket = deposit(room, insert("cards", {"id": 1, "title": "x"}, returning=NOTHING, on_conflict=NOTHING))   # returns at once
 ...                                                                # free to work
 receipt = await collect(room, ticket)     # {"id": ..., "ok": True, "error": ""}
 ```

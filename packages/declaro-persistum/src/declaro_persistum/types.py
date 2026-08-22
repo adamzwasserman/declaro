@@ -131,7 +131,7 @@ def is_our_table(name: str) -> bool:
 # =============================================================================
 
 # AN OMITTED ARGUMENT WAS INDISTINGUISHABLE FROM A CHOSEN ONE. `def
-# select(table, where=None, limit=None)` absorbs the caller's omission:
+# select(table, where=None, limit=None, from_table=NOTHING, params=NOTHING, order_by=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)` absorbs the caller's omission:
 # afterwards nothing can tell "asked for no limit" from "forgot the limit",
 # and the region where the default applies is invisible at every call site,
 # so nothing exercises it. Honest Code rule 14 calls the `=` default the
