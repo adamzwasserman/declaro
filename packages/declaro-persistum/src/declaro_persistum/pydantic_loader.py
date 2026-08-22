@@ -11,7 +11,7 @@ import importlib.util
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal, get_args, get_origin, get_type_hints
+from typing import Any, Literal, TypedDict, Unpack, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel
 from pydantic import Field as PydanticField
@@ -210,21 +210,32 @@ def table(name: str) -> Callable[[type], type]:
     return declare
 
 
+# WHAT A COLUMN MAY DECLARE, AS A BOUNDED VOCABULARY. `total=False` is what
+# makes absence explicit: a facet the author did not write is a key that is
+# not in the mapping, which is a member of this type rather than a value the
+# signature invented. Eleven `= None` parameters used to do this, and each one
+# absorbed the author's omission before anything could see it.
+class ColumnFacets(TypedDict, total=False):
+    """Everything a column can say about itself, and nothing else."""
+
+    primary_key: bool
+    unique: bool
+    nullable: bool
+    references: str
+    on_delete: OnAction
+    on_update: OnAction
+    check: str
+    default: str
+    db_type: str
+    renamed_from: str
+    is_new: bool
+
+
+_COLUMN_FACETS = frozenset(ColumnFacets.__annotations__)
+
+
 @helper
-def field(
-    *,
-    primary_key: bool | None = None,
-    unique: bool | None = None,
-    nullable: bool | None = None,
-    references: str | None = None,
-    on_delete: OnAction | None = None,
-    on_update: OnAction | None = None,
-    check: str | None = None,
-    default: str | None = None,
-    db_type: str | None = None,
-    renamed_from: str | None = None,
-    is_new: bool | None = None,
-) -> Any:
+def field(**declared: Unpack[ColumnFacets]) -> Any:
     """Declare what a column MEANS. The applier decides how it is spelled.
 
         total: Decimal = field(db_type="numeric(10,2)", check="total >= 0")
@@ -240,8 +251,9 @@ def field(
         Field(json_schema_extra={"primry_key": True})
 
     is a typo that reaches the schema as a key nothing reads, and the column is
-    quietly not a primary key. Named keyword arguments make it a TypeError at
-    import. Same defect as `index_from_meta`, on the other side of this loader.
+    quietly not a primary key. `ColumnFacets` makes it an error a type checker
+    catches at edit time and `_refuse_unknown_facets` catches at import. Same
+    defect as `index_from_meta`, on the other side of this loader.
 
     `default` IS A SQL EXPRESSION, NOT A PYTHON VALUE. `default="now()"` means
     DEFAULT now(); it is not Pydantic's default and does not become the string
@@ -253,29 +265,44 @@ def field(
     say `primary_key`. Nothing can depend on the old spelling, because nothing
     could ever call this.
 
-    Every argument is keyword-only and defaults to None, which here means
-    "not declared" rather than a value: a None is dropped, so the schema
-    carries only what the model actually said.
+    NOTHING DEFAULTS. This took eleven keyword arguments each defaulting to
+    None, and then dropped every None on the way out, so "not declared" was
+    reconstructed from a value the signature had supplied. A facet the author
+    did not write never enters now, and there is nothing to drop.
     """
-    declared = {
-        "primary_key": primary_key,
-        "unique": unique,
-        "nullable": nullable,
-        "references": references,
-        "on_delete": on_delete,
-        "on_update": on_update,
-        "check": check,
-        "default": default,
-        "db_type": db_type,
-        "renamed_from": renamed_from,
-        "is_new": is_new,
-    }
+    unknown = sorted(set(declared) - _COLUMN_FACETS)
+    _WHEN_UNKNOWN_FACET[bool(unknown)](unknown)
     # Pydantic carries field metadata on its own FieldInfo and offers no
     # other way to attach it. This is the declarative surface an author writes
     # against, so the object IS the contract rather than a leak of one.
     return PydanticField(  # honest: ignore HC-P010: Pydantic's own field type
-        json_schema_extra={k: v for k, v in declared.items() if v is not None}
+        json_schema_extra=dict(declared)
     )
+
+
+@helper
+def _refuse_unknown_facets(unknown: list[str]) -> None:
+    """A facet no column has, named so the author can see the typo.
+
+    `Unpack[ColumnFacets]` says this at edit time. This says it at import,
+    which is where an author who runs no type checker finds out.
+    """
+    raise LoaderError(
+        f"field() was given {unknown}, which no column declares. A column may "
+        f"declare {sorted(_COLUMN_FACETS)}.",
+        path=NOTHING,
+    )
+
+
+@helper
+def _accept_known_facets(_unknown: list[str]) -> None:
+    """Every facet named is one a column has."""
+
+
+_WHEN_UNKNOWN_FACET: dict[bool, Callable[[list[str]], None]] = {
+    True: _refuse_unknown_facets,
+    False: _accept_known_facets,
+}
 
 
 # HOW A PYTHON VALUE IS SPELLED IN SQL, read by the value's exact type.

@@ -102,11 +102,22 @@ def test_field_carries_every_column_property_the_loader_reads() -> None:
 
 
 def test_a_misspelled_property_fails_at_import_not_in_the_schema() -> None:
-    """The whole reason this exists rather than a bare dict."""
-    from declaro_persistum import field
+    """The whole reason this exists rather than a bare dict.
 
-    with pytest.raises(TypeError):
-        field(primry_key=True)  # type: ignore[call-arg]
+    THE REFUSAL NAMES THE TYPO AND THE VOCABULARY NOW. This asserted a bare
+    TypeError, which is what eleven keyword arguments produced and which
+    tells the author nothing but the word "unexpected". `field` takes the
+    facets as a bounded mapping, so it can say which key it did not know and
+    list the ones it does.
+    """
+    from declaro_persistum import field
+    from declaro_persistum.exceptions import LoaderError
+
+    with pytest.raises(LoaderError) as raised:
+        field(primry_key=True)  # type: ignore[typeddict-unknown-key]
+
+    assert "primry_key" in str(raised.value)
+    assert "primary_key" in str(raised.value), "the vocabulary is not listed"
 
 
 def test_field_declares_a_sql_expression_not_a_python_value() -> None:
