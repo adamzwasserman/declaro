@@ -29,6 +29,7 @@ import inspect
 
 import pytest
 
+import declaro_persistum
 from declaro_persistum.cli.commands import cmd_apply, cmd_migrate_remote
 from declaro_persistum.migrations import apply_migrations_async
 
@@ -73,21 +74,30 @@ def test_the_list_still_matches_what_reaches_an_applier() -> None:
     """The floor under the gate.
 
     A fourth migrating function added without a line here would leave this
-    file green while the path it added went unchecked. This counts the
-    `apply_operations` and `apply_migrations_async` calls in the two modules
-    the list covers, so a new one shows up as a mismatch.
-    """
-    from declaro_persistum import migrations
-    from declaro_persistum.cli import commands
+    file green while the path it added went unchecked.
 
-    calls = 0
-    for module in (migrations, commands):
-        source = inspect.getsource(module)
-        calls += source.count("await apply_operations(")
-        calls += source.count("await apply_migrations_async(")
+    IT USED TO READ TWO NAMED MODULES, `migrations` and `cli.commands`. On
+    2026-08-22 both were split for length, one call moved to
+    `migration_sql.py`, and the count fell to three while nothing about the
+    code had changed. A scan that names its files goes blind the moment a
+    file is renamed or divided, and it goes blind quietly: the number falls
+    and reads like a path that was removed.
+
+    It reads every module in the package now, so a call cannot escape it by
+    moving house.
+    """
+    import pathlib
+
+    package = pathlib.Path(declaro_persistum.__file__).parent
+    calls = sum(
+        source.count("await apply_operations(")
+        + source.count("await apply_migrations_async(")
+        for module in sorted(package.rglob("*.py"))
+        for source in [module.read_text()]
+    )
 
     assert calls == 4, (
-        f"{calls} calls reach an applier across migrations.py and "
-        f"cli/commands.py; the gate above covers three functions holding "
-        f"four. A new one needs a line in MIGRATES and a file of its own."
+        f"{calls} calls reach an applier across the package; the gate above "
+        f"covers three functions holding four. A new one needs a line in "
+        f"MIGRATES and a file of its own."
     )
