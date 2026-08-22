@@ -14,7 +14,17 @@ from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionErr
 from declaro_persistum.exceptions import DeclaroError
 from declaro_persistum.inspector.shared import normalize_check
 from declaro_persistum.inspector.shared import normalize_fk_action as _normalize_fk_action
-from declaro_persistum.types import Column, FetchingConnection, Index, Schema, Table, View
+from declaro_persistum.types import (
+    NOTHING,
+    Column,
+    FetchingConnection,
+    Index,
+    Nothing,
+    Schema,
+    Table,
+    View,
+    resolved,
+)
 
 
 @helper
@@ -45,8 +55,8 @@ def get_dialect() -> str:
 async def introspect(
     connection: FetchingConnection,
     *,
-    schema_name: str = "public",
-    include_views: bool = False,
+    schema_name: str | Nothing,
+    include_views: bool | Nothing,
 ) -> Schema | tuple[Schema, dict[str, View]]:
     """
     Introspect PostgreSQL database schema.
@@ -62,6 +72,10 @@ async def introspect(
     Returns:
         Schema dict, or tuple of (Schema, views dict) if include_views=True
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    schema_name = resolved(schema_name, 'public')
+    include_views = resolved(include_views, False)
     try:
         # Get all tables in schema
         tables = await connection.fetch(
@@ -454,7 +468,7 @@ async def get_table_columns(
     See the note on the SQLite twin: this was documented as the inspector's
     and defined on Turso alone.
     """
-    if not await table_exists(connection, table_name):
+    if not await table_exists(connection, table_name, schema_name=NOTHING):
         raise DeclaroError(f"Table '{table_name}' does not exist")
 
     return await _get_columns(connection, table_name, "public")
@@ -465,9 +479,12 @@ async def table_exists(
     connection: FetchingConnection,
     table_name: str,
     *,
-    schema_name: str = "public",
+    schema_name: str | Nothing,
 ) -> bool:
     """Check if a table exists."""
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    schema_name = resolved(schema_name, 'public')
     result = await connection.fetchval(
         """
         SELECT EXISTS (
@@ -566,7 +583,7 @@ async def _get_table_constraints(
 async def introspect_views(
     connection: FetchingConnection,
     *,
-    schema_name: str = "public",
+    schema_name: str | Nothing,
 ) -> dict[str, View]:
     """
     Introspect views and materialized views from PostgreSQL.
@@ -578,6 +595,9 @@ async def introspect_views(
     Returns:
         Dict mapping view names to View definitions
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    schema_name = resolved(schema_name, 'public')
     views: dict[str, View] = {}
 
     # Regular views

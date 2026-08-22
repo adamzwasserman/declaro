@@ -49,6 +49,7 @@ import pytest
 
 from declaro_persistum import close, open_sqlite, writing
 from declaro_persistum.migrations import apply_migrations_async
+from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.precommit, pytest.mark.sqlite]
 
@@ -121,7 +122,7 @@ async def test_a_clean_schema_still_migrates() -> None:
     """
     database = await _database()
     try:
-        result = await apply_migrations_async(database, "sqlite", _models(CLEAN))
+        result = await apply_migrations_async(database, "sqlite", _models(CLEAN), expand_enums=NOTHING, force=NOTHING)
 
         assert result["success"] is True, result
         assert await _tables(database) == ["users"]
@@ -137,8 +138,7 @@ async def test_a_dangling_reference_is_refused() -> None:
     database = await _database()
     try:
         result = await apply_migrations_async(
-            database, "sqlite", _models(DANGLING_REFERENCE)
-        )
+            database, "sqlite", _models(DANGLING_REFERENCE), expand_enums=NOTHING, force=NOTHING)
 
         assert result["success"] is False, result
     finally:
@@ -150,8 +150,7 @@ async def test_nothing_is_created_when_the_schema_is_refused() -> None:
     database = await _database()
     try:
         await apply_migrations_async(
-            database, "sqlite", _models(DANGLING_REFERENCE)
-        )
+            database, "sqlite", _models(DANGLING_REFERENCE), expand_enums=NOTHING, force=NOTHING)
 
         assert await _tables(database) == [], await _tables(database)
     finally:
@@ -163,8 +162,7 @@ async def test_the_refusal_carries_the_validator_s_words() -> None:
     database = await _database()
     try:
         result = await apply_migrations_async(
-            database, "sqlite", _models(DANGLING_REFERENCE)
-        )
+            database, "sqlite", _models(DANGLING_REFERENCE), expand_enums=NOTHING, force=NOTHING)
 
         assert "authors" in result["error"], result["error"]
     finally:
@@ -176,8 +174,7 @@ async def test_an_unrenderable_name_is_refused_before_the_engine_sees_it() -> No
     database = await _database()
     try:
         result = await apply_migrations_async(
-            database, "sqlite", _models(UNRENDERABLE)
-        )
+            database, "sqlite", _models(UNRENDERABLE), expand_enums=NOTHING, force=NOTHING)
 
         assert result["success"] is False, result
         assert "Rename it" in result["error"], result["error"]
@@ -218,7 +215,7 @@ async def test_a_schema_the_validator_only_warns_about_still_migrates() -> None:
 
     database = await _database()
     try:
-        result = await apply_migrations_async(database, "sqlite", models)
+        result = await apply_migrations_async(database, "sqlite", models, expand_enums=NOTHING, force=NOTHING)
 
         assert result["success"] is True, result
         assert await _tables(database) == ["shapes"], await _tables(database)

@@ -39,6 +39,7 @@ import pytest
 from declaro_persistum.migrations import apply_migrations_async
 from declaro_persistum.sqlite_database import open_sqlite
 from declaro_persistum.turso_database import open_turso
+from declaro_persistum.types import NOTHING
 
 pytestmark = pytest.mark.turso
 
@@ -77,7 +78,7 @@ async def _open(kind: str, tmp_path: pathlib.Path):
             shutdown="exit_immediately",
             busy_timeout_s=5.0,
         )
-    return await open_turso(str(tmp_path / f"{kind}.db"), shutdown="exit_immediately")
+    return await open_turso(str(tmp_path / f"{kind}.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
 
 
 @pytest.mark.parametrize("kind", ["sqlite", "turso"])
@@ -89,16 +90,14 @@ async def test_the_second_migration_does_nothing(kind: str, tmp_path) -> None:
     db = await _open(kind, tmp_path)
 
     first = await apply_migrations_async(
-        db, dialect=kind, schema_path=str(models)
-    )
+        db, dialect=kind, schema_path=str(models), expand_enums=NOTHING, force=NOTHING)
     assert first["success"], first["error"]
     assert first["operations_applied"] > 0, "nothing was created to begin with"
 
     # `force` skips the schema-hash cache, which would otherwise return before
     # diffing and hide every defect this file exists for.
     again = await apply_migrations_async(
-        db, dialect=kind, schema_path=str(models), force=True
-    )
+        db, dialect=kind, schema_path=str(models), force=True, expand_enums=NOTHING)
     assert again["success"], again["error"]
     assert again["operations_applied"] == 0, (
         f"nothing changed and the engine proposed "
@@ -122,7 +121,7 @@ async def test_a_materialized_view_is_not_reported_as_a_table(
     models = tmp_path / "models.py"
     models.write_text(MODELS)
     db = await _open(kind, tmp_path)
-    await apply_migrations_async(db, dialect=kind, schema_path=str(models))
+    await apply_migrations_async(db, dialect=kind, schema_path=str(models), expand_enums=NOTHING, force=NOTHING)
 
     async with reading(db) as conn:
         schema, views = await introspect_with_views(conn, kind)

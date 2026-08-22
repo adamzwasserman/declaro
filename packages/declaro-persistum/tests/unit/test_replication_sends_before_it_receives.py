@@ -21,6 +21,7 @@ from __future__ import annotations
 import pytest
 
 from declaro_persistum.database import replicate
+from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.precommit]
 
@@ -152,7 +153,7 @@ async def test_a_local_open_injects_callables_of_the_right_shape(tmp_path) -> No
     from declaro_persistum import close as close_db
     from declaro_persistum import open_turso
 
-    db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
+    db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
     try:
         for field in ("replicate_once", "refresh_once"):
             fn = db[field]
@@ -179,7 +180,7 @@ async def test_a_local_database_never_consults_them(tmp_path) -> None:
     from declaro_persistum import open_turso
     from declaro_persistum.database import flush, replicate
 
-    db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
+    db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
     consulted = False
 
     async def _tripwire(_db):

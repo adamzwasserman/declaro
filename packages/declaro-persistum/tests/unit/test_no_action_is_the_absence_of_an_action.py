@@ -50,7 +50,7 @@ async def _live_schema(tmp_path: pathlib.Path, ddl: tuple[str, ...]) -> dict:
                 await conn.execute(statement)
             await conn.commit()
         async with reading(database) as conn:
-            return await INSPECTORS["sqlite"](conn)
+            return await INSPECTORS["sqlite"](conn, schema_name=NOTHING, include_views=False)
     finally:
         await close(database)
 

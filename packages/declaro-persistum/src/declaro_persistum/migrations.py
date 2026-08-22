@@ -12,7 +12,7 @@ hasn't changed since the last successful migration (skip-if-clean).
 
 Usage:
     # Async
-    await apply_migrations_async(db, dialect, schema_path)
+    await apply_migrations_async(db, dialect, schema_path, expand_enums=NOTHING, force=NOTHING)
 """
 
 import hashlib
@@ -38,7 +38,7 @@ from declaro_persistum.pydantic_loader import (
     load_declarations,
     load_models_from_module,
 )
-from declaro_persistum.types import NOTHING, Dialect, for_dialect
+from declaro_persistum.types import NOTHING, Dialect, Nothing, for_dialect, resolved
 from declaro_persistum.validator import validate_schema
 
 META_TABLE = "_declaro_meta"
@@ -606,8 +606,8 @@ async def apply_migrations_async(
     dialect: Dialect,
     schema_path: str | Path,
     *,
-    expand_enums: bool = True,
-    force: bool = False,
+    expand_enums: bool | Nothing,
+    force: bool | Nothing,
 ) -> dict[str, Any]:
     """
     Apply automatic schema migrations asynchronously.
@@ -637,6 +637,10 @@ async def apply_migrations_async(
     Raises:
         Exception: If migration fails critically (logs error but may not crash)
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    expand_enums = resolved(expand_enums, True)
+    force = resolved(force, False)
     schema_path = Path(schema_path)
 
     if not schema_path.exists():

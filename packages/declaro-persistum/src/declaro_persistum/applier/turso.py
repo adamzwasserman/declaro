@@ -31,7 +31,14 @@ from declaro_persistum.applier.shared import (
 from declaro_persistum.applier.sqlite import generate_create_view, generate_drop_view
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, MigrationError
-from declaro_persistum.types import NOTHING, ApplyResult, DbapiConnection, Operation
+from declaro_persistum.types import (
+    NOTHING,
+    ApplyResult,
+    DbapiConnection,
+    Nothing,
+    Operation,
+    resolved,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +103,7 @@ async def apply(
     operations: list[Operation],
     execution_order: list[int],
     *,
-    dry_run: bool = False,
+    dry_run: bool | Nothing,
 ) -> ApplyResult:
     """
     Apply migration operations asynchronously.
@@ -112,6 +119,9 @@ async def apply(
         execution_order: Order to execute operations
         dry_run: If True, only generate SQL without executing
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    dry_run = resolved(dry_run, False)
     if dry_run:
         return dry_run_preview(operations, execution_order)
 

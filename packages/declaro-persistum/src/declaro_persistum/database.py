@@ -3,7 +3,7 @@
 A local database file, sometimes with a primary in the cloud. So it is called a
 `Database`, it is a TypedDict, and the operations are functions that take it.
 
-    db = await open_turso(path, shutdown=...)                    local only
+    db = await open_turso(path, shutdown=..., primary=NOTHING, token=NOTHING)                    local only
     db = await open_turso(path, primary=..., token=..., shutdown=...)
 
     async with reading(db) as conn: ...

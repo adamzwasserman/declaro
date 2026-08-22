@@ -7,7 +7,7 @@ Tests the View TypedDict, loader parsing, and applier generation.
 
 import pytest
 
-from declaro_persistum.types import View
+from declaro_persistum.types import NOTHING, View
 
 
 class TestViewTypedDict:
@@ -262,7 +262,7 @@ class TestViewIntrospection:
                 "SELECT id FROM users WHERE status = 'active'"
             )
 
-            views = await _inspector_pg().introspect_views(conn)
+            views = await _inspector_pg().introspect_views(conn, schema_name=NOTHING)
 
             assert "active_users" in views, sorted(views)
             assert views["active_users"]["materialized"] is False
@@ -289,7 +289,7 @@ class TestViewIntrospection:
                 "CREATE MATERIALIZED VIEW user_stats AS SELECT count(*) FROM users"
             )
 
-            views = await _inspector_pg().introspect_views(conn)
+            views = await _inspector_pg().introspect_views(conn, schema_name=NOTHING)
 
             assert views["user_stats"]["materialized"] is True, views["user_stats"]
         finally:

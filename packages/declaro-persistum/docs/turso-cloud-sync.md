@@ -45,7 +45,7 @@ This gives sub-ms read latency while keeping Turso Cloud as the source of truth.
 
 pyturso's replication engine uses WAL-based replication. It can replicate **DML** (INSERT, UPDATE, DELETE) but **cannot replicate DDL** (CREATE TABLE, ALTER TABLE, DROP TABLE).
 
-When `apply_migrations_async()` creates tables locally and tries to push:
+When `apply_migrations_async(, db=NOTHING, dialect=NOTHING, schema_path=NOTHING, expand_enums=NOTHING, force=NOTHING)` creates tables locally and tries to push:
 
 ```
 replication engine operation failed: database replication engine error:
@@ -117,7 +117,7 @@ Once cloud has the schema:
 - App startup: `_initialize()` pulls schema from cloud into the local replica
 - Reads: sub-ms from local replica (tables now exist locally)
 - Writes: commit locally, push DML to cloud (cloud has matching schema, push succeeds)
-- `apply_migrations_async()` at startup finds 0 diff (schema matches) and skips
+- `apply_migrations_async(, db=NOTHING, dialect=NOTHING, schema_path=NOTHING, expand_enums=NOTHING, force=NOTHING)` at startup finds 0 diff (schema matches) and skips
 
 ### When to run it
 

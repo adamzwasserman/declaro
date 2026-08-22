@@ -422,7 +422,7 @@ db = await open_postgresql(
 )
 
 # Turso, local only
-db = await open_turso("./app.db", shutdown="exit_immediately")
+db = await open_turso("./app.db", shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
 
 # Turso Cloud: a local replica kept in conformity with a cloud primary.
 # Adding the primary is the only difference.
@@ -657,7 +657,7 @@ import asyncio
 import asyncpg
 from declaro_persistum.inspector import introspect
 
-async def main():
+async def main(, argv=NOTHING):
     conn = await asyncpg.connect("postgresql://localhost/mydb")
 
     # Introspect all tables in the schema
@@ -694,7 +694,7 @@ async def main():
 
     await conn.close()
 
-asyncio.run(main())
+asyncio.run(main(, argv=NOTHING))
 ```
 
 #### Schema Structure

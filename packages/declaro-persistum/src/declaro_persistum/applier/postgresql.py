@@ -18,7 +18,16 @@ from declaro_persistum.applier.shared import (
 )
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import MigrationError
-from declaro_persistum.types import NOTHING, ApplyResult, Column, Operation, View, changed_to
+from declaro_persistum.types import (
+    NOTHING,
+    ApplyResult,
+    Column,
+    Nothing,
+    Operation,
+    View,
+    changed_to,
+    resolved,
+)
 
 # Type for SQL generator functions
 SQLGenerator = Callable[..., str]
@@ -58,7 +67,7 @@ async def apply(
     operations: list[Operation],
     execution_order: list[int],
     *,
-    dry_run: bool = False,
+    dry_run: bool | Nothing,
 ) -> ApplyResult:
     """
     Apply migration operations within a transaction.
@@ -66,6 +75,9 @@ async def apply(
     PostgreSQL's transactional DDL means we can safely roll back
     all changes if any operation fails.
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    dry_run = resolved(dry_run, False)
     # ONE ENTRY PER OPERATION, each holding that operation's statements. The
     # dry run prints them joined; the run below executes them one at a time,
     # because an operation is sometimes more than one statement.

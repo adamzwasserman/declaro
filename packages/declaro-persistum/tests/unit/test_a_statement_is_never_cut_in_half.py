@@ -45,6 +45,7 @@ from declaro_persistum.applier.shared import (
     statements_for,
 )
 from declaro_persistum.applier.sqlite import generate_create_view
+from declaro_persistum.types import NOTHING
 
 _TRIGGERED = {
     "name": "v_live",
@@ -140,7 +141,7 @@ async def test_a_triggered_view_reaches_the_database(
             str(tmp_path / "s.db"), shutdown="exit_immediately", busy_timeout_s=5.0
         )
     else:
-        database = await open_turso(str(tmp_path / "u.db"), shutdown="exit_immediately")
+        database = await open_turso(str(tmp_path / "u.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
 
     try:
         async with writing(database) as conn:

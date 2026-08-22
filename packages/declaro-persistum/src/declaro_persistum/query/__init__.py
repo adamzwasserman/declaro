@@ -64,7 +64,7 @@ from declaro_persistum.query.table import (
     sum_,
     table,
 )
-from declaro_persistum.types import NOTHING
+from declaro_persistum.types import NOTHING as NOTHING
 
 __all__ = [
     # building

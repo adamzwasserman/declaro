@@ -36,6 +36,7 @@ from declaro_persistum.database import (
     writing,
 )
 from declaro_persistum.turso_database import open_turso, replicate_path
+from declaro_persistum.types import NOTHING
 
 scenarios("../features/replication.feature")
 
@@ -481,7 +482,7 @@ def _then_no_remote_on_path(ctx):
 def _when_opened(ctx):
     async def run():
         path = str(ctx["tmp_path"] / "warm.db")
-        db = await open_turso(path, shutdown="exit_immediately")
+        db = await open_turso(path, shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
         ctx["opened"] = db
         ctx["is_local"] = db["primary"] is None
 

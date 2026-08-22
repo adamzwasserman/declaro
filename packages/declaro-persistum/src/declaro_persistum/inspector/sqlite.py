@@ -32,7 +32,16 @@ from declaro_persistum.inspector.shared import (
     unique_cols_from_index_rows,
     views_from_rows,
 )
-from declaro_persistum.types import Column, DbapiConnection, Schema, Table, View
+from declaro_persistum.types import (
+    NOTHING,
+    Column,
+    DbapiConnection,
+    Nothing,
+    Schema,
+    Table,
+    View,
+    resolved,
+)
 
 # Tables neither the user nor the differ should ever see. `sqlite_%` belongs to
 # the engine and `_declaro_%` to us; a schema containing either would make the
@@ -142,7 +151,7 @@ async def get_table_columns(connection: DbapiConnection, table: str) -> dict[str
     existed on more than one engine. It was defined in `inspector/turso.py`
     alone, which is the shape that made `declaro generate` raise on SQLite.
     """
-    if not await table_exists(connection, table):
+    if not await table_exists(connection, table, schema_name=NOTHING):
         raise DeclaroError(f"Table '{table}' does not exist")
 
     return await columns_of(connection, table)
@@ -226,8 +235,8 @@ async def views_of(connection: DbapiConnection) -> dict[str, View]:
 async def introspect(
     connection: DbapiConnection,
     *,
-    _schema_name: str = "main",
-    include_views: bool = False,
+    schema_name: str | Nothing,
+    include_views: bool | Nothing,
 ) -> Schema | tuple[Schema, dict[str, View]]:
     """Read the whole schema back.
 
@@ -235,6 +244,15 @@ async def introspect(
     dialect, so a caller can tell "the database is unreachable" from "the
     database says no" without reading the message (Rule 8).
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    # NAMED, NOT USED. Every entry in a dispatch table takes the same
+    # arguments, or it is not one function. This engine has no schemas
+    # to choose between, and `schema_name` was spelled `_schema_name`
+    # here and `schema_name` in the PostgreSQL entry, so no caller
+    # could pass it through the table at all.
+    _ = resolved(schema_name, 'main')
+    include_views = resolved(include_views, False)
     try:
         # A MATERIALIZED VIEW IS A REAL TABLE HERE, and it must not be
         # reported as one. SQLite has no materialized views, so the emulation
@@ -264,7 +282,9 @@ async def introspect(
 
 
 @boundary
-async def table_exists(connection: DbapiConnection, table: str) -> bool:
+async def table_exists(
+    connection: DbapiConnection, table: str, *, schema_name: str | Nothing
+) -> bool:
     """Does the engine consider a table of this name to be there?
 
     THE NAME IS BOUND, NOT INTERPOLATED. It used to arrive inside an f-string
@@ -279,6 +299,12 @@ async def table_exists(connection: DbapiConnection, table: str) -> bool:
     table, so this has to answer True for either spelling. PostgreSQL is the
     opposite and its implementation is right to compare exactly.
     """
+    # NAMED, NOT USED. Every entry in a dispatch table takes the same
+    # arguments, or it is not one function. This engine has no schemas to
+    # choose between, and the PostgreSQL entry's `schema_name` was reachable
+    # from nowhere because the wrapper could not pass an argument two of the
+    # three entries would refuse.
+    _ = schema_name
     cursor = await connection.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' "
         "AND lower(name) = lower(?)",

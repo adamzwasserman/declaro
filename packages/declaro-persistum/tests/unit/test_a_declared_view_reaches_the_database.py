@@ -32,6 +32,7 @@ from declaro_persistum.differ import diff_views
 from declaro_persistum.migrations import apply_migrations_async
 from declaro_persistum.pydantic_loader import LoaderError, load_declarations
 from declaro_persistum.sqlite_database import open_sqlite
+from declaro_persistum.types import NOTHING
 
 pytestmark = pytest.mark.precommit
 
@@ -71,7 +72,7 @@ async def test_a_declared_view_exists_after_a_migration(tmp_path) -> None:
     db = await open_sqlite(
         str(tmp_path / "a.db"), shutdown="exit_immediately", busy_timeout_s=5.0
     )
-    result = await apply_migrations_async(db, dialect="sqlite", schema_path=str(path))
+    result = await apply_migrations_async(db, dialect="sqlite", schema_path=str(path), expand_enums=NOTHING, force=NOTHING)
     assert result["success"]
 
     from declaro_persistum import reading
@@ -100,7 +101,7 @@ async def test_the_view_operations_are_in_the_execution_order(tmp_path) -> None:
     db = await open_sqlite(
         str(tmp_path / "b.db"), shutdown="exit_immediately", busy_timeout_s=5.0
     )
-    result = await apply_migrations_async(db, dialect="sqlite", schema_path=str(path))
+    result = await apply_migrations_async(db, dialect="sqlite", schema_path=str(path), expand_enums=NOTHING, force=NOTHING)
     assert result["operations_applied"] == 2, (
         "one table and one view were declared; "
         f"{result['operations_applied']} operation(s) ran"
@@ -205,12 +206,11 @@ async def test_migrating_twice_changes_nothing_the_second_time(tmp_path) -> None
     db = await open_sqlite(
         str(tmp_path / "twice.db"), shutdown="exit_immediately", busy_timeout_s=5.0
     )
-    first = await apply_migrations_async(db, dialect="sqlite", schema_path=str(path))
+    first = await apply_migrations_async(db, dialect="sqlite", schema_path=str(path), expand_enums=NOTHING, force=NOTHING)
     assert first["success"] and first["operations_applied"] > 0
 
     again = await apply_migrations_async(
-        db, dialect="sqlite", schema_path=str(path), force=True
-    )
+        db, dialect="sqlite", schema_path=str(path), force=True, expand_enums=NOTHING)
     assert again["success"], again["error"]
     assert again["operations_applied"] == 0, (
         f"nothing changed and the engine proposed "
@@ -227,9 +227,9 @@ async def test_a_changed_view_query_reaches_the_database(tmp_path) -> None:
     db = await open_sqlite(
         str(tmp_path / "chg.db"), shutdown="exit_immediately", busy_timeout_s=5.0
     )
-    await apply_migrations_async(db, dialect="sqlite", schema_path=str(path))
+    await apply_migrations_async(db, dialect="sqlite", schema_path=str(path), expand_enums=NOTHING, force=NOTHING)
     path.write_text(path.read_text().replace("'active'", "'archived'"))
-    result = await apply_migrations_async(db, dialect="sqlite", schema_path=str(path))
+    result = await apply_migrations_async(db, dialect="sqlite", schema_path=str(path), expand_enums=NOTHING, force=NOTHING)
     assert result["success"], result["error"]
 
     from declaro_persistum import reading

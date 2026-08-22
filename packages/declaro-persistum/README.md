@@ -91,7 +91,7 @@ from declaro_persistum import (
     close, execute, insert, open_sqlite, reading, select, writing,
 )
 
-async def main():
+async def main(, argv=NOTHING):
     db = await open_sqlite("./app.db", shutdown="exit_immediately", busy_timeout_s=5.0)
 
     async with writing(db) as conn:
@@ -115,7 +115,7 @@ async def main():
     await close(db)
     return rows
 
-asyncio.run(main())
+asyncio.run(main(, argv=NOTHING))
 ```
 
 `select`, `insert`, `update`, `delete` and `raw` build a `Query`. `execute(query, conn, row_factory=NOTHING)` runs it. A query is data until something executes it, which is why it can be built, inspected and tested without a database.
@@ -128,7 +128,7 @@ asyncio.run(main())
 db = await open_sqlite("./app.db", shutdown="exit_immediately", busy_timeout_s=5.0)
 db = await open_postgresql(os.environ["DATABASE_URL"],
                            shutdown="exit_immediately", busy_timeout_s=5.0)
-db = await open_turso("./app.db", shutdown="exit_immediately")
+db = await open_turso("./app.db", shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
 
 # Turso Cloud: a local replica kept in sync with a cloud primary.
 db = await open_turso(
@@ -235,7 +235,7 @@ DDL does not go through the crew, and `declaro apply` does not choose its own co
 
 All three answer to the same API, which is priority 2 above. Moving between them is configuration, not a code change.
 
-libsql is gone. Turso Cloud is reached with `open_turso(path, primary=..., token=...)`. A `libsql://` URL is still a valid Turso Cloud address, since that is Turso's own URL scheme rather than the removed libsql package.
+libsql is gone. Turso Cloud is reached with `open_turso(path, primary=..., token=..., shutdown=NOTHING)`. A `libsql://` URL is still a valid Turso Cloud address, since that is Turso's own URL scheme rather than the removed libsql package.
 
 ## Database Credentials
 

@@ -29,7 +29,7 @@ from declaro_persistum.cli.commands import (
     cmd_snapshot,
     cmd_validate,
 )
-from declaro_persistum.types import Dialect
+from declaro_persistum.types import NOTHING, Dialect, Nothing, resolved
 
 
 @helper
@@ -260,8 +260,11 @@ def detect_dialect(connection_string: str) -> str:
 
 
 @boundary
-def main(argv: Sequence[str] | None = None) -> int:
+def main(argv: Sequence[str] | None | Nothing) -> int:
     """Main entry point for the CLI."""
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    argv = resolved(argv, None)
     parser = create_parser()
     args = parser.parse_args(argv)
 
@@ -388,4 +391,4 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(argv=NOTHING))

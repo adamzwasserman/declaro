@@ -23,7 +23,7 @@ from typing import Any, cast
 
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.inspector import postgresql, sqlite, turso
-from declaro_persistum.types import Dialect, Schema, View, for_dialect
+from declaro_persistum.types import NOTHING, Dialect, Schema, View, for_dialect
 
 # PLAIN DICTS. Both tables were `_Inspectors(dict)`, a class whose only member
 # was `__missing__`. See `for_dialect` in `types.py`: the lookup is the thing
@@ -45,7 +45,7 @@ TABLE_EXISTS: dict[str, Any] = {
 async def introspect(connection: Any, dialect: Dialect) -> Schema:
     """Read a database's tables back out of it."""
     inspector = for_dialect(INSPECTORS, dialect, "Inspectors")
-    result = await inspector(connection, include_views=False)
+    result = await inspector(connection, schema_name=NOTHING, include_views=False)
     return cast(Schema, result)
 
 
@@ -70,7 +70,7 @@ async def introspect_with_views(
     caller who never knew there was a choice.
     """
     inspector = for_dialect(INSPECTORS, dialect, "Inspectors")
-    result = await inspector(connection, include_views=True)
+    result = await inspector(connection, schema_name=NOTHING, include_views=True)
     return cast(tuple[Schema, dict[str, View]], result)
 
 
@@ -98,7 +98,7 @@ async def get_table_columns(
 @boundary
 async def table_exists(connection: Any, dialect: Dialect, table: str) -> bool:
     exists = for_dialect(TABLE_EXISTS, dialect, "Table-exists checks")
-    return cast(bool, await exists(connection, table))
+    return cast(bool, await exists(connection, table, schema_name=NOTHING))
 
 
 __all__ = [

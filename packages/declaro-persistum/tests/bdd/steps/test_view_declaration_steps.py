@@ -43,6 +43,7 @@ from declaro_persistum import (
 from declaro_persistum.exceptions import LoaderError
 from declaro_persistum.migrations import apply_migrations_async
 from declaro_persistum.pydantic_loader import load_views_from_models
+from declaro_persistum.types import NOTHING
 
 scenarios("../features/schema/view_declaration.feature")
 
@@ -126,8 +127,7 @@ async def _database(ctx: Ctx, engine: str) -> Any:
     elif engine == "turso":
         try:
             database = await open_turso(
-                str(ctx["directory"] / "u.db"), shutdown="exit_immediately"
-            )
+                str(ctx["directory"] / "u.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
         except Exception as exc:  # noqa: BLE001
             pytest.skip(f"no Turso: {type(exc).__name__}: {exc}")
     else:
@@ -157,8 +157,7 @@ async def _migrate(ctx: Ctx, engine: str) -> dict[str, Any]:
     # it. The last scenario still asserts that a second migration applies no
     # operations, which is true with or without the stamp.
     result = await apply_migrations_async(
-        database, engine, ctx["models"], force=True
-    )
+        database, engine, ctx["models"], force=True, expand_enums=NOTHING)
     ctx["results"].append(result)
     return result
 

@@ -55,7 +55,7 @@ class TableTransferProgress(TypedDict):
 
 
 class BulkTransferResult(TypedDict):
-    """Result of a bulk_transfer() call."""
+    """Result of a bulk_transfer(, source=NOTHING, target=NOTHING, source_dialect=NOTHING, target_dialect=NOTHING, schema_path=NOTHING, batch_size=NOTHING, tables=NOTHING, expand_enums=NOTHING, on_progress=NOTHING, resume=NOTHING) call."""
 
     success: bool
     tables_transferred: int
@@ -297,11 +297,11 @@ async def bulk_transfer(
     target_dialect: Dialect,
     schema_path: str | Path,
     *,
-    batch_size: int = 1000,
+    batch_size: int | Nothing,
     tables: list[str] | Nothing,
-    expand_enums: bool = True,
+    expand_enums: bool | Nothing,
     on_progress: Callable[[TableTransferProgress], None] | Nothing,
-    resume: bool = True,
+    resume: bool | Nothing,
 ) -> BulkTransferResult:
     """
     Transfer data from source database to target database.
@@ -334,6 +334,11 @@ async def bulk_transfer(
     """
     # THE VISIBLE RESOLVE. A default would hide this inside the
     # signature, where no reader sees it happen and no test reaches it.
+    batch_size = resolved(batch_size, 1000)
+    expand_enums = resolved(expand_enums, True)
+    resume = resolved(resume, True)
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
     tables = resolved(tables, None)
     on_progress = resolved(on_progress, None)
     start = datetime.now(UTC)
@@ -341,8 +346,7 @@ async def bulk_transfer(
     # Step 1: Schema migration on target
     logger.info("Applying schema migrations to target database")
     migration_result = await apply_migrations_async(
-        target, target_dialect, schema_path, expand_enums=expand_enums
-    )
+        target, target_dialect, schema_path, expand_enums=expand_enums, force=NOTHING)
     if not migration_result["success"]:
         raise TransferError(
             f"Schema migration failed on target: {migration_result.get('error')}",

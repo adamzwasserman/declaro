@@ -68,7 +68,7 @@ from declaro_persistum.database import (
     writing,
 )
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE
-from declaro_persistum.types import Dialect
+from declaro_persistum.types import Dialect, Nothing, resolved
 from declaro_persistum.writers import WRITERS
 
 __all__ = ["open_turso", "migrating", "negotiate_journal_mode", "replicate_path"]
@@ -260,14 +260,14 @@ async def _close_connection(conn: Any) -> None:
 
 async def open_turso(
     path: str,
-    primary: str | None = None,
-    token: str | None = None,
+    primary: str | None | Nothing,
+    token: str | None | Nothing,
     *,
     shutdown: ShutdownPolicy,
 ) -> Database:
     """Open a Turso database, local or replicated.
 
-        db = await open_turso("/tmp/app.db", shutdown="exit_immediately")                     local
+        db = await open_turso("/tmp/app.db", shutdown="exit_immediately", primary=NOTHING, token=NOTHING)                     local
         db = await open_turso("/tmp/app.db", primary=..., token=..., shutdown="exit_immediately")
 
     `primary` decides everything else. There is no engine argument, and adding
@@ -287,6 +287,10 @@ async def open_turso(
     2026-08-13: 2.8s alone, 20-25s for 25 cold opens at once, because they
     serialize.
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    primary = resolved(primary, None)
+    token = resolved(token, None)
     check_shutdown(
         shutdown, can_replicate=primary is not None, opener="open_turso"
     )

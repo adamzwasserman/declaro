@@ -30,6 +30,7 @@ import pytest
 from declaro_persistum.database import new_write_lock, reading, writing
 from declaro_persistum.sqlite_database import open_sqlite
 from declaro_persistum.turso_database import migrating, open_turso
+from declaro_persistum.types import NOTHING
 
 pytestmark = pytest.mark.turso
 
@@ -121,7 +122,7 @@ async def test_the_serialise_lock_is_released_after_a_failed_block(
 @pytest.mark.asyncio
 async def test_turso_commits_too(tmp_path) -> None:
     """The other DB-API engine, on the path it actually takes."""
-    db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
+    db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
     async with migrating(db) as conn:
         await conn.execute("CREATE TABLE t (v INT)")
         await conn.commit()

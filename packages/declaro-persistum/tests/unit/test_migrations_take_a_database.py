@@ -27,6 +27,7 @@ import pytest
 
 from declaro_persistum.migrations import apply_migrations_async
 from declaro_persistum.turso_database import open_turso
+from declaro_persistum.types import NOTHING
 
 pytestmark = pytest.mark.precommit
 
@@ -51,9 +52,9 @@ def _schema(tmp_path: pathlib.Path) -> str:
 @pytest.mark.asyncio
 async def test_a_migration_runs_against_a_database(tmp_path):
     """The whole point. It creates the table the schema asks for."""
-    db = await open_turso(str(tmp_path / "app.db"), shutdown="exit_immediately")
+    db = await open_turso(str(tmp_path / "app.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
 
-    await apply_migrations_async(db, "turso", _schema(tmp_path))
+    await apply_migrations_async(db, "turso", _schema(tmp_path), expand_enums=NOTHING, force=NOTHING)
 
     from declaro_persistum.database import reading
 
@@ -69,11 +70,11 @@ async def test_a_migration_runs_against_a_database(tmp_path):
 @pytest.mark.asyncio
 async def test_running_it_twice_changes_nothing_the_second_time(tmp_path):
     """A migration is a diff, so a second run against the same schema is empty."""
-    db = await open_turso(str(tmp_path / "app.db"), shutdown="exit_immediately")
+    db = await open_turso(str(tmp_path / "app.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
     schema = _schema(tmp_path)
 
-    await apply_migrations_async(db, "turso", schema)
-    second = await apply_migrations_async(db, "turso", schema)
+    await apply_migrations_async(db, "turso", schema, expand_enums=NOTHING, force=NOTHING)
+    second = await apply_migrations_async(db, "turso", schema, expand_enums=NOTHING, force=NOTHING)
 
     applied = second.get("operations_applied", second.get("applied", 0))
     assert applied == 0, (

@@ -92,7 +92,7 @@ async def test_a_clean_transfer_still_reports_success(tmp_path) -> None:
     source, target = await _pair(tmp_path)
     try:
         result = await bulk_transfer(
-            source, target, "sqlite", "sqlite", str(_models(tmp_path)), tables=NOTHING, on_progress=NOTHING)
+            source, target, "sqlite", "sqlite", str(_models(tmp_path)), tables=NOTHING, on_progress=NOTHING, batch_size=NOTHING, expand_enums=NOTHING, resume=NOTHING)
         assert result["success"] is True, result
         assert result["tables_transferred"] == len(TABLES)
         assert result["tables_failed"] == 0
@@ -120,7 +120,7 @@ async def test_a_bug_of_ours_reaches_the_caller_once(
     try:
         with pytest.raises(TypeError):
             await bulk_transfer(
-                source, target, "sqlite", "sqlite", str(_models(tmp_path)), tables=NOTHING, on_progress=NOTHING)
+                source, target, "sqlite", "sqlite", str(_models(tmp_path)), tables=NOTHING, on_progress=NOTHING, batch_size=NOTHING, expand_enums=NOTHING, resume=NOTHING)
     finally:
         await close(source)
         await close(target)
@@ -145,7 +145,7 @@ async def test_every_shape_of_our_own_bug_escapes(
     try:
         with pytest.raises(kind):
             await bulk_transfer(
-                source, target, "sqlite", "sqlite", str(_models(tmp_path)), tables=NOTHING, on_progress=NOTHING)
+                source, target, "sqlite", "sqlite", str(_models(tmp_path)), tables=NOTHING, on_progress=NOTHING, batch_size=NOTHING, expand_enums=NOTHING, resume=NOTHING)
     finally:
         await close(source)
         await close(target)
@@ -178,7 +178,7 @@ async def test_a_table_the_engine_refuses_is_still_recorded_and_the_rest_run(
 
     try:
         result = await bulk_transfer(
-            source, target, "sqlite", "sqlite", str(_models(tmp_path)), tables=NOTHING, on_progress=NOTHING)
+            source, target, "sqlite", "sqlite", str(_models(tmp_path)), tables=NOTHING, on_progress=NOTHING, batch_size=NOTHING, expand_enums=NOTHING, resume=NOTHING)
 
         assert result["success"] is False
         assert result["tables_failed"] == 1, (

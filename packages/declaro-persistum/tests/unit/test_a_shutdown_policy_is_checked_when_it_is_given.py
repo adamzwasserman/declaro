@@ -35,6 +35,7 @@ import tempfile
 import pytest
 
 from declaro_persistum import close, open_sqlite, open_turso
+from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.precommit]
 
@@ -62,7 +63,7 @@ async def test_sqlite_refuses_a_policy_that_is_not_one(policy: str) -> None:
 @pytest.mark.parametrize("policy", ["typo", "replicate_then_exit", ""])
 async def test_turso_refuses_a_policy_that_is_not_one(policy: str) -> None:
     with pytest.raises(ValueError) as caught:
-        await open_turso(_path(), shutdown=policy)
+        await open_turso(_path(), shutdown=policy, primary=NOTHING, token=NOTHING)
 
     assert "exit_immediately" in str(caught.value)
 
@@ -93,7 +94,7 @@ async def test_sqlite_refuses_to_replicate_at_shutdown() -> None:
 async def test_turso_refuses_to_replicate_with_no_primary() -> None:
     """A local Turso file has nowhere to send anything."""
     with pytest.raises(ValueError) as caught:
-        await open_turso(_path(), shutdown="replicate")
+        await open_turso(_path(), shutdown="replicate", primary=NOTHING, token=NOTHING)
 
     assert "primary" in str(caught.value).lower()
 
@@ -112,7 +113,7 @@ async def test_sqlite_opens_with_the_policy_it_can_honour() -> None:
 
 
 async def test_turso_opens_locally_without_replicating() -> None:
-    db = await open_turso(_path(), shutdown="exit_immediately")
+    db = await open_turso(_path(), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
     try:
         assert db["shutdown"] == "exit_immediately"
     finally:

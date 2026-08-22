@@ -62,7 +62,7 @@ async def _live(tmp_path: pathlib.Path) -> dict:
             await conn.execute(_INDEX)
             await conn.commit()
         async with reading(database) as conn:
-            return await INSPECTORS["sqlite"](conn)
+            return await INSPECTORS["sqlite"](conn, schema_name=NOTHING, include_views=False)
     finally:
         await close(database)
 

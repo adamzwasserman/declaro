@@ -35,6 +35,7 @@ import pytest
 
 from declaro_persistum.applier import apply as apply_operations
 from declaro_persistum.differ import diff
+from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.precommit, pytest.mark.sqlite]
 
@@ -247,7 +248,7 @@ async def _turso_seeded(tmp_path):
     """
     from declaro_persistum import open_turso, writing
 
-    db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
+    db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
     async with writing(db) as conn:
         await conn.execute("CREATE TABLE parent (id INTEGER PRIMARY KEY)")
         await conn.execute(

@@ -77,9 +77,9 @@ uv run declaro migrate-remote \
   --schema schema.py
 ```
 
-**Reconstruction guard**. `apply_migrations_async()` on an embedded replica skips operations that require table reconstruction (`alter_column`, `add_foreign_key`, `drop_foreign_key`). These operations involve DROP TABLE + CREATE TABLE, and partial sync (DROP reaches cloud, CREATE doesn't) destroys tables on both sides. A warning directs the user to `migrate-remote`.
+**Reconstruction guard**. `apply_migrations_async(, db=NOTHING, dialect=NOTHING, schema_path=NOTHING, expand_enums=NOTHING, force=NOTHING)` on an embedded replica skips operations that require table reconstruction (`alter_column`, `add_foreign_key`, `drop_foreign_key`). These operations involve DROP TABLE + CREATE TABLE, and partial sync (DROP reaches cloud, CREATE doesn't) destroys tables on both sides. A warning directs the user to `migrate-remote`.
 
-**Orphaned table recovery**. If a previous reconstruction left `_declaro_tmp_*` or `*_new` tables behind, `apply_migrations_async()` detects and recovers them before running migrations.
+**Orphaned table recovery**. If a previous reconstruction left `_declaro_tmp_*` or `*_new` tables behind, `apply_migrations_async(, db=NOTHING, dialect=NOTHING, schema_path=NOTHING, expand_enums=NOTHING, force=NOTHING)` detects and recovers them before running migrations.
 
 ## PRAGMA Compatibility
 

@@ -8,7 +8,7 @@ Orchestrates a 4-phase cutover from a local database to a remote database:
     Phase 3: promote_mirror() — remote becomes primary
     Phase 4: detach_mirror() — run on remote alone
 
-begin_cutover() handles Phase 1 + 2 setup. Phase 3 + 4 are manual calls
+begin_cutover(, source=NOTHING, target=NOTHING, source_dialect=NOTHING, target_dialect=NOTHING, schema_path=NOTHING, batch_size=NOTHING, tables=NOTHING, expand_enums=NOTHING, on_progress=NOTHING, resume=NOTHING, fail_open=NOTHING, compare_on_read=NOTHING) handles Phase 1 + 2 setup. Phase 3 + 4 are manual calls
 because the verification window has indeterminate duration — the caller
 decides when confidence is sufficient.
 
@@ -47,13 +47,13 @@ async def begin_cutover(
     target_dialect: str,
     schema_path: str | Path,
     *,
-    batch_size: int = 1000,
+    batch_size: int | Nothing,
     tables: list[str] | Nothing,
-    expand_enums: bool = True,
+    expand_enums: bool | Nothing,
     on_progress: Callable[[TableTransferProgress], None] | Nothing,
-    resume: bool = True,
-    fail_open: bool = True,
-    compare_on_read: bool = True,
+    resume: bool | Nothing,
+    fail_open: bool | Nothing,
+    compare_on_read: bool | Nothing,
 ) -> tuple[Mirror, BulkTransferResult]:
     """
     Begin a live cutover from source to target database.
@@ -83,6 +83,13 @@ async def begin_cutover(
     Raises:
         TransferError: If bulk transfer fails critically
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    batch_size = resolved(batch_size, 1000)
+    expand_enums = resolved(expand_enums, True)
+    resume = resolved(resume, True)
+    fail_open = resolved(fail_open, True)
+    compare_on_read = resolved(compare_on_read, True)
     # THE VISIBLE RESOLVE. A default would hide this inside the
     # signature, where no reader sees it happen and no test reaches it.
     tables = resolved(tables, None)

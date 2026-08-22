@@ -47,6 +47,7 @@ from declaro_persistum.database import writing
 from declaro_persistum.migrations import _for_ddl
 from declaro_persistum.sqlite_database import open_sqlite
 from declaro_persistum.turso_database import migrating, open_turso
+from declaro_persistum.types import NOTHING
 
 pytestmark = pytest.mark.turso
 
@@ -65,7 +66,7 @@ async def test_a_reader_is_not_blinded_by_a_migration(tmp_path) -> None:
     Under `writing`, the final SELECT raised "Parse error: no such table: t".
     """
     db = await _seeded(
-        await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
+        await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
     )
 
     reader = await db["connect"](db)
@@ -101,9 +102,9 @@ async def test_migrating_one_tenant_does_not_stop_another_from_serving(
     different locks" is exactly the kind of reasoning that turns out to be
     wrong about an engine.
     """
-    a = await open_turso(str(tmp_path / "tenant-a.db"), shutdown="exit_immediately")
+    a = await open_turso(str(tmp_path / "tenant-a.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
     b = await _seeded(
-        await open_turso(str(tmp_path / "tenant-b.db"), shutdown="exit_immediately")
+        await open_turso(str(tmp_path / "tenant-b.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
     )
 
     reader = await b["connect"](b)
@@ -124,7 +125,7 @@ async def test_a_local_turso_database_sends_ddl_through_the_wal_door(
     tmp_path,
 ) -> None:
     """The wiring, asserted on the value rather than on behaviour."""
-    db = await open_turso(str(tmp_path / "local.db"), shutdown="exit_immediately")
+    db = await open_turso(str(tmp_path / "local.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
     assert db["for_ddl"] is migrating, (
         "a local Turso database writes on MVCC, where DDL is invisible to a "
         "connection that has read; its DDL door must be the WAL one"
@@ -143,7 +144,7 @@ async def test_sqlite_uses_the_same_door_for_ddl_and_writes(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_ddl_still_runs_through_the_door_the_database_names(tmp_path) -> None:
     """`_for_ddl` asks the value. It must not have kept a favourite."""
-    db = await open_turso(str(tmp_path / "asks.db"), shutdown="exit_immediately")
+    db = await open_turso(str(tmp_path / "asks.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
     asked: list[str] = []
 
     def record(_db):

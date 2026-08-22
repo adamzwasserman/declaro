@@ -18,6 +18,7 @@ from pytest_bdd import given, scenarios, then, when
 
 from declaro_persistum import close, is_replicated, open_sqlite, open_turso, reading
 from declaro_persistum.exceptions import DatabaseClosedError
+from declaro_persistum.types import NOTHING
 
 scenarios("../features/database/opening.feature")
 
@@ -177,7 +178,7 @@ def _then_open_fails_loudly(ctx):
 @when("a local Turso database is opened")
 def _when_open_turso_local(ctx):
     ctx["db"] = ctx["run"](
-        open_turso(str(ctx["tmp"] / "t.db"), shutdown="exit_immediately")
+        open_turso(str(ctx["tmp"] / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
     )
 
 

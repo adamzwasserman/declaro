@@ -35,6 +35,7 @@ import pytest
 
 from declaro_persistum.database import is_replicated, reading, writing
 from declaro_persistum.turso_database import migrating, open_turso
+from declaro_persistum.types import NOTHING
 
 pytestmark = pytest.mark.turso
 
@@ -42,19 +43,19 @@ pytestmark = pytest.mark.turso
 class TestALocalDatabase:
     @pytest.mark.asyncio
     async def test_it_is_not_replicated(self, tmp_path):
-        db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
+        db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
         assert is_replicated(db) is False
         assert db["primary"] is None
 
     @pytest.mark.asyncio
     async def test_it_takes_no_write_lock(self, tmp_path):
         """MVCC exists so writers run concurrently. A lock would throw that away."""
-        db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
+        db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
         assert db["serialise"] is None
 
     @pytest.mark.asyncio
     async def test_a_write_is_readable_afterwards(self, tmp_path):
-        db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
+        db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
 
         # DDL goes through `migrating`, which is WAL. Creating the table on an
         # MVCC connection makes it INVISIBLE to every later connection —
@@ -90,7 +91,7 @@ class TestALocalDatabase:
         """
         from declaro_persistum.database import flush, replicate
 
-        db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
+        db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
 
         with pytest.raises(ValueError, match="no primary"):
             await replicate(db)
@@ -115,7 +116,7 @@ class TestALocalDatabase:
         at once: that is the crew's job, and a laptop cannot say what a server
         would do anyway.
         """
-        db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
+        db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
         async with migrating(db) as conn:
             await conn.execute("CREATE TABLE t (v INT)")
             await conn.commit()
@@ -142,7 +143,7 @@ class TestTheEngineChoiceIsNotTheCallers:
 
     @pytest.mark.asyncio
     async def test_a_local_database_gets_no_serialisation(self, tmp_path):
-        db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
+        db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
         assert db["serialise"] is None, (
             "a local database serialised its writers, which throws away the "
             "concurrency MVCC is enabled for"
@@ -168,7 +169,7 @@ class TestTheShutdownPolicyIsActedOn:
         the policy IS acted on at open, which is what this test was for.
         """
         with pytest.raises(ValueError, match="primary"):
-            await open_turso(str(tmp_path / "t.db"), shutdown="replicate")
+            await open_turso(str(tmp_path / "t.db"), shutdown="replicate", primary=NOTHING, token=NOTHING)
 
     async def test_the_trap_is_installed_for_a_database_that_can_replicate(self):
         """The original intent, kept, without opening a replica.
@@ -210,7 +211,7 @@ class TestTheShutdownPolicyIsActedOn:
         import signal
 
         before = signal.getsignal(signal.SIGTERM)
-        await open_turso(str(tmp_path / "t2.db"), shutdown="exit_immediately")
+        await open_turso(str(tmp_path / "t2.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
         assert signal.getsignal(signal.SIGTERM) is before, (
             "a database that asked to exit immediately installed a handler anyway"
         )

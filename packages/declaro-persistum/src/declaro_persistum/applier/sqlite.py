@@ -25,7 +25,15 @@ from declaro_persistum.applier.shared import (
 )
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, MigrationError
-from declaro_persistum.types import NOTHING, ApplyResult, DbapiConnection, Operation, View
+from declaro_persistum.types import (
+    NOTHING,
+    ApplyResult,
+    DbapiConnection,
+    Nothing,
+    Operation,
+    View,
+    resolved,
+)
 
 
 @helper
@@ -61,7 +69,7 @@ async def apply(
     operations: list[Operation],
     execution_order: list[int],
     *,
-    dry_run: bool = False,
+    dry_run: bool | Nothing,
 ) -> ApplyResult:
     """
     Apply migration operations within a transaction.
@@ -69,6 +77,9 @@ async def apply(
     SQLite DDL is transactional, allowing safe rollback on failure.
     Uses per-operation execution with reconstruction for unsupported operations.
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    dry_run = resolved(dry_run, False)
     if dry_run:
         return dry_run_preview(operations, execution_order)
 

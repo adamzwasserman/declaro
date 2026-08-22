@@ -40,13 +40,14 @@ import pytest
 
 from declaro_persistum import close, open_turso, writing
 from declaro_persistum.applier import apply as apply_operations
+from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.precommit, pytest.mark.turso]
 
 
 async def _seeded():
     directory = pathlib.Path(tempfile.mkdtemp())
-    db = await open_turso(str(directory / "t.db"), shutdown="exit_immediately")
+    db = await open_turso(str(directory / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
     async with writing(db) as conn:
         await conn.execute("CREATE TABLE child (id INTEGER PRIMARY KEY, note TEXT)")
         await conn.execute("INSERT INTO child VALUES (1, 'x')")

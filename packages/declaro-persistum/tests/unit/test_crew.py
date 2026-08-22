@@ -46,6 +46,7 @@ from declaro_persistum.crew import start_crew, stop_crew
 from declaro_persistum.database import reading, writing
 from declaro_persistum.retry import ON_CONTENTION
 from declaro_persistum.turso_database import migrating, open_turso
+from declaro_persistum.types import NOTHING
 from declaro_persistum.write_queue import collect, deposit, new_room
 
 pytestmark = pytest.mark.turso
@@ -61,7 +62,7 @@ async def _write_one(conn, sql, params):
 
 
 async def _database_with_table(tmp_path):
-    db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately")
+    db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
     async with migrating(db) as conn:
         await conn.execute("CREATE TABLE t (v INTEGER)")
         await conn.commit()
