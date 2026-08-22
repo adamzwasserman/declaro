@@ -30,6 +30,8 @@ import pathlib
 import aiosqlite
 import pytest
 
+from declaro_persistum.types import NOTHING
+
 pytestmark = [pytest.mark.asyncio, pytest.mark.precommit, pytest.mark.sqlite]
 
 
@@ -126,8 +128,7 @@ async def test_a_reconstruction_leaves_the_restore_to_whoever_commits(
                 "id": {"type": "INTEGER", "primary_key": True},
                 "pid": {"type": "INTEGER"},
                 "note": {"type": "TEXT", "nullable": False},
-            },
-        )
+            }, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 
         assert await _enforcement(conn) == 0, (
             "`reconstruct_table` restored enforcement on its own. If it can "
@@ -162,8 +163,7 @@ async def test_a_failed_reconstruction_also_leaves_enforcement_on(
             await reconstruct_table(
                 conn,
                 "child",
-                {"id": {"type": "NOT A REAL TYPE ("}},
-            )
+                {"id": {"type": "NOT A REAL TYPE ("}}, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 
         assert await _enforcement(conn) == 1, (
             "a failed reconstruction left enforcement off, so a caller that "
@@ -196,8 +196,7 @@ async def test_a_reconstruction_that_managed_nothing_changes_nothing(
                 "pid": {"type": "INTEGER"},
                 "note": {"type": "TEXT"},
             },
-            manage_foreign_keys=False,
-        )
+            manage_foreign_keys=False, preserve_data=NOTHING)
 
         assert await _enforcement(conn) == 0, (
             "the reconstruction turned enforcement on despite being told not "

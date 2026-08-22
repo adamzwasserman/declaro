@@ -29,7 +29,7 @@ from declaro_persistum.applier.shared import (
     sqlite_type,
 )
 from declaro_persistum.boundary import boundary, helper
-from declaro_persistum.types import Column
+from declaro_persistum.types import NOTHING, Column, Nothing, resolved
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +77,8 @@ async def reconstruct_table(
     table_name: str,
     new_columns: dict[str, Column],
     *,
-    preserve_data: bool = True,
-    manage_foreign_keys: bool = True,
+    preserve_data: bool | Nothing,
+    manage_foreign_keys: bool | Nothing,
 ) -> None:
     """
     Reconstruct a table with new column definitions.
@@ -104,8 +104,12 @@ async def reconstruct_table(
         ...     "id": {"type": "INTEGER", "primary_key": True},
         ...     "email": {"type": "TEXT", "nullable": False},  # Changed from nullable
         ... }
-        >>> await reconstruct_table(conn, "users", new_cols)
+        >>> await reconstruct_table(conn, "users", new_cols, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    preserve_data = resolved(preserve_data, True)
+    manage_foreign_keys = resolved(manage_foreign_keys, True)
     # One definition, in migrations.py, shared with the recovery that reads
     # these names back. It was a literal here and a literal there, and a change
     # to either is silent: reconstruction keeps working, recovery keeps finding
@@ -257,7 +261,7 @@ async def alter_column_nullability(
     columns[column_name]["nullable"] = nullable
 
     # Reconstruct table
-    await reconstruct_table(connection, table_name, columns)
+    await reconstruct_table(connection, table_name, columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 
 
 @helper
@@ -292,7 +296,7 @@ async def alter_column_type(
     columns[column_name]["type"] = new_type
 
     # Reconstruct table
-    await reconstruct_table(connection, table_name, columns)
+    await reconstruct_table(connection, table_name, columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 
 
 @helper
@@ -328,7 +332,7 @@ async def alter_column_default(
         columns[column_name]["default"] = default_value
 
     # Reconstruct table
-    await reconstruct_table(connection, table_name, columns)
+    await reconstruct_table(connection, table_name, columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 
 
 # =============================================================================
@@ -450,7 +454,7 @@ async def table_constraints_of(connection: Any, table_name: str) -> dict[str, An
 def _generate_create_table_sql(
     table_name: str,
     columns: dict[str, Column],
-    constraints: dict[str, dict[str, str]] | None = None,
+    constraints: dict[str, dict[str, str]] | None | Nothing,
 ) -> str:
     """
     Generate CREATE TABLE statement from column definitions.
@@ -462,6 +466,9 @@ def _generate_create_table_sql(
     Returns:
         CREATE TABLE SQL statement
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    constraints = resolved(constraints, None)
     # BEFORE THE LOOP, so every offending column is named at once rather than
     # the caller fixing them one crash at a time. This rebuilder checked
     # nothing at all, so which of the two a caller reached decided whether

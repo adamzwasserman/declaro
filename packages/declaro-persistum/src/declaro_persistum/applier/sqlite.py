@@ -258,7 +258,7 @@ async def _execute_with_reconstruction(
             return
 
     # General reconstruction
-    await reconstruct_table(connection, table, columns)
+    await reconstruct_table(connection, table, columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 
 
 
@@ -347,8 +347,7 @@ def generate_create_view(view: View) -> list[str]:
                 generate_refresh_trigger_sql(
                     matview_name=name,
                     source_table=source,
-                    query=query,
-                )
+                    query=query, events=NOTHING)
             )
 
     return statements

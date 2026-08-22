@@ -37,7 +37,7 @@ Added new functions:
 - `drop_column(conn, table, column)` - Drop column via reconstruction (handles UNIQUE)
 
 Updated:
-- `_get_full_table_schema()` - Now fetches FK info via `pragma_foreign_key_list` to preserve existing FKs during reconstruction
+- `_get_full_table_schema(, connection=NOTHING, table_name=NOTHING)` - Now fetches FK info via `pragma_foreign_key_list` to preserve existing FKs during reconstruction
 
 ### 2. `applier/sqlite.py`
 
@@ -84,7 +84,7 @@ Also fixed:
 
 The `users_new` table reference issue described below was resolved by the reconstruction architecture rework in `abstractions/reconstruction.py`. The new implementation uses per-operation execution with fresh introspection, avoiding stale table references.
 
-Additionally, a differ-format bug was fixed (2026-03-06): the differ produces `{"from": old, "to": new}` dicts for changes, which were being assigned directly as column values instead of extracting the `"to"` value. This caused crashes during `alter_column` reconstruction (e.g., `'dict' object has no attribute 'lower'`). A fail-fast `_validate_columns()` check now runs before any destructive operations.
+Additionally, a differ-format bug was fixed (2026-03-06): the differ produces `{"from": old, "to": new}` dicts for changes, which were being assigned directly as column values instead of extracting the `"to"` value. This caused crashes during `alter_column` reconstruction (e.g., `'dict' object has no attribute 'lower'`). A fail-fast `_validate_columns(, table_name=NOTHING, columns=NOTHING)` check now runs before any destructive operations.
 
 ### Original issue (historical):
 

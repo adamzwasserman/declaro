@@ -32,7 +32,7 @@ from declaro_persistum.applier.shared import (
     sqlite_type,
 )
 from declaro_persistum.boundary import boundary, helper
-from declaro_persistum.types import Column, Operation, changed_to
+from declaro_persistum.types import NOTHING, Column, Nothing, Operation, changed_to, resolved
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 def generate_create_table_sql(
     table_name: str,
     columns: dict[str, Column],
-    constraints: dict[str, dict[str, str]] | None = None,
+    constraints: dict[str, dict[str, str]] | None | Nothing,
 ) -> str:
     """
     Generate CREATE TABLE statement from column definitions.
@@ -66,8 +66,11 @@ def generate_create_table_sql(
         ...     "id": {"type": "INTEGER", "primary_key": True},
         ...     "user_id": {"type": "INTEGER", "nullable": False, "references": "users.id"},
         ... }
-        >>> sql = generate_create_table_sql("posts", cols)
+        >>> sql = generate_create_table_sql("posts", cols, constraints=NOTHING)
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    constraints = resolved(constraints, None)
     # THE REFUSAL BELONGS TO THE RENDERER, NOT ONLY THE ORCHESTRATOR.
     # `_validate_columns` ran in the rebuild path, so a caller who rendered a
     # CREATE TABLE directly got an AttributeError from inside a type mapper
@@ -305,8 +308,8 @@ async def execute_reconstruction_async(
     table_name: str,
     new_columns: dict[str, Column],
     *,
-    preserve_data: bool = True,
-    manage_foreign_keys: bool = True,
+    preserve_data: bool | Nothing,
+    manage_foreign_keys: bool | Nothing,
 ) -> None:
     """
     Execute table reconstruction asynchronously.
@@ -332,8 +335,12 @@ async def execute_reconstruction_async(
         ...     "id": {"type": "INTEGER", "primary_key": True},
         ...     "email": {"type": "TEXT", "nullable": False},
         ... }
-        >>> await execute_reconstruction_async(conn, "users", new_cols)
+        >>> await execute_reconstruction_async(conn, "users", new_cols, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    preserve_data = resolved(preserve_data, True)
+    manage_foreign_keys = resolved(manage_foreign_keys, True)
     # Validate column definitions before any destructive operations
     _validate_columns(table_name, new_columns)
 
@@ -486,7 +493,7 @@ def _validate_columns(table_name: str, columns: dict[str, Column]) -> None:
     # value of the wrong type, and a value of the right type that is not
     # legal. Anything else is ours and belongs in the traceback.
     try:  # honest: ignore HC-P002: names the bad column before the rebuild
-        generate_create_table_sql(f"{table_name}_validate", columns)
+        generate_create_table_sql(f"{table_name}_validate", columns, constraints=NOTHING)
     except (KeyError, TypeError, ValueError) as unrenderable:
         raise ValueError(
             f"Cannot reconstruct table '{table_name}': "

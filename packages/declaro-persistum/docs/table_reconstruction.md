@@ -86,7 +86,7 @@ new_columns = {
     "name": {"type": "TEXT", "nullable": True},
 }
 # SQLite and Turso both take this path.
-await execute_reconstruction_async(conn, "users", new_columns)
+await execute_reconstruction_async(conn, "users", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 
 # Compute new schema from operation
 operation = {
@@ -153,12 +153,12 @@ SQLite has limited concurrency support. Table reconstruction acquires a write lo
 - Uses synchronous API (no async/await)
 - CHECK constraints are now supported natively (as of early 2026) and included in reconstruction SQL
 - Most PRAGMAs needed for reconstruction are supported (table_info, index_list, index_info, foreign_keys); `foreign_key_list` still requires emulation
-- Same reconstruction logic, same `execute_reconstruction_async()`. There is no sync variant.
+- Same reconstruction logic, same `execute_reconstruction_async(, connection=NOTHING, table_name=NOTHING, new_columns=NOTHING, preserve_data=NOTHING, manage_foreign_keys=NOTHING)`. There is no sync variant.
 
 **Turso Cloud (libSQL/libsql_experimental):**
 - Uses async API like SQLite
 - Full SQLite compatibility including CHECK constraints
-- Executed via `execute_reconstruction_async()`
+- Executed via `execute_reconstruction_async(, connection=NOTHING, table_name=NOTHING, new_columns=NOTHING, preserve_data=NOTHING, manage_foreign_keys=NOTHING)`
 
 ## Execution Model
 
@@ -186,7 +186,7 @@ The implementation provides both async and sync execution paths:
 from declaro_persistum.abstractions.reconstruction import execute_reconstruction_async
 
 # For aiosqlite, libsql_experimental connections
-await execute_reconstruction_async(conn, table_name, new_columns)
+await execute_reconstruction_async(conn, table_name, new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 ```
 
 **Sync (Turso Database):**
@@ -194,7 +194,7 @@ await execute_reconstruction_async(conn, table_name, new_columns)
 from declaro_persistum.abstractions.reconstruction import execute_reconstruction_async
 
 # For pyturso connections
-await execute_reconstruction_async(conn, table_name, new_columns)
+await execute_reconstruction_async(conn, table_name, new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 ```
 
 The SQLite applier uses async execution, while the Turso applier uses sync execution to match their respective connection APIs.
@@ -235,8 +235,8 @@ Following `pragma_compat.py` patterns:
 ### Integration Points
 
 The abstraction is used by:
-1. **SQLite Applier** (`applier/sqlite.py`) - Async execution via `execute_reconstruction_async()`
-2. **Turso** (`applier/turso.py`) - async execution via `execute_reconstruction_async()`
+1. **SQLite Applier** (`applier/sqlite.py`) - Async execution via `execute_reconstruction_async(, connection=NOTHING, table_name=NOTHING, new_columns=NOTHING, preserve_data=NOTHING, manage_foreign_keys=NOTHING)`
+2. **Turso** (`applier/turso.py`) - async execution via `execute_reconstruction_async(, connection=NOTHING, table_name=NOTHING, new_columns=NOTHING, preserve_data=NOTHING, manage_foreign_keys=NOTHING)`
 3. **Direct API** - Can be called directly for advanced use cases
 
 ## References

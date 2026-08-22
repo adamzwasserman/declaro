@@ -34,7 +34,7 @@ from declaro_persistum.abstractions.materialized_views import (
     refresh_matview_sql,
 )
 from declaro_persistum.loader import validate_view
-from declaro_persistum.types import View
+from declaro_persistum.types import NOTHING, View
 
 scenarios("../features/schema/materialized_views.feature")
 
@@ -130,7 +130,7 @@ def _when_create(ctx):
     )
     for source in view.get("trigger_sources", []):
         sql.extend(
-            generate_refresh_trigger_sql(view["name"], source, view["query"])
+            generate_refresh_trigger_sql(view["name"], source, view["query"], events=NOTHING)
         )
     ctx["sql"] = sql
 
@@ -249,7 +249,7 @@ def _then_creates_trigger(ctx, trigger):
 
 @given(parsers.parse('trigger SQL for matview "{name}" on source "{source}"'))
 def _given_trigger_sql(ctx, name, source):
-    ctx["triggers"] = generate_refresh_trigger_sql(name, source, _QUERY)
+    ctx["triggers"] = generate_refresh_trigger_sql(name, source, _QUERY, events=NOTHING)
 
 
 @when(parsers.parse("I examine the {event} trigger"))

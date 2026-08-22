@@ -10,6 +10,8 @@ Pattern follows arrays.py and maps.py abstractions.
 import json
 from typing import Any, Literal
 
+from declaro_persistum.types import Nothing, resolved
+
 # Type for refresh strategies
 RefreshStrategy = Literal["manual", "trigger", "hybrid"]
 
@@ -56,8 +58,8 @@ def generate_metadata_table_schema() -> dict[str, Any]:
 def create_matview_sql(
     name: str,
     query: str,
-    refresh_strategy: RefreshStrategy = "manual",
-    depends_on: list[str] | None = None,
+    refresh_strategy: RefreshStrategy | Nothing,
+    depends_on: list[str] | None | Nothing,
 ) -> list[str]:
     """
     Generate SQL statements to create an emulated materialized view.
@@ -71,6 +73,10 @@ def create_matview_sql(
     Returns:
         List of SQL statements to execute
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    refresh_strategy = resolved(refresh_strategy, 'manual')
+    depends_on = resolved(depends_on, None)
     statements: list[str] = []
 
     # 1. Ensure metadata table exists
@@ -121,7 +127,7 @@ def drop_matview_sql(name: str) -> list[str]:
 def refresh_matview_sql(
     name: str,
     query: str,
-    atomic: bool = True,
+    atomic: bool | Nothing,
 ) -> list[str]:
     """
     Generate SQL statements to refresh an emulated materialized view.
@@ -134,6 +140,9 @@ def refresh_matview_sql(
     Returns:
         List of SQL statements to execute
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    atomic = resolved(atomic, True)
     if atomic:
         # Atomic refresh: delete all rows, insert new ones
         return [
@@ -154,7 +163,7 @@ def generate_refresh_trigger_sql(
     matview_name: str,
     source_table: str,
     query: str,
-    events: list[str] | None = None,
+    events: list[str] | None | Nothing,
 ) -> list[str]:
     """
     Generate trigger SQL for auto-refresh on source table changes.
@@ -168,6 +177,9 @@ def generate_refresh_trigger_sql(
     Returns:
         List of SQL statements to create triggers
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    events = resolved(events, None)
     events = events or ["INSERT", "UPDATE", "DELETE"]
     statements: list[str] = []
 

@@ -29,7 +29,7 @@ from declaro_persistum.abstractions.table_reconstruction import (
 )
 from declaro_persistum.applier import apply as apply_operations
 from declaro_persistum.exceptions import MigrationError
-from declaro_persistum.types import Column
+from declaro_persistum.types import NOTHING, Column
 
 # Load scenarios from feature file
 scenarios("../features/table_reconstruction.feature")
@@ -636,7 +636,7 @@ def when_alter_not_null_with_default(recon_context, column, default):
         columns[column]["nullable"] = False
         columns[column]["default"] = default
         recon_context["run"](
-            reconstruct_table(recon_context["conn"], recon_context["table_name"], columns)
+            reconstruct_table(recon_context["conn"], recon_context["table_name"], columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
         )
         recon_context["run"](recon_context["conn"].commit())
     except Exception as e:
@@ -731,7 +731,7 @@ def when_reconstruct_new_columns(recon_context):
     try:
         _enable_fk(recon_context)
         recon_context["run"](
-            reconstruct_table(recon_context["conn"], recon_context["table_name"], new_columns)
+            reconstruct_table(recon_context["conn"], recon_context["table_name"], new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
         )
         recon_context["run"](recon_context["conn"].commit())
     except Exception as e:
@@ -767,7 +767,7 @@ def when_perform_reconstruction(recon_context):
     }
     _enable_fk(recon_context)
     recon_context["run"](
-        reconstruct_table(recon_context["conn"], recon_context["table_name"], columns)
+        reconstruct_table(recon_context["conn"], recon_context["table_name"], columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
     )
     recon_context["run"](recon_context["conn"].commit())
 
@@ -840,7 +840,7 @@ def when_add_foreign_key(recon_context, table_col, ref):
         current_columns = recon_context["run"](_build_full_schema(recon_context["conn"], table_name))
         new_columns = get_reconstruction_columns(current_columns, operation)
         recon_context["run"](
-            execute_reconstruction_async(recon_context["conn"], table_name, new_columns)
+            execute_reconstruction_async(recon_context["conn"], table_name, new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
         )
         recon_context["run"](recon_context["conn"].commit())
         recon_context["table_name"] = table_name
@@ -873,7 +873,7 @@ def when_add_foreign_key_cascade(recon_context, table_col, ref):
         current_columns = recon_context["run"](_build_full_schema(recon_context["conn"], table_name))
         new_columns = get_reconstruction_columns(current_columns, operation)
         recon_context["run"](
-            execute_reconstruction_async(recon_context["conn"], table_name, new_columns)
+            execute_reconstruction_async(recon_context["conn"], table_name, new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
         )
         recon_context["run"](recon_context["conn"].commit())
         recon_context["table_name"] = table_name
@@ -904,7 +904,7 @@ def when_drop_foreign_key(recon_context, table_col):
         current_columns = recon_context["run"](_build_full_schema(recon_context["conn"], table_name))
         new_columns = get_reconstruction_columns(current_columns, operation)
         recon_context["run"](
-            execute_reconstruction_async(recon_context["conn"], table_name, new_columns)
+            execute_reconstruction_async(recon_context["conn"], table_name, new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
         )
         recon_context["run"](recon_context["conn"].commit())
         recon_context["table_name"] = table_name
@@ -1015,8 +1015,7 @@ def when_drop_column(recon_context, column):
             new_columns = get_reconstruction_columns(current_columns, operation)
             recon_context["run"](
                 execute_reconstruction_async(
-                    recon_context["conn"], table_name, new_columns
-                )
+                    recon_context["conn"], table_name, new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
             )
         recon_context["run"](recon_context["conn"].commit())
     except Exception as e:

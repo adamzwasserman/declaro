@@ -146,7 +146,7 @@ async def _add_foreign_key(self, conn, table: str, details: dict[str, Any]) -> s
     }
 
     # Reconstruct table with new FK
-    await reconstruct_table(conn, table, current_schema["columns"])
+    await reconstruct_table(conn, table, current_schema["columns"], preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 
     return ""  # No SQL to return; operation performed directly
 ```

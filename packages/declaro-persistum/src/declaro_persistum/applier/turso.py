@@ -299,8 +299,7 @@ async def _execute_coalesced_reconstruction(
         columns = apply_reconstruction_changes(columns, op)
 
     await execute_reconstruction_async(
-        connection, table, columns, manage_foreign_keys=False
-    )
+        connection, table, columns, manage_foreign_keys=False, preserve_data=NOTHING)
 
 
 

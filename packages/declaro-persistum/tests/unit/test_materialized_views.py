@@ -8,6 +8,8 @@ These tests should FAIL initially (RED) until implementation is complete.
 
 import pytest
 
+from declaro_persistum.types import NOTHING
+
 
 class TestCreateMatviewSQL:
     """Tests for creating emulated materialized views."""
@@ -18,8 +20,7 @@ class TestCreateMatviewSQL:
 
         statements = create_matview_sql(
             name="monthly_stats",
-            query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id",
-        )
+            query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id", refresh_strategy=NOTHING, depends_on=NOTHING)
 
         # First statement should create metadata table
         assert any("_dp_materialized_views" in s for s in statements)
@@ -31,8 +32,7 @@ class TestCreateMatviewSQL:
 
         statements = create_matview_sql(
             name="monthly_stats",
-            query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id",
-        )
+            query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id", refresh_strategy=NOTHING, depends_on=NOTHING)
 
         # Should have CREATE TABLE ... AS SELECT
         assert any('CREATE TABLE "monthly_stats" AS' in s for s in statements)
@@ -44,8 +44,7 @@ class TestCreateMatviewSQL:
         statements = create_matview_sql(
             name="monthly_stats",
             query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id",
-            refresh_strategy="manual",
-        )
+            refresh_strategy="manual", depends_on=NOTHING)
 
         # Should INSERT into metadata
         assert any("INSERT INTO _dp_materialized_views" in s for s in statements)
@@ -59,8 +58,7 @@ class TestCreateMatviewSQL:
         statements = create_matview_sql(
             name="monthly_stats",
             query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id",
-            depends_on=["orders"],
-        )
+            depends_on=["orders"], refresh_strategy=NOTHING)
 
         # Should include JSON array in INSERT
         joined = " ".join(statements)
@@ -72,8 +70,7 @@ class TestCreateMatviewSQL:
 
         statements = create_matview_sql(
             name="test_view",
-            query="SELECT 1",
-        )
+            query="SELECT 1", refresh_strategy=NOTHING, depends_on=NOTHING)
 
         joined = " ".join(statements)
         assert "'manual'" in joined
@@ -134,8 +131,7 @@ class TestTriggerGeneration:
         statements = generate_refresh_trigger_sql(
             matview_name="monthly_stats",
             source_table="orders",
-            query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id",
-        )
+            query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id", events=NOTHING)
 
         joined = " ".join(statements)
         assert "AFTER INSERT ON" in joined
@@ -150,8 +146,7 @@ class TestTriggerGeneration:
         statements = generate_refresh_trigger_sql(
             matview_name="monthly_stats",
             source_table="orders",
-            query="SELECT 1",
-        )
+            query="SELECT 1", events=NOTHING)
 
         joined = " ".join(statements)
         assert "AFTER UPDATE ON" in joined
@@ -165,8 +160,7 @@ class TestTriggerGeneration:
         statements = generate_refresh_trigger_sql(
             matview_name="monthly_stats",
             source_table="orders",
-            query="SELECT 1",
-        )
+            query="SELECT 1", events=NOTHING)
 
         joined = " ".join(statements)
         assert "AFTER DELETE ON" in joined
@@ -180,8 +174,7 @@ class TestTriggerGeneration:
         statements = generate_refresh_trigger_sql(
             matview_name="monthly_stats",
             source_table="orders",
-            query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id",
-        )
+            query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id", events=NOTHING)
 
         joined = " ".join(statements)
         # Trigger should DELETE and INSERT
@@ -197,8 +190,7 @@ class TestTriggerGeneration:
         statements = generate_refresh_trigger_sql(
             matview_name="monthly_stats",
             source_table="orders",
-            query="SELECT 1",
-        )
+            query="SELECT 1", events=NOTHING)
 
         joined = " ".join(statements)
         assert "_dp_refresh_monthly_stats_on_orders_insert" in joined

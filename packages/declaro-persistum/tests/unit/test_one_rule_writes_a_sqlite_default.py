@@ -24,6 +24,7 @@ import pytest
 
 from declaro_persistum.abstractions.reconstruction import generate_create_table_sql
 from declaro_persistum.applier.shared import sqlite_default
+from declaro_persistum.types import NOTHING
 
 _DEFAULTS = {
     "nothing": None,
@@ -47,7 +48,7 @@ def test_the_rebuild_writes_what_the_applier_writes(shape: str) -> None:
     value = _DEFAULTS[shape]
     columns = {"c": {"type": "text", "default": value}}
 
-    rendered = generate_create_table_sql("t", columns)
+    rendered = generate_create_table_sql("t", columns, constraints=NOTHING)
 
     assert sqlite_default(value) in rendered, rendered
 

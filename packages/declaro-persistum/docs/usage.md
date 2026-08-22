@@ -286,7 +286,8 @@ from declaro_persistum.abstractions import generate_refresh_trigger_sql
 triggers = generate_refresh_trigger_sql(
     matview_name="monthly_stats",
     source_table="orders",
-    query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id"
+    query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id",
+    events=NOTHING,
 )
 ```
 

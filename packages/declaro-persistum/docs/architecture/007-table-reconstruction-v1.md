@@ -99,12 +99,12 @@ Reference: https://www.sqlite.org/lang_altertable.html#making_other_kinds_of_tab
 │              Reconstruction Core (abstractions/)             │
 │                                                              │
 │  Pure Functions:                                            │
-│    - generate_create_table_sql()                            │
-│    - generate_data_copy_sql()                               │
-│    - get_reconstruction_columns()                           │
+│    - generate_create_table_sql(, table_name=NOTHING, columns=NOTHING, constraints=NOTHING)                            │
+│    - generate_data_copy_sql(, table_from=NOTHING, table_to=NOTHING, common_columns=NOTHING)                               │
+│    - get_reconstruction_columns(, current_columns=NOTHING, operation=NOTHING)                           │
 │                                                              │
 │  Execution Functions:                                       │
-│    - execute_reconstruction_async()  [SQLite/LibSQL]        │
+│    - execute_reconstruction_async(, connection=NOTHING, table_name=NOTHING, new_columns=NOTHING, preserve_data=NOTHING, manage_foreign_keys=NOTHING)  [SQLite/LibSQL]        │
 │    - execute_reconstruction_sync()   [Turso Database]       │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -148,7 +148,7 @@ for op_idx in execution_order:
         new_columns = apply_operation_to_schema(current_columns, operation)
 
         # Execute reconstruction
-        await execute_reconstruction_async(connection, table, new_columns)
+        await execute_reconstruction_async(connection, table, new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
     else:
         # Direct SQL execution
         sql = self.generate_operation_sql(operation)
@@ -309,9 +309,9 @@ async def _execute_with_reconstruction(
         # ... on_delete, on_update
 
     # 3. Reconstruct
-    await reconstruct_table(connection, table, columns)  # Legacy API
+    await reconstruct_table(connection, table, columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)  # Legacy API
     # OR
-    await execute_reconstruction_async(connection, table, columns)  # New API
+    await execute_reconstruction_async(connection, table, columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)  # New API
 ```
 
 ### Turso Applier
@@ -457,7 +457,7 @@ try:
 
     for operation in operations:
         if requires_reconstruction:
-            await execute_reconstruction_async(connection, ...)
+            await execute_reconstruction_async(connection, ..., new_columns=NOTHING, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
         else:
             await connection.execute(sql)
 
@@ -482,7 +482,7 @@ If reconstruction fails:
 ### Error Propagation
 
 ```python
-async def execute_reconstruction_async(...):
+async def execute_reconstruction_async(..., table_name=NOTHING, new_columns=NOTHING, preserve_data=NOTHING, manage_foreign_keys=NOTHING):
     try:
         # ... reconstruction steps ...
     except Exception as e:
@@ -534,7 +534,7 @@ On failure, the original table remains intact because:
 
 | Backend | Package | API | SQL Parser | Reconstruction |
 |---------|---------|-----|------------|----------------|
-| Turso Cloud | libsql_experimental | Async | SQLite-compatible | `execute_reconstruction_async()` |
+| Turso Cloud | libsql_experimental | Async | SQLite-compatible | `execute_reconstruction_async(, connection=NOTHING, table_name=NOTHING, new_columns=NOTHING, preserve_data=NOTHING, manage_foreign_keys=NOTHING)` |
 | Turso Database | pyturso | Sync | Rust (limited) | `execute_reconstruction_sync()` |
 
 ### Turso Database CHECK Support
@@ -681,7 +681,7 @@ Feature: Table Reconstruction for SQLite Limitations
 
 ### 3. Separate Async/Sync Functions
 
-**Decision**: Duplicate logic with `execute_reconstruction_async()` and `execute_reconstruction_sync()`.
+**Decision**: Duplicate logic with `execute_reconstruction_async(, connection=NOTHING, table_name=NOTHING, new_columns=NOTHING, preserve_data=NOTHING, manage_foreign_keys=NOTHING)` and `execute_reconstruction_sync()`.
 
 **Rationale**:
 - Clean APIs for each connection type
@@ -722,7 +722,7 @@ Feature: Table Reconstruction for SQLite Limitations
 
 ### Problem
 
-The differ (`differ/core.py`) produces change dicts in `{"from": old_value, "to": new_value}` format for `alter_column` operations. The reconstruction code was blindly assigning these dicts as column property values instead of extracting the `"to"` value. This caused `_map_type()` to crash with `'dict' object has no attribute 'lower'` when processing Literal type changes.
+The differ (`differ/core.py`) produces change dicts in `{"from": old_value, "to": new_value}` format for `alter_column` operations. The reconstruction code was blindly assigning these dicts as column property values instead of extracting the `"to"` value. This caused `_map_type(, type_str=NOTHING)` to crash with `'dict' object has no attribute 'lower'` when processing Literal type changes.
 
 ### Fix
 
@@ -736,13 +736,13 @@ for key, value in changes.items():
 ```
 
 This fix was applied in:
-- `abstractions/reconstruction.py` — `get_reconstruction_columns()`
+- `abstractions/reconstruction.py` — `get_reconstruction_columns(, current_columns=NOTHING, operation=NOTHING)`
 - `applier/sqlite.py` — both `_execute_with_reconstruction()` and `_execute_with_reconstruction_sync()`
 - `applier/turso.py` — `_execute_with_reconstruction_sync()`
 
 ### Fail-Fast Validation
 
-A `_validate_columns()` function was added to `reconstruction.py` that runs **before** any destructive operations (DROP TABLE). It catches invalid column definitions (e.g., dict types that weren't unwrapped) before data loss can occur. Both `execute_reconstruction_async()` and `execute_reconstruction_sync()` call this validation.
+A `_validate_columns(, table_name=NOTHING, columns=NOTHING)` function was added to `reconstruction.py` that runs **before** any destructive operations (DROP TABLE). It catches invalid column definitions (e.g., dict types that weren't unwrapped) before data loss can occur. Both `execute_reconstruction_async(, connection=NOTHING, table_name=NOTHING, new_columns=NOTHING, preserve_data=NOTHING, manage_foreign_keys=NOTHING)` and `execute_reconstruction_sync()` call this validation.
 
 ---
 

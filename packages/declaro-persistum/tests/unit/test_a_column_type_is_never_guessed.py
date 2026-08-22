@@ -27,6 +27,7 @@ from declaro_persistum.abstractions.reconstruction import generate_create_table_
 from declaro_persistum.abstractions.table_reconstruction import (
     _generate_create_table_sql,
 )
+from declaro_persistum.types import NOTHING
 
 _BUILDERS = {
     "reconstruction": generate_create_table_sql,
@@ -59,7 +60,7 @@ def test_a_type_that_is_not_a_type_is_refused(builder: str, shape: str) -> None:
     columns = {"c": {"type": _UNREADABLE[shape]}}
 
     with pytest.raises((TypeError, ValueError)) as raised:
-        _BUILDERS[builder]("t", columns)
+        _BUILDERS[builder]("t", columns, NOTHING)
 
     assert "c" in str(raised.value), str(raised.value)
 
@@ -67,7 +68,7 @@ def test_a_type_that_is_not_a_type_is_refused(builder: str, shape: str) -> None:
 @pytest.mark.parametrize("builder", sorted(_BUILDERS), ids=sorted(_BUILDERS))
 def test_a_declared_type_still_renders(builder: str) -> None:
     """The control. Refusing what cannot be read must not refuse what can."""
-    rendered = _BUILDERS[builder]("t", {"c": {"type": "integer"}})
+    rendered = _BUILDERS[builder]("t", {"c": {"type": "integer"}}, NOTHING)
 
     assert "INTEGER" in rendered.upper()
     assert '"c"' in rendered
@@ -81,4 +82,4 @@ def test_a_column_with_no_type_declared_is_refused(builder: str) -> None:
     line up. A schema that forgot to say gets asked, not answered for.
     """
     with pytest.raises((KeyError, TypeError, ValueError)):
-        _BUILDERS[builder]("t", {"c": {}})
+        _BUILDERS[builder]("t", {"c": {}}, NOTHING)

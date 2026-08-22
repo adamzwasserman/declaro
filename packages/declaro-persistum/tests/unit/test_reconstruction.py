@@ -13,7 +13,7 @@ from declaro_persistum.abstractions.reconstruction import (
     generate_data_copy_sql,
     get_reconstruction_columns,
 )
-from declaro_persistum.types import Column, Operation
+from declaro_persistum.types import NOTHING, Column, Operation
 
 # =============================================================================
 # Pure Function Tests (No DB)
@@ -31,7 +31,7 @@ class TestPureFunctions:
             "age": {"type": "INTEGER", "nullable": True},
         }
 
-        sql = generate_create_table_sql("users", columns)
+        sql = generate_create_table_sql("users", columns, constraints=NOTHING)
 
         assert 'CREATE TABLE "users"' in sql
         assert '"id" INTEGER PRIMARY KEY' in sql
@@ -50,7 +50,7 @@ class TestPureFunctions:
             },
         }
 
-        sql = generate_create_table_sql("posts", columns)
+        sql = generate_create_table_sql("posts", columns, constraints=NOTHING)
 
         assert 'REFERENCES "users"("id")' in sql
         assert "ON DELETE CASCADE" in sql
@@ -63,7 +63,7 @@ class TestPureFunctions:
             "assigned_at": {"type": "TEXT"},
         }
 
-        sql = generate_create_table_sql("user_roles", columns)
+        sql = generate_create_table_sql("user_roles", columns, constraints=NOTHING)
 
         assert 'PRIMARY KEY ("user_id", "role_id")' in sql
         # Inline PRIMARY KEY should not be present for composite keys
@@ -77,7 +77,7 @@ class TestPureFunctions:
             "status": {"type": "TEXT", "default": "'active'"},
         }
 
-        sql = generate_create_table_sql("accounts", columns)
+        sql = generate_create_table_sql("accounts", columns, constraints=NOTHING)
 
         assert '"email" TEXT NOT NULL UNIQUE' in sql
         assert "DEFAULT 'active'" in sql
@@ -89,7 +89,7 @@ class TestPureFunctions:
             "age": {"type": "INTEGER", "check": "age >= 18"},
         }
 
-        sql = generate_create_table_sql("adults", columns)
+        sql = generate_create_table_sql("adults", columns, constraints=NOTHING)
 
         assert "CHECK (age >= 18)" in sql
 
@@ -235,7 +235,7 @@ class TestPureFunctions:
         }
 
         with pytest.raises((TypeError, ValueError, AttributeError)):
-            generate_create_table_sql("test", columns)
+            generate_create_table_sql("test", columns, constraints=NOTHING)
 
     def test_get_reconstruction_columns_differ_format_changes(self):
         """Test that differ-format changes (from/to dicts) are handled correctly.
@@ -313,7 +313,7 @@ class TestReconstructionAsync:
                 "email": {"type": "TEXT", "nullable": False},
             }
 
-            await execute_reconstruction_async(conn, "users", new_columns)
+            await execute_reconstruction_async(conn, "users", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 
             # Verify data preserved
             cursor = await conn.execute("SELECT id, email FROM users ORDER BY id")
@@ -339,7 +339,7 @@ class TestReconstructionAsync:
                 "email": {"type": "TEXT", "nullable": False},
             }
 
-            await execute_reconstruction_async(conn, "users", new_columns)
+            await execute_reconstruction_async(conn, "users", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 
             # Verify index exists
             cursor = await conn.execute(
@@ -374,7 +374,7 @@ class TestReconstructionAsync:
                 "title": {"type": "TEXT"},  # Added column
             }
 
-            await execute_reconstruction_async(conn, "posts", new_columns)
+            await execute_reconstruction_async(conn, "posts", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 
             # Verify data preserved
             cursor = await conn.execute("SELECT id, user_id FROM posts")
@@ -400,7 +400,7 @@ class TestReconstructionAsync:
                 "email": {"type": "TEXT", "nullable": False},
             }
 
-            await execute_reconstruction_async(conn, "users", new_columns)
+            await execute_reconstruction_async(conn, "users", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 
             # Verify table exists with new schema
             cursor = await conn.execute("PRAGMA table_info(users)")
@@ -425,7 +425,7 @@ class TestReconstructionAsync:
                 "new_col2": {"type": "TEXT"},
             }
 
-            await execute_reconstruction_async(conn, "old_table", new_columns)
+            await execute_reconstruction_async(conn, "old_table", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 
             # Verify table exists but is empty
             cursor = await conn.execute("SELECT * FROM old_table")
@@ -455,7 +455,7 @@ class TestReconstructionAsync:
                 "assigned_at": {"type": "TEXT", "nullable": False},
             }
 
-            await execute_reconstruction_async(conn, "user_roles", new_columns)
+            await execute_reconstruction_async(conn, "user_roles", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 
             # Verify data preserved
             cursor = await conn.execute("SELECT * FROM user_roles")
@@ -496,7 +496,7 @@ class TestReconstructionAsync:
                 "title": {"type": "TEXT"},  # New column
             }
 
-            await execute_reconstruction_async(conn, "posts", new_columns)
+            await execute_reconstruction_async(conn, "posts", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 
             # Verify data preserved
             cursor = await conn.execute("SELECT id, user_id, category_id FROM posts")
@@ -532,7 +532,7 @@ class TestReconstructionAsync:
                 "bio": {"type": "TEXT"},  # New column
             }
 
-            await execute_reconstruction_async(conn, "profiles", new_columns)
+            await execute_reconstruction_async(conn, "profiles", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 
             # Verify schema. This fetched the columns and asserted nothing --
             # the comment promised a check the test did not make, and ruff
@@ -570,7 +570,7 @@ class TestReconstructionAsync:
             }
 
             with pytest.raises(ValueError, match="Foreign key constraint violations"):
-                await execute_reconstruction_async(conn, "posts", new_columns)
+                await execute_reconstruction_async(conn, "posts", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
 
     async def test_execute_reconstruction_async_no_data_preservation(self):
         """Test reconstruction with preserve_data=False."""
@@ -587,8 +587,7 @@ class TestReconstructionAsync:
             }
 
             await execute_reconstruction_async(
-                conn, "users", new_columns, preserve_data=False
-            )
+                conn, "users", new_columns, preserve_data=False, manage_foreign_keys=NOTHING)
 
             # Verify table is empty
             cursor = await conn.execute("SELECT * FROM users")

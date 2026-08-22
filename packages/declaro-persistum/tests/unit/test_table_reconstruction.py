@@ -16,6 +16,7 @@ from declaro_persistum.abstractions.table_reconstruction import (
     alter_column_type,
     reconstruct_table,
 )
+from declaro_persistum.types import NOTHING
 
 
 @pytest.mark.asyncio
@@ -157,7 +158,7 @@ async def test_reconstruct_preserves_data():
             "email": {"type": "TEXT", "nullable": False},
             "name": {"type": "TEXT", "nullable": True},
         }
-        await reconstruct_table(conn, "customers", columns)
+        await reconstruct_table(conn, "customers", columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
         await conn.commit()
 
         # Verify all data preserved
@@ -199,7 +200,7 @@ async def test_reconstruct_preserves_foreign_keys():
             "title": {"type": "TEXT", "nullable": True},  # Changed to nullable
             "author_id": {"type": "INTEGER", "references": "authors.id"},
         }
-        await reconstruct_table(conn, "books", columns)
+        await reconstruct_table(conn, "books", columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
         await conn.commit()
 
         # Verify FK still enforced
@@ -247,7 +248,7 @@ async def test_reconstruct_with_composite_primary_key():
             "b": {"type": "INTEGER", "primary_key": True},
             "data": {"type": "TEXT", "nullable": False},
         }
-        await reconstruct_table(conn, "composite_pk", columns)
+        await reconstruct_table(conn, "composite_pk", columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
         await conn.commit()
 
         # Verify composite PK preserved
