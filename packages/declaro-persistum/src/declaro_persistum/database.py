@@ -76,12 +76,12 @@ ShutdownPolicy = Literal["replicate", "exit_immediately"]
 POLICIES: tuple[str, ...] = ("replicate", "exit_immediately")
 
 
-def _policy_stands(_policy: str, _opener: str) -> None:
+def _policy_stands(_policy: str, _opener: str) -> int:
     """The policy names one of the two answers, so nothing is refused."""
-    return None
+    return 0
 
 
-def _refuse_unknown_policy(policy: str, opener: str) -> None:
+def _refuse_unknown_policy(policy: str, opener: str) -> int:
     """A misspelt policy reads as 'do not replicate', so it is refused by name."""
     raise ValueError(
         f"{opener}: shutdown={policy!r} is not a policy. It takes "
@@ -92,18 +92,18 @@ def _refuse_unknown_policy(policy: str, opener: str) -> None:
     )
 
 
-_KNOWN_POLICY: dict[bool, Callable[[str, str], None]] = {
+_KNOWN_POLICY: dict[bool, Callable[[str, str], int]] = {
     True: _policy_stands,
     False: _refuse_unknown_policy,
 }
 
 
-def _replication_stands(_policy: str, _opener: str) -> None:
+def _replication_stands(_policy: str, _opener: str) -> int:
     """Either there is a primary, or the policy does not ask for one."""
-    return None
+    return 0
 
 
-def _refuse_replicating_nowhere(_policy: str, opener: str) -> None:
+def _refuse_replicating_nowhere(_policy: str, opener: str) -> int:
     """`replicate` with no primary would fail at SIGTERM, so it fails at open."""
     raise ValueError(
         f"{opener}: shutdown='replicate' needs a primary to replicate to, "
@@ -112,7 +112,7 @@ def _refuse_replicating_nowhere(_policy: str, opener: str) -> None:
     )
 
 
-_CAN_HONOUR_POLICY: dict[bool, Callable[[str, str], None]] = {
+_CAN_HONOUR_POLICY: dict[bool, Callable[[str, str], int]] = {
     True: _replication_stands,
     False: _refuse_replicating_nowhere,
 }
@@ -157,7 +157,9 @@ Connect = Callable[["Database"], Awaitable[Any]]
 # The door DDL goes through, which is not always the door a write goes
 # through. See `Database.for_ddl`.
 ForDDL = Callable[["Database"], "AbstractAsyncContextManager[Any]"]
-CloseConnection = Callable[[Any], Awaitable[None]]
+# How many connections it closed: one, or none for an engine that holds
+# its connection open past every write.
+CloseConnection = Callable[[Any], Awaitable[int]]
 ReplicateOnce = Callable[["Database"], Awaitable[bool]]
 # HOW MANY PASSES RAN, NOT NOTHING. Both were `Awaitable[None]`, so the
 # implementation for an engine with nothing to do was a function with an empty
@@ -309,17 +311,17 @@ def is_replicated(db: Database) -> bool:
     return db["primary"] is not None
 
 
-def _still_open(_db: Database) -> None:
+def _still_open(_db: Database) -> int:
     """The database is open, so the caller may go on."""
-    return None
+    return 0
 
 
-def _refuse_closed(_db: Database) -> None:
+def _refuse_closed(_db: Database) -> int:
     """`close` released everything, so there is nothing left to work on."""
     raise DatabaseClosedError("Database has been closed")
 
 
-_IS_CLOSED: dict[bool, Callable[[Database], None]] = {
+_IS_CLOSED: dict[bool, Callable[[Database], int]] = {
     True: _refuse_closed,
     False: _still_open,
 }
@@ -454,12 +456,12 @@ async def replicate(db: Database) -> bool:
     return await _AFTER_SENDING[await db["replicate_once"](db)](db)
 
 
-def _primary_stands(_db: Database) -> None:
+def _primary_stands(_db: Database) -> int:
     """There is a primary, so there is something to bring into conformity."""
-    return None
+    return 0
 
 
-def _refuse_local_only(db: Database) -> None:
+def _refuse_local_only(db: Database) -> int:
     """A local-only database has no second copy, so the request has no meaning."""
     raise ValueError(
         f"cannot replicate {db['path']}: it has no primary. A local-only "
@@ -468,7 +470,7 @@ def _refuse_local_only(db: Database) -> None:
     )
 
 
-_HAS_A_PRIMARY: dict[bool, Callable[[Database], None]] = {
+_HAS_A_PRIMARY: dict[bool, Callable[[Database], int]] = {
     True: _primary_stands,
     False: _refuse_local_only,
 }
@@ -561,12 +563,12 @@ async def replicate_on_shutdown(db: Database, *, now: Callable[[], float]) -> No
     await _ON_SHUTDOWN[is_replicated(db)](db, now)
 
 
-async def _nothing_to_deliver(_db: Database, _now: Callable[[], float]) -> None:
+async def _nothing_to_deliver(_db: Database, _now: Callable[[], float]) -> int:
     """A local-only database has no primary, so shutdown waits for nothing."""
-    return None
+    return 0
 
 
-async def _deliver_before_exit(db: Database, now: Callable[[], float]) -> None:
+async def _deliver_before_exit(db: Database, now: Callable[[], float]) -> int:
     """Retry until the primary has everything, saying so on every attempt."""
     started = now()
     logger.info(
@@ -588,9 +590,10 @@ async def _deliver_before_exit(db: Database, now: Callable[[], float]) -> None:
         "Shutdown: %s is in conformity with its primary after %.1fs (%d retries).",
         db["path"], now() - started, attempt,
     )
+    return 1
 
 
-_ON_SHUTDOWN: dict[bool, Callable[[Database, Callable[[], float]], Awaitable[None]]] = {
+_ON_SHUTDOWN: dict[bool, Callable[[Database, Callable[[], float]], Awaitable[int]]] = {
     True: _deliver_before_exit,
     False: _nothing_to_deliver,
 }
@@ -605,18 +608,19 @@ async def refresh(db: Database) -> None:
     await _REFRESH[is_replicated(db)](db)
 
 
-async def _refresh_nothing(_db: Database) -> None:
+async def _refresh_nothing(_db: Database) -> int:
     """No primary, so there is nothing to bring down."""
-    return None
+    return 0
 
 
-async def _refresh_from_primary(db: Database) -> None:
+async def _refresh_from_primary(db: Database) -> int:
     """Take whatever the primary has that this copy does not."""
     _check_open(db)
     await db["refresh_once"](db)
+    return 1
 
 
-_REFRESH: dict[bool, Callable[[Database], Awaitable[None]]] = {
+_REFRESH: dict[bool, Callable[[Database], Awaitable[int]]] = {
     True: _refresh_from_primary,
     False: _refresh_nothing,
 }
@@ -632,21 +636,22 @@ async def flush(db: Database) -> None:
     await _FLUSH[is_replicated(db)](db)
 
 
-async def _flush_nothing(_db: Database) -> None:
+async def _flush_nothing(_db: Database) -> int:
     """No primary, so every write is already where it is going to be."""
-    return None
+    return 0
 
 
-async def _flush_to_primary(db: Database) -> None:
+async def _flush_to_primary(db: Database) -> int:
     """Keep sending until the primary takes it, then take back what it has."""
     # IGNORES LOAD. A caller that awaited this has said it is willing to wait;
     # politeness belongs to the background pass, not here.
     while not await db["replicate_once"](db):
         await db["sleep"](db["retry_delay_s"])
     await db["refresh_once"](db)
+    return 1
 
 
-_FLUSH: dict[bool, Callable[[Database], Awaitable[None]]] = {
+_FLUSH: dict[bool, Callable[[Database], Awaitable[int]]] = {
     True: _flush_to_primary,
     False: _flush_nothing,
 }

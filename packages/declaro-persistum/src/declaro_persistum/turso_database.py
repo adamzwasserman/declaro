@@ -306,8 +306,9 @@ async def migrating(db: Database) -> AsyncIterator[Any]:
 
 
 @boundary
-async def _close_connection(conn: Any) -> None:
+async def _close_connection(conn: Any) -> int:
     await conn.close()
+    return 1
 
 
 @boundary
@@ -341,17 +342,18 @@ async def open_turso(
     serialize.
     """
     # A default in the signature would decide this where no reader
-    # sees it happen and no test reaches it.
-    primary = resolved(primary, None)
-    token = resolved(token, None)
-    check_shutdown(
-        shutdown, can_replicate=primary is not None, opener="open_turso"
-    )
+    # sees it happen and no test reaches it. The resolved values get their own
+    # names so their type says `str | None`, which is what everything below
+    # them takes; reassigning the parameter left it `str | Nothing` and mypy
+    # could not follow the narrowing.
+    at: str | None = resolved(primary, None)
+    with_token: str | None = resolved(token, None)
+    check_shutdown(shutdown, can_replicate=at is not None, opener="open_turso")
 
     db = (
         await _open_local(path, shutdown)
-        if primary is None
-        else await _open_replicated(path, primary, token, shutdown)
+        if at is None
+        else await _open_replicated(path, at, with_token, shutdown)
     )
     # THE POLICY IS ACTED ON HERE, not left for a caller to remember. A
     # `shutdown` field that is stored and never read is a swallowed argument,
@@ -451,9 +453,9 @@ async def _open_replicated(
         return held
 
     @helper
-    async def close_connection(_conn: Any) -> None:
+    async def close_connection(_conn: Any) -> int:
         # The held connection outlives every write. `close(db)` releases it.
-        return None
+        return 0
 
     @boundary
     async def replicate_once(_db: Database) -> bool:

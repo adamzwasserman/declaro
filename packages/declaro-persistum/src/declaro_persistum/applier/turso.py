@@ -395,9 +395,13 @@ _RUN_UNIT: dict[
 
 
 @helper
-def _nothing_skipped(_skipped: list[str]) -> None:
-    """Every operation ran, so the result carries no error."""
-    return None
+def _nothing_skipped(_skipped: list[str]) -> str | None:
+    """No error, because every operation ran.
+
+    None rather than a count: this feeds `ApplyResult["error"]`, where None
+    is what "no error" already means to every reader of that record.
+    """
+    return None  # noqa: RET501
 
 
 @helper

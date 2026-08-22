@@ -38,8 +38,9 @@ async def connect_postgresql(db: Database) -> Any:
 
 
 @boundary
-async def _close_connection(conn: Any) -> None:
+async def _close_connection(conn: Any) -> int:
     await conn.close()
+    return 1
 
 
 @helper

@@ -409,21 +409,21 @@ COMMANDS: dict[str, Runner] = {
 
 
 @helper
-def _print_traceback() -> None:
+def _print_traceback() -> int:
     """The operator asked for detail, so the stack goes to stderr."""
     import traceback
 
     traceback.print_exc()
-    return None
+    return 1
 
 
 @helper
-def _keep_the_traceback() -> None:
+def _keep_the_traceback() -> int:
     """Without -v the message alone is the report."""
-    return None
+    return 0
 
 
-_TRACEBACK: dict[bool, Callable[[], None]] = {
+_TRACEBACK: dict[bool, Callable[[], int]] = {
     True: _print_traceback,
     False: _keep_the_traceback,
 }
@@ -535,18 +535,18 @@ def main(argv: Sequence[str] | None | Nothing) -> int:
 
 
 @helper
-def _run_as_a_program() -> None:
+def _run_as_a_program() -> int:
     """Started with `python -m`, so the CLI runs and its status is the exit code."""
     sys.exit(main(argv=NOTHING))
 
 
 @helper
-def _do_not_run() -> None:
+def _do_not_run() -> int:
     """Imported, so this module defines its functions and runs none of them."""
-    return None
+    return 0
 
 
-_ENTRY: dict[bool, Callable[[], None]] = {
+_ENTRY: dict[bool, Callable[[], int]] = {
     True: _run_as_a_program,
     False: _do_not_run,
 }

@@ -489,20 +489,20 @@ async def _one_attempt(
 
 
 @boundary
-async def _wait_out_the_delay(seconds: float) -> None:
+async def _wait_out_the_delay(seconds: float) -> int:
     """The policy asks this attempt to pause first, so it takes the clock."""
     await asyncio.sleep(seconds)
-    return None
+    return 1
 
 
 @helper
-async def _no_delay(_seconds: float) -> None:
+async def _no_delay(_seconds: float) -> int:
     """No pause is due, so the write runs now without touching the clock."""
-    return None
+    return 0
 
 
 # Whether the policy asks this attempt to wait before it runs.
-_BEFORE_THIS_ATTEMPT: dict[bool, Callable[[float], Awaitable[None]]] = {
+_BEFORE_THIS_ATTEMPT: dict[bool, Callable[[float], Awaitable[int]]] = {
     True: _wait_out_the_delay,
     False: _no_delay,
 }

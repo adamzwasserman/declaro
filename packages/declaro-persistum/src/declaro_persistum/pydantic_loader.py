@@ -791,8 +791,12 @@ _META_INDEXES: dict[bool, Callable[[Any], dict[str, Any]]] = {
 
 @helper
 def _not_a_table(_model_cls: type, _table_name: Any) -> tuple[str, Table] | None:
-    """No `__tablename__`, so this class declares no table to convert."""
-    return None
+    """No `__tablename__`, so this class declares no table to convert.
+
+    The caller filters on the result, so None is the answer rather than an
+    absence. `pydantic_model_to_table` is public and a test asserts it.
+    """
+    return None  # noqa: RET501
 
 
 @helper

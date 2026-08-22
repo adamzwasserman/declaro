@@ -417,28 +417,43 @@ def _paren_depths(text: str) -> list[int]:
     return list(accumulate((_depth_delta(char) for char in text), initial=0))
 
 
-def _no_body(_create_statement: str) -> None:
-    """The statement has no opening parenthesis, so it declares no body."""
-    return None
+def _no_body(_create_statement: str) -> str:
+    """No body: the statement has no opening parenthesis.
+
+    An empty string rather than None, because the caller reads the result as
+    text and the two callers that once tested for None both meant "nothing
+    between the parentheses".
+    """
+    return ""
 
 
-def _body_between(create_statement: str) -> str | None:
-    """What the first parenthesis holds, or None when it never closes."""
+def _body_between(create_statement: str) -> str:
+    """What the first parenthesis holds, empty when it never closes.
+
+    An unclosed parenthesis is a statement with no readable body, which is the
+    same answer as no parenthesis at all. It used to be None here and `""` in
+    the sibling, and both callers converted one to the other.
+    """
     start = create_statement.find("(")
     depths = _paren_depths(create_statement[start:])
     closes = [offset for offset, depth in enumerate(depths[1:]) if depth == 0]
     bodies = [create_statement[start + 1 : start + offset] for offset in closes[:1]]
-    return [*bodies, None][0]
+    return [*bodies, ""][0]
 
 
-_TABLE_BODY: dict[bool, Callable[[str], str | None]] = {
+_TABLE_BODY: dict[bool, Callable[[str], str]] = {
     True: _no_body,
     False: _body_between,
 }
 
 
-def _table_body(create_statement: str) -> str | None:
-    """What sits between the outermost parentheses of a CREATE TABLE."""
+def _table_body(create_statement: str) -> str:
+    """What sits between the outermost parentheses of a CREATE TABLE.
+
+    Empty when there are none. It used to answer None, and both callers wrote
+    `"" if body is None else body` to undo that, so the absence was invented
+    here and repaired twice.
+    """
     return _TABLE_BODY[create_statement.find("(") == -1](create_statement)
 
 
@@ -657,10 +672,15 @@ def _before(clause: str, position: int) -> str:
     return clause[position - 1] if position else " "
 
 
-def _expression_at(clause: str, position: int) -> str | None:
-    """The CHECK expression starting at `position`, normalised."""
+def _expression_at(clause: str, position: int) -> str:
+    """The CHECK expression starting at `position`, normalised.
+
+    Empty when the clause holds none, because `_table_body` answers with an
+    empty string rather than None.
+    """
     rest = clause[position + 5 :].lstrip()
-    return applied_to_text(normalize_check, _table_body(rest))
+    normalised: str = applied_to_text(normalize_check, _table_body(rest))
+    return normalised
 
 
 def _check_in(clause: str) -> str | None:
@@ -680,8 +700,8 @@ def _check_in(clause: str) -> str | None:
         and clause[position + 5 : position + 6] in (" ", "(")
         and clause[position + 5 :].lstrip().startswith("(")
     ]
-    found: list[Any] = [_expression_at(clause, position) for position in starts[:1]]
-    return [*found, None][0]
+    found: list[str] = [_expression_at(clause, position) for position in starts[:1]]
+    return next(iter(found), None)
 
 
 # The keywords that open a table-level clause. A leading one of these names no
@@ -714,7 +734,7 @@ def table_constraints_from_ddl(create_statement: str) -> dict[str, dict[str, str
     body = _table_body(create_statement)
     named = [
         (remainder, leading)
-        for clause in _split_top_level("" if body is None else body)
+        for clause in _split_top_level(body)
         for stripped in [clause.strip()]
         if stripped.upper().startswith("CONSTRAINT")
         for remainder in [stripped[len("CONSTRAINT") :].strip()]
@@ -754,7 +774,7 @@ def checks_from_ddl(create_statement: str) -> dict[str, str]:
     body = _table_body(create_statement)
     return {
         column: expression
-        for clause in _split_top_level("" if body is None else body)
+        for clause in _split_top_level(body)
         for leading in [_leading_identifier(clause)]
         if leading is not None
         for column, was_quoted in [leading]

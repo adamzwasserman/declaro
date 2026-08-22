@@ -711,7 +711,7 @@ def _as_number(value: Any) -> float | None:
 @helper
 def _not_a_number(_value: Any) -> float | None:
     """Nothing here denotes a number, and saying so is the answer."""
-    return None
+    return 0
 
 
 @helper
