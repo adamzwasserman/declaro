@@ -44,7 +44,7 @@ from declaro_persistum.query.expressions import (  # noqa: F401
     render_order_term,
     render_subquery,
 )
-from declaro_persistum.types import Dialect, Schema
+from declaro_persistum.types import Dialect, Nothing, Schema, resolved
 
 __all__ = [
     "SQLFunction",
@@ -94,32 +94,56 @@ def _function(name: str, *args: Any, alias: str | None) -> SQLFunction:
 
 
 @helper
-def count_(column: str = "*", alias: str | None = None) -> SQLFunction:
+def count_(column: str, alias: str | Nothing) -> SQLFunction:
+    """COUNT of a column, or of everything if the caller writes `"*"`.
+
+    THE STAR IS WRITTEN DOWN. This defaulted `column` to `"*"`, so a call
+    that meant "count every row" and a call that forgot to say what to count
+    produced the same SQL and nothing could tell them apart.
+    """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    alias = resolved(alias, None)
     return _function("COUNT", column, alias=alias)
 
 
 @helper
-def sum_(column: str, alias: str | None = None) -> SQLFunction:
+def sum_(column: str, alias: str | Nothing) -> SQLFunction:
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    alias = resolved(alias, None)
     return _function("SUM", column, alias=alias)
 
 
 @helper
-def avg_(column: str, alias: str | None = None) -> SQLFunction:
+def avg_(column: str, alias: str | Nothing) -> SQLFunction:
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    alias = resolved(alias, None)
     return _function("AVG", column, alias=alias)
 
 
 @helper
-def min_(column: str, alias: str | None = None) -> SQLFunction:
+def min_(column: str, alias: str | Nothing) -> SQLFunction:
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    alias = resolved(alias, None)
     return _function("MIN", column, alias=alias)
 
 
 @helper
-def max_(column: str, alias: str | None = None) -> SQLFunction:
+def max_(column: str, alias: str | Nothing) -> SQLFunction:
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    alias = resolved(alias, None)
     return _function("MAX", column, alias=alias)
 
 
 @helper
-def now_(alias: str | None = None) -> SQLFunction:
+def now_(alias: str | Nothing) -> SQLFunction:
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    alias = resolved(alias, None)
     return _function("NOW", alias=alias)
 
 
@@ -127,7 +151,7 @@ def now_(alias: str | None = None) -> SQLFunction:
 def case_(
     *whens: tuple[dict[str, Any], Any],
     else_: Any = None,
-    alias: str | None = None,
+    alias: str | Nothing,
 ) -> CaseExpression:
     """A CASE expression.
 
@@ -140,6 +164,10 @@ def case_(
     only shape that needed `.as_()` instead, which is why that method outlived
     its usefulness.
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    else_ = resolved(else_, None)
+    alias = resolved(alias, None)
     return {"kind": "case", "whens": list(whens), "else_": else_, "alias": alias}
 
 
