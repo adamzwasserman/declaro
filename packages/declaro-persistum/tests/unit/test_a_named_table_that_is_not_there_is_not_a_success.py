@@ -36,6 +36,7 @@ import pytest
 
 from declaro_persistum import bulk_transfer, close, open_sqlite, writing
 from declaro_persistum.exceptions import TransferError
+from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.precommit, pytest.mark.sqlite]
 
@@ -77,8 +78,7 @@ async def test_naming_tables_that_exist_transfers_them(tmp_path) -> None:
     source, target, models = await _pair(tmp_path)
     try:
         result = await bulk_transfer(
-            source, target, "sqlite", "sqlite", str(models), tables=["users", "orders"]
-        )
+            source, target, "sqlite", "sqlite", str(models), tables=["users", "orders"], on_progress=NOTHING)
         assert result["success"] is True, result
         assert result["tables_transferred"] == 2
     finally:
@@ -91,8 +91,7 @@ async def test_naming_a_subset_still_works(tmp_path) -> None:
     source, target, models = await _pair(tmp_path)
     try:
         result = await bulk_transfer(
-            source, target, "sqlite", "sqlite", str(models), tables=["users"]
-        )
+            source, target, "sqlite", "sqlite", str(models), tables=["users"], on_progress=NOTHING)
         assert result["success"] is True
         assert result["tables_transferred"] == 1
 
@@ -115,8 +114,7 @@ async def test_naming_a_table_that_is_not_there_raises(tmp_path) -> None:
                 "sqlite",
                 "sqlite",
                 str(models),
-                tables=["users", "orders_typo"],
-            )
+                tables=["users", "orders_typo"], on_progress=NOTHING)
 
         assert "orders_typo" in str(caught.value), (
             f"the error does not name the table that is missing: {caught.value}"
@@ -139,8 +137,7 @@ async def test_the_error_names_every_missing_table_not_just_the_first(
                 "sqlite",
                 "sqlite",
                 str(models),
-                tables=["users", "gone_one", "gone_two"],
-            )
+                tables=["users", "gone_one", "gone_two"], on_progress=NOTHING)
 
         message = str(caught.value)
         assert "gone_one" in message and "gone_two" in message, message
@@ -160,8 +157,7 @@ async def test_nothing_is_transferred_when_a_name_is_wrong(tmp_path) -> None:
         with pytest.raises(TransferError):
             await bulk_transfer(
                 source, target, "sqlite", "sqlite", str(models),
-                tables=["users", "orders_typo"],
-            )
+                tables=["users", "orders_typo"], on_progress=NOTHING)
 
         async with writing(target) as conn:
             cursor = await conn.execute('SELECT COUNT(*) FROM "users"')
@@ -180,8 +176,7 @@ async def test_asking_for_everything_is_not_a_claim_about_any_table(
     source, target, models = await _pair(tmp_path)
     try:
         result = await bulk_transfer(
-            source, target, "sqlite", "sqlite", str(models), tables=None
-        )
+            source, target, "sqlite", "sqlite", str(models), tables=None, on_progress=NOTHING)
         assert result["success"] is True
         assert result["tables_transferred"] == 2
     finally:

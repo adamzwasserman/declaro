@@ -35,6 +35,7 @@ from declaro_persistum.transfer import (
     TableTransferProgress,
     bulk_transfer,
 )
+from declaro_persistum.types import Nothing, resolved
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +48,9 @@ async def begin_cutover(
     schema_path: str | Path,
     *,
     batch_size: int = 1000,
-    tables: list[str] | None = None,
+    tables: list[str] | Nothing,
     expand_enums: bool = True,
-    on_progress: Callable[[TableTransferProgress], None] | None = None,
+    on_progress: Callable[[TableTransferProgress], None] | Nothing,
     resume: bool = True,
     fail_open: bool = True,
     compare_on_read: bool = True,
@@ -82,6 +83,10 @@ async def begin_cutover(
     Raises:
         TransferError: If bulk transfer fails critically
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    tables = resolved(tables, None)
+    on_progress = resolved(on_progress, None)
     # Phase 1: Bulk transfer
     logger.info("Phase 1: Starting bulk data transfer")
     result = await bulk_transfer(

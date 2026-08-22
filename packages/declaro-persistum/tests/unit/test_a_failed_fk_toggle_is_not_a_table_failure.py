@@ -27,6 +27,7 @@ import pytest
 import declaro_persistum.transfer as transfer_module
 from declaro_persistum import bulk_transfer, close, open_sqlite, writing
 from declaro_persistum.exceptions import TransferError
+from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.precommit, pytest.mark.sqlite]
 
@@ -85,8 +86,7 @@ async def test_a_circular_schema_transfers(tmp_path) -> None:
     source, target, models = await _pair(tmp_path)
     try:
         result = await bulk_transfer(
-            source, target, "sqlite", "sqlite", str(models)
-        )
+            source, target, "sqlite", "sqlite", str(models), tables=NOTHING, on_progress=NOTHING)
         assert result["success"] is True, result
         assert result["tables_transferred"] == 2, result
     finally:
@@ -114,7 +114,7 @@ async def test_a_failed_disable_stops_the_run(
 
     try:
         with pytest.raises(TransferError) as caught:
-            await bulk_transfer(source, target, "sqlite", "sqlite", str(models))
+            await bulk_transfer(source, target, "sqlite", "sqlite", str(models), tables=NOTHING, on_progress=NOTHING)
 
         message = str(caught.value)
         assert "foreign key" in message.lower(), message
@@ -142,7 +142,7 @@ async def test_the_failure_names_the_preparation_not_the_tables(
 
     try:
         with pytest.raises(TransferError) as caught:
-            await bulk_transfer(source, target, "sqlite", "sqlite", str(models))
+            await bulk_transfer(source, target, "sqlite", "sqlite", str(models), tables=NOTHING, on_progress=NOTHING)
 
         assert "circular" in str(caught.value).lower(), (
             f"the error does not say why the checks needed disabling, so it "
@@ -173,8 +173,7 @@ async def test_a_failed_re_enable_is_reported_loudly_but_does_not_mask(
 
     try:
         result = await bulk_transfer(
-            source, target, "sqlite", "sqlite", str(models)
-        )
+            source, target, "sqlite", "sqlite", str(models), tables=NOTHING, on_progress=NOTHING)
         assert result["success"] is True, (
             "a teardown failure changed the outcome of a transfer that worked"
         )

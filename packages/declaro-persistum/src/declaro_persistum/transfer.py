@@ -32,7 +32,7 @@ from declaro_persistum.database import Database, reading
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, TransferError
 from declaro_persistum.inspector import introspect
 from declaro_persistum.migrations import apply_migrations_async
-from declaro_persistum.types import NOTHING, Dialect
+from declaro_persistum.types import NOTHING, Dialect, Nothing, resolved
 
 logger = logging.getLogger(__name__)
 
@@ -186,15 +186,18 @@ async def _upsert_progress(
     loader: BulkLoader,
     table_name: str,
     status: str,
-    rows_transferred: int = 0,
-    total_rows: int = 0,
-    error: str | None = None,
+    rows_transferred: int,
+    total_rows: int,
+    error: str | Nothing,
 ) -> None:
     """Record where a table's transfer got to.
 
     The clock is read here and passed down, so both families stamp the same
     instant rather than each calling `now()` for itself.
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    error = resolved(error, None)
     await loader["write_progress"](
         conn,
         table_name,
@@ -239,8 +242,7 @@ async def _transfer_table(
     }
 
     await _upsert_progress(
-        target_conn, target_loader, table, "in_progress", 0, total_rows
-    )
+        target_conn, target_loader, table, "in_progress", 0, total_rows, error=NOTHING)
 
     if on_progress:
         on_progress(progress)
@@ -264,8 +266,7 @@ async def _transfer_table(
 
         await _upsert_progress(
             target_conn, target_loader, table, "in_progress",
-            rows_transferred, total_rows,
-        )
+            rows_transferred, total_rows, error=NOTHING)
 
         progress["rows_transferred"] = rows_transferred
         if on_progress:
@@ -275,8 +276,7 @@ async def _transfer_table(
     progress["rows_transferred"] = rows_transferred
     await _upsert_progress(
         target_conn, target_loader, table, "completed",
-        rows_transferred, total_rows,
-    )
+        rows_transferred, total_rows, error=NOTHING)
 
     if on_progress:
         on_progress(progress)
@@ -298,9 +298,9 @@ async def bulk_transfer(
     schema_path: str | Path,
     *,
     batch_size: int = 1000,
-    tables: list[str] | None = None,
+    tables: list[str] | Nothing,
     expand_enums: bool = True,
-    on_progress: Callable[[TableTransferProgress], None] | None = None,
+    on_progress: Callable[[TableTransferProgress], None] | Nothing,
     resume: bool = True,
 ) -> BulkTransferResult:
     """
@@ -332,6 +332,10 @@ async def bulk_transfer(
     Raises:
         TransferError: If schema migration or critical setup fails
     """
+    # THE VISIBLE RESOLVE. A default would hide this inside the
+    # signature, where no reader sees it happen and no test reaches it.
+    tables = resolved(tables, None)
+    on_progress = resolved(on_progress, None)
     start = datetime.now(UTC)
 
     # Step 1: Schema migration on target
@@ -521,10 +525,13 @@ async def bulk_transfer(
                     errors[table] = error_msg
                     logger.error(f"Failed to transfer {table}: {error_msg}")
 
+                    # A TABLE THAT FAILED MOVED NO ROWS, which is zero rather
+                    # than absent. These two carried `= 0` in the signature, so
+                    # every caller that omitted them was recorded as having
+                    # moved nothing whether or not that was true.
                     await _upsert_progress(
                         target_conn, target_loader, table, "failed",
-                        error=error_msg,
-                    )
+                        rows_transferred=0, total_rows=0, error=error_msg)
                     if on_progress:
                         on_progress({
                             "table": table,
