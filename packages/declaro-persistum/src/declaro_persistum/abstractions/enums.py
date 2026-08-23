@@ -15,6 +15,8 @@ Pattern:
 from collections.abc import Callable
 from typing import Any
 
+from declaro_persistum.types import Schema
+
 # Prefix for auto-generated enum lookup tables
 ENUM_TABLE_PREFIX = "_dp_enum_"
 
@@ -219,7 +221,7 @@ _AS_ENUM_COLUMN: dict[bool, Callable[[dict[str, Any], str, str], dict[str, Any]]
 }
 
 
-def expand_schema_enums(schema: dict[str, Any]) -> dict[str, Any]:
+def expand_schema_enums(schema: Schema) -> dict[str, Any]:
     """Expand all Literal type columns into lookup tables + FK constraints.
 
     Args:

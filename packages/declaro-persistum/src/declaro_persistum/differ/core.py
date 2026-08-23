@@ -469,7 +469,7 @@ def _diff_table(
 
 
 @helper
-def _with_unique_folded(table: dict[str, Any]) -> dict[str, Column]:
+def _with_unique_folded(table: Table) -> dict[str, Column]:
     """A table's columns, with single-column unique indexes folded onto them.
 
     The same fold `inspector.shared.apply_unique_columns` performs on the way

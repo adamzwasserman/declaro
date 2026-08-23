@@ -47,7 +47,7 @@ from declaro_persistum.query.expressions import (  # noqa: F401
     render_order_term,
     render_subquery,
 )
-from declaro_persistum.types import NOTHING, Dialect, Nothing, Schema, resolved
+from declaro_persistum.types import NOTHING, Dialect, Nothing, Schema, Table, resolved
 
 __all__ = [
     "SQLFunction",
@@ -76,7 +76,7 @@ class SQLFunction(TypedDict):
 
 
 @helper
-def _refuse_unknown_table(name: str, schema: Schema) -> dict[str, Any]:
+def _refuse_unknown_table(name: str, schema: Schema) -> Table:
     """A name the schema does not hold, named beside the ones it does."""
     raise ValueError(
         f"Table {name!r} not found in schema. Available: {sorted(schema)}"
@@ -84,19 +84,19 @@ def _refuse_unknown_table(name: str, schema: Schema) -> dict[str, Any]:
 
 
 @helper
-def _the_known_table(name: str, schema: Schema) -> dict[str, Any]:
+def _the_known_table(name: str, schema: Schema) -> Table:
     """The schema holds this name, so its own definition is the answer."""
     return schema[name]
 
 
-_WHEN_UNKNOWN_TABLE: dict[bool, Callable[[str, Schema], dict[str, Any]]] = {
+_WHEN_UNKNOWN_TABLE: dict[bool, Callable[[str, Schema], Table]] = {
     True: _the_known_table,
     False: _refuse_unknown_table,
 }
 
 
 @helper
-def table(name: str, schema: Schema) -> dict[str, Any]:
+def table(name: str, schema: Schema) -> Table:
     """Look a table up in the schema, failing loudly if it is absent.
 
     This returned a `TableProxy` whose `__getattr__` manufactured a

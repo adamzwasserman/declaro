@@ -7,7 +7,7 @@ queries are byte-for-byte the ones that were there: this was a de-classing, not
 a rewrite, so nothing about what PostgreSQL is asked has changed.
 """
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from functools import reduce
 from typing import Any, NoReturn
 
@@ -69,7 +69,15 @@ async def _the_tables_and_views(
     return schema, await introspect_views(connection, schema_name=schema_name)
 
 
-_WHEN_VIEWS_ARE_WANTED: dict[bool, Any] = {
+# Both entries read the same database; only one also reads its views. Typed
+# `Any` this said nothing, and mypy could not tell the caller what it had.
+_WHEN_VIEWS_ARE_WANTED: dict[
+    bool,
+    Callable[
+        [FetchingConnection, Schema, str],
+        Awaitable[Schema | tuple[Schema, dict[str, View]]],
+    ],
+] = {
     True: _the_tables_and_views,
     False: _the_tables_alone,
 }

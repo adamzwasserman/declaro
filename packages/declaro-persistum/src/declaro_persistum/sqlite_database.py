@@ -22,7 +22,7 @@ from declaro_persistum.database import (
     new_database,
     writing,
 )
-from declaro_persistum.types import Dialect
+from declaro_persistum.types import DbapiConnection, Dialect
 from declaro_persistum.writers import WRITERS
 
 __all__ = ["open_sqlite", "connect_sqlite"]
@@ -42,7 +42,7 @@ async def connect_sqlite(db: Database) -> Any:
 
 
 @boundary
-async def _close_connection(conn: Any) -> int:
+async def _close_connection(conn: DbapiConnection) -> int:
     await conn.close()
     return 1
 

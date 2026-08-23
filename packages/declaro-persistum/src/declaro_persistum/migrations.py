@@ -10,7 +10,7 @@ from `migrations` had to change.
 """
 
 
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -211,6 +211,8 @@ from declaro_persistum.types import (
     NOTHING,
     Dialect,
     Nothing,
+    Schema,
+    View,
     is_nothing,
     resolved,
 )
@@ -270,7 +272,7 @@ async def _no_orphan_recovery(_db: Database) -> int:
     return 0
 
 
-_ORPHAN_RECOVERY: dict[bool, Callable[[Database], Coroutine[Any, Any, int]]] = {
+_ORPHAN_RECOVERY: dict[bool, Callable[[Database], Awaitable[int]]] = {
     True: _recover_orphaned_tmp_tables,
     False: _no_orphan_recovery,
 }
@@ -311,7 +313,7 @@ async def _read_the_schema_file(
 _WHEN_THE_SCHEMA_FILE_IS_THERE: dict[
     bool,
     Callable[
-        [Database, Dialect, Path, bool, bool], Coroutine[Any, Any, _Migration]
+        [Database, Dialect, Path, bool, bool], Awaitable[_Migration]
     ],
 ] = {
     True: _read_the_schema_file,
@@ -361,7 +363,7 @@ async def _nothing_has_changed(
 _WHEN_THE_DATABASE_IS_CURRENT: dict[
     bool,
     Callable[
-        [Database, Dialect, Path, bool, str], Coroutine[Any, Any, _Migration]
+        [Database, Dialect, Path, bool, str], Awaitable[_Migration]
     ],
 ] = {
     True: _nothing_has_changed,
@@ -388,7 +390,7 @@ async def _consult_the_stamp(
 _WHEN_THE_STAMP_IS_WORTH_READING: dict[
     bool,
     Callable[
-        [Database, Dialect, Path, bool, str], Coroutine[Any, Any, _Migration]
+        [Database, Dialect, Path, bool, str], Awaitable[_Migration]
     ],
 ] = {
     True: _consult_the_stamp,
@@ -433,8 +435,8 @@ def _how_the_migration_stands(answer: Any, errors: list[str]) -> str:
 @boundary
 async def _the_answer_already_settled(
     plan: _Migration,
-    _target_schema: dict[str, Any],
-    _target_views: dict[str, Any],
+    _target_schema: Schema,
+    _target_views: dict[str, View],
     _errors: list[str],
 ) -> dict[str, Any]:
     """The file was missing or the stamp was clean. That answer stands."""
@@ -444,8 +446,8 @@ async def _the_answer_already_settled(
 @boundary
 async def _refuse_an_invalid_schema(
     _plan: _Migration,
-    target_schema: dict[str, Any],
-    _target_views: dict[str, Any],
+    target_schema: Schema,
+    _target_views: dict[str, View],
     errors: list[str],
 ) -> dict[str, Any]:
     """Every error is logged by itself, and all of them reach the caller."""
@@ -463,8 +465,8 @@ async def _refuse_an_invalid_schema(
 @boundary
 async def _stamp_an_empty_schema(
     plan: _Migration,
-    _target_schema: dict[str, Any],
-    _target_views: dict[str, Any],
+    _target_schema: Schema,
+    _target_views: dict[str, View],
 ) -> dict[str, Any]:
     """A models file declaring no table is stamped, so the next call skips."""
     logger.warning("No tables found in schema models")
@@ -480,7 +482,7 @@ async def _stamp_an_empty_schema(
 
 
 @boundary
-def _expand_the_enums(target_schema: dict[str, Any]) -> dict[str, Any]:
+def _expand_the_enums(target_schema: Schema) -> dict[str, Any]:
     """Every Literal column becomes a lookup table and an FK to it."""
     expanded = expand_schema_enums(target_schema)
     logger.info(
@@ -490,7 +492,7 @@ def _expand_the_enums(target_schema: dict[str, Any]) -> dict[str, Any]:
 
 
 @helper
-def _the_schema_as_declared(target_schema: dict[str, Any]) -> dict[str, Any]:
+def _the_schema_as_declared(target_schema: Schema) -> dict[str, Any]:
     """Expansion was declined, so a Literal column stays a plain column."""
     return target_schema
 
@@ -504,8 +506,8 @@ _ENUM_EXPANSION: dict[bool, Callable[[dict[str, Any]], dict[str, Any]]] = {
 @boundary
 async def _nothing_to_change(
     plan: _Migration,
-    target_schema: dict[str, Any],
-    current_schema: dict[str, Any],
+    target_schema: Schema,
+    current_schema: Schema,
     _diff_result: dict[str, Any],
 ) -> dict[str, Any]:
     """The database already holds what the schema declares."""
@@ -524,8 +526,8 @@ async def _nothing_to_change(
 @boundary
 async def _refuse_ambiguous_changes(
     _plan: _Migration,
-    target_schema: dict[str, Any],
-    current_schema: dict[str, Any],
+    target_schema: Schema,
+    current_schema: Schema,
     diff_result: dict[str, Any],
 ) -> dict[str, Any]:
     """A rename and a drop-plus-add look alike, and only a person can say."""
@@ -544,8 +546,8 @@ async def _refuse_ambiguous_changes(
 @boundary
 async def _record_the_migration(
     plan: _Migration,
-    target_schema: dict[str, Any],
-    current_schema: dict[str, Any],
+    target_schema: Schema,
+    current_schema: Schema,
     skipped_operations: list[dict[str, Any]],
     result: dict[str, Any],
 ) -> dict[str, Any]:
@@ -572,8 +574,8 @@ async def _record_the_migration(
 @boundary
 async def _report_a_failed_apply(
     _plan: _Migration,
-    target_schema: dict[str, Any],
-    current_schema: dict[str, Any],
+    target_schema: Schema,
+    current_schema: Schema,
     skipped_operations: list[dict[str, Any]],
     result: dict[str, Any],
 ) -> dict[str, Any]:
@@ -601,7 +603,7 @@ _WHEN_THE_OPERATIONS_LANDED: dict[
             list[dict[str, Any]],
             dict[str, Any],
         ],
-        Coroutine[Any, Any, dict[str, Any]],
+        Awaitable[dict[str, Any]],
     ],
 ] = {
     True: _record_the_migration,
@@ -612,8 +614,8 @@ _WHEN_THE_OPERATIONS_LANDED: dict[
 @boundary
 async def _apply_and_report(
     plan: _Migration,
-    target_schema: dict[str, Any],
-    current_schema: dict[str, Any],
+    target_schema: Schema,
+    current_schema: Schema,
     operations: list[dict[str, Any]],
     execution_order: list[int],
     skipped_operations: list[dict[str, Any]],
@@ -636,8 +638,8 @@ async def _apply_and_report(
 @boundary
 async def _run_the_safe_operations(
     plan: _Migration,
-    target_schema: dict[str, Any],
-    current_schema: dict[str, Any],
+    target_schema: Schema,
+    current_schema: Schema,
     diff_result: dict[str, Any],
     safe_order: list[int],
     skipped_operations: list[dict[str, Any]],
@@ -656,8 +658,8 @@ async def _run_the_safe_operations(
 @boundary
 async def _report_everything_deferred(
     _plan: _Migration,
-    target_schema: dict[str, Any],
-    current_schema: dict[str, Any],
+    target_schema: Schema,
+    current_schema: Schema,
     _diff_result: dict[str, Any],
     _safe_order: list[int],
     skipped_operations: list[dict[str, Any]],
@@ -689,7 +691,7 @@ _WHEN_ANYTHING_IS_SAFE_TO_RUN: dict[
             list[int],
             list[dict[str, Any]],
         ],
-        Coroutine[Any, Any, dict[str, Any]],
+        Awaitable[dict[str, Any]],
     ],
 ] = {
     True: _run_the_safe_operations,
@@ -700,8 +702,8 @@ _WHEN_ANYTHING_IS_SAFE_TO_RUN: dict[
 @boundary
 async def _run_every_operation(
     plan: _Migration,
-    target_schema: dict[str, Any],
-    current_schema: dict[str, Any],
+    target_schema: Schema,
+    current_schema: Schema,
     diff_result: dict[str, Any],
 ) -> dict[str, Any]:
     """Not a replica, so everything the differ emitted runs here."""
@@ -718,8 +720,8 @@ async def _run_every_operation(
 @boundary
 async def _defer_what_cannot_replicate(
     plan: _Migration,
-    target_schema: dict[str, Any],
-    current_schema: dict[str, Any],
+    target_schema: Schema,
+    current_schema: Schema,
     diff_result: dict[str, Any],
 ) -> dict[str, Any]:
     """On an embedded replica, reconstruction is left for `migrate-remote`.
@@ -753,7 +755,7 @@ _WHEN_THE_TARGET_IS_A_REPLICA: dict[
     bool,
     Callable[
         [_Migration, dict[str, Any], dict[str, Any], dict[str, Any]],
-        Coroutine[Any, Any, dict[str, Any]],
+        Awaitable[dict[str, Any]],
     ],
 ] = {
     True: _defer_what_cannot_replicate,
@@ -764,8 +766,8 @@ _WHEN_THE_TARGET_IS_A_REPLICA: dict[
 @boundary
 async def _choose_what_to_run(
     plan: _Migration,
-    target_schema: dict[str, Any],
-    current_schema: dict[str, Any],
+    target_schema: Schema,
+    current_schema: Schema,
     diff_result: dict[str, Any],
 ) -> dict[str, Any]:
     """A replica runs less than a primary does, and says what it left out."""
@@ -778,7 +780,7 @@ _WHEN_THE_CHANGES_ARE_AMBIGUOUS: dict[
     bool,
     Callable[
         [_Migration, dict[str, Any], dict[str, Any], dict[str, Any]],
-        Coroutine[Any, Any, dict[str, Any]],
+        Awaitable[dict[str, Any]],
     ],
 ] = {
     True: _refuse_ambiguous_changes,
@@ -789,8 +791,8 @@ _WHEN_THE_CHANGES_ARE_AMBIGUOUS: dict[
 @boundary
 async def _consider_what_changed(
     plan: _Migration,
-    target_schema: dict[str, Any],
-    current_schema: dict[str, Any],
+    target_schema: Schema,
+    current_schema: Schema,
     diff_result: dict[str, Any],
 ) -> dict[str, Any]:
     """Log the planned operations, then ask whether any of them is ambiguous."""
@@ -808,7 +810,7 @@ _WHEN_THERE_IS_WORK: dict[
     bool,
     Callable[
         [_Migration, dict[str, Any], dict[str, Any], dict[str, Any]],
-        Coroutine[Any, Any, dict[str, Any]],
+        Awaitable[dict[str, Any]],
     ],
 ] = {
     True: _consider_what_changed,
@@ -819,8 +821,8 @@ _WHEN_THERE_IS_WORK: dict[
 @boundary
 async def _migrate_the_tables(
     plan: _Migration,
-    target_schema: dict[str, Any],
-    target_views: dict[str, Any],
+    target_schema: Schema,
+    target_views: dict[str, View],
 ) -> dict[str, Any]:
     """Introspect the database, diff it against the schema, run the result."""
     logger.info(f"Loaded {len(target_schema)} tables from schema models")
@@ -871,7 +873,7 @@ _WHEN_THE_SCHEMA_DECLARES_TABLES: dict[
     bool,
     Callable[
         [_Migration, dict[str, Any], dict[str, Any]],
-        Coroutine[Any, Any, dict[str, Any]],
+        Awaitable[dict[str, Any]],
     ],
 ] = {
     True: _migrate_the_tables,
@@ -882,8 +884,8 @@ _WHEN_THE_SCHEMA_DECLARES_TABLES: dict[
 @boundary
 async def _migrate_the_declared_schema(
     plan: _Migration,
-    target_schema: dict[str, Any],
-    target_views: dict[str, Any],
+    target_schema: Schema,
+    target_views: dict[str, View],
     _errors: list[str],
 ) -> dict[str, Any]:
     """The schema is valid, so the only question left is whether it has any
@@ -897,7 +899,7 @@ _NEXT_STEP: dict[
     str,
     Callable[
         [_Migration, dict[str, Any], dict[str, Any], list[str]],
-        Coroutine[Any, Any, dict[str, Any]],
+        Awaitable[dict[str, Any]],
     ],
 ] = {
     "answered": _the_answer_already_settled,

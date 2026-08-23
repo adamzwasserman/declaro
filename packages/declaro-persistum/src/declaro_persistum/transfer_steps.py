@@ -9,7 +9,7 @@ it has seen before. Every name is re-exported from `transfer`."""
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any, Literal, TypedDict, cast
 
@@ -20,7 +20,7 @@ from declaro_persistum.bulk_loader import (
     BulkLoader,
 )
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, TransferError
-from declaro_persistum.types import NOTHING, Nothing, resolved
+from declaro_persistum.types import NOTHING, Nothing, Schema, resolved
 
 logger = logging.getLogger(__name__)
 
@@ -473,7 +473,7 @@ _RESUME_ACTION: dict[
     str,
     Callable[
         [_Run, str, list[str], dict[str, Any] | None],
-        Coroutine[Any, Any, _TableOutcome],
+        Awaitable[_TableOutcome],
     ],
 ] = {
     "already done": _already_transferred,
@@ -520,7 +520,7 @@ async def _from_the_beginning(
 
 _WHEN_RESUMING: dict[
     bool,
-    Callable[[_Run, str, list[str]], Coroutine[Any, Any, _TableOutcome]],
+    Callable[[_Run, str, list[str]], Awaitable[_TableOutcome]],
 ] = {
     True: _from_where_it_got_to,
     False: _from_the_beginning,
@@ -547,7 +547,7 @@ async def _skip_a_table_with_no_columns(
 
 _WHEN_THE_TABLE_HAS_COLUMNS: dict[
     bool,
-    Callable[[_Run, str, list[str]], Coroutine[Any, Any, _TableOutcome]],
+    Callable[[_Run, str, list[str]], Awaitable[_TableOutcome]],
 ] = {
     True: _transfer_or_resume,
     False: _skip_a_table_with_no_columns,
@@ -613,7 +613,7 @@ _WHEN_A_NAMED_TABLE_IS_MISSING: dict[
 def _the_tables_the_caller_named(
     tables: list[str] | None,
     all_tables: list[str],
-    source_schema: dict[str, Any],
+    source_schema: Schema,
 ) -> list[str]:
     """The names the caller gave, once the source is known to have them all.
 
@@ -644,7 +644,7 @@ def _the_tables_the_caller_named(
 def _every_user_table(
     _tables: list[str] | None,
     all_tables: list[str],
-    _source_schema: dict[str, Any],
+    _source_schema: Schema,
 ) -> list[str]:
     """No names given, so everything the source holds that is not ours."""
     return [
@@ -728,7 +728,7 @@ async def _leave_fk_checks_on(
 # restore step needs to know afterwards.
 _WHEN_THERE_ARE_CYCLES: dict[
     bool,
-    Callable[[BulkLoader, Any, list[str]], Coroutine[Any, Any, int]],
+    Callable[[BulkLoader, Any, list[str]], Awaitable[int]],
 ] = {
     True: _turn_fk_checks_off,
     False: _leave_fk_checks_on,
@@ -767,7 +767,7 @@ async def _leave_the_checks_as_they_are(_loader: BulkLoader, _conn: Any) -> int:
 
 # How many connections had enforcement put back: one or none.
 _WHEN_THE_CHECKS_WERE_TURNED_OFF: dict[
-    bool, Callable[[BulkLoader, Any], Coroutine[Any, Any, int]]
+    bool, Callable[[BulkLoader, Any], Awaitable[int]]
 ] = {
     True: _turn_fk_checks_back_on,
     False: _leave_the_checks_as_they_are,

@@ -92,6 +92,34 @@ class FetchingConnection(Protocol):
     async def close(self, *args: Any, **kwargs: Any) -> Any: ...
 
 
+@runtime_checkable
+class ReplicaConnection(Protocol):
+    """pyturso's `turso.aio.sync.ConnectionSync`: DBAPI plus replication.
+
+    `turso.aio.connect` and `turso.aio.sync.connect` return different types,
+    and every function here took `Any`, so nothing said which one it needed.
+    `_pull_until_level` requires `pull`; a local connection has no such method
+    and the mistake would surface only at runtime, on a replica, in
+    production. Signatures verified against pyturso on 2026-08-23:
+    `ConnectionSync` adds `pull`, `push`, `checkpoint` and `stats` to
+    `Connection`'s `execute`, `commit`, `rollback` and `close`.
+    """
+
+    async def execute(self, *args: Any, **kwargs: Any) -> Any: ...
+
+    async def commit(self) -> Any: ...
+
+    async def rollback(self) -> Any: ...
+
+    async def close(self) -> Any: ...
+
+    async def pull(self) -> bool: ...
+
+    async def push(self) -> Any: ...
+
+    async def checkpoint(self) -> Any: ...
+
+
 # =============================================================================
 # Which tables are ours
 # =============================================================================

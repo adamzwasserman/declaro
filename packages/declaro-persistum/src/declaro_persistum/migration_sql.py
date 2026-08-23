@@ -9,7 +9,7 @@ should run. That decision lives in `migrations`.
 import hashlib
 import logging
 import uuid
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypedDict, cast
@@ -322,7 +322,7 @@ async def _run_on_dbapi(conn: Any, sql: str, params: tuple[Any, ...]) -> None:
 
 
 _WRITERS: dict[
-    str, Callable[[Any, str, tuple[Any, ...]], Coroutine[Any, Any, None]]
+    str, Callable[[Any, str, tuple[Any, ...]], Awaitable[None]]
 ] = {
     "postgresql": _run_on_postgres,
     "sqlite": _run_on_dbapi,
@@ -376,7 +376,7 @@ async def _read_stamp_from_dbapi(conn: Any, sql: str, key: str) -> str | None:
 
 
 _STAMP_READERS: dict[
-    str, Callable[[Any, str, str], Coroutine[Any, Any, str | None]]
+    str, Callable[[Any, str, str], Awaitable[str | None]]
 ] = {
     "postgresql": _read_stamp_from_postgres,
     "sqlite": _read_stamp_from_dbapi,
@@ -480,7 +480,7 @@ def _the_database_is_empty(schema_path: Path) -> bool:
 
 
 _WHEN_THE_STAMP_MATCHES: dict[
-    bool, Callable[[Any, Path], Coroutine[Any, Any, bool]]
+    bool, Callable[[Any, Path], Awaitable[bool]]
 ] = {
     True: _the_stamp_agrees,
     False: _the_stamp_disagrees,
@@ -505,7 +505,7 @@ async def _count_tables_on_dbapi(conn: Any, sql: str) -> bool:
     return await cursor.fetchone() is not None
 
 
-_TABLE_COUNTERS: dict[str, Callable[[Any, str], Coroutine[Any, Any, bool]]] = {
+_TABLE_COUNTERS: dict[str, Callable[[Any, str], Awaitable[bool]]] = {
     "postgresql": _count_tables_on_postgres,
     "sqlite": _count_tables_on_dbapi,
 }
@@ -680,7 +680,7 @@ async def _rename_into_place(conn: Any, tmp_name: str, original_name: str) -> in
 
 
 _WHEN_THE_ORIGINAL_SURVIVED: dict[
-    bool, Callable[[Any, str, str], Coroutine[Any, Any, int]]
+    bool, Callable[[Any, str, str], Awaitable[int]]
 ] = {
     True: _drop_the_leftover,
     False: _rename_into_place,
@@ -747,7 +747,7 @@ async def _clear_the_stamp(conn: Any, recovered: int) -> int:
 
 
 _WHEN_ANYTHING_WAS_RECOVERED: dict[
-    bool, Callable[[Any, int], Coroutine[Any, Any, int]]
+    bool, Callable[[Any, int], Awaitable[int]]
 ] = {
     True: _clear_the_stamp,
     False: _leave_the_stamp,

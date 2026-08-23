@@ -22,6 +22,7 @@ from declaro_persistum.types import (
     NOTHING,
     ApplyResult,
     Column,
+    FetchingConnection,
     Nothing,
     Operation,
     View,
@@ -63,7 +64,7 @@ def get_transaction_mode() -> str:
 
 @boundary
 async def apply(
-    connection: Any,
+    connection: FetchingConnection,
     operations: list[Operation],
     execution_order: list[int],
     *,
@@ -93,7 +94,7 @@ async def apply(
 
 @helper
 async def _preview(
-    _connection: Any,
+    _connection: FetchingConnection,
     _operations: list[Operation],
     _execution_order: list[int],
     _per_operation: list[list[str]],
@@ -110,7 +111,9 @@ async def _preview(
 
 
 @boundary
-async def _executed_statements(connection: Any, statements: list[str]) -> list[str]:
+async def _executed_statements(
+    connection: FetchingConnection, statements: list[str]
+) -> list[str]:
     """Run each statement in order and hand back the ones that reached the engine.
 
     One result comes back per statement, so the count of results is the count
@@ -123,7 +126,7 @@ async def _executed_statements(connection: Any, statements: list[str]) -> list[s
 
 @boundary
 async def _execute_operation(
-    connection: Any,
+    connection: FetchingConnection,
     operations: list[Operation],
     execution_order: list[int],
     per_operation: list[list[str]],
@@ -147,7 +150,7 @@ async def _execute_operation(
 
 @boundary
 async def _run_batch(
-    connection: Any,
+    connection: FetchingConnection,
     operations: list[Operation],
     execution_order: list[int],
     per_operation: list[list[str]],

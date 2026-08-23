@@ -21,7 +21,7 @@ from declaro_persistum.database import (
     new_database,
     writing,
 )
-from declaro_persistum.types import Dialect
+from declaro_persistum.types import Dialect, FetchingConnection
 from declaro_persistum.writers import WRITERS
 
 __all__ = ["open_postgresql", "connect_postgresql"]
@@ -38,7 +38,7 @@ async def connect_postgresql(db: Database) -> Any:
 
 
 @boundary
-async def _close_connection(conn: Any) -> int:
+async def _close_connection(conn: FetchingConnection) -> int:
     await conn.close()
     return 1
 

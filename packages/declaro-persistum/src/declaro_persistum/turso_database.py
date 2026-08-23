@@ -69,7 +69,7 @@ from declaro_persistum.database import (
     writing,
 )
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE
-from declaro_persistum.types import Dialect, Nothing, resolved
+from declaro_persistum.types import DbapiConnection, Dialect, Nothing, ReplicaConnection, resolved
 from declaro_persistum.writers import WRITERS
 
 __all__ = ["open_turso", "migrating", "negotiate_journal_mode", "replicate_path"]
@@ -91,7 +91,7 @@ _BUSY_TIMEOUT_S = 5.0
 
 
 @boundary
-async def _pull_until_level(conn: Any) -> bool:
+async def _pull_until_level(conn: ReplicaConnection) -> bool:
     """Keep pulling until the primary reports nothing further.
 
     pyturso's `pull()` fetches ONE batch and returns whether it fetched
@@ -106,7 +106,9 @@ async def _pull_until_level(conn: Any) -> bool:
 
 
 @boundary
-async def _pull_batches(conn: Any, budget: int, fetched_any: bool) -> bool:
+async def _pull_batches(
+    conn: ReplicaConnection, budget: int, fetched_any: bool
+) -> bool:
     """Pull one more batch while the budget allows, and report what happened.
 
     `budget` counts the batches still allowed. It reaches zero only when the
@@ -121,7 +123,9 @@ async def _pull_batches(conn: Any, budget: int, fetched_any: bool) -> bool:
 
 
 @boundary
-async def _pull_one_more(conn: Any, budget: int, fetched_any: bool) -> bool:
+async def _pull_one_more(
+    conn: ReplicaConnection, budget: int, fetched_any: bool
+) -> bool:
     """Fetch one batch. Anything fetched means ask again; nothing means level."""
     fetched = await conn.pull()
     return (
@@ -198,7 +202,7 @@ _DEFAULT_RETRY_DELAY_S = 0.1
 
 
 @boundary
-async def _set_journal_mode(conn: Any, mode: str) -> str:
+async def _set_journal_mode(conn: DbapiConnection, mode: str) -> str:
     """Request a journal mode and report what the engine granted.
 
     THE CURSOR MUST BE FETCHED. An unfetched PRAGMA is a silent no-op in
@@ -306,7 +310,7 @@ async def migrating(db: Database) -> AsyncIterator[Any]:
 
 
 @boundary
-async def _close_connection(conn: Any) -> int:
+async def _close_connection(conn: DbapiConnection) -> int:
     await conn.close()
     return 1
 
@@ -453,7 +457,7 @@ async def _open_replicated(
         return held
 
     @helper
-    async def close_connection(_conn: Any) -> int:
+    async def close_connection(_conn: DbapiConnection) -> int:
         # The held connection outlives every write. `close(db)` releases it.
         return 0
 

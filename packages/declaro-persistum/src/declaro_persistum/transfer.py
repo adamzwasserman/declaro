@@ -183,7 +183,7 @@ from declaro_persistum.transfer_steps import (
 from declaro_persistum.transfer_steps import (
     logger as logger,
 )
-from declaro_persistum.types import NOTHING, Dialect, Nothing, resolved
+from declaro_persistum.types import NOTHING, Dialect, Nothing, Schema, Table, resolved
 
 
 class BulkTransferResult(TypedDict):
@@ -204,7 +204,7 @@ class BulkTransferResult(TypedDict):
 
 
 @helper
-def _parents_named_by(table_def: dict[str, Any]) -> list[str]:
+def _parents_named_by(table_def: Table) -> list[str]:
     """Every table this one names as a parent, in either schema shape.
 
     A declared schema puts the parent in a column's `references`, written
@@ -225,7 +225,7 @@ def _parents_named_by(table_def: dict[str, Any]) -> list[str]:
 
 @helper
 def _build_table_fk_graph(
-    schema: dict[str, Any],
+    schema: Schema,
     tables: list[str],
 ) -> dict[str, set[str]]:
     """
@@ -247,7 +247,7 @@ def _build_table_fk_graph(
 
 @helper
 def _toposort_tables(
-    schema: dict[str, Any],
+    schema: Schema,
     tables: list[str],
 ) -> tuple[list[str], list[str]]:
     """
@@ -293,7 +293,7 @@ async def _ensure_progress_table(conn: Any, loader: BulkLoader) -> None:
 
 @boundary
 async def _transfer_one_table(
-    run: _Run, source_schema: dict[str, Any], table: str
+    run: _Run, source_schema: Schema, table: str
 ) -> _TableOutcome:
     """Everything one table goes through, from its columns to its rows."""
     columns = list(source_schema.get(table, {}).get("columns", {}).keys())
