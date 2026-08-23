@@ -350,7 +350,7 @@ def test_an_explicit_db_type_still_bypasses_the_check() -> None:
     """
     import inspect
 
-    from declaro_persistum import pydantic_loader
+    from declaro_persistum import model_columns as pydantic_loader
 
     source = inspect.getsource(pydantic_loader)
 
