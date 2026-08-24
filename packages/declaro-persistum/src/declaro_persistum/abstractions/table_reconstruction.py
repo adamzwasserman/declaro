@@ -667,7 +667,7 @@ def _generate_create_table_sql(
 
     # Written through the shared clause so a rebuilt table cannot spell a
     # constraint differently from the create that first made it.
-    from declaro_persistum.applier.shared import constraint_clause
+    from declaro_persistum.applier.spelling import constraint_clause
 
     pk_columns = [
         col_name for col_name, col_def in columns.items() if col_def.get("primary_key")

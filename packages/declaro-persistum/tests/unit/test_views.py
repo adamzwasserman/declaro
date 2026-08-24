@@ -7,6 +7,7 @@ Tests the View TypedDict, loader parsing, and applier generation.
 
 import pytest
 
+from declaro_persistum.applier.rendering import statements_for
 from declaro_persistum.types import NOTHING, View
 from tests.conftest import probe_url
 
@@ -66,17 +67,28 @@ class TestViewLoading:
     """Tests for loading views from TOML."""
 
 class TestViewApplierPostgreSQL:
-    """Tests for PostgreSQL view applier."""
+    """The statements PostgreSQL writes for a view.
+
+    THESE GO THROUGH THE RENDERER NOW. They used to call
+    `postgresql.generate_create_view` directly, which was one of thirty-two
+    generator functions this package kept in two tables. The text lives in
+    `applier/templates.py` and `statements_for` fills it, so a test that asks
+    what PostgreSQL emits reads the same path a migration does.
+    """
 
     def test_create_view_sql(self):
-        """Generate CREATE VIEW SQL."""
-        from declaro_persistum.applier.postgresql import generate_create_view
-
-        view: View = {
-            "name": "active_users",
-            "query": "SELECT id, email FROM users WHERE status = 'active'",
-        }
-        statements = generate_create_view(view)
+        """A plain view is replaced where it stands."""
+        statements = statements_for(
+            {
+                "op": "create_view",
+                "table": "",
+                "details": {
+                    "name": "active_users",
+                    "query": "SELECT id, email FROM users WHERE status = 'active'",
+                },
+            },
+            "postgresql",
+        )
 
         assert statements == [
             'CREATE OR REPLACE VIEW "active_users" AS\n'
@@ -84,15 +96,19 @@ class TestViewApplierPostgreSQL:
         ]
 
     def test_create_materialized_view_sql(self):
-        """Generate CREATE MATERIALIZED VIEW SQL."""
-        from declaro_persistum.applier.postgresql import generate_create_view
-
-        view: View = {
-            "name": "user_stats",
-            "query": "SELECT COUNT(*) as total FROM users",
-            "materialized": True,
-        }
-        statements = generate_create_view(view)
+        """A materialized view holds its rows, so it cannot be replaced."""
+        statements = statements_for(
+            {
+                "op": "create_view",
+                "table": "",
+                "details": {
+                    "name": "user_stats",
+                    "query": "SELECT COUNT(*) as total FROM users",
+                    "materialized": True,
+                },
+            },
+            "postgresql",
+        )
 
         assert statements == [
             'CREATE MATERIALIZED VIEW "user_stats" AS\n'
@@ -100,20 +116,31 @@ class TestViewApplierPostgreSQL:
         ]
 
     def test_drop_view_sql(self):
-        """Generate DROP VIEW SQL."""
-        from declaro_persistum.applier.postgresql import generate_drop_view
-
-        sql = generate_drop_view("active_users", materialized=False)
-
-        assert sql == 'DROP VIEW IF EXISTS "active_users"'
+        """DROP VIEW, and IF EXISTS so a repeat is not an error."""
+        assert statements_for(
+            {
+                "op": "drop_view",
+                "table": "",
+                "details": {"name": "active_users", "materialized": False},
+            },
+            "postgresql",
+        ) == ['DROP VIEW IF EXISTS "active_users"']
 
     def test_drop_materialized_view_sql(self):
-        """Generate DROP MATERIALIZED VIEW SQL."""
-        from declaro_persistum.applier.postgresql import generate_drop_view
+        """DROP MATERIALIZED VIEW, which is a different statement.
 
-        sql = generate_drop_view("user_stats", materialized=True)
+        Emitting DROP VIEW against a materialized one is refused with
+        WrongObjectTypeError rather than ignored.
+        """
+        assert statements_for(
+            {
+                "op": "drop_view",
+                "table": "",
+                "details": {"name": "user_stats", "materialized": True},
+            },
+            "postgresql",
+        ) == ['DROP MATERIALIZED VIEW IF EXISTS "user_stats"']
 
-        assert sql == 'DROP MATERIALIZED VIEW IF EXISTS "user_stats"'
 
 class TestViewApplierSQLite:
     """Tests for SQLite view applier."""

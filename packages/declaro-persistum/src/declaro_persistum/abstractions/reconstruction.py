@@ -27,13 +27,13 @@ from declaro_persistum.abstractions.pragma_compat import (
     table_column_names,
 )
 from declaro_persistum.applier.shared import (
-    constraint_clause,
     copy_the_shared_columns,
     refuse_the_violations,
     refuse_unwritable_column_types,
     sqlite_default,
     sqlite_type,
 )
+from declaro_persistum.applier.spelling import constraint_clause
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.types import NOTHING, Column, Nothing, Operation, changed_to, resolved
 

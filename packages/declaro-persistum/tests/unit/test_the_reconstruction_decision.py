@@ -19,13 +19,14 @@ from __future__ import annotations
 
 import pytest
 
+from declaro_persistum.applier.rendering import COMPOSERS
 from declaro_persistum.applier.shared import (
-    _SQL_GENERATORS,
     apply_reconstruction_changes,
     dry_run_preview,
     requires_reconstruction,
     single_change_property,
 )
+from declaro_persistum.applier.templates import TEMPLATES
 from declaro_persistum.differ import diff
 from declaro_persistum.types import NOTHING
 
@@ -48,7 +49,9 @@ def _alter(**changes) -> dict:
 REBUILDS = {"alter_column", "add_foreign_key", "drop_foreign_key"}
 
 
-@pytest.mark.parametrize("op", sorted(_SQL_GENERATORS))
+@pytest.mark.parametrize(
+    "op", sorted(set(TEMPLATES["sqlite"]) | set(COMPOSERS["sqlite"]))
+)
 def test_only_the_operations_sqlite_cannot_alter_rebuild(op: str) -> None:
     """A rebuild copies the whole table, so the list must be exactly right.
 

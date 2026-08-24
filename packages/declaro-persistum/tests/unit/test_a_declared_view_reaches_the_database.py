@@ -171,14 +171,15 @@ def test_every_operation_the_differ_emits_can_be_applied() -> None:
     import inspect
     import re
 
-    from declaro_persistum.applier import shared
+    from declaro_persistum.applier.rendering import COMPOSERS
+    from declaro_persistum.applier.templates import TEMPLATES
     from declaro_persistum.differ import core, extended
 
     emitted = set()
     for module in (core, extended):
         emitted |= set(re.findall(r'"op": "([a-z_]+)"', inspect.getsource(module)))
 
-    handled = set(shared._SQL_GENERATORS)
+    handled = set(TEMPLATES["sqlite"]) | set(COMPOSERS["sqlite"])
     assert emitted <= handled, (
         f"the differ emits {sorted(emitted - handled)}, which no applier can "
         f"execute"

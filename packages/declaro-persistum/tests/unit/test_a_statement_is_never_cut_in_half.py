@@ -41,7 +41,6 @@ from declaro_persistum import close, open_sqlite, open_turso, reading, writing
 from declaro_persistum.applier import apply
 from declaro_persistum.applier.shared import (
     generate_operation_sql,
-    insert_enum_values_sql,
     statements_for,
 )
 from declaro_persistum.applier.sqlite import generate_create_view
@@ -173,7 +172,13 @@ def test_the_enum_generator_returns_a_list() -> None:
     appliers split. It returns the list now, and nothing between it and the
     engine has to know what a semicolon means.
     """
-    values = insert_enum_values_sql("_dp_enum_status", {"values": ["ok", "a;b"]})
+    values = statements_for(
+        {
+            "op": "insert_enum_values",
+            "table": "_dp_enum_status",
+            "details": {"values": ["ok", "a;b"]},
+        }
+    )
 
     assert isinstance(values, list)
     assert len(values) == 2

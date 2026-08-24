@@ -207,11 +207,13 @@ def test_every_operation_the_differ_emits_can_be_rendered() -> None:
     and no generator renders raises `Unknown operation type` mid-migration,
     after earlier operations have already run.
     """
-    from declaro_persistum.applier.shared import _SQL_GENERATORS
+    from declaro_persistum.applier.rendering import COMPOSERS
+    from declaro_persistum.applier.templates import TEMPLATES
 
+    handled = set(TEMPLATES["sqlite"]) | set(COMPOSERS["sqlite"])
     _, plan = _plan("sqlite")
     emitted = {o["op"] for o in plan["operations"]}
-    missing = sorted(emitted - set(_SQL_GENERATORS))
+    missing = sorted(emitted - handled)
 
     assert not missing, (
         f"the differ emits {missing} and no SQL generator handles it, so the "
@@ -264,19 +266,39 @@ def test_every_dialect_renders_every_operation_the_differ_emits(
     )
 
 
-def test_the_two_dispatch_tables_hold_the_same_vocabulary() -> None:
-    """The drift itself, rather than the one operation that revealed it.
+def test_every_dialect_holds_the_same_operation_vocabulary() -> None:
+    """One vocabulary across three engines, asked of the tables themselves.
 
-    `postgresql.OPERATION_SQL` was a dict built inside the function on every
-    call. Hoisting it to module level is what lets this be asked at all.
+    THIS USED TO COMPARE TWO TABLES. `postgresql.OPERATION_SQL` and
+    `shared._SQL_GENERATORS` held the same fifteen keys and drifted the moment
+    either was edited: the sixteenth operation reached one and not the other,
+    and a migration died partway through with `Unknown operation type` after
+    earlier statements had already run.
+
+    There is one table per engine now and they are built from one another, so
+    the drift this was written to catch can no longer be spelled. What it asks
+    instead is that the engines answer for the same OPERATIONS, which is still
+    a real question: PostgreSQL carries rows the others do not, because it
+    alters a column where it stands and they rebuild the table.
     """
-    from declaro_persistum.applier.postgresql import OPERATION_SQL
-    from declaro_persistum.applier.shared import _SQL_GENERATORS
+    from declaro_persistum.applier.rendering import COMPOSERS
+    from declaro_persistum.applier.templates import TEMPLATES
 
-    only_shared = sorted(set(_SQL_GENERATORS) - set(OPERATION_SQL))
-    only_pg = sorted(set(OPERATION_SQL) - set(_SQL_GENERATORS))
+    # A row whose name carries a colon is a piece of an operation, not an
+    # operation. The supervisor picks between them; the differ never emits one.
+    def operations(dialect: str) -> set[str]:
+        return {
+            name
+            for name in set(TEMPLATES[dialect]) | set(COMPOSERS[dialect])
+            if ":" not in name
+        }
 
-    assert not only_shared and not only_pg, (
-        f"the two operation tables disagree. Only in shared: {only_shared}. "
-        f"Only in postgresql: {only_pg}"
+    disagreements = {
+        dialect: sorted(operations(dialect) ^ operations("sqlite"))
+        for dialect in ("postgresql", "turso")
+        if operations(dialect) != operations("sqlite")
+    }
+
+    assert not disagreements, (
+        f"the engines do not answer for the same operations: {disagreements}"
     )

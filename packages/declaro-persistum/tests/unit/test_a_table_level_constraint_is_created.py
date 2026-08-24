@@ -52,7 +52,7 @@ from typing import Any
 import pytest
 
 from declaro_persistum.applier import apply
-from declaro_persistum.applier.shared import create_table_sql
+from declaro_persistum.applier.shared import statements_for
 from declaro_persistum.differ.core import diff
 from declaro_persistum.types import NOTHING
 from tests.conftest import probe_url
@@ -114,7 +114,10 @@ def test_the_renderer_puts_the_constraint_in_the_create() -> None:
     SQLite and Turso have no ADD CONSTRAINT, so a constraint not written here
     can never be added later.
     """
-    statements = create_table_sql("t", {**DECLARED["t"], "primary_key": None})
+    statements = statements_for(
+        {"op": "create_table", "table": "t",
+         "details": {**DECLARED["t"], "primary_key": None}}
+    )
     # ONE CREATE TABLE IS ONE STATEMENT. The generator returns a list because
     # some operations are several; this one is not.
     rendered = "\n".join(statements)
@@ -125,7 +128,10 @@ def test_the_renderer_puts_the_constraint_in_the_create() -> None:
 
 def test_the_constraint_is_named_in_the_create() -> None:
     """An unnamed constraint cannot be dropped by name afterwards."""
-    statements = create_table_sql("t", {**DECLARED["t"], "primary_key": None})
+    statements = statements_for(
+        {"op": "create_table", "table": "t",
+         "details": {**DECLARED["t"], "primary_key": None}}
+    )
     # ONE CREATE TABLE IS ONE STATEMENT. The generator returns a list because
     # some operations are several; this one is not.
     rendered = "\n".join(statements)
@@ -197,7 +203,12 @@ async def test_a_table_with_no_constraints_is_unchanged() -> None:
     """The control. Rendering an empty constraints map must add nothing."""
     plain = {"columns": {"a": {"type": "integer", "primary_key": True}}}
 
-    rendered = "\n".join(create_table_sql("t", {**plain, "primary_key": None}))
+    rendered = "\n".join(
+        statements_for(
+            {"op": "create_table", "table": "t",
+             "details": {**plain, "primary_key": None}}
+        )
+    )
 
     assert "CHECK" not in rendered.upper(), rendered
 

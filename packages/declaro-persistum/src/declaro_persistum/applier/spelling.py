@@ -529,3 +529,61 @@ def column_definition(name: str, col: Column, dialect: Dialect) -> str:
     return " ".join(parts)
 
 
+# =============================================================================
+# Table-level constraints
+# =============================================================================
+#
+# MOVED HERE FROM `shared`, because `templates` needs it and `shared` now
+# reaches the renderer. How a constraint is spelled is spelling, which is what
+# this module is; who renders a statement is rendering, which is not.
+
+
+@helper
+def _check_clause(name: str, definition: dict[str, Any]) -> str:
+    """A CHECK, written with the expression the declaration carries."""
+    return f'CONSTRAINT "{name}" CHECK ({definition["expression"]})'
+
+
+@helper
+def _unique_clause(name: str, definition: dict[str, Any]) -> str:
+    """A UNIQUE over the columns the declaration names."""
+    columns = ", ".join(f'"{c}"' for c in definition.get("columns", []))
+    return f'CONSTRAINT "{name}" UNIQUE ({columns})'
+
+
+_CONSTRAINT_CLAUSES: dict[str, Callable[[str, dict[str, Any]], str]] = {
+    "check": _check_clause,
+    "unique": _unique_clause,
+}
+
+
+@helper
+def _write_constraint(name: str, kind: Any, definition: dict[str, Any]) -> str:
+    """A type this renderer writes, so the table names the writer."""
+    return _CONSTRAINT_CLAUSES[kind](name, definition)
+
+
+@helper
+def _refuse_constraint(name: str, kind: Any, _definition: dict[str, Any]) -> str:
+    """A type this renderer does not write, named so the author finds it."""
+    raise ValueError(
+        f"constraint {name!r} has type {kind!r}; this renderer writes "
+        f"{sorted(_CONSTRAINT_CLAUSES)}."
+    )
+
+
+_KNOWN_CONSTRAINT: dict[bool, Callable[[str, Any, dict[str, Any]], str]] = {
+    True: _write_constraint,
+    False: _refuse_constraint,
+}
+
+
+@helper
+def constraint_clause(name: str, definition: dict[str, Any]) -> str:
+    """One table-level constraint, as it appears inside a CREATE TABLE.
+
+    Shared by the renderer above and by the reconstruction that rewrites a
+    table, so a rebuild cannot spell a constraint differently from the create.
+    """
+    kind = definition.get("type")
+    return _KNOWN_CONSTRAINT[kind in _CONSTRAINT_CLAUSES](name, kind, definition)
