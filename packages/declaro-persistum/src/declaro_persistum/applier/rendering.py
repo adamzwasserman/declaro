@@ -326,7 +326,7 @@ def _postgresql_drop_foreign_key(
     """
     table = operation["table"]
     column = operation["details"]["column"]
-    reference = operation["details"].get("references", "")
+    reference = operation["details"]["references"]
     referenced = reference.split(".")[0]
 
     return [

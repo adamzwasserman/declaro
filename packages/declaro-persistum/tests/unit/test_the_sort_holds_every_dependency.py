@@ -54,13 +54,10 @@ def _acyclic(draw):
     """
     size = draw(st.integers(min_value=0, max_value=12))
     operations = [
-        {"op": draw(st.sampled_from(_OPS)), "table": f"t{i}", "details": {}}
-        for i in range(size)
+        {"op": draw(st.sampled_from(_OPS)), "table": f"t{i}", "details": {}} for i in range(size)
     ]
     dependencies = {
-        i: draw(st.lists(st.integers(min_value=0, max_value=i - 1), unique=True))
-        if i
-        else []
+        i: draw(st.lists(st.integers(min_value=0, max_value=i - 1), unique=True)) if i else []
         for i in range(size)
     }
     return operations, dependencies
@@ -110,9 +107,7 @@ def test_the_highest_priority_ready_operation_goes_first(case) -> None:
         ready = [
             index
             for index in range(len(operations))
-            if index not in done
-            and index != chosen
-            and set(dependencies.get(index, ())) <= done
+            if index not in done and index != chosen and set(dependencies.get(index, ())) <= done
         ]
         best = _operation_priority(operations[chosen])
         for other in ready:
@@ -137,8 +132,16 @@ def test_a_cycle_is_refused_and_names_what_is_stuck() -> None:
     from declaro_persistum.exceptions import CycleError
 
     operations = [
-        {"op": "create_table", "table": "a", "details": {}},
-        {"op": "create_table", "table": "b", "details": {}},
+        {
+            "op": "create_table",
+            "table": "a",
+            "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+        },
+        {
+            "op": "create_table",
+            "table": "b",
+            "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+        },
     ]
 
     with pytest.raises(CycleError) as raised:

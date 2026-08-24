@@ -1,6 +1,5 @@
 """Tests for type definitions."""
 
-
 from declaro_persistum.types import (
     Ambiguity,
     ApplyResult,
@@ -105,6 +104,9 @@ class TestOperation:
             "table": "users",
             "details": {
                 "columns": {"id": {"type": "uuid"}},
+                "constraints": {},
+                "indexes": {},
+                "primary_key": [],
             },
         }
         assert op["op"] == "create_table"
@@ -142,7 +144,11 @@ class TestDiffResult:
         """DiffResult with operations."""
         result: DiffResult = {
             "operations": [
-                {"op": "create_table", "table": "users", "details": {}},
+                {
+                    "op": "create_table",
+                    "table": "users",
+                    "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+                },
             ],
             "dependencies": {0: []},
             "execution_order": [0],

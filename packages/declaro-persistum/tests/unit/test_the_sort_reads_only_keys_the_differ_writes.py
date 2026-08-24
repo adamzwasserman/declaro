@@ -157,21 +157,23 @@ def _every_operation() -> dict[str, dict]:
 
 CORPUS = _every_operation()
 
-# Which detail keys the sort reads, and for which operation types. Read from
-# the source, so a new `.get` with a default is noticed rather than assumed
-# absent.
+# Which detail keys the sort reads, in either form. Read from the source, so a
+# new read is noticed rather than assumed absent.
+#
+# BOTH FORMS, because the sort now reads most keys with `[]`. Eight of its nine
+# reads used to carry a default and every one of those defaults was for a case
+# the differ never produces: measured by running the differ over every kind of
+# change, no operation ever omits a key it can carry. The one that survives is
+# `depends_on`, which a view genuinely may not declare.
+_SOURCE = inspect.getsource(toposort)
 READS = sorted(
-    set(
-        re.findall(
-            r'\["details"\]\.get\(\s*"([a-z_]+)"\s*,',
-            inspect.getsource(toposort),
-        )
-    )
+    set(re.findall(r'\["details"\]\.get\(\s*"([a-z_]+)"\s*,', _SOURCE))
+    | set(re.findall(r'\["details"\]\[\s*"([a-z_]+)"\s*\]', _SOURCE))
 )
 
 
 def test_the_sort_still_reads_the_keys_this_file_knows_about() -> None:
-    """The floor. A key added with a default would go unchecked otherwise."""
+    """The floor. A key the sort starts reading would go unchecked otherwise."""
     assert READS == [
         "changes",
         "column",
@@ -179,10 +181,34 @@ def test_the_sort_still_reads_the_keys_this_file_knows_about() -> None:
         "definition",
         "depends_on",
         "index",
+        "name",
         "references",
     ], (
-        f"the sort reads {READS} with defaults; this file was written for "
-        f"a different set"
+        f"the sort reads {READS}; this file was written for a different set"
+    )
+
+
+def test_only_a_key_the_differ_may_omit_is_read_with_a_default() -> None:
+    """A default for a case that never arrives is a region nothing exercises.
+
+    The differ never omits a key it can carry, measured by running it over
+    every kind of change it handles. So a `.get(key, fallback)` here covers
+    nothing real, and it hides the case it was meant to survive: reading
+    `definition` off a `drop_index` returned an empty list on every migration
+    ever run, so the edge that orders an index drop before the drop of a
+    column it covers never once fired.
+
+    `depends_on` is the exception and is genuinely optional: a view that
+    selects from nothing declares no dependencies.
+    """
+    with_default = sorted(
+        set(re.findall(r'\["details"\]\.get\(\s*"([a-z_]+)"\s*,', _SOURCE))
+    )
+
+    assert with_default == ["depends_on"], (
+        f"the sort supplies a default for {with_default}. Every key but "
+        f"depends_on is one the differ always writes, so a default there "
+        f"covers a case that never arrives and hides one that does."
     )
 
 

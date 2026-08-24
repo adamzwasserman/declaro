@@ -49,9 +49,7 @@ def _alter(**changes) -> dict:
 REBUILDS = {"alter_column", "add_foreign_key", "drop_foreign_key"}
 
 
-@pytest.mark.parametrize(
-    "op", sorted(set(TEMPLATES["sqlite"]) | set(COMPOSERS["sqlite"]))
-)
+@pytest.mark.parametrize("op", sorted(set(TEMPLATES["sqlite"]) | set(COMPOSERS["sqlite"])))
 def test_only_the_operations_sqlite_cannot_alter_rebuild(op: str) -> None:
     """A rebuild copies the whole table, so the list must be exactly right.
 
@@ -65,7 +63,9 @@ def test_only_the_operations_sqlite_cannot_alter_rebuild(op: str) -> None:
 
 def test_creating_a_table_does_not_rebuild_it() -> None:
     """The common case, taken from the differ rather than written."""
-    plan = diff({}, {"t": {"columns": {"c": {"type": "text"}}}}, dialect="sqlite", decisions=NOTHING)
+    plan = diff(
+        {}, {"t": {"columns": {"c": {"type": "text"}}}}, dialect="sqlite", decisions=NOTHING
+    )
 
     assert not any(requires_reconstruction(o) for o in plan["operations"])
 
@@ -107,7 +107,10 @@ def test_two_changes_take_the_general_path() -> None:
 
 
 def test_another_operation_is_not_a_column_change() -> None:
-    assert single_change_property({"op": "drop_table", "table": "t", "details": {}}) is None
+    assert (
+        single_change_property({"op": "drop_table", "table": "t", "details": {"references": []}})
+        is None
+    )
 
 
 @pytest.mark.parametrize("prop", ["unique", "check"])
@@ -183,7 +186,7 @@ def test_an_operation_reconstruction_cannot_apply_raises() -> None:
     with pytest.raises(ValueError, match="reconstruction"):
         apply_reconstruction_changes(
             {"c": {"type": "text"}},
-            {"op": "drop_table", "table": "t", "details": {}},
+            {"op": "drop_table", "table": "t", "details": {"references": []}},
         )
 
 
@@ -196,7 +199,9 @@ def test_a_preview_renders_every_operation() -> None:
     plan = diff(
         {},
         {"t": {"columns": {"c": {"type": "text"}}, "indexes": {"i": {"columns": ["c"]}}}},
-        dialect="sqlite", decisions=NOTHING)
+        dialect="sqlite",
+        decisions=NOTHING,
+    )
 
     preview = dry_run_preview(plan["operations"], plan["execution_order"])
 
@@ -214,9 +219,9 @@ def test_a_preview_says_where_a_rebuild_would_happen() -> None:
 
     preview = dry_run_preview(plan["operations"], plan["execution_order"])
 
-    assert any("reconstruction" in s.lower() for s in preview["executed_sql"]), (
-        preview["executed_sql"]
-    )
+    assert any("reconstruction" in s.lower() for s in preview["executed_sql"]), preview[
+        "executed_sql"
+    ]
 
 
 def test_a_preview_of_nothing_is_a_success_with_nothing_in_it() -> None:

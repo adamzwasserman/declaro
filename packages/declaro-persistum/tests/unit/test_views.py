@@ -4,7 +4,6 @@ Unit tests for View support.
 Tests the View TypedDict, loader parsing, and applier generation.
 """
 
-
 import pytest
 
 from declaro_persistum.applier.rendering import statements_for
@@ -66,6 +65,7 @@ class TestViewTypedDict:
 class TestViewLoading:
     """Tests for loading views from TOML."""
 
+
 class TestViewApplierPostgreSQL:
     """The statements PostgreSQL writes for a view.
 
@@ -111,8 +111,7 @@ class TestViewApplierPostgreSQL:
         )
 
         assert statements == [
-            'CREATE MATERIALIZED VIEW "user_stats" AS\n'
-            "SELECT COUNT(*) as total FROM users"
+            'CREATE MATERIALIZED VIEW "user_stats" AS\nSELECT COUNT(*) as total FROM users'
         ]
 
     def test_drop_view_sql(self):
@@ -286,8 +285,7 @@ class TestViewIntrospection:
             await conn.execute("DROP TABLE IF EXISTS users CASCADE")
             await conn.execute("CREATE TABLE users (id INT, status TEXT)")
             await conn.execute(
-                "CREATE VIEW active_users AS "
-                "SELECT id FROM users WHERE status = 'active'"
+                "CREATE VIEW active_users AS SELECT id FROM users WHERE status = 'active'"
             )
 
             views = await _inspector_pg().introspect_views(conn, schema_name=NOTHING)
@@ -313,9 +311,7 @@ class TestViewIntrospection:
             await conn.execute("DROP MATERIALIZED VIEW IF EXISTS user_stats CASCADE")
             await conn.execute("DROP TABLE IF EXISTS users CASCADE")
             await conn.execute("CREATE TABLE users (id INT)")
-            await conn.execute(
-                "CREATE MATERIALIZED VIEW user_stats AS SELECT count(*) FROM users"
-            )
+            await conn.execute("CREATE MATERIALIZED VIEW user_stats AS SELECT count(*) FROM users")
 
             views = await _inspector_pg().introspect_views(conn, schema_name=NOTHING)
 
@@ -348,9 +344,7 @@ class TestViewIntrospection:
         conn = await aiosqlite.connect(path)
         try:
             await conn.execute("CREATE TABLE users (id INT, active INT)")
-            await conn.execute(
-                "CREATE VIEW active_users AS SELECT * FROM users WHERE active = 1"
-            )
+            await conn.execute("CREATE VIEW active_users AS SELECT * FROM users WHERE active = 1")
             await conn.commit()
 
             views = await views_of(conn)
@@ -381,6 +375,8 @@ class TestViewIntrospection:
         finally:
             await conn.close()
             os.unlink(path)
+
+
 class TestViewDiff:
     """Tests for view diff detection."""
 
@@ -564,7 +560,7 @@ class TestViewOperationHandlers:
         operation = {
             "op": "drop_view",
             "table": "_views",
-            "details": {"name": "old_view"},
+            "details": {"name": "old_view", "materialized": False},
         }
         sql = applier.generate_operation_sql(operation)
         assert "DROP VIEW" in sql
@@ -595,7 +591,7 @@ class TestViewOperationHandlers:
         operation = {
             "op": "drop_view",
             "table": "_views",
-            "details": {"name": "old_view"},
+            "details": {"name": "old_view", "materialized": False},
         }
         sql = applier.generate_operation_sql(operation)
         assert "DROP VIEW" in sql
@@ -631,7 +627,12 @@ class TestViewDependencies:
             {
                 "op": "create_table",
                 "table": "users",
-                "details": {"columns": {"id": {"type": "integer", "primary_key": True}}},
+                "details": {
+                    "columns": {"id": {"type": "integer", "primary_key": True}},
+                    "constraints": {},
+                    "indexes": {},
+                    "primary_key": [],
+                },
             },
         ]
 
@@ -639,7 +640,9 @@ class TestViewDependencies:
         order = topological_sort(operations, deps)
 
         # create_table (users) should come before create_view (user_stats)
-        table_idx = next(i for i, idx in enumerate(order) if operations[idx]["op"] == "create_table")
+        table_idx = next(
+            i for i, idx in enumerate(order) if operations[idx]["op"] == "create_table"
+        )
         view_idx = next(i for i, idx in enumerate(order) if operations[idx]["op"] == "create_view")
         assert table_idx < view_idx
 
@@ -669,7 +672,12 @@ class TestViewDependencies:
             {
                 "op": "create_table",
                 "table": "users",
-                "details": {"columns": {"id": {"type": "integer", "primary_key": True}}},
+                "details": {
+                    "columns": {"id": {"type": "integer", "primary_key": True}},
+                    "constraints": {},
+                    "indexes": {},
+                    "primary_key": [],
+                },
             },
         ]
 
@@ -695,7 +703,7 @@ class TestViewDependencies:
             {
                 "op": "drop_table",
                 "table": "users",
-                "details": {},
+                "details": {"references": []},
             },
             {
                 "op": "drop_view",
@@ -703,6 +711,7 @@ class TestViewDependencies:
                 "details": {
                     "name": "user_stats",
                     "depends_on": ["users"],
+                    "materialized": False,
                 },
             },
         ]
@@ -720,8 +729,8 @@ class TestViewDependencies:
         from declaro_persistum.differ.toposort import _operation_priority
 
         # drop_view should have lower priority number (runs first) than drop_table
-        drop_view_op = {"op": "drop_view", "table": "_views", "details": {}}
-        drop_table_op = {"op": "drop_table", "table": "users", "details": {}}
+        drop_view_op = {"op": "drop_view", "table": "_views", "details": {"materialized": False}}
+        drop_table_op = {"op": "drop_table", "table": "users", "details": {"references": []}}
         assert _operation_priority(drop_view_op) < _operation_priority(drop_table_op)
 
         # create_view should have higher priority number (runs last) than add_foreign_key

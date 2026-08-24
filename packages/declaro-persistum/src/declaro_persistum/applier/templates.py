@@ -65,8 +65,8 @@ def _table_body(operation: Operation, dialect: Dialect) -> str:
     times in the code this replaces.
     """
     details = operation["details"]
-    columns = details.get("columns", {})
-    primary_key = details.get("primary_key", [])
+    columns = details["columns"]
+    primary_key = details["primary_key"]
 
     column_defs = [
         column_definition(name, definition, dialect)
@@ -100,7 +100,7 @@ def _quoted_columns(operation: Operation, _dialect: Dialect) -> str:
     """The columns an index covers, quoted and comma-separated."""
     return ", ".join(
         f'"{column}"'
-        for column in operation["details"]["definition"].get("columns", [])
+        for column in operation["details"]["definition"]["columns"]
     )
 
 

@@ -284,19 +284,51 @@ def _then_no_ambiguity(ctx):
     )
 
 
-def _op(kind: str, table: str = "t") -> dict[str, Any]:
-    """A minimal operation of the given kind.
+# WHAT EACH OPERATION CARRIES, measured by running the differ rather than
+# guessed. Every key here is one the differ emits on every operation of that
+# kind, so an operation built without it is a shape nothing in production ever
+# produces. This helper used to supply only `name` and `column`, and the
+# toposort read the rest with `.get(key, "")`: a missing key became an empty
+# string, matched nothing, earned no dependency edge, and the migration was
+# ordered as though the operation depended on nothing.
+#
+# The docstring this replaces already recorded one instance of that, found by
+# a KeyError that "looked like a toposort defect until I checked what
+# diff_views actually emits". The table is so the next one cannot happen.
+_DETAILS_OF: dict[str, dict[str, Any]] = {
+    "create_table": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+    "drop_table": {"references": []},
+    "rename_table": {"new_name": "renamed"},
+    "add_column": {"column": "c", "definition": {"type": "text"}},
+    "drop_column": {"column": "c"},
+    "rename_column": {"from_column": "c", "to_column": "d"},
+    "alter_column": {"column": "c", "changes": {"type": {"from": "text", "to": "integer"}}},
+    "add_index": {"index": "ix", "definition": {"columns": ["c"]}},
+    # A DROP CARRIES WHAT IT DROPS. The sort reads the covered columns off
+    # this operation to order the drop before a column it covers.
+    "drop_index": {"index": "ix", "definition": {"columns": ["c"]}},
+    "add_constraint": {"constraint": "ck", "definition": {"type": "check", "expression": "1=1"}},
+    "drop_constraint": {"constraint": "ck"},
+    "add_foreign_key": {"column": "c", "references": "other.id"},
+    "drop_foreign_key": {"column": "c", "references": "other.id"},
+    "insert_enum_values": {"values": ["a"]},
+}
 
-    View operations carry details["name"]; toposort reads it to track which
-    views were dropped. Omitting it raised KeyError and looked like a toposort
-    defect until I checked what diff_views actually emits.
-    """
-    details: dict[str, Any] = {}
-    if "view" in kind:
-        details["name"] = f"{table}_view"
-    if "column" in kind:
-        details["column"] = "c"
-    return {"op": kind, "table": table, "details": details}
+
+def _op(kind: str, table: str = "t") -> dict[str, Any]:
+    """An operation of the given kind, in the shape the differ emits."""
+    details = {
+        **_DETAILS_OF.get(kind, {}),
+        **_VIEW_DETAILS_OF.get(kind, lambda _t: {})(table),
+    }
+    return {"op": kind, "table": table, "details": dict(details)}
+
+
+# A view names itself, and a drop says whether the thing it removes holds rows.
+_VIEW_DETAILS_OF: dict[str, Any] = {
+    "create_view": lambda table: {"name": f"{table}_view", "query": "SELECT 1"},
+    "drop_view": lambda table: {"name": f"{table}_view", "materialized": False},
+}
 
 
 @given("operations that drop a foreign key, drop a table, and create a table")

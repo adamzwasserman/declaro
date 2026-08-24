@@ -295,7 +295,7 @@ def _alter_the_column(
     # The differ produces {"from": old, "to": new} dicts for changes.
     changes = {
         key: changed_to(value)
-        for key, value in details.get("changes", {}).items()
+        for key, value in details["changes"].items()
         if key in _ALTERABLE
     }
 

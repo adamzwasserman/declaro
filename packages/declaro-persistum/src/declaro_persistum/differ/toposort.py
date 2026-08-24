@@ -72,13 +72,13 @@ def build_dependency_graph(operations: list[Operation]) -> dict[int, list[int]]:
     dropped_fks: list[tuple[int, str, str]] = []  # (op_idx, table, column)
     for i in op_by_type.get("drop_foreign_key", []):
         op = operations[i]
-        dropped_fks.append((i, op["table"], op["details"].get("column", "")))
+        dropped_fks.append((i, op["table"], op["details"]["column"]))
 
     # Indexes being dropped
     dropped_indexes: list[tuple[int, str, str]] = []  # (op_idx, table, index_name)
     for i in op_by_type.get("drop_index", []):
         op = operations[i]
-        dropped_indexes.append((i, op["table"], op["details"].get("index", "")))
+        dropped_indexes.append((i, op["table"], op["details"]["index"]))
 
     # Process each operation type
     for i, op in enumerate(operations):
@@ -110,9 +110,9 @@ def _handle_drop_table(
     keys = [
         fk_idx
         for fk_idx, _fk_table, _ in dropped_fks
-        if all_operations[fk_idx]["details"]
-        .get("references", "")
-        .startswith(f"{table_name}.")
+        if all_operations[fk_idx]["details"]["references"].startswith(
+            f"{table_name}."
+        )
     ]
     # Views selecting from it go before it.
     views = [
@@ -144,7 +144,7 @@ def _handle_drop_column(
 ) -> list[int]:
     """Handle DROP COLUMN dependencies."""
     table_name = op["table"]
-    col_name = op["details"].get("column", "")
+    col_name = op["details"]["column"]
 
     keys = [
         fk_idx
@@ -156,7 +156,7 @@ def _handle_drop_column(
         for idx_idx, idx_table, _ in dropped_indexes
         if idx_table == table_name
         and col_name
-        in all_operations[idx_idx]["details"].get("definition", {}).get("columns", [])
+        in all_operations[idx_idx]["details"]["definition"]["columns"]
     ]
     return keys + indexes
 
@@ -174,7 +174,7 @@ def _handle_create_table(
     # without this the sort reports a cycle in a schema that has none.
     referenced = {
         col.get("references", "").split(".")[0]
-        for col in op["details"].get("columns", {}).values()
+        for col in op["details"]["columns"].values()
         if col.get("references")
     } & set(created_tables) - {table_name}
 
@@ -199,7 +199,7 @@ def _handle_add_foreign_key(
     created_tables: dict[str, int],
 ) -> list[int]:
     """Handle ADD FOREIGN KEY dependencies."""
-    ref = op["details"].get("references", "")
+    ref = op["details"]["references"]
     parts = ref.split(".")
     ref_table = parts[0]
 
@@ -230,7 +230,7 @@ def _handle_add_index(
 ) -> list[int]:
     """Handle ADD INDEX dependencies."""
     table_name = op["table"]
-    idx_cols = op["details"].get("definition", {}).get("columns", [])
+    idx_cols = op["details"]["definition"]["columns"]
 
     table = [created_tables[name] for name in [table_name] if name in created_tables]
     columns = [
@@ -251,11 +251,11 @@ def _handle_alter_column(
 ) -> list[int]:
     """Handle ALTER COLUMN dependencies."""
     table_name = op["table"]
-    col_name = op["details"].get("column", "")
+    col_name = op["details"]["column"]
     # ONLY A TYPE CHANGE WAITS. Setting a default rewrites no data and
     # invalidates no index, so ordering it behind a DROP INDEX would be a
     # dependency the schema never asked for.
-    retyped = "type" in op["details"].get("changes", {})
+    retyped = "type" in op["details"]["changes"]
 
     return [
         idx_idx
@@ -263,7 +263,7 @@ def _handle_alter_column(
         if retyped
         and idx_table == table_name
         and col_name
-        in all_operations[idx_idx]["details"].get("definition", {}).get("columns", [])
+        in all_operations[idx_idx]["details"]["definition"]["columns"]
     ]
 
 

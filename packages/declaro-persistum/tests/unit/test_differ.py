@@ -1,6 +1,5 @@
 """Tests for the diff engine."""
 
-
 from declaro_persistum.differ.ambiguity import detect_ambiguities
 from declaro_persistum.differ.core import diff
 from declaro_persistum.differ.toposort import build_dependency_graph, topological_sort
@@ -18,7 +17,9 @@ class TestDiff:
 
     def test_diff_identical_schemas(self, simple_schema):
         """Diffing identical schemas produces no operations."""
-        result = diff(current=simple_schema, target=simple_schema, dialect="postgresql", decisions=NOTHING)
+        result = diff(
+            current=simple_schema, target=simple_schema, dialect="postgresql", decisions=NOTHING
+        )
         assert result["operations"] == []
 
     def test_diff_create_table(self, simple_schema):
@@ -40,12 +41,8 @@ class TestDiff:
 
     def test_diff_add_column(self):
         """Adding a column creates ADD COLUMN operation."""
-        current: Schema = {
-            "users": {"columns": {"id": {"type": "uuid"}}}
-        }
-        target: Schema = {
-            "users": {"columns": {"id": {"type": "uuid"}, "email": {"type": "text"}}}
-        }
+        current: Schema = {"users": {"columns": {"id": {"type": "uuid"}}}}
+        target: Schema = {"users": {"columns": {"id": {"type": "uuid"}, "email": {"type": "text"}}}}
 
         result = diff(current=current, target=target, dialect="postgresql", decisions=NOTHING)
 
@@ -56,12 +53,8 @@ class TestDiff:
 
     def test_diff_drop_column(self):
         """Removing a column creates DROP COLUMN operation."""
-        current: Schema = {
-            "users": {"columns": {"id": {"type": "uuid"}, "temp": {"type": "text"}}}
-        }
-        target: Schema = {
-            "users": {"columns": {"id": {"type": "uuid"}}}
-        }
+        current: Schema = {"users": {"columns": {"id": {"type": "uuid"}, "temp": {"type": "text"}}}}
+        target: Schema = {"users": {"columns": {"id": {"type": "uuid"}}}}
 
         result = diff(current=current, target=target, dialect="postgresql", decisions=NOTHING)
 
@@ -71,9 +64,7 @@ class TestDiff:
 
     def test_diff_rename_column_with_hint(self):
         """Renaming a column with hint creates RENAME COLUMN operation."""
-        current: Schema = {
-            "users": {"columns": {"name": {"type": "text"}}}
-        }
+        current: Schema = {"users": {"columns": {"name": {"type": "text"}}}}
         target: Schema = {
             "users": {"columns": {"full_name": {"type": "text", "renamed_from": "name"}}}
         }
@@ -87,12 +78,8 @@ class TestDiff:
 
     def test_diff_alter_column_type(self):
         """Changing column type creates ALTER COLUMN operation."""
-        current: Schema = {
-            "users": {"columns": {"count": {"type": "integer"}}}
-        }
-        target: Schema = {
-            "users": {"columns": {"count": {"type": "bigint"}}}
-        }
+        current: Schema = {"users": {"columns": {"count": {"type": "integer"}}}}
+        target: Schema = {"users": {"columns": {"count": {"type": "bigint"}}}}
 
         result = diff(current=current, target=target, dialect="postgresql", decisions=NOTHING)
 
@@ -103,9 +90,7 @@ class TestDiff:
 
     def test_diff_add_index(self):
         """Adding an index creates ADD INDEX operation."""
-        current: Schema = {
-            "users": {"columns": {"email": {"type": "text"}}, "indexes": {}}
-        }
+        current: Schema = {"users": {"columns": {"email": {"type": "text"}}, "indexes": {}}}
         target: Schema = {
             "users": {
                 "columns": {"email": {"type": "text"}},
@@ -147,12 +132,8 @@ class TestAmbiguityDetection:
 
     def test_detect_possible_rename(self):
         """Detects possible column rename when type matches."""
-        current: Schema = {
-            "users": {"columns": {"name": {"type": "text"}}}
-        }
-        target: Schema = {
-            "users": {"columns": {"full_name": {"type": "text"}}}
-        }
+        current: Schema = {"users": {"columns": {"name": {"type": "text"}}}}
+        target: Schema = {"users": {"columns": {"full_name": {"type": "text"}}}}
 
         ambiguities = detect_ambiguities(current, target, "postgresql", decisions=NOTHING)
 
@@ -180,9 +161,7 @@ class TestAmbiguityDetection:
 
     def test_no_ambiguity_with_renamed_from_hint(self):
         """No ambiguity when renamed_from hint is present."""
-        current: Schema = {
-            "users": {"columns": {"name": {"type": "text"}}}
-        }
+        current: Schema = {"users": {"columns": {"name": {"type": "text"}}}}
         target: Schema = {
             "users": {"columns": {"full_name": {"type": "text", "renamed_from": "name"}}}
         }
@@ -193,12 +172,8 @@ class TestAmbiguityDetection:
 
     def test_no_ambiguity_with_is_new_hint(self):
         """No ambiguity when is_new hint is present."""
-        current: Schema = {
-            "users": {"columns": {"name": {"type": "text"}}}
-        }
-        target: Schema = {
-            "users": {"columns": {"full_name": {"type": "text", "is_new": True}}}
-        }
+        current: Schema = {"users": {"columns": {"name": {"type": "text"}}}}
+        target: Schema = {"users": {"columns": {"full_name": {"type": "text", "is_new": True}}}}
 
         ambiguities = detect_ambiguities(current, target, "postgresql", decisions=NOTHING)
 
@@ -229,8 +204,16 @@ class TestTopologicalSort:
     def test_no_dependencies(self):
         """Operations without dependencies maintain stable order."""
         operations = [
-            {"op": "create_table", "table": "a", "details": {}},
-            {"op": "create_table", "table": "b", "details": {}},
+            {
+                "op": "create_table",
+                "table": "a",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            },
+            {
+                "op": "create_table",
+                "table": "b",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            },
         ]
         deps = {0: [], 1: []}
 
@@ -242,7 +225,11 @@ class TestTopologicalSort:
         """Operations respect dependencies."""
         operations = [
             {"op": "add_foreign_key", "table": "orders", "details": {}},  # depends on 1
-            {"op": "create_table", "table": "users", "details": {}},  # no deps
+            {
+                "op": "create_table",
+                "table": "users",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            },  # no deps
         ]
         deps = {0: [1], 1: []}
 
@@ -256,15 +243,21 @@ class TestTopologicalSort:
             {
                 "op": "create_table",
                 "table": "users",
-                "details": {"columns": {"id": {"type": "uuid"}}},
+                "details": {
+                    "columns": {"id": {"type": "uuid"}},
+                    "constraints": {},
+                    "indexes": {},
+                    "primary_key": [],
+                },
             },
             {
                 "op": "create_table",
                 "table": "orders",
                 "details": {
-                    "columns": {
-                        "user_id": {"type": "uuid", "references": "users.id"}
-                    }
+                    "columns": {"user_id": {"type": "uuid", "references": "users.id"}},
+                    "constraints": {},
+                    "indexes": {},
+                    "primary_key": [],
                 },
             },
         ]

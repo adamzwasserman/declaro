@@ -115,8 +115,14 @@ def test_the_renderer_puts_the_constraint_in_the_create() -> None:
     can never be added later.
     """
     statements = statements_for(
-        {"op": "create_table", "table": "t",
-         "details": {**DECLARED["t"], "primary_key": None}}
+        {
+            "op": "create_table",
+            "table": "t",
+            "details": {
+                **DECLARED["t"],
+                "primary_key": None,
+            },
+        }
     )
     # ONE CREATE TABLE IS ONE STATEMENT. The generator returns a list because
     # some operations are several; this one is not.
@@ -129,8 +135,14 @@ def test_the_renderer_puts_the_constraint_in_the_create() -> None:
 def test_the_constraint_is_named_in_the_create() -> None:
     """An unnamed constraint cannot be dropped by name afterwards."""
     statements = statements_for(
-        {"op": "create_table", "table": "t",
-         "details": {**DECLARED["t"], "primary_key": None}}
+        {
+            "op": "create_table",
+            "table": "t",
+            "details": {
+                **DECLARED["t"],
+                "primary_key": None,
+            },
+        }
     )
     # ONE CREATE TABLE IS ONE STATEMENT. The generator returns a list because
     # some operations are several; this one is not.
@@ -205,8 +217,14 @@ async def test_a_table_with_no_constraints_is_unchanged() -> None:
 
     rendered = "\n".join(
         statements_for(
-            {"op": "create_table", "table": "t",
-             "details": {**plain, "primary_key": None}}
+            {
+                "op": "create_table",
+                "table": "t",
+                "details": {
+                    **plain,
+                    "primary_key": None,
+                },
+            }
         )
     )
 
@@ -259,7 +277,9 @@ async def test_a_declared_constraint_converges(dialect: str, expression: str) ->
         remaining = diff(
             {n: actual[n] for n in declared if n in actual},
             declared,
-            dialect=dialect, decisions=NOTHING)["operations"]
+            dialect=dialect,
+            decisions=NOTHING,
+        )["operations"]
 
         assert remaining == [], (
             f"{expression!r} on {dialect} migrates on every deploy: "
@@ -303,13 +323,10 @@ async def test_a_changed_constraint_is_still_noticed(dialect: str) -> None:
 
         actual = await introspect(connection, dialect)
         changed = diff(
-            {n: actual[n] for n in actual},
-            declared("lo > hi"),
-            dialect=dialect, decisions=NOTHING)["operations"]
+            {n: actual[n] for n in actual}, declared("lo > hi"), dialect=dialect, decisions=NOTHING
+        )["operations"]
 
-        assert [o["op"] for o in changed] == ["drop_constraint", "add_constraint"], (
-            changed
-        )
+        assert [o["op"] for o in changed] == ["drop_constraint", "add_constraint"], changed
     finally:
         await connection.close()
 
@@ -334,9 +351,7 @@ async def test_postgresql_creates_the_constraint_too() -> None:
                     "lo": {"type": "integer"},
                     "hi": {"type": "integer"},
                 },
-                "constraints": {
-                    "ck_order": {"type": "check", "expression": "lo < hi"}
-                },
+                "constraints": {"ck_order": {"type": "check", "expression": "lo < hi"}},
             }
         }
         plan = diff({}, declared, dialect="postgresql", decisions=NOTHING)
@@ -376,9 +391,7 @@ async def test_postgresql_does_not_propose_a_constraint_it_already_has() -> None
                     "lo": {"type": "integer"},
                     "hi": {"type": "integer"},
                 },
-                "constraints": {
-                    "ck_order": {"type": "check", "expression": "lo > 0 AND hi > 0"}
-                },
+                "constraints": {"ck_order": {"type": "check", "expression": "lo > 0 AND hi > 0"}},
             }
         }
         plan = diff({}, declared, dialect="postgresql", decisions=NOTHING)
@@ -394,7 +407,9 @@ async def test_postgresql_does_not_propose_a_constraint_it_already_has() -> None
         remaining = diff(
             {n: actual[n] for n in declared if n in actual},
             declared,
-            dialect="postgresql", decisions=NOTHING)["operations"]
+            dialect="postgresql",
+            decisions=NOTHING,
+        )["operations"]
 
         assert remaining == [], [(o["op"], o["details"]) for o in remaining]
     finally:

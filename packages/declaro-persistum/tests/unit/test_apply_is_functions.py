@@ -85,7 +85,10 @@ class TestAgainstARealSqliteDatabase:
                     "columns": {
                         "id": {"type": "integer", "primary_key": True},
                         "name": {"type": "text", "nullable": False},
-                    }
+                    },
+                    "constraints": {},
+                    "indexes": {},
+                    "primary_key": [],
                 },
             }
         ]
@@ -115,6 +118,12 @@ class TestAgainstARealSqliteDatabase:
             await conn.execute("CREATE TABLE gone (id INTEGER PRIMARY KEY)")
             await conn.commit()
 
-            await apply(conn, [{"op": "drop_table", "table": "gone", "details": {}}], [0], "sqlite", dry_run=False)
+            await apply(
+                conn,
+                [{"op": "drop_table", "table": "gone", "details": {"references": []}}],
+                [0],
+                "sqlite",
+                dry_run=False,
+            )
 
             assert "gone" not in await introspect(conn, "sqlite")

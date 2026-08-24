@@ -20,7 +20,13 @@ class TestTopologicalSort:
 
     def test_single_operation(self):
         """Single operation returns single-element list."""
-        operations = [{"op": "create_table", "table": "users", "details": {}}]
+        operations = [
+            {
+                "op": "create_table",
+                "table": "users",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            }
+        ]
         deps = {0: []}
 
         result = topological_sort(operations, deps)
@@ -30,9 +36,21 @@ class TestTopologicalSort:
     def test_independent_operations(self):
         """Independent operations all appear in output."""
         operations = [
-            {"op": "create_table", "table": "a", "details": {}},
-            {"op": "create_table", "table": "b", "details": {}},
-            {"op": "create_table", "table": "c", "details": {}},
+            {
+                "op": "create_table",
+                "table": "a",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            },
+            {
+                "op": "create_table",
+                "table": "b",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            },
+            {
+                "op": "create_table",
+                "table": "c",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            },
         ]
         deps = {0: [], 1: [], 2: []}
 
@@ -44,9 +62,21 @@ class TestTopologicalSort:
         """Linear dependency chain produces correct order."""
         # c depends on b, b depends on a
         operations = [
-            {"op": "create_table", "table": "a", "details": {}},
-            {"op": "create_table", "table": "b", "details": {}},
-            {"op": "create_table", "table": "c", "details": {}},
+            {
+                "op": "create_table",
+                "table": "a",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            },
+            {
+                "op": "create_table",
+                "table": "b",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            },
+            {
+                "op": "create_table",
+                "table": "c",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            },
         ]
         deps = {0: [], 1: [0], 2: [1]}
 
@@ -60,10 +90,26 @@ class TestTopologicalSort:
         """Diamond dependency pattern produces valid order."""
         # d depends on b and c, both b and c depend on a
         operations = [
-            {"op": "create_table", "table": "a", "details": {}},
-            {"op": "create_table", "table": "b", "details": {}},
-            {"op": "create_table", "table": "c", "details": {}},
-            {"op": "create_table", "table": "d", "details": {}},
+            {
+                "op": "create_table",
+                "table": "a",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            },
+            {
+                "op": "create_table",
+                "table": "b",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            },
+            {
+                "op": "create_table",
+                "table": "c",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            },
+            {
+                "op": "create_table",
+                "table": "d",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            },
         ]
         deps = {0: [], 1: [0], 2: [0], 3: [1, 2]}
 
@@ -80,8 +126,16 @@ class TestTopologicalSort:
         """Cycle in dependencies raises CycleError."""
         # a depends on b, b depends on a
         operations = [
-            {"op": "create_table", "table": "a", "details": {}},
-            {"op": "create_table", "table": "b", "details": {}},
+            {
+                "op": "create_table",
+                "table": "a",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            },
+            {
+                "op": "create_table",
+                "table": "b",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            },
         ]
         deps = {0: [1], 1: [0]}
 
@@ -90,7 +144,13 @@ class TestTopologicalSort:
 
     def test_self_cycle_detection(self):
         """Self-referential dependency raises CycleError."""
-        operations = [{"op": "create_table", "table": "a", "details": {}}]
+        operations = [
+            {
+                "op": "create_table",
+                "table": "a",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            }
+        ]
         deps = {0: [0]}
 
         with pytest.raises(CycleError):
@@ -108,8 +168,16 @@ class TestBuildDependencyGraph:
     def test_independent_creates(self):
         """Independent CREATE TABLE operations have no dependencies."""
         operations = [
-            {"op": "create_table", "table": "a", "details": {"columns": {}}},
-            {"op": "create_table", "table": "b", "details": {"columns": {}}},
+            {
+                "op": "create_table",
+                "table": "a",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            },
+            {
+                "op": "create_table",
+                "table": "b",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            },
         ]
 
         result = build_dependency_graph(operations)
@@ -123,15 +191,21 @@ class TestBuildDependencyGraph:
             {
                 "op": "create_table",
                 "table": "users",
-                "details": {"columns": {"id": {"type": "uuid"}}},
+                "details": {
+                    "columns": {"id": {"type": "uuid"}},
+                    "constraints": {},
+                    "indexes": {},
+                    "primary_key": [],
+                },
             },
             {
                 "op": "create_table",
                 "table": "orders",
                 "details": {
-                    "columns": {
-                        "user_id": {"type": "uuid", "references": "users.id"}
-                    }
+                    "columns": {"user_id": {"type": "uuid", "references": "users.id"}},
+                    "constraints": {},
+                    "indexes": {},
+                    "primary_key": [],
                 },
             },
         ]
@@ -149,7 +223,7 @@ class TestBuildDependencyGraph:
                 "table": "orders",
                 "details": {"column": "user_id", "references": "users.id"},
             },
-            {"op": "drop_table", "table": "users", "details": {}},
+            {"op": "drop_table", "table": "users", "details": {"references": []}},
         ]
 
         result = build_dependency_graph(operations)
@@ -163,7 +237,7 @@ class TestBuildDependencyGraph:
             {
                 "op": "create_table",
                 "table": "users",
-                "details": {"columns": {}},
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
             },
             {
                 "op": "add_column",
@@ -183,21 +257,37 @@ class TestOperationPriority:
 
     def test_drops_before_creates(self):
         """DROP operations have lower priority (execute first)."""
-        drop_priority = _operation_priority({"op": "drop_table", "table": "", "details": {}})
-        create_priority = _operation_priority({"op": "create_table", "table": "", "details": {}})
+        drop_priority = _operation_priority(
+            {"op": "drop_table", "table": "", "details": {"references": []}}
+        )
+        create_priority = _operation_priority(
+            {
+                "op": "create_table",
+                "table": "",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            }
+        )
 
         assert drop_priority < create_priority
 
     def test_drop_fk_first(self):
         """DROP FOREIGN KEY has lowest priority."""
         fk_priority = _operation_priority({"op": "drop_foreign_key", "table": "", "details": {}})
-        table_priority = _operation_priority({"op": "drop_table", "table": "", "details": {}})
+        table_priority = _operation_priority(
+            {"op": "drop_table", "table": "", "details": {"references": []}}
+        )
 
         assert fk_priority < table_priority
 
     def test_add_fk_last(self):
         """ADD FOREIGN KEY has highest priority (execute last)."""
         fk_priority = _operation_priority({"op": "add_foreign_key", "table": "", "details": {}})
-        create_priority = _operation_priority({"op": "create_table", "table": "", "details": {}})
+        create_priority = _operation_priority(
+            {
+                "op": "create_table",
+                "table": "",
+                "details": {"columns": {}, "constraints": {}, "indexes": {}, "primary_key": []},
+            }
+        )
 
         assert fk_priority > create_priority

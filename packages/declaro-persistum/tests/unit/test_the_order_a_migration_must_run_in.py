@@ -22,8 +22,10 @@ the rule, `{}` with a lucky order is its absence.
 
 import pytest
 
+from declaro_persistum.differ.core import diff
 from declaro_persistum.differ.toposort import build_dependency_graph, topological_sort
 from declaro_persistum.exceptions import CycleError
+from declaro_persistum.types import NOTHING
 
 
 def _ordered(operations: list[dict]) -> list[str]:
@@ -45,9 +47,23 @@ def test_a_table_is_created_before_the_table_whose_key_points_at_it() -> None:
         {
             "op": "create_table",
             "table": "post",
-            "details": {"columns": {"author_id": {"type": "integer", "references": "author.id"}}},
+            "details": {
+                "columns": {"author_id": {"type": "integer", "references": "author.id"}},
+                "constraints": {},
+                "indexes": {},
+                "primary_key": [],
+            },
         },
-        {"op": "create_table", "table": "author", "details": {"columns": {"id": {"type": "integer"}}}},
+        {
+            "op": "create_table",
+            "table": "author",
+            "details": {
+                "columns": {"id": {"type": "integer"}},
+                "constraints": {},
+                "indexes": {},
+                "primary_key": [],
+            },
+        },
     ]
 
     assert build_dependency_graph(operations) == {0: [1], 1: []}
@@ -65,7 +81,12 @@ def test_a_table_that_references_itself_does_not_wait_for_itself() -> None:
         {
             "op": "create_table",
             "table": "node",
-            "details": {"columns": {"parent_id": {"type": "integer", "references": "node.id"}}},
+            "details": {
+                "columns": {"parent_id": {"type": "integer", "references": "node.id"}},
+                "constraints": {},
+                "indexes": {},
+                "primary_key": [],
+            },
         },
     ]
 
@@ -81,7 +102,16 @@ def test_a_foreign_key_waits_for_the_table_it_points_at() -> None:
             "table": "post",
             "details": {"column": "author_id", "references": "author.id"},
         },
-        {"op": "create_table", "table": "author", "details": {"columns": {"id": {"type": "integer"}}}},
+        {
+            "op": "create_table",
+            "table": "author",
+            "details": {
+                "columns": {"id": {"type": "integer"}},
+                "constraints": {},
+                "indexes": {},
+                "primary_key": [],
+            },
+        },
     ]
 
     assert build_dependency_graph(operations) == {0: [1], 1: []}
@@ -102,7 +132,11 @@ def test_a_foreign_key_waits_for_the_column_it_points_at() -> None:
             "table": "post",
             "details": {"column": "author_id", "references": "author.code"},
         },
-        {"op": "add_column", "table": "author", "details": {"column": "code", "definition": {"type": "text"}}},
+        {
+            "op": "add_column",
+            "table": "author",
+            "details": {"column": "code", "definition": {"type": "text"}},
+        },
     ]
 
     assert build_dependency_graph(operations) == {0: [1], 1: []}
@@ -116,12 +150,60 @@ def test_an_index_is_dropped_before_the_column_it_covers() -> None:
         {
             "op": "drop_index",
             "table": "users",
-            "details": {"name": "ix_users_email", "definition": {"columns": ["email"]}},
+            "details": {"index": "ix_users_email", "definition": {"columns": ["email"]}},
         },
     ]
 
     assert build_dependency_graph(operations) == {0: [1], 1: []}
     assert _ordered(operations) == ["drop_index/users", "drop_column/users"]
+
+
+def test_the_differ_hands_the_sort_what_the_edge_needs() -> None:
+    """The test above passed for years while the edge never fired.
+
+    It builds its own operations, and the shape it built was not the shape the
+    differ emits. The differ wrote `drop_index` as `{"index": name}` with no
+    definition, the sort read `details.get("definition", {}).get("columns", [])`
+    off it, got an empty list, matched nothing, and added no edge. Measured on
+    2026-08-24: `build_dependency_graph` returned `{0: [], 1: []}` for a real
+    plan, where it now returns `{0: [1], 1: []}`.
+
+    SQLite refuses to drop a column an index covers and PostgreSQL drops the
+    index for you, so which engine ran the migration decided whether the
+    missing constraint was visible.
+
+    This one starts from two schemas, so it can only pass if the differ hands
+    the sort what the sort reads.
+    """
+    current = {
+        "users": {
+            "columns": {"id": {"type": "integer"}, "email": {"type": "text"}},
+            "indexes": {"ix_users_email": {"columns": ["email"]}},
+        }
+    }
+    target = {"users": {"columns": {"id": {"type": "integer"}}}}
+
+    plan = diff(current, target, dialect="sqlite", decisions=NOTHING)
+    operations = plan["operations"]
+
+    dropped_index = next(
+        i for i, op in enumerate(operations) if op["op"] == "drop_index"
+    )
+    dropped_column = next(
+        i for i, op in enumerate(operations) if op["op"] == "drop_column"
+    )
+
+    dependencies = build_dependency_graph(operations)
+    assert dropped_index in dependencies[dropped_column], (
+        f"dropping the column does not wait for the index that covers it: "
+        f"{dependencies}"
+    )
+
+    order = plan["execution_order"]
+    assert order.index(dropped_index) < order.index(dropped_column), (
+        f"the index is dropped after the column it covers: "
+        f"{[operations[i]['op'] for i in order]}"
+    )
 
 
 def test_an_index_is_dropped_before_its_column_changes_type() -> None:
@@ -130,12 +212,15 @@ def test_an_index_is_dropped_before_its_column_changes_type() -> None:
         {
             "op": "alter_column",
             "table": "users",
-            "details": {"column": "email", "changes": {"type": {"from": "text", "to": "varchar(50)"}}},
+            "details": {
+                "column": "email",
+                "changes": {"type": {"from": "text", "to": "varchar(50)"}},
+            },
         },
         {
             "op": "drop_index",
             "table": "users",
-            "details": {"name": "ix_users_email", "definition": {"columns": ["email"]}},
+            "details": {"index": "ix_users_email", "definition": {"columns": ["email"]}},
         },
     ]
 
@@ -160,7 +245,7 @@ def test_a_column_that_only_changes_its_default_does_not_wait_for_the_index() ->
         {
             "op": "drop_index",
             "table": "users",
-            "details": {"name": "ix_users_email", "definition": {"columns": ["email"]}},
+            "details": {"index": "ix_users_email", "definition": {"columns": ["email"]}},
         },
     ]
 
@@ -179,12 +264,22 @@ def test_two_tables_that_reference_each_other_are_refused_by_name() -> None:
         {
             "op": "create_table",
             "table": "a",
-            "details": {"columns": {"b_id": {"type": "integer", "references": "b.id"}}},
+            "details": {
+                "columns": {"b_id": {"type": "integer", "references": "b.id"}},
+                "constraints": {},
+                "indexes": {},
+                "primary_key": [],
+            },
         },
         {
             "op": "create_table",
             "table": "b",
-            "details": {"columns": {"a_id": {"type": "integer", "references": "a.id"}}},
+            "details": {
+                "columns": {"a_id": {"type": "integer", "references": "a.id"}},
+                "constraints": {},
+                "indexes": {},
+                "primary_key": [],
+            },
         },
     ]
 

@@ -931,12 +931,23 @@ def _diff_indexes(
         if not _same_index(current_indexes[idx_name], target_indexes[idx_name])
     ]
 
-    # Drop removed indexes
+    # A DROP CARRIES THE DEFINITION IT IS DROPPING. The sort needs to know
+    # which columns an index covers, so that dropping the index is ordered
+    # before dropping or retyping one of those columns. It read
+    # `details["definition"]["columns"]` off this operation, which never
+    # carried a definition, and `.get("definition", {})` turned that into an
+    # empty list. The comparison then matched nothing, no edge was ever added,
+    # and the order was whatever Kahn's algorithm happened to emit. SQLite
+    # refuses to drop a column an index covers, so the failure depended on
+    # which engine ran the migration.
     dropped: list[Operation] = [
         {
             "op": "drop_index",
             "table": table_name,
-            "details": {"index": idx_name},
+            "details": {
+                "index": idx_name,
+                "definition": current_indexes[idx_name],
+            },
         }
         for idx_name in current_names - target_names
     ]
@@ -967,7 +978,7 @@ def _replaced_index(table_name: str, idx_name: str, definition: Index) -> list[O
         {
             "op": "drop_index",
             "table": table_name,
-            "details": {"index": idx_name},
+            "details": {"index": idx_name, "definition": definition},
         },
         {
             "op": "add_index",
