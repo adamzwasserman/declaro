@@ -445,33 +445,81 @@ def topological_sort(
     return order
 
 
+# WHICH KIND OF OPERATION GOES FIRST when nothing else decides. A dependency
+# edge always wins; this only breaks ties between operations that do not
+# constrain each other.
+#
+# A MODULE-LEVEL TABLE, not one rebuilt inside the function on every call. The
+# same shape hid a second copy of the applier's operation table for months,
+# because a dict living inside a function cannot be read, printed or compared
+# by anything outside it.
+#
+# THESE NUMBERS ARE A THIRD MECHANISM FOR ONE FACT, and that is worth knowing.
+# Dropping an index before the column it covers is enforced here (1 before 4),
+# by a dependency edge the sort infers, and now by `differ.core` writing the
+# two operations as one sequence. The edge was broken for as long as it
+# existed and nothing noticed, because these numbers were quietly carrying it.
+_PRIORITIES: dict[str, int] = {
+    # Drops first, in reverse dependency order.
+    "drop_foreign_key": 0,
+    "drop_index": 1,
+    "drop_constraint": 2,
+    # Views go before the tables they might select from.
+    "drop_view": 3,
+    "drop_column": 4,
+    "drop_table": 5,
+    # Renames.
+    "rename_table": 6,
+    "rename_column": 7,
+    # Creates.
+    "create_table": 8,
+    "add_column": 9,
+    # Modifications.
+    "alter_column": 10,
+    # Additions last.
+    "add_constraint": 11,
+    "add_index": 12,
+    "add_foreign_key": 13,
+    "insert_enum_values": 14,
+    # Views after every table and index they select from.
+    "create_view": 15,
+}
+
+
+@helper
+def _the_priority(op_type: str) -> int:
+    """An operation kind this sort ranks, so the table ranks it."""
+    return _PRIORITIES[op_type]
+
+
+@helper
+def _refuse_unranked_operation(op_type: str) -> int:
+    """An operation kind nothing ranks, named beside the ones that are.
+
+    THIS RETURNED 99. A kind nobody had ranked sorted after everything else
+    and said nothing, so adding an operation to the differ and forgetting it
+    here produced a migration that ran the new operation last for no stated
+    reason. `insert_enum_values` was such a kind, unranked for as long as it
+    has existed. Whether that ever produced a wrong order I did not manage to
+    demonstrate; what is certain is that nothing would have said so.
+    """
+    raise ValueError(
+        f"No sort priority for operation {op_type!r}. "
+        f"Ranked: {sorted(_PRIORITIES)}."
+    )
+
+
+_WHEN_RANKED: dict[bool, Callable[[str], int]] = {
+    True: _the_priority,
+    False: _refuse_unranked_operation,
+}
+
+
 @helper
 def _operation_priority(op: Operation) -> int:
-    """
-    Get priority for an operation type.
+    """Which kind of operation goes first, when no edge decides it.
 
-    Lower number = higher priority (executed first).
+    Lower goes first.
     """
-    priorities = {
-        # Drops first (reverse dependency order)
-        "drop_foreign_key": 0,
-        "drop_index": 1,
-        "drop_constraint": 2,
-        "drop_view": 3,  # Drop views before tables they might reference
-        "drop_column": 4,
-        "drop_table": 5,
-        # Renames
-        "rename_table": 6,
-        "rename_column": 7,
-        # Creates
-        "create_table": 8,
-        "add_column": 9,
-        # Modifications
-        "alter_column": 10,
-        # Additions last
-        "add_constraint": 11,
-        "add_index": 12,
-        "add_foreign_key": 13,
-        "create_view": 14,  # Create views after all tables and indexes
-    }
-    return priorities.get(op["op"], 99)
+    op_type = op["op"]
+    return _WHEN_RANKED[op_type in _PRIORITIES](op_type)

@@ -457,8 +457,16 @@ def _diff_table(
     column_ops = _diff_columns(table_name, current, target, dialect)
     operations.extend(column_ops)
 
-    # Diff indexes
-    index_ops = _diff_indexes(table_name, current, target)
+    # AN INDEX A COLUMN DROP ALREADY TAKES IS NOT THE INDEX DIFF'S BUSINESS.
+    # `dropping_a_column` writes the drops its column requires, so the index
+    # diff would otherwise write a second drop for the same index and the
+    # engine would refuse it as missing.
+    already_dropped = {
+        operation["details"]["index"]
+        for operation in column_ops
+        if operation["op"] == "drop_index"
+    }
+    index_ops = _diff_indexes(table_name, current, target, already_dropped)
     operations.extend(index_ops)
 
     # Diff constraints
@@ -525,6 +533,74 @@ def _with_unique_folded(table: Table) -> dict[str, Column]:
 
 
 @helper
+def _indexes_over(table_name: str, column: str, current: Table) -> list[Operation]:
+    """The indexes on this table that name this column.
+
+    Read off the CURRENT table, which is what the database has, rather than
+    off the target. Whether the author still declares the index is a separate
+    question from whether the database still has one pointing at a column that
+    is about to go.
+    """
+    return [
+        {
+            "op": "drop_index",
+            "table": table_name,
+            "details": {"index": index_name, "definition": definition},
+        }
+        for index_name, definition in (current.get("indexes") or {}).items()
+        if column in (definition.get("columns") or [])
+    ]
+
+
+@helper
+def _keys_on(table_name: str, column: str, current: Table) -> list[Operation]:
+    """The foreign key this column carries, if it carries one."""
+    return [
+        {
+            "op": "drop_foreign_key",
+            "table": table_name,
+            "details": {"column": column, "references": reference},
+        }
+        for definition in [(current.get("columns") or {}).get(column) or {}]
+        for reference in [definition.get("references")]
+        if reference
+    ]
+
+
+@helper
+def dropping_a_column(table_name: str, column: str, current: Table) -> list[Operation]:
+    """Everything dropping this column requires, in the order it requires it.
+
+    A SEQUENCE, NOT A GRAPH. Whoever drops a column knows what dropping it
+    entails: an index over the column has to go first, and so does a key on
+    it. Saying so here is the whole of it, and nothing downstream has to work
+    it out by searching the other operations for a match.
+
+    THE SEARCH IS WHAT FAILED. The sort used to discover this by scanning
+    every operation for a drop_index whose definition named the column. The
+    drop_index carried no definition, the scan matched nothing, and the edge
+    was never once added in any migration anyone ran. Then there was a second
+    hole the scan could not reach at all: an author who removes a column and
+    leaves the index declared gets no drop_index to find, and SQLite refuses
+    the drop:
+
+        error in index ix_email after drop column: no such column: "email"
+
+    Measured against a real database on 2026-08-24. The migration dies, the
+    column survives, and the next attempt emits the same one operation and
+    dies the same way. Nothing converges.
+
+    Both holes close the same way: the column drop carries its own
+    requirements instead of hoping something downstream infers them.
+    """
+    return [
+        *_keys_on(table_name, column, current),
+        *_indexes_over(table_name, column, current),
+        {"op": "drop_column", "table": table_name, "details": {"column": column}},
+    ]
+
+
+@helper
 def _diff_columns(
     table_name: str,
     current: Table,
@@ -577,14 +653,13 @@ def _diff_columns(
     actual_adds = added_cols - {to_name for _, to_name in renames}
     actual_drops = dropped_cols - {from_name for from_name, _ in renames}
 
-    # Generate DROP COLUMN operations
+    # DROPPING A COLUMN IS A SEQUENCE, so `dropping_a_column` writes the whole
+    # of it. Sorting `actual_drops` so two migrations of one schema emit the
+    # same plan in the same order.
     operations.extend(
-        {
-            "op": "drop_column",
-            "table": table_name,
-            "details": {"column": col_name},
-        }
-        for col_name in actual_drops
+        operation
+        for col_name in sorted(actual_drops)
+        for operation in dropping_a_column(table_name, col_name, current)
     )
 
     # Generate RENAME COLUMN operations
@@ -904,6 +979,7 @@ def _diff_indexes(
     table_name: str,
     current: Table,
     target: Table,
+    already_dropped: set[str],
 ) -> list[Operation]:
     """
     Diff index definitions.
@@ -949,7 +1025,7 @@ def _diff_indexes(
                 "definition": current_indexes[idx_name],
             },
         }
-        for idx_name in current_names - target_names
+        for idx_name in sorted(current_names - target_names - already_dropped)
     ]
     # Add new indexes
     added: list[Operation] = [
