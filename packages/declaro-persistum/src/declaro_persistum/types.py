@@ -7,7 +7,13 @@ This ensures serialization to/from TOML/JSON and compatibility with pure functio
 
 from collections.abc import Callable
 from types import EllipsisType
-from typing import Any, Final, Literal, Protocol, TypedDict, runtime_checkable
+from typing import Any, Final, Literal, Protocol, TypedDict, TypeVar, runtime_checkable
+
+# What a generic helper below carries through unchanged. Written down because
+# `Any` in and `Any` out says nothing, and these functions do say something:
+# whatever you hand them comes back as the same type.
+T = TypeVar("T")
+V = TypeVar("V")
 
 # THE ENGINES, AS A VOCABULARY RATHER THAN A STRING.
 #
@@ -185,7 +191,7 @@ def is_nothing(value: Any) -> bool:
     return value is NOTHING
 
 
-def resolved(value: Any, otherwise: Any) -> Any:
+def resolved(value: T | Nothing, otherwise: T) -> T:
     """The value a caller passed, or `otherwise` when they passed NOTHING.
 
     A default hides this inside the signature, where no reader sees it happen
@@ -199,12 +205,12 @@ def resolved(value: Any, otherwise: Any) -> Any:
     return _RESOLVED[is_nothing(value)](value, otherwise)
 
 
-def _the_value(value: Any, _otherwise: Any) -> Any:
+def _the_value(value: T | Nothing, _otherwise: T) -> T:
     """A caller passed something, so that is the answer."""
     return value
 
 
-def _the_other(_value: Any, otherwise: Any) -> Any:
+def _the_other(_value: T | Nothing, otherwise: T) -> T:
     """A caller passed NOTHING, so the named alternative stands."""
     return otherwise
 
@@ -655,7 +661,7 @@ class ConnectionConfig(TypedDict, total=False):
     token: str
 
 
-def is_nullable(column: dict[str, Any]) -> bool:
+def is_nullable(column: Column) -> bool:
     """Does this column accept NULL, including what the key already said?
 
     A PRIMARY KEY column is NOT NULL on every engine this package supports, by
@@ -683,7 +689,7 @@ def is_nullable(column: dict[str, Any]) -> bool:
     return not column.get("primary_key") and bool(column.get("nullable", True))
 
 
-def for_dialect(table: dict[str, Any], dialect: str, what: str) -> Any:
+def for_dialect(table: dict[str, V], dialect: str, what: str) -> V:
     """Read a dispatch table, naming what exists when the key does not.
 
     THIS WAS TWO CLASSES. `applier/__init__.py` and `inspector/__init__.py`
@@ -693,6 +699,10 @@ def for_dialect(table: dict[str, Any], dialect: str, what: str) -> Any:
     methods; the method was the whole reason each class existed, so it was
     inheritance for code reuse and nothing else.
 
+    THE PAIR'S ANSWER IS RETURNED, not discarded. This called the pair for its
+    refusal alone and then looked the entry up a second time, so `_the_entry`
+    computed a value nothing read.
+
     The lookup is what varies, so the lookup is the function. The tables stay
     plain dicts, which means they can be printed, merged, compared with `==`
     and passed to anything expecting a dict.
@@ -701,16 +711,15 @@ def for_dialect(table: dict[str, Any], dialect: str, what: str) -> Any:
     was available. `what` names the table so one message can serve every one
     of them.
     """
-    _WHEN_NO_ENTRY[dialect in table](table, dialect, what)
+    return _WHEN_NO_ENTRY[dialect in table](table, dialect, what)
+
+
+def _the_entry(table: dict[str, V], dialect: str, _what: str) -> V:
+    """The table holds this dialect, so this is the entry."""
     return table[dialect]
 
 
-def _the_entry(table: dict[str, Any], dialect: str, _what: str) -> Any:
-    """The table holds this dialect, so the caller reads it next."""
-    return table[dialect]
-
-
-def _refuse_unknown_dialect(table: dict[str, Any], dialect: str, what: str) -> Any:
+def _refuse_unknown_dialect(table: dict[str, V], dialect: str, what: str) -> V:
     """No entry, named alongside the ones that exist."""
     raise ValueError(
         f"Unsupported dialect: {dialect}. "

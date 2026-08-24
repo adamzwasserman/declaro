@@ -187,15 +187,15 @@ def select(
     """
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
-    where = resolved(where, None)
-    params = resolved(params, None)
-    order_by = resolved(order_by, None)
-    limit = resolved(limit, None)
-    offset = resolved(offset, None)
-    joins = resolved(joins, None)
-    group_by = resolved(group_by, None)
-    having = resolved(having, None)
-    params = params or {}
+    the_where = resolved(where, None)
+    the_params = resolved(params, None)
+    the_order_by = resolved(order_by, None)
+    the_limit = resolved(limit, None)
+    the_offset = resolved(offset, None)
+    the_joins = resolved(joins, None)
+    the_group_by = resolved(group_by, None)
+    the_having = resolved(having, None)
+    the_params = the_params or {}
 
     # NAMING NOTHING SELECTS EVERYTHING, and the join says so on its own: an
     # empty column list joins to the empty string. `_quote_column` passes a
@@ -204,12 +204,12 @@ def select(
 
     # WHERE is rendered before HAVING because each merges into the params the
     # one before it produced.
-    where_sql, params = _clause(where, params, "w")
-    having_sql, params = _clause(having, params, "h")
+    where_sql, the_params = _clause(the_where, the_params, "w")
+    having_sql, the_params = _clause(the_having, the_params, "h")
 
-    group_sql = ", ".join(_quote_column(c) for c in (group_by or []))
+    group_sql = ", ".join(_quote_column(c) for c in (the_group_by or []))
     order_sql = ", ".join(
-        _ORDER_DIRECTION[c.startswith("-")](c) for c in (order_by or [])
+        _ORDER_DIRECTION[c.startswith("-")](c) for c in (the_order_by or [])
     )
 
     # THE STATEMENT IS THE CLAUSES THAT ARE PRESENT, joined. A clause a caller
@@ -218,21 +218,21 @@ def select(
     sql_parts = [
         f"SELECT {cols_sql}",
         f'FROM "{from_table}"',
-        *(_join_sql(join) for join in (joins or [])),
+        *(_join_sql(join) for join in (the_joins or [])),
         *[f"WHERE {clause}" for clause in [where_sql] if clause],
-        *[f"GROUP BY {group_sql}" for cols in [group_by] if cols],
+        *[f"GROUP BY {group_sql}" for cols in [the_group_by] if cols],
         *[f"HAVING {clause}" for clause in [having_sql] if clause],
-        *[f"ORDER BY {order_sql}" for cols in [order_by] if cols],
+        *[f"ORDER BY {order_sql}" for cols in [the_order_by] if cols],
         # `is not None` rather than truthiness: 0 is a real limit and a real
         # offset, and reading either as absent drops a clause the caller asked
         # for.
-        *[f"LIMIT {n}" for n in [limit] if n is not None],
-        *[f"OFFSET {n}" for n in [offset] if n is not None],
+        *[f"LIMIT {n}" for n in [the_limit] if n is not None],
+        *[f"OFFSET {n}" for n in [the_offset] if n is not None],
     ]
 
     return {
         "sql": " ".join(sql_parts),
-        "params": params,
+        "params": the_params,
         "dialect": None,
     }
 
@@ -333,8 +333,8 @@ def insert(
     """
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
-    returning = resolved(returning, None)
-    on_conflict = resolved(on_conflict, None)
+    the_returning = resolved(returning, None)
+    the_on_conflict = resolved(on_conflict, None)
     # ONE ROW OR SEVERAL, AND BOTH MEAN SEVERAL. Two spellings of one thing
     # is a vocabulary, resolved here into the single form the rest reads.
     values_list = _ROWS[written_as(dict, values)](values)
@@ -349,8 +349,8 @@ def insert(
     sql_parts = [
         f'INSERT INTO "{into_table}" ({cols_sql})',
         f"VALUES {values_sql}",
-        *[f"ON CONFLICT {clause}" for clause in [on_conflict] if clause],
-        *_returning(returning),
+        *[f"ON CONFLICT {clause}" for clause in [the_on_conflict] if clause],
+        *_returning(the_returning),
     ]
 
     return {
@@ -423,8 +423,8 @@ def update(
     """
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
-    params = resolved(params, None)
-    returning = resolved(returning, None)
+    the_params = resolved(params, None)
+    the_returning = resolved(returning, None)
     # SET is asked about before WHERE, and a test pins that order.
     set_values = _WHEN_NOTHING_TO_SET[not set_values](set_values)
     where = _WHEN_NO_WHERE[not where]("UPDATE", where)
@@ -435,7 +435,7 @@ def update(
     all_params: dict[str, Any] = {
         f"set_{col}": val for col, val in set_values.items()
     }
-    all_params.update(params or {})
+    all_params.update(the_params or {})
 
     # THE MERGED PARAMS, NOT A LOCAL NOBODY READS. This said
     #
@@ -454,14 +454,14 @@ def update(
     # `delete` returns what `_clause` gives it, which is why only this one was
     # wrong, and only for a dict WHERE: a string WHERE takes its bindings from
     # the caller's `params`, which `all_params` already had.
-    where_sql, where_params = _clause(where, params, "w")
+    where_sql, where_params = _clause(where, the_params, "w")
     all_params.update(where_params)
 
     sql_parts = [
         f'UPDATE "{table}"',
         f"SET {set_sql}",
         f"WHERE {where_sql}",
-        *_returning(returning),
+        *_returning(the_returning),
     ]
 
     return {
@@ -497,20 +497,20 @@ def delete(
     """
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
-    params = resolved(params, None)
-    returning = resolved(returning, None)
+    the_params = resolved(params, None)
+    the_returning = resolved(returning, None)
     where = _WHEN_NO_WHERE[not where]("DELETE", where)
 
-    where_sql, params = _clause(where, params, "w")
+    where_sql, the_params = _clause(where, the_params, "w")
     sql_parts = [
         f'DELETE FROM "{from_table}"',
         f"WHERE {where_sql}",
-        *_returning(returning),
+        *_returning(the_returning),
     ]
 
     return {
         "sql": " ".join(sql_parts),
-        "params": params,
+        "params": the_params,
         "dialect": None,
     }
 
@@ -531,10 +531,10 @@ def raw(sql: str, params: dict[str, Any] | Nothing) -> Query:
     """
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
-    params = resolved(params, None)
+    the_params = resolved(params, None)
     return {
         "sql": sql,
-        "params": params or {},
+        "params": the_params or {},
         "dialect": None,
     }
 

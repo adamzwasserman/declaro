@@ -101,14 +101,14 @@ async def _upsert_progress(
     """
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
-    error = resolved(error, None)
+    the_error = resolved(error, None)
     await loader["write_progress"](
         conn,
         table_name,
         status,
         rows_transferred,
         total_rows,
-        error,
+        the_error,
         datetime.now(UTC).isoformat(),
     )
 

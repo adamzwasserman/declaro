@@ -86,11 +86,11 @@ class SchemaError(DeclaroError):
     def __init__(self, message: str, *, file: str | Nothing, line: int | Nothing) -> None:
         # A default in the signature would decide this where no reader
         # sees it happen and no test reaches it.
-        file = resolved(file, None)
-        line = resolved(line, None)
-        self.file = file
-        self.line = line
-        location = _LOCATION[(bool(file), bool(line))](file, line)
+        the_file = resolved(file, None)
+        the_line = resolved(line, None)
+        self.file = the_file
+        self.line = the_line
+        location = _LOCATION[(bool(the_file), bool(the_line))](the_file, the_line)
         super().__init__(f"{message}{location}")
 
 
@@ -163,11 +163,11 @@ class DriftError(DeclaroError):
     ) -> None:
         # A default in the signature would decide this where no reader
         # sees it happen and no test reaches it.
-        last_snapshot = resolved(last_snapshot, None)
-        current_time = resolved(current_time, None)
+        the_last_snapshot = resolved(last_snapshot, None)
+        the_current_time = resolved(current_time, None)
         self.differences = differences
-        self.last_snapshot = last_snapshot
-        self.current_time = current_time
+        self.last_snapshot = the_last_snapshot
+        self.current_time = the_current_time
 
         diff_display = "\n".join(
             [
@@ -183,8 +183,8 @@ class DriftError(DeclaroError):
         # a trade a caller would make.
         stamped = _given(
             (
-                f"  Last snapshot: {last_snapshot}" if last_snapshot else "",
-                f"  Current time:  {current_time}" if current_time else "",
+                f"  Last snapshot: {the_last_snapshot}" if the_last_snapshot else "",
+                f"  Current time:  {the_current_time}" if the_current_time else "",
             )
         )
         timestamps = "\n\n" + "\n".join(stamped) if stamped else ""
@@ -216,9 +216,9 @@ class ConnectionError(DeclaroError):
     def __init__(self, message: str, *, dialect: str | Nothing) -> None:
         # A default in the signature would decide this where no reader
         # sees it happen and no test reaches it.
-        dialect = resolved(dialect, None)
-        self.dialect = dialect
-        dialect_hint = f"\n\n  Dialect: {dialect}" if dialect else ""
+        the_dialect = resolved(dialect, None)
+        self.dialect = the_dialect
+        dialect_hint = f"\n\n  Dialect: {the_dialect}" if the_dialect else ""
         super().__init__(f"{message}{dialect_hint}")
 
 
@@ -240,19 +240,19 @@ class MigrationError(DeclaroError):
     ) -> None:
         # A default in the signature would decide this where no reader
         # sees it happen and no test reaches it.
-        operation = resolved(operation, None)
-        sql = resolved(sql, None)
-        original_error = resolved(original_error, None)
-        self.operation = operation
-        self.sql = sql
-        self.original_error = original_error
+        the_operation = resolved(operation, None)
+        the_sql = resolved(sql, None)
+        the_original_error = resolved(original_error, None)
+        self.operation = the_operation
+        self.sql = the_sql
+        self.original_error = the_original_error
 
         details = _given(
             (
-                f"  Operation: {operation['op']} on {operation['table']}" if operation else "",
-                f"  SQL: {_shortened(sql)}" if sql else "",
-                f"  Original error: {type(original_error).__name__}: {original_error}"  # honest: ignore HC-P005: the class name IS the message
-                if original_error
+                f"  Operation: {the_operation['op']} on {the_operation['table']}" if the_operation else "",
+                f"  SQL: {_shortened(the_sql)}" if the_sql else "",
+                f"  Original error: {type(the_original_error).__name__}: {the_original_error}"  # honest: ignore HC-P005: the class name IS the message
+                if the_original_error
                 else "",
             )
         )
@@ -280,25 +280,25 @@ class RollbackError(MigrationError):
     ) -> None:
         # A default in the signature would decide this where no reader
         # sees it happen and no test reaches it.
-        operation = resolved(operation, None)
-        sql = resolved(sql, None)
-        original_error = resolved(original_error, None)
-        rollback_error = resolved(rollback_error, None)
-        self.rollback_error = rollback_error
+        the_operation = resolved(operation, None)
+        the_sql = resolved(sql, None)
+        the_original_error = resolved(original_error, None)
+        the_rollback_error = resolved(rollback_error, None)
+        self.rollback_error = the_rollback_error
         rollback_msg = (
             (
                 f"\n\n  CRITICAL: Rollback also failed!\n"
-                f"  Rollback error: {type(rollback_error).__name__}: {rollback_error}\n"  # honest: ignore HC-P005: the class name IS the message
+                f"  Rollback error: {type(the_rollback_error).__name__}: {the_rollback_error}\n"  # honest: ignore HC-P005: the class name IS the message
                 f"  Manual database inspection required."
             )
-            if rollback_error
+            if the_rollback_error
             else ""
         )
         super().__init__(
             f"{message}{rollback_msg}",
-            operation=operation,
-            sql=sql,
-            original_error=original_error,
+            operation=the_operation,
+            sql=the_sql,
+            original_error=the_original_error,
         )
 
 
@@ -322,18 +322,18 @@ class ValidationError(SchemaError):
     ) -> None:
         # A default in the signature would decide this where no reader
         # sees it happen and no test reaches it.
-        table = resolved(table, None)
-        column = resolved(column, None)
-        reference = resolved(reference, None)
-        self.table = table
-        self.column = column
-        self.reference = reference
+        the_table = resolved(table, None)
+        the_column = resolved(column, None)
+        the_reference = resolved(reference, None)
+        self.table = the_table
+        self.column = the_column
+        self.reference = the_reference
 
         context = _given(
             (
-                f"Table: {table}" if table else "",
-                f"Column: {column}" if column else "",
-                f"Reference: {reference}" if reference else "",
+                f"Table: {the_table}" if the_table else "",
+                f"Column: {the_column}" if the_column else "",
+                f"Reference: {the_reference}" if the_reference else "",
             )
         )
         context_str = "\n  " + "\n  ".join(context) if context else ""
@@ -354,9 +354,9 @@ class LoaderError(SchemaError):
     def __init__(self, message: str, *, path: str | Nothing) -> None:
         # A default in the signature would decide this where no reader
         # sees it happen and no test reaches it.
-        path = resolved(path, None)
-        self.path = path
-        path_str = f"\n\n  Path: {path}" if path else ""
+        the_path = resolved(path, None)
+        self.path = the_path
+        path_str = f"\n\n  Path: {the_path}" if the_path else ""
         super().__init__(f"{message}{path_str}", file=NOTHING, line=NOTHING)
 
 
@@ -434,19 +434,19 @@ class TransferError(DeclaroError):
     ) -> None:
         # A default in the signature would decide this where no reader
         # sees it happen and no test reaches it.
-        phase = resolved(phase, None)
-        table = resolved(table, None)
-        original_error = resolved(original_error, None)
-        self.phase = phase
-        self.table = table
-        self.original_error = original_error
+        the_phase = resolved(phase, None)
+        the_table = resolved(table, None)
+        the_original_error = resolved(original_error, None)
+        self.phase = the_phase
+        self.table = the_table
+        self.original_error = the_original_error
 
         details = _given(
             (
-                f"Phase: {phase}" if phase else "",
-                f"Table: {table}" if table else "",
-                f"Original error: {type(original_error).__name__}: {original_error}"  # honest: ignore HC-P005: the class name IS the message
-                if original_error
+                f"Phase: {the_phase}" if the_phase else "",
+                f"Table: {the_table}" if the_table else "",
+                f"Original error: {type(the_original_error).__name__}: {the_original_error}"  # honest: ignore HC-P005: the class name IS the message
+                if the_original_error
                 else "",
             )
         )

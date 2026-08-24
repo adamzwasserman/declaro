@@ -92,8 +92,8 @@ async def begin_cutover(
     compare_on_read = resolved(compare_on_read, True)
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
-    tables = resolved(tables, None)
-    on_progress = resolved(on_progress, None)
+    the_tables = resolved(tables, None)
+    the_on_progress = resolved(on_progress, None)
     # Phase 1: Bulk transfer
     logger.info("Phase 1: Starting bulk data transfer")
     result = await bulk_transfer(
@@ -103,9 +103,9 @@ async def begin_cutover(
         target_dialect,
         schema_path,
         batch_size=batch_size,
-        tables=tables,
+        tables=the_tables,
         expand_enums=expand_enums,
-        on_progress=on_progress,
+        on_progress=the_on_progress,
         resume=resume,
     )
     logger.info(

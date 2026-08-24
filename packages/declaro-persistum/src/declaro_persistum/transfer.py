@@ -353,8 +353,8 @@ async def bulk_transfer(
     batch_size = resolved(batch_size, 1000)
     expand_enums = resolved(expand_enums, True)
     resume = resolved(resume, True)
-    tables = resolved(tables, None)
-    on_progress = resolved(on_progress, None)
+    the_tables = resolved(tables, None)
+    the_on_progress = resolved(on_progress, None)
     start = datetime.now(UTC)
 
     # Step 1: Schema migration on target
@@ -374,8 +374,8 @@ async def bulk_transfer(
     logger.info(f"Source has {len(all_tables)} tables")
 
     # Step 3: Filter
-    transfer_tables = _WHICH_TABLES[tables is not None](
-        tables, all_tables, source_schema
+    transfer_tables = _WHICH_TABLES[the_tables is not None](
+        the_tables, all_tables, source_schema
     )
 
     logger.info(f"Transferring {len(transfer_tables)} tables (filtered from {len(all_tables)})")
@@ -397,7 +397,7 @@ async def bulk_transfer(
             "source_loader": source_loader,
             "target_loader": target_loader,
             "batch_size": batch_size,
-            "on_progress": on_progress,
+            "on_progress": the_on_progress,
             "resume": resume,
         }
 

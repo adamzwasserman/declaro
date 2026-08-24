@@ -122,48 +122,48 @@ def count_(column: str, alias: str | Nothing) -> SQLFunction:
     """
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
-    alias = resolved(alias, None)
-    return _function("COUNT", column, alias=alias)
+    the_alias = resolved(alias, None)
+    return _function("COUNT", column, alias=the_alias)
 
 
 @helper
 def sum_(column: str, alias: str | Nothing) -> SQLFunction:
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
-    alias = resolved(alias, None)
-    return _function("SUM", column, alias=alias)
+    the_alias = resolved(alias, None)
+    return _function("SUM", column, alias=the_alias)
 
 
 @helper
 def avg_(column: str, alias: str | Nothing) -> SQLFunction:
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
-    alias = resolved(alias, None)
-    return _function("AVG", column, alias=alias)
+    the_alias = resolved(alias, None)
+    return _function("AVG", column, alias=the_alias)
 
 
 @helper
 def min_(column: str, alias: str | Nothing) -> SQLFunction:
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
-    alias = resolved(alias, None)
-    return _function("MIN", column, alias=alias)
+    the_alias = resolved(alias, None)
+    return _function("MIN", column, alias=the_alias)
 
 
 @helper
 def max_(column: str, alias: str | Nothing) -> SQLFunction:
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
-    alias = resolved(alias, None)
-    return _function("MAX", column, alias=alias)
+    the_alias = resolved(alias, None)
+    return _function("MAX", column, alias=the_alias)
 
 
 @helper
 def now_(alias: str | Nothing) -> SQLFunction:
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
-    alias = resolved(alias, None)
-    return _function("NOW", alias=alias)
+    the_alias = resolved(alias, None)
+    return _function("NOW", alias=the_alias)
 
 
 @helper
@@ -189,8 +189,8 @@ def case_(
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
     else_ = resolved(else_, None)
-    alias = resolved(alias, None)
-    return {"kind": "case", "whens": list(whens), "else_": else_, "alias": alias}
+    the_alias = resolved(alias, None)
+    return {"kind": "case", "whens": list(whens), "else_": else_, "alias": the_alias}
 
 
 @helper
