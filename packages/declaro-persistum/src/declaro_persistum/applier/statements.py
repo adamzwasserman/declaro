@@ -136,7 +136,9 @@ def built_by(
 
 
 @helper
-def _refuse_undeclared_names(op_type: str, declared: set[str], given: set[str]) -> None:
+def _refuse_undeclared_names(
+    op_type: str, declared: set[str], given: dict[str, Any]
+) -> dict[str, Any]:
     """A name the row does not declare, refused where the row is.
 
     This is the check that the old shape could not perform. A caller that
@@ -147,19 +149,29 @@ def _refuse_undeclared_names(op_type: str, declared: set[str], given: set[str]) 
     raise KeyError(
         f"{op_type} takes {sorted(declared)}. "
         f"It was given {sorted(given)}: "
-        f"{sorted(given - declared)} unknown, {sorted(declared - given)} missing."
+        f"{sorted(set(given) - declared)} unknown, "
+        f"{sorted(declared - set(given))} missing."
     )
 
 
 @helper
-def _the_declared_names(_op_type: str, _declared: set[str], _given: set[str]) -> None:
-    """The names given are exactly the ones declared, so there is nothing
-    to say."""
-    return None
+def _the_checked_names(
+    _op_type: str, _declared: set[str], given: dict[str, Any]
+) -> dict[str, Any]:
+    """The names given are exactly the ones declared, so they are the answer.
+
+    BOTH ENTRIES RETURN THE VALUES. This used to return `None` and be called
+    for its refusal alone, which reads as a function nobody finished: an empty
+    body hands `None` back to a caller that cannot tell "not written" from
+    "nothing to do".
+    """
+    return given
 
 
-_WHEN_NAMES_MATCH: dict[bool, Callable[[str, set[str], set[str]], None]] = {
-    True: _the_declared_names,
+_WHEN_NAMES_MATCH: dict[
+    bool, Callable[[str, set[str], dict[str, Any]], dict[str, Any]]
+] = {
+    True: _the_checked_names,
     False: _refuse_undeclared_names,
 }
 
@@ -174,10 +186,9 @@ def render(op_type: str, rendering: Rendering, **named: Any) -> list[str]:
     arguments are checked against the row's own list at the point of use.
     """
     declared = set(rendering["reads"]) | rendering["given"]
-    given = set(named)
-    _WHEN_NAMES_MATCH[given == declared](op_type, declared, given)
+    checked = _WHEN_NAMES_MATCH[set(named) == declared](op_type, declared, named)
 
-    return _REPEATED[rendering["repeat"] is not NOTHING](rendering, named)
+    return _REPEATED[rendering["repeat"] is not NOTHING](rendering, checked)
 
 
 @helper
