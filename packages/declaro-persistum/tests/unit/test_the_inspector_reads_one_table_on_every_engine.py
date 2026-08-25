@@ -127,10 +127,15 @@ def test_an_unknown_dialect_is_refused_and_the_known_ones_named() -> None:
     """The same refusal every other dispatch table in this package gives."""
     import asyncio
 
+    # `asyncio.run`, NOT a loop made by hand. This built one with
+    # `new_event_loop()` and never closed it, so the loop was finalised
+    # whenever the collector next ran and its `__del__` raised
+    # `ValueError: Invalid file descriptor: -1` -- reported as an unraisable
+    # exception against whichever unrelated test happened to be running at the
+    # time. It came and went between runs, which is what the Slop Audit sees
+    # as test determinism 4/5. `asyncio.run` closes what it opens.
     with pytest.raises(ValueError) as caught:
-        asyncio.get_event_loop_policy().new_event_loop().run_until_complete(
-            get_table_columns(None, "mysql", "widgets")
-        )
+        asyncio.run(get_table_columns(None, "mysql", "widgets"))
 
     message = str(caught.value)
     assert "mysql" in message and "sqlite" in message, message
