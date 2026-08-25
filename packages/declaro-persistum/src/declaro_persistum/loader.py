@@ -536,7 +536,7 @@ _THE_PENDING_DECISIONS: dict[bool, Callable[[Path], dict[str, Decision]]] = {
 }
 
 
-@boundary
+@helper
 def load_decisions(schema_dir: str | Path) -> dict[str, Decision]:
     """
     Load pending decisions file.
@@ -551,7 +551,7 @@ def load_decisions(schema_dir: str | Path) -> dict[str, Decision]:
     return _THE_PENDING_DECISIONS[pending_path.exists()](pending_path)
 
 
-@boundary
+@helper
 def clear_decisions(schema_dir: str | Path) -> None:
     """Delete the pending decisions, because they have been applied.
 

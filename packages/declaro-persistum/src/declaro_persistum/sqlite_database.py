@@ -41,7 +41,7 @@ async def connect_sqlite(db: Database) -> Any:
     return conn
 
 
-@boundary
+@helper
 async def _close_connection(conn: DbapiConnection) -> int:
     await conn.close()
     return 1

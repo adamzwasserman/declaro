@@ -64,7 +64,7 @@ async def _restore_enforcement(connection: DbapiConnection, enforced: int) -> No
     await connection.execute(f"PRAGMA foreign_keys = {'ON' if enforced else 'OFF'}")
 
 
-@boundary
+@helper
 async def apply(
     connection: DbapiConnection,
     operations: list[Operation],
@@ -97,7 +97,7 @@ async def _preview(
     return dry_run_preview(operations, execution_order)
 
 
-@boundary
+@helper
 async def _run_reconstruction(
     connection: DbapiConnection, operation: Operation
 ) -> list[str]:

@@ -53,7 +53,7 @@ def get_dialect() -> str:
     return "postgresql"
 
 
-@boundary
+@helper
 async def _the_tables_alone(
     _connection: FetchingConnection, schema: Schema, _schema_name: str
 ) -> Schema | tuple[Schema, dict[str, View]]:
@@ -61,7 +61,7 @@ async def _the_tables_alone(
     return schema
 
 
-@boundary
+@helper
 async def _the_tables_and_views(
     connection: FetchingConnection, schema: Schema, schema_name: str
 ) -> Schema | tuple[Schema, dict[str, View]]:
@@ -260,7 +260,7 @@ def _pointing_at(column: Column, fk: dict[str, str]) -> Column:
     return dict(facts)  # type: ignore[return-value]
 
 
-@boundary
+@helper
 async def _get_columns(
     connection: FetchingConnection,
     table_name: str,
@@ -448,7 +448,7 @@ def _normalize_type(row: dict[str, Any]) -> str:
     return _with_precision(_base_type(row["data_type"], row["udt_name"]), row)
 
 
-@boundary
+@helper
 async def _get_primary_key(
     connection: FetchingConnection,
     table_name: str,
@@ -474,7 +474,7 @@ async def _get_primary_key(
     return [row["column_name"] for row in rows]
 
 
-@boundary
+@helper
 async def _get_unique_columns(
     connection: FetchingConnection,
     table_name: str,
@@ -501,7 +501,7 @@ async def _get_unique_columns(
     return {row["column_name"] for row in rows}
 
 
-@boundary
+@helper
 async def _get_indexes(
     connection: FetchingConnection,
     table_name: str,
@@ -596,7 +596,7 @@ def _index_from_row(row: dict[str, Any]) -> Index:
     return dict(facts)  # type: ignore[return-value]
 
 
-@boundary
+@helper
 async def _get_foreign_keys(
     connection: FetchingConnection,
     table_name: str,
@@ -664,7 +664,7 @@ _WHEN_PRESENT: dict[bool, Callable[[str], str]] = {
 }
 
 
-@boundary
+@helper
 async def table_exists(
     connection: FetchingConnection,
     table_name: str,
@@ -693,7 +693,7 @@ async def table_exists(
 
 
 
-@boundary
+@helper
 async def _get_column_checks(
     connection: FetchingConnection, table_name: str, schema_name: str
 ) -> dict[str, str]:
@@ -728,7 +728,7 @@ async def _get_column_checks(
     }
 
 
-@boundary
+@helper
 async def _get_table_constraints(
     connection: FetchingConnection, table_name: str, schema_name: str
 ) -> dict[str, dict[str, str]]:
@@ -769,7 +769,7 @@ async def _get_table_constraints(
     }
 
 
-@boundary
+@helper
 async def introspect_views(
     connection: FetchingConnection,
     *,

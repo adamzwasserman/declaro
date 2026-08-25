@@ -84,7 +84,7 @@ async def _get_table_status(
     return await loader["read_progress"](conn, table_name)
 
 
-@boundary
+@helper
 async def _upsert_progress(
     conn: Any,
     loader: BulkLoader,
@@ -176,7 +176,7 @@ async def _nothing_left_to_read(
     return []
 
 
-@boundary
+@helper
 async def _read_one_batch(
     loader: BulkLoader,
     conn: Any,
@@ -200,7 +200,7 @@ _MORE_ROWS: dict[
 }
 
 
-@boundary
+@helper
 async def _next_batch(
     loader: BulkLoader,
     conn: Any,
@@ -221,7 +221,7 @@ async def _next_batch(
     )
 
 
-@boundary
+@helper
 async def _transfer_table(
     source_conn: Any,
     target_conn: Any,
@@ -322,7 +322,7 @@ class _Run(TypedDict):
     resume: bool
 
 
-@boundary
+@helper
 async def _record_a_failed_table(
     run: _Run, table: str, failure: Exception
 ) -> _TableOutcome:
@@ -391,7 +391,7 @@ async def _stream_the_table(
     }
 
 
-@boundary
+@helper
 async def _transfer_from_scratch(
     run: _Run,
     table: str,
@@ -402,7 +402,7 @@ async def _transfer_from_scratch(
     return await _stream_the_table(run, table, columns, status)
 
 
-@boundary
+@helper
 async def _already_transferred(
     run: _Run,
     table: str,
@@ -427,7 +427,7 @@ async def _already_transferred(
     return {"table": table, "outcome": "skipped", "rows": rows, "error": None}
 
 
-@boundary
+@helper
 async def _clear_and_transfer(
     run: _Run,
     table: str,
@@ -499,7 +499,7 @@ def _how_a_recorded_table_stands(status: dict[str, Any] | None) -> str:
     return next(iter(recorded), "fresh")
 
 
-@boundary
+@helper
 async def _from_where_it_got_to(
     run: _Run, table: str, columns: list[str]
 ) -> _TableOutcome:
@@ -510,7 +510,7 @@ async def _from_where_it_got_to(
     )
 
 
-@boundary
+@helper
 async def _from_the_beginning(
     run: _Run, table: str, columns: list[str]
 ) -> _TableOutcome:
@@ -527,7 +527,7 @@ _WHEN_RESUMING: dict[
 }
 
 
-@boundary
+@helper
 async def _transfer_or_resume(
     run: _Run, table: str, columns: list[str]
 ) -> _TableOutcome:
@@ -535,7 +535,7 @@ async def _transfer_or_resume(
     return await _WHEN_RESUMING[run["resume"]](run, table, columns)
 
 
-@boundary
+@helper
 async def _skip_a_table_with_no_columns(
     _run: _Run, table: str, _columns: list[str]
 ) -> _TableOutcome:
@@ -662,7 +662,7 @@ _WHICH_TABLES: dict[
 }
 
 
-@boundary
+@helper
 def _warn_and_append_the_cycle(
     sorted_tables: list[str], circular_refs: list[str]
 ) -> list[str]:
@@ -715,7 +715,7 @@ async def _turn_fk_checks_off(
     return None
 
 
-@boundary
+@helper
 async def _leave_fk_checks_on(
     _loader: BulkLoader, _conn: Any, _circular_refs: list[str]
 ) -> int:
@@ -759,7 +759,7 @@ async def _turn_fk_checks_back_on(loader: BulkLoader, conn: Any) -> int:
     return 1
 
 
-@boundary
+@helper
 async def _leave_the_checks_as_they_are(_loader: BulkLoader, _conn: Any) -> int:
     """They were never turned off, so there is nothing to put back."""
     return 0

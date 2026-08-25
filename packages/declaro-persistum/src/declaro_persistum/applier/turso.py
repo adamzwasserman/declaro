@@ -103,7 +103,7 @@ def migration_succeeded(*, skipped: int) -> bool:
     return skipped == 0
 
 
-@boundary
+@helper
 async def apply(
     connection: DbapiConnection,
     operations: list[Operation],
@@ -416,7 +416,7 @@ _SKIP_SUMMARY: dict[bool, Callable[[list[str]], str | None]] = {
 }
 
 
-@boundary
+@helper
 def _partial_note(executed: list[str], skipped: list[str]) -> str:
     """Say how much of the batch landed, when some of it did not."""
     note = f"Migration partial: {len(executed)} applied, {len(skipped)} skipped"
@@ -436,7 +436,7 @@ _PARTIAL: dict[bool, Callable[[list[str], list[str]], str]] = {
 }
 
 
-@boundary
+@helper
 async def _run_batch(
     connection: DbapiConnection,
     operations: list[Operation],

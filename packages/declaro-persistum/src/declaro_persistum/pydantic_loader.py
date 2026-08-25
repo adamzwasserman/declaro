@@ -412,7 +412,7 @@ def _import_module_file(module_path: Path) -> Any:
     return module
 
 
-@boundary
+@helper
 def load_declarations(module_path: Path) -> tuple[Schema, dict[str, View]]:
     """Everything a models file declares: its tables AND its views.
 
@@ -425,7 +425,7 @@ def load_declarations(module_path: Path) -> tuple[Schema, dict[str, View]]:
     return _schema_of(module), views_from_module(module)
 
 
-@boundary
+@helper
 def load_models_from_module(module_path: Path) -> Schema:
     """Load all @table decorated Pydantic models from a Python module.
 

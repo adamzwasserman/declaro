@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from itertools import accumulate, groupby
 from typing import TypedDict
 
-from declaro_persistum.boundary import boundary, helper, recognizer
+from declaro_persistum.boundary import helper, recognizer
 from declaro_persistum.types import Nothing, resolved
 
 
@@ -225,7 +225,7 @@ def format_jsonl(record: LatencyRecord) -> str:
 
 
 
-@boundary
+@helper
 def emit_record(logger: logging.Logger, record: LatencyRecord) -> None:
     """Write a LatencyRecord to the latency logger."""
     logger.info(format_jsonl(record))

@@ -37,7 +37,7 @@ async def connect_postgresql(db: Database) -> Any:
     return await asyncpg.connect(db["path"], timeout=db["busy_timeout_s"])
 
 
-@boundary
+@helper
 async def _close_connection(conn: FetchingConnection) -> int:
     await conn.close()
     return 1

@@ -50,6 +50,7 @@ from typing import Any
 import pytest
 
 from declaro_persistum.abstractions.enums import expand_schema_enums
+from declaro_persistum.differ import diff_views
 from declaro_persistum.differ.core import diff
 from declaro_persistum.inspector import introspect
 from declaro_persistum.types import NOTHING, Operation
@@ -89,9 +90,27 @@ POSTS_FK = {
     },
 }
 
-# (label, current, target). The operations each one produces are read off the
-# differ below, never listed here, so a case that stops producing what it was
-# written for is reported rather than silently passing.
+A_VIEW = {"v_names": {"name": "v_names", "query": "SELECT name FROM users"}}
+A_MATVIEW = {
+    "mv_names": {
+        "name": "mv_names",
+        "query": "SELECT name FROM users",
+        "materialized": True,
+        "refresh": "manual",
+    }
+}
+WITH_CHECK = _users(
+    constraints={"ck_id": {"type": "check", "expression": "id > 0"}}
+)
+
+# (label, current, target). A state is a schema, optionally paired with the
+# views declared against it, because a view is diffed by `diff_views` and a
+# case that carries only a schema can never reach one. Four cells of the
+# matrix were empty for exactly that reason.
+#
+# The operations each case produces are read off the differ below, never
+# listed here, so a case that stops producing what it was written for is
+# reported rather than silently passing.
 CASES: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
     ("create a table", {}, _users()),
     # NOT ALL LOWER CASE, and every other case here is. A uniform input space
@@ -126,6 +145,14 @@ CASES: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
     ("add an index", _users(), WITH_INDEX),
     ("drop an index", WITH_INDEX, _users()),
     ("add a foreign key", POSTS_PLAIN, POSTS_FK),
+    ("drop a foreign key", POSTS_FK, POSTS_PLAIN),
+    ("rename a table", _users(), {"people": {**USERS, "renamed_from": "users"}}),
+    ("create a view", (_users(), {}), (_users(), A_VIEW)),
+    ("drop a view", (_users(), A_VIEW), (_users(), {})),
+    ("create a materialized view", (_users(), {}), (_users(), A_MATVIEW)),
+    ("drop a materialized view", (_users(), A_MATVIEW), (_users(), {})),
+    ("add a constraint", _users(), WITH_CHECK),
+    ("drop a constraint", WITH_CHECK, _users()),
     (
         "change a column type",
         _users(),
@@ -172,8 +199,40 @@ CASES: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
 ]
 
 
-def _operations_of(current: dict[str, Any], target: dict[str, Any]) -> set[str]:
-    return {o["op"] for o in diff(current, target, dialect="sqlite", decisions=NOTHING)["operations"]}
+# WHAT SQLITE AND TURSO REFUSE, by label. Neither has ADD CONSTRAINT or DROP
+# CONSTRAINT and this package does not yet rebuild a table to stand in for
+# one, so the applier raises and says which constraint on which table.
+#
+# A REFUSAL IS A BEHAVIOUR AND IS TESTED AS ONE. Leaving these out of the
+# matrix would have said the cells were unreachable, which is what the gate
+# above claimed for two years and was wrong about: the differ emits them
+# perfectly well, and it is the applier that will not run them.
+REFUSED_BY_SQLITE = {"add a constraint", "drop a constraint"}
+
+APPLIED_CASES = [
+    case for case in CASES if case[0] not in REFUSED_BY_SQLITE
+]
+
+
+def _operations_of(current: Any, target: Any) -> set[str]:
+    """Every operation moving between these two states, tables and views both.
+
+    IT ASKED ONLY ABOUT TABLES. `diff` answers for tables and `diff_views`
+    answers for views, so a case carrying a view produced nothing here and the
+    view operations went unrecorded. That is why `create_view` and `drop_view`
+    were declared out of reach below: nothing could reach them, including this.
+    """
+    current_schema, current_views = _state(current)
+    target_schema, target_views = _state(target)
+    return {
+        operation["op"]
+        for operation in (
+            *diff(
+                current_schema, target_schema, dialect="sqlite", decisions=NOTHING
+            )["operations"],
+            *diff_views(current_views, target_views),
+        )
+    }
 
 
 def test_the_cases_cover_the_operations_they_claim_to() -> None:
@@ -188,31 +247,92 @@ def test_the_cases_cover_the_operations_they_claim_to() -> None:
         reached |= _operations_of(current, target)
 
     declared = set(Operation.__annotations__["op"].__args__)
-    # Stated, not silent. Views do not travel through the table introspector,
-    # and SQLite refuses to add or drop a named constraint at all, which the
-    # renderer gate beside this file asserts it says out loud.
-    out_of_reach = {
-        "create_view",
-        "drop_view",
-        "add_constraint",
-        "drop_constraint",
-        "drop_foreign_key",
-    }
 
-    assert reached == declared - out_of_reach, (
-        f"cases reach {sorted(reached)}; expected "
-        f"{sorted(declared - out_of_reach)}. Missing "
-        f"{sorted((declared - out_of_reach) - reached)}, unexpected "
-        f"{sorted(reached - (declared - out_of_reach))}"
+    # NOTHING IS OUT OF REACH ANY MORE, and this used to name five.
+    # `create_view`, `drop_view` and `drop_foreign_key` were listed because no
+    # case could produce them: the runner applied only table operations, and
+    # no case carried a view. `add_constraint` and `drop_constraint` were
+    # listed as though the differ could not emit them, and it always could --
+    # what refuses them is the SQLite applier, which is a different fact and
+    # is asserted as one below.
+    #
+    # Measured 2026-08-25 by wrapping the applier for a whole suite run:
+    # `drop_view` and `drop_constraint` had never been applied to any database
+    # on any engine, and `create_view` had never been applied to PostgreSQL. A
+    # list of what a gate cannot reach is honest. Leaving five on it when
+    # three were waiting for a case and two were mislabelled is not.
+    assert reached == declared, (
+        f"cases reach {sorted(reached)}. Missing {sorted(declared - reached)}, "
+        f"unexpected {sorted(reached - declared)}"
     )
 
 
-async def _apply_plan(
-    connection: Any, current: dict, target: dict, dialect: str
+@pytest.mark.parametrize(
+    "label,current,target",
+    [case for case in CASES if case[0] in REFUSED_BY_SQLITE],
+    ids=[
+        case[0].replace(" ", "_") for case in CASES if case[0] in REFUSED_BY_SQLITE
+    ],
+)
+async def test_what_sqlite_refuses_it_refuses_out_loud(
+    label: str, current: Any, target: Any
 ) -> None:
+    """A refusal is a behaviour, so it is run rather than assumed.
+
+    These two were on the gate's out-of-reach list as though the differ could
+    not emit them. It always could. What will not run them is the applier,
+    and until this test nothing had ever asked it to: measured 2026-08-25,
+    `drop_constraint` had never been applied to any database on any engine.
+
+    The message must name the constraint and the table, because an operator
+    reading it has to know which declaration to change.
+    """
+    import aiosqlite
+
+    path = tempfile.mktemp(suffix=".db")
+    connection = await aiosqlite.connect(path)
+    try:
+        await _apply_plan(connection, {}, current, "sqlite")
+
+        with pytest.raises(Exception) as raised:
+            await _apply_plan(connection, current, target, "sqlite")
+
+        assert "ck_id" in str(raised.value) and "users" in str(raised.value), (
+            f"{label} was refused without naming what to change: {raised.value}"
+        )
+    finally:
+        await connection.close()
+        os.unlink(path)
+
+
+def _state(case_half: Any) -> tuple[dict, dict]:
+    """A case half is a schema, or a schema paired with its views.
+
+    Written as a pair only where a view is the point, so the fifteen cases
+    that have nothing to say about views stay as short as they were.
+    """
+    return case_half if isinstance(case_half, tuple) else (case_half, {})
+
+
+async def _apply_plan(
+    connection: Any, current: Any, target: Any, dialect: str
+) -> None:
+    """Everything that changes between two states: its tables, then its views.
+
+    THE VIEWS WERE NOT APPLIED HERE AT ALL. `diff` answers for tables and
+    `diff_views` answers for views, and this helper called only the first, so
+    no case could reach a create_view or a drop_view however it was written.
+    Measured 2026-08-25 by wrapping the applier for a whole suite run: of the
+    48 cells of operation against engine, `drop_view` and `drop_constraint`
+    had never been applied to any database, and `create_view` had never been
+    applied to PostgreSQL.
+    """
     from declaro_persistum.applier import apply
 
-    plan = diff(current, target, dialect=dialect, decisions=NOTHING)
+    current_schema, current_views = _state(current)
+    target_schema, target_views = _state(target)
+
+    plan = diff(current_schema, target_schema, dialect=dialect, decisions=NOTHING)
     await apply(
         connection,
         plan["operations"],
@@ -221,17 +341,30 @@ async def _apply_plan(
         dry_run=False,
     )
 
+    view_operations = diff_views(current_views, target_views)
+    await apply(
+        connection,
+        view_operations,
+        list(range(len(view_operations))),
+        dialect,
+        dry_run=False,
+    )
 
-async def _converged(connection: Any, target: dict, dialect: str) -> list:
+
+async def _converged(connection: Any, target: Any, dialect: str) -> list:
+    """What a second migration would still emit. Zero is the only pass."""
+    target_schema, _target_views = _state(target)
     actual = await introspect(connection, dialect)
     return diff(
-        {name: actual[name] for name in target if name in actual},
-        target,
+        {name: actual[name] for name in target_schema if name in actual},
+        target_schema,
         dialect=dialect, decisions=NOTHING)["operations"]
 
 
 @pytest.mark.parametrize(
-    "label,current,target", CASES, ids=[c[0].replace(" ", "_") for c in CASES]
+    "label,current,target",
+    APPLIED_CASES,
+    ids=[c[0].replace(" ", "_") for c in APPLIED_CASES],
 )
 async def test_the_change_applies_and_then_stops_being_emitted(
     label: str, current: dict, target: dict
@@ -261,7 +394,9 @@ async def test_the_change_applies_and_then_stops_being_emitted(
 
 
 @pytest.mark.parametrize(
-    "label,current,target", CASES, ids=[c[0].replace(" ", "_") for c in CASES]
+    "label,current,target",
+    APPLIED_CASES,
+    ids=[c[0].replace(" ", "_") for c in APPLIED_CASES],
 )
 async def test_the_change_leaves_the_declared_tables_present(
     label: str, current: dict, target: dict
@@ -281,9 +416,10 @@ async def test_the_change_leaves_the_declared_tables_present(
         await _apply_plan(connection, current, target, "sqlite")
 
         actual = await introspect(connection, "sqlite")
+        declared, _views = _state(target)
 
-        assert set(target) <= set(actual), (
-            f"{label} left {sorted(set(target) - set(actual))} missing; "
+        assert set(declared) <= set(actual), (
+            f"{label} left {sorted(set(declared) - set(actual))} missing; "
             f"the database holds {sorted(actual)}"
         )
     finally:
@@ -297,15 +433,63 @@ async def test_the_change_leaves_the_declared_tables_present(
 
 PROBE_URL = probe_url()
 
-# Every table any case names. Dropped before and after each one, so a case
-# that fails halfway cannot poison the next. Read off the cases rather than
-# listed, because a list here would go stale the moment a case is added.
-TOUCHED = sorted({name for _l, c, t in CASES for name in (*c, *t)} | {"_dp_enum_t_status"})
+# Every table and view any case names. Dropped before and after each one, so a
+# case that fails halfway cannot poison the next. Read off the cases rather
+# than listed, because a list here would go stale the moment a case is added.
+TOUCHED = sorted(
+    {
+        name
+        for _label, current, target in CASES
+        for half in (current, target)
+        for part in _state(half)
+        for name in part
+    }
+    | {"_dp_enum_t_status"}
+)
+
+
+# What PostgreSQL calls each kind of object, and the statement that removes
+# it. A table read by subscript, so a kind nobody wrote a rule for raises here
+# rather than being dropped by the wrong statement.
+# IF EXISTS ON EACH, because the list is read once and CASCADE removes
+# dependents as the loop runs. A materialized view selecting from `users`
+# goes when `users` goes, and the loop then reaches a name pg_class listed a
+# moment earlier. IF EXISTS is safe here in a way it was not before: the kind
+# is read from the database rather than guessed, so this cannot be a
+# wrong-kind drop quietly doing nothing.
+_DROP_BY_KIND: dict[str, str] = {
+    "r": "DROP TABLE IF EXISTS",
+    "p": "DROP TABLE IF EXISTS",
+    "v": "DROP VIEW IF EXISTS",
+    "m": "DROP MATERIALIZED VIEW IF EXISTS",
+}
 
 
 async def _clean(connection: Any) -> None:
-    for name in TOUCHED:
-        await connection.execute(f'DROP TABLE IF EXISTS "{name}" CASCADE')
+    """Remove everything any case names, by asking what kind each one is.
+
+    A VIEW IS NOT A TABLE AND POSTGRESQL SAYS SO. `DROP TABLE` against a
+    materialized view is refused with WrongObjectTypeError and a hint naming
+    the statement that would have worked, and `IF EXISTS` does not help:
+    PostgreSQL checks the kind before it checks existence, so a wrong-kind
+    drop raises for an object that is plainly there.
+
+    Trying all three statements in turn therefore fails on the two that are
+    wrong. The kind is a fact the database holds, so it is read rather than
+    guessed.
+    """
+    present = await connection.fetch(
+        "SELECT c.relname, c.relkind FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'public' AND c.relname = ANY($1::text[])",
+        TOUCHED,
+    )
+    # asyncpg hands `relkind` back as a one-byte value rather than as text,
+    # so it is decoded here, at the edge where it arrives, and the table below
+    # is keyed by what PostgreSQL's own documentation calls these.
+    for name, kind in present:
+        statement = _DROP_BY_KIND[kind.decode()]
+        await connection.execute(f'{statement} "{name}" CASCADE')
 
 
 @pytest.mark.postgresql
@@ -362,9 +546,10 @@ async def test_the_change_leaves_the_declared_tables_present_on_postgresql(
         await _apply_plan(connection, current, target, "postgresql")
 
         actual = await introspect(connection, "postgresql")
+        declared, _views = _state(target)
 
-        assert set(target) <= set(actual), (
-            f"{label} left {sorted(set(target) - set(actual))} missing; "
+        assert set(declared) <= set(actual), (
+            f"{label} left {sorted(set(declared) - set(actual))} missing; "
             f"the database holds {sorted(actual)}"
         )
     finally:
@@ -379,7 +564,9 @@ async def test_the_change_leaves_the_declared_tables_present_on_postgresql(
 
 @pytest.mark.turso
 @pytest.mark.parametrize(
-    "label,current,target", CASES, ids=[c[0].replace(" ", "_") for c in CASES]
+    "label,current,target",
+    APPLIED_CASES,
+    ids=[c[0].replace(" ", "_") for c in APPLIED_CASES],
 )
 async def test_the_change_applies_and_converges_on_turso(
     label: str, current: dict, target: dict
@@ -405,7 +592,9 @@ async def test_the_change_applies_and_converges_on_turso(
 
 @pytest.mark.turso
 @pytest.mark.parametrize(
-    "label,current,target", CASES, ids=[c[0].replace(" ", "_") for c in CASES]
+    "label,current,target",
+    APPLIED_CASES,
+    ids=[c[0].replace(" ", "_") for c in APPLIED_CASES],
 )
 async def test_the_change_leaves_the_declared_tables_present_on_turso(
     label: str, current: dict, target: dict
@@ -424,9 +613,10 @@ async def test_the_change_leaves_the_declared_tables_present_on_turso(
         await _apply_plan(connection, current, target, "turso")
 
         actual = await introspect(connection, "turso")
+        declared, _views = _state(target)
 
-        assert set(target) <= set(actual), (
-            f"{label} left {sorted(set(target) - set(actual))} missing; "
+        assert set(declared) <= set(actual), (
+            f"{label} left {sorted(set(declared) - set(actual))} missing; "
             f"the database holds {sorted(actual)}"
         )
     finally:

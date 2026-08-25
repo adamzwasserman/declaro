@@ -233,7 +233,7 @@ def deposit(room: Room, write: PendingWrite) -> str:
     return ticket
 
 
-@boundary
+@helper
 async def collect(room: Room, ticket: str) -> Receipt:
     """Wait for one deposited write, and RAISE whatever it raised.
 
@@ -422,7 +422,7 @@ async def drain(
     return {"attempted": attempted, "orphaned": orphaned}
 
 
-@boundary
+@helper
 async def _append_one(
     ticket: str,
     write: PendingWrite,
@@ -488,7 +488,7 @@ async def _one_attempt(
         ](ticket, write, execute, retry, attempt, exc)
 
 
-@boundary
+@helper
 async def _wait_out_the_delay(seconds: float) -> int:
     """The policy asks this attempt to pause first, so it takes the clock."""
     await asyncio.sleep(seconds)
@@ -566,7 +566,7 @@ async def _the_budget_is_spent(
     }
 
 
-@boundary
+@helper
 async def _once_more(
     ticket: str,
     write: PendingWrite,

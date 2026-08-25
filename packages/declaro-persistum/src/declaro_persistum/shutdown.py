@@ -116,7 +116,7 @@ def _trap_signals(db: Database) -> Callable[[], int]:
             # Not the main thread. Nothing to trap; close(db) still works.
             pass
 
-    @boundary
+    @helper
     def restore() -> int:
         """Put back what was replaced, and say how many."""
         put_back = [
@@ -155,7 +155,7 @@ _TRAP: dict[bool, Callable[[Database], Callable[[], int]]] = {
 }
 
 
-@boundary
+@helper
 def _restored(sig: int, previous: object) -> bool:
     """Put one handler back. False when the platform refuses it."""
     with contextlib.suppress(ValueError, OSError, TypeError):

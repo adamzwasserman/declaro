@@ -16,7 +16,7 @@ from typing import Any, cast
 
 from declaro_persistum.abstractions.enums import expand_schema_enums
 from declaro_persistum.applier import apply as apply_operations
-from declaro_persistum.boundary import boundary, helper
+from declaro_persistum.boundary import helper
 from declaro_persistum.database import (
     Database,
     is_replicated,
@@ -238,7 +238,7 @@ def _still_to_do(
     }
 
 
-@boundary
+@helper
 async def _no_schema_file(
     db: Database,
     dialect: Dialect,
@@ -265,7 +265,7 @@ async def _no_schema_file(
     }
 
 
-@boundary
+@helper
 async def _no_orphan_recovery(_db: Database) -> int:
     """This dialect writes no `_declaro_tmp_` tables and has no sqlite_master,
     so there is nothing to scan for and nothing came back."""
@@ -278,7 +278,7 @@ _ORPHAN_RECOVERY: dict[bool, Callable[[Database], Awaitable[int]]] = {
 }
 
 
-@boundary
+@helper
 async def _read_the_schema_file(
     db: Database,
     dialect: Dialect,
@@ -321,7 +321,7 @@ _WHEN_THE_SCHEMA_FILE_IS_THERE: dict[
 }
 
 
-@boundary
+@helper
 async def _migrate_whatever_the_stamp_says(
     db: Database,
     dialect: Dialect,
@@ -333,7 +333,7 @@ async def _migrate_whatever_the_stamp_says(
     return _still_to_do(db, dialect, schema_path, expand_enums, schema_hash)
 
 
-@boundary
+@helper
 async def _nothing_has_changed(
     db: Database,
     dialect: Dialect,
@@ -371,7 +371,7 @@ _WHEN_THE_DATABASE_IS_CURRENT: dict[
 }
 
 
-@boundary
+@helper
 async def _consult_the_stamp(
     db: Database,
     dialect: Dialect,
@@ -398,14 +398,14 @@ _WHEN_THE_STAMP_IS_WORTH_READING: dict[
 }
 
 
-@boundary
+@helper
 def _load_the_schema(schema_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     """The tables and views one models file declares."""
     logger.info(f"Loading schema from {schema_path}")
     return load_declarations(schema_path)
 
 
-@boundary
+@helper
 async def _stamp(plan: _Migration) -> None:
     """Record the hash so the next start can skip introspection."""
     async with _for_ddl(plan["db"]) as conn:
@@ -432,7 +432,7 @@ def _how_the_migration_stands(answer: Any, errors: list[str]) -> str:
     return next(iter(settled), "carry on")
 
 
-@boundary
+@helper
 async def _the_answer_already_settled(
     plan: _Migration,
     _target_schema: Schema,
@@ -443,7 +443,7 @@ async def _the_answer_already_settled(
     return cast(dict[str, Any], plan["answer"])
 
 
-@boundary
+@helper
 async def _refuse_an_invalid_schema(
     _plan: _Migration,
     target_schema: Schema,
@@ -462,7 +462,7 @@ async def _refuse_an_invalid_schema(
     }
 
 
-@boundary
+@helper
 async def _stamp_an_empty_schema(
     plan: _Migration,
     _target_schema: Schema,
@@ -481,7 +481,7 @@ async def _stamp_an_empty_schema(
     }
 
 
-@boundary
+@helper
 def _expand_the_enums(target_schema: Schema) -> dict[str, Any]:
     """Every Literal column becomes a lookup table and an FK to it."""
     expanded = expand_schema_enums(target_schema)
@@ -503,7 +503,7 @@ _ENUM_EXPANSION: dict[bool, Callable[[dict[str, Any]], dict[str, Any]]] = {
 }
 
 
-@boundary
+@helper
 async def _nothing_to_change(
     plan: _Migration,
     target_schema: Schema,
@@ -523,7 +523,7 @@ async def _nothing_to_change(
     }
 
 
-@boundary
+@helper
 async def _refuse_ambiguous_changes(
     _plan: _Migration,
     target_schema: Schema,
@@ -543,7 +543,7 @@ async def _refuse_ambiguous_changes(
     }
 
 
-@boundary
+@helper
 async def _record_the_migration(
     plan: _Migration,
     target_schema: Schema,
@@ -571,7 +571,7 @@ async def _record_the_migration(
     }
 
 
-@boundary
+@helper
 async def _report_a_failed_apply(
     _plan: _Migration,
     target_schema: Schema,
@@ -611,7 +611,7 @@ _WHEN_THE_OPERATIONS_LANDED: dict[
 }
 
 
-@boundary
+@helper
 async def _apply_and_report(
     plan: _Migration,
     target_schema: Schema,
@@ -635,7 +635,7 @@ async def _apply_and_report(
     )
 
 
-@boundary
+@helper
 async def _run_the_safe_operations(
     plan: _Migration,
     target_schema: Schema,
@@ -655,7 +655,7 @@ async def _run_the_safe_operations(
     )
 
 
-@boundary
+@helper
 async def _report_everything_deferred(
     _plan: _Migration,
     target_schema: Schema,
@@ -699,7 +699,7 @@ _WHEN_ANYTHING_IS_SAFE_TO_RUN: dict[
 }
 
 
-@boundary
+@helper
 async def _run_every_operation(
     plan: _Migration,
     target_schema: Schema,
@@ -717,7 +717,7 @@ async def _run_every_operation(
     )
 
 
-@boundary
+@helper
 async def _defer_what_cannot_replicate(
     plan: _Migration,
     target_schema: Schema,
@@ -763,7 +763,7 @@ _WHEN_THE_TARGET_IS_A_REPLICA: dict[
 }
 
 
-@boundary
+@helper
 async def _choose_what_to_run(
     plan: _Migration,
     target_schema: Schema,
@@ -788,7 +788,7 @@ _WHEN_THE_CHANGES_ARE_AMBIGUOUS: dict[
 }
 
 
-@boundary
+@helper
 async def _consider_what_changed(
     plan: _Migration,
     target_schema: Schema,
@@ -818,7 +818,7 @@ _WHEN_THERE_IS_WORK: dict[
 }
 
 
-@boundary
+@helper
 async def _migrate_the_tables(
     plan: _Migration,
     target_schema: Schema,
@@ -881,7 +881,7 @@ _WHEN_THE_SCHEMA_DECLARES_TABLES: dict[
 }
 
 
-@boundary
+@helper
 async def _migrate_the_declared_schema(
     plan: _Migration,
     target_schema: Schema,
@@ -913,7 +913,7 @@ _NEXT_STEP: dict[
 _NOTHING_TO_VALIDATE: dict[str, list[str]] = {"errors": [], "warnings": []}
 
 
-@boundary
+@helper
 async def apply_migrations_async(
     db: Database,
     dialect: Dialect,

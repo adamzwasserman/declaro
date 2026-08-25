@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from declaro_persistum.boundary import boundary, helper
+from declaro_persistum.boundary import helper
 from declaro_persistum.inspector import postgresql, sqlite, turso
 from declaro_persistum.types import NOTHING, Dialect, Schema, View, for_dialect
 
@@ -95,7 +95,7 @@ async def get_table_columns(
     return cast(dict[str, Any], await reader(connection, table))
 
 
-@boundary
+@helper
 async def table_exists(connection: Any, dialect: Dialect, table: str) -> bool:
     exists = for_dialect(TABLE_EXISTS, dialect, "Table-exists checks")
     return cast(bool, await exists(connection, table, schema_name=NOTHING))

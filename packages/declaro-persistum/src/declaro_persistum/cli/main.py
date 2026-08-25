@@ -351,7 +351,7 @@ def _run_snapshot(args: argparse.Namespace, connection_string: str | None, diale
 
 
 @boundary
-@helper
+@boundary
 def _run_migrate_remote(
     args: argparse.Namespace, _connection_string: str | None, _dialect: Dialect | None
 ) -> int:

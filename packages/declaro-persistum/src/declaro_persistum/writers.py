@@ -53,15 +53,15 @@ Transaction = Callable[[Any], "AbstractAsyncContextManager[None]"]
 class DbApiConnection(Protocol):
     """Turso and SQLite. Parameters as a sequence, an explicit commit."""
 
-    @boundary
+    @helper
     async def execute(self, sql: str, parameters: Sequence[object] = ..., /) -> object:
         raise NotImplementedError("CODE NOT WRITTEN")
 
-    @boundary
+    @helper
     async def commit(self) -> None:
         raise NotImplementedError("CODE NOT WRITTEN")
 
-    @boundary
+    @helper
     async def rollback(self) -> None:
         # DECLARED BECAUSE `dbapi_transaction` DEPENDS ON IT. The Protocol
         # named `execute` and `commit` only, so the rollback half of the
@@ -78,7 +78,7 @@ class AsyncpgConnection(Protocol):
     async def execute(self, sql: str, /, *args: object) -> object:
         raise NotImplementedError("CODE NOT WRITTEN")
 
-    @boundary
+    @helper
     def transaction(self) -> AbstractAsyncContextManager[object]:
         raise NotImplementedError("CODE NOT WRITTEN")
 

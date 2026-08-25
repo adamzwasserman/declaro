@@ -34,7 +34,7 @@ META_TABLE = "_declaro_meta"
 logger = logging.getLogger(__name__)
 
 
-@boundary
+@helper
 def _for_ddl(db: Database) -> Any:
     """The database's own DDL door. Never a read, and not always a write.
 
@@ -289,7 +289,7 @@ def user_tables_sql(dialect: str) -> str:
     return cast(str, for_dialect(_USER_TABLES, dialect, "Statement builders"))
 
 
-@boundary
+@helper
 def _dialect_of(conn: Any) -> str:
     """asyncpg or not, decided once rather than in every statement.
 
@@ -329,7 +329,7 @@ _WRITERS: dict[
 }
 
 
-@boundary
+@helper
 async def _ensure_meta_table(conn: Any) -> None:
     """Run `meta_table_sql`. The statement is asserted in its own test."""
     write = for_dialect(_WRITERS, _dialect_of(conn), "Statement writers")
@@ -360,7 +360,7 @@ def _stamp_key(schema_name: str, schema_hash: str) -> str:
     return f"schema_hash:{schema_name}:{schema_hash}"
 
 
-@boundary
+@helper
 async def _read_stamp_from_postgres(conn: Any, sql: str, key: str) -> str | None:
     """asyncpg hands the row straight back, keyed by column name."""
     row = await conn.fetchrow(sql, key)
@@ -383,7 +383,7 @@ _STAMP_READERS: dict[
 }
 
 
-@boundary
+@helper
 async def _get_stored_hash(conn: Any, schema_name: str, schema_hash: str) -> str | None:
     """Return the stored stamp for this exact schema and version, else None."""
     dialect = _dialect_of(conn)
@@ -394,7 +394,7 @@ async def _get_stored_hash(conn: Any, schema_name: str, schema_hash: str) -> str
     )
 
 
-@boundary
+@helper
 async def _store_hash(conn: Any, schema_name: str, schema_hash: str) -> None:
     """Store (upsert) the schema hash in _declaro_meta."""
     dialect = _dialect_of(conn)
@@ -406,7 +406,7 @@ async def _store_hash(conn: Any, schema_name: str, schema_hash: str) -> None:
     )
 
 
-@boundary
+@helper
 async def _schema_is_clean(
     conn: Any, schema_path: Path, schema_hash: str
 ) -> bool:
@@ -447,13 +447,13 @@ async def _schema_is_clean(
     return await _WHEN_THE_STAMP_MATCHES[stored == schema_hash](conn, schema_path)
 
 
-@boundary
+@helper
 async def _the_stamp_disagrees(_conn: Any, _schema_path: Path) -> bool:
     """No stamp, or one written for a different schema. There is work to do."""
     return False
 
 
-@boundary
+@helper
 async def _the_stamp_agrees(conn: Any, schema_path: Path) -> bool:
     """The stamp matches, so the only question left is whether the database
     still holds what it was stamped for.
@@ -471,7 +471,7 @@ def _the_database_holds_tables(_schema_path: Path) -> bool:
     return True
 
 
-@boundary
+@helper
 def _the_database_is_empty(schema_path: Path) -> bool:
     """No user tables, so the hash is only trustworthy when the schema file
     itself produces none. Otherwise the database was destroyed and recreated.
@@ -492,7 +492,7 @@ _WHEN_THE_DATABASE_IS_POPULATED: dict[bool, Callable[[Path], bool]] = {
 }
 
 
-@boundary
+@helper
 async def _count_tables_on_postgres(conn: Any, sql: str) -> bool:
     """asyncpg returns the rows, so their number is the answer."""
     return bool(await conn.fetch(sql))
@@ -511,7 +511,7 @@ _TABLE_COUNTERS: dict[str, Callable[[Any, str], Awaitable[bool]]] = {
 }
 
 
-@boundary
+@helper
 async def _has_user_tables(conn: Any) -> bool:
     """Return True if the database has at least one table besides _declaro_meta."""
     dialect = _dialect_of(conn)
@@ -707,7 +707,7 @@ async def _recover_one(conn: Any, tmp_name: str) -> int:
     )
 
 
-@boundary
+@helper
 async def _leave_the_stamp(_conn: Any, recovered: int) -> int:
     """Nothing was recovered, so the stored hash still describes the database."""
     return recovered

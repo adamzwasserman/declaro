@@ -448,7 +448,7 @@ _FOREIGN_KEYS_OFF: dict[bool, Callable[[Any], Awaitable[bool]]] = {
 
 
 
-@boundary
+@helper
 async def _say_no_column_is_shared(
     _connection: Any,
     table_name: str,
@@ -471,7 +471,7 @@ _WHEN_COLUMNS_ARE_SHARED: dict[
 }
 
 
-@boundary
+@helper
 async def _copy_the_rows(
     connection: Any,
     table_name: str,

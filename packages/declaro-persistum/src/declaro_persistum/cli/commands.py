@@ -7,7 +7,7 @@ Each command is an async function that returns an exit code.
 import sys
 from pathlib import Path
 
-from declaro_persistum.boundary import boundary
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.cli.parts import (
     _ANSWER_AMBIGUITIES as _ANSWER_AMBIGUITIES,
 )
@@ -309,7 +309,7 @@ from declaro_persistum.types import (
 )
 
 
-@boundary
+@helper
 async def cmd_diff(
     *,
     connection_string: str,
@@ -351,7 +351,7 @@ async def cmd_diff(
 
         _note(verbose, f"Introspected {len(actual)} tables from database", sys.stdout)
 
-        @boundary
+        @helper
         async def show_the_diff() -> int:
             """Diff, settle anything ambiguous, and print what would happen."""
             result = diff(
@@ -523,7 +523,7 @@ async def cmd_apply(
                         apply_result["success"]
                     ]()
 
-                @boundary
+                @helper
                 async def show_then_run() -> int:
                     """Show the plan, then dry-run, ask or run it."""
                     _print_diff_result(result, verbose)
@@ -787,7 +787,7 @@ async def cmd_migrate_remote(
                     # loss, and --init is how the operator says which.
                     from_scratch = len(current_schema) == 0 and bool(create_ops)
 
-                    @boundary
+                    @helper
                     async def apply_and_push() -> int:
                         """Run the DDL on the local copy, then send it up."""
                         result = await apply_operations(
@@ -834,7 +834,7 @@ async def cmd_migrate_remote(
                             ),
                         )
 
-                    @boundary
+                    @helper
                     async def migrate_them() -> int:
                         """There are operations, so the guard is asked first."""
                         return await _WHEN_SETTLED[from_scratch and not init](
@@ -871,7 +871,7 @@ async def cmd_migrate_remote(
             against_the_cloud,
         )
 
-    @boundary
+    @helper
     async def with_the_schema_file() -> int:
         """The file is there, so its @table models are read off it.
 
@@ -894,7 +894,7 @@ async def cmd_migrate_remote(
     )
 
 
-@boundary
+@helper
 async def cmd_generate(
     *,
     connection_string: str,
@@ -929,7 +929,7 @@ async def cmd_generate(
 
         _note(verbose, f"Introspected {len(actual)} tables from database", sys.stderr)
 
-        @boundary
+        @helper
         async def write_the_sql() -> int:
             """Diff, then render the operations as statements."""
             result = diff(
@@ -939,7 +939,7 @@ async def cmd_generate(
             # Nothing here can answer an ambiguity, so the command refuses.
             _WHEN_UNANSWERABLE[bool(result["ambiguities"])](result["ambiguities"])
 
-            @boundary
+            @helper
             async def render() -> int:
                 """There are operations, so they become SQL."""
                 sql_statements = generate_sql(

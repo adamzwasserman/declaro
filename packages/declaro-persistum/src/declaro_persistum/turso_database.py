@@ -90,7 +90,7 @@ DIALECT: Dialect = "turso"
 _BUSY_TIMEOUT_S = 5.0
 
 
-@boundary
+@helper
 async def _pull_until_level(conn: ReplicaConnection) -> bool:
     """Keep pulling until the primary reports nothing further.
 
@@ -105,7 +105,7 @@ async def _pull_until_level(conn: ReplicaConnection) -> bool:
     return await _pull_batches(conn, _MAX_PULL_BATCHES, fetched_any=False)
 
 
-@boundary
+@helper
 async def _pull_batches(
     conn: ReplicaConnection, budget: int, fetched_any: bool
 ) -> bool:
@@ -122,7 +122,7 @@ async def _pull_batches(
     )
 
 
-@boundary
+@helper
 async def _pull_one_more(
     conn: ReplicaConnection, budget: int, fetched_any: bool
 ) -> bool:
@@ -146,7 +146,7 @@ def _out_of_batches(fetched_any: bool) -> bool:
     return fetched_any
 
 
-@boundary
+@helper
 async def replicate_path(path: str, *, primary: str, token: str | None) -> None:
     """Bring a PATH into conformity with its primary, creating it if absent.
 
@@ -215,7 +215,7 @@ async def _set_journal_mode(conn: DbapiConnection, mode: str) -> str:
     return row[0] if row else "unknown"
 
 
-@boundary
+@helper
 async def negotiate_journal_mode(path: str, mode: str) -> str:
     """Ask the file for a journal mode, once, and report what was granted.
 
@@ -253,7 +253,7 @@ async def negotiate_journal_mode(path: str, mode: str) -> str:
         await conn.close()
 
 
-@boundary
+@helper
 async def connect_local(db: Database) -> Any:
     """Open a connection to a local database. Nothing else.
 
@@ -267,7 +267,7 @@ async def connect_local(db: Database) -> Any:
 
 
 @asynccontextmanager
-@boundary
+@helper
 async def migrating(db: Database) -> AsyncIterator[Any]:
     """Open a connection for DDL. ALWAYS WAL, even on a local database.
 
@@ -309,13 +309,13 @@ async def migrating(db: Database) -> AsyncIterator[Any]:
 
 
 
-@boundary
+@helper
 async def _close_connection(conn: DbapiConnection) -> int:
     await conn.close()
     return 1
 
 
-@boundary
+@helper
 async def open_turso(
     path: str,
     primary: str | None | Nothing,
@@ -370,7 +370,7 @@ async def open_turso(
     return db
 
 
-@boundary
+@helper
 async def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
     """A local database: MVCC, no lock, a connection per `writing` block.
 
@@ -452,7 +452,7 @@ async def _open_replicated(
     held = await turso.aio.sync.connect(path, remote_url=primary, auth_token=token)
     await _set_journal_mode(held, "wal")
 
-    @boundary
+    @helper
     async def connect(_db: Database) -> Any:
         return held
 
@@ -508,7 +508,7 @@ async def _open_replicated(
         await _pull_until_level(held)
         return 1
 
-    @boundary
+    @helper
     async def release(_db: Database) -> int:
         await held.close()
         return 1

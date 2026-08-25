@@ -269,7 +269,7 @@ async def _no_rows_loaded(
     return 0
 
 
-@boundary
+@helper
 async def _copied(
     conn: FetchingConnection,
     table: str,
@@ -297,7 +297,7 @@ async def postgres_load_rows(
     return await _WHEN_POSTGRES_HAS_ROWS[bool(rows)](conn, table, columns, rows)
 
 
-@boundary
+@helper
 async def postgres_count_rows(conn: FetchingConnection, table: str) -> int:
     return int(await conn.fetchval(f'SELECT COUNT(*) FROM "{table}"'))
 
@@ -309,7 +309,7 @@ async def postgres_delete_rows(conn: FetchingConnection, table: str) -> int:
     return int(result.split()[-1]) if result else 0
 
 
-@boundary
+@helper
 async def postgres_commit(_conn: FetchingConnection) -> int:
     """No commit sent: asyncpg's transaction context commits on exit."""
     return 0
@@ -320,7 +320,7 @@ async def postgres_ensure_progress(conn: FetchingConnection) -> None:
     await conn.execute(_CREATE_PROGRESS_TABLE_SQL)
 
 
-@boundary
+@helper
 async def postgres_read_progress(conn: FetchingConnection, table: str) -> dict[str, Any] | None:
     row = await conn.fetchrow(
         f'SELECT * FROM "{TRANSFER_STATE_TABLE}" WHERE table_name = $1',
@@ -385,7 +385,7 @@ async def dbapi_read_rows(
     return [tuple(row) for row in await cursor.fetchall()]
 
 
-@boundary
+@helper
 async def _inserted(
     conn: DbapiConnection,
     table: str,

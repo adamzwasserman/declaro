@@ -162,7 +162,7 @@ def detect_dialect(connection: Any) -> str:
     ][0]
 
 
-@boundary
+@helper
 async def execute(
     query: Query,
     connection: Any,
@@ -194,7 +194,7 @@ async def execute(
     return _ALL_ROWS[bool(row_factory)](rows, row_factory)
 
 
-@boundary
+@helper
 async def execute_one(
     query: Query,
     connection: Any,
@@ -227,7 +227,7 @@ async def execute_one(
     return _ONE_ROW[row is not None and bool(row_factory)](row, row_factory)
 
 
-@boundary
+@helper
 async def execute_scalar(
     query: Query,
     connection: Any,
@@ -251,7 +251,7 @@ async def execute_scalar(
     return await _execute_fetch_scalar(connection, sql, params)
 
 
-@boundary
+@helper
 async def execute_many(
     query: Query,
     connection: Any,
@@ -345,7 +345,7 @@ def _placeholders(sql: str) -> list[tuple[int, int, str]]:
     ]
 
 
-@boundary
+@helper
 def _convert_to_asyncpg(sql: str, params: dict[str, Any]) -> tuple[str, list[Any]]:
     """Convert :name parameters to $N for asyncpg.
 
@@ -386,7 +386,7 @@ def _convert_to_aiosqlite(sql: str, params: dict[str, Any]) -> tuple[str, dict[s
     return sql, params
 
 
-@boundary
+@helper
 def _convert_to_turso(sql: str, params: dict[str, Any]) -> tuple[str, list[Any]]:
     """Convert :name parameters to ? for turso/pyturso, in SQL occurrence order.
 
@@ -474,7 +474,7 @@ async def _execute_fetch_one(connection: Any, sql: str, params: Any) -> dict[str
     """Execute and fetch single row."""
     conn_type = _conn_module(connection)
 
-    @boundary
+    @helper
     async def _fetch_one_asyncpg() -> dict[str, Any] | None:
         row = await connection.fetchrow(sql, *params)
         return dict(row) if row else None
@@ -570,7 +570,7 @@ async def _execute_fetch_scalar(connection: Any, sql: str, params: Any) -> Any:
     """Execute and fetch scalar value."""
     conn_type = _conn_module(connection)
 
-    @boundary
+    @helper
     async def _scalar_asyncpg() -> Any:
         return await connection.fetchval(sql, *params)
 
@@ -625,7 +625,7 @@ async def _execute_update(connection: Any, sql: str, params: Any) -> int:
     return await _UPDATERS[_driver_key(conn_type)]()
 
 
-@boundary
+@helper
 def _dict_factory(cursor: Any, row: tuple[Any, ...]) -> dict[str, Any]:
     """Row factory for aiosqlite to return dicts."""
     columns = [col[0] for col in cursor.description]

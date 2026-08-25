@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypedDict, cast
 
-from declaro_persistum.boundary import boundary, helper
+from declaro_persistum.boundary import helper
 from declaro_persistum.bulk_loader import (
     BULK_LOADERS,
     BulkLoader,
@@ -271,7 +271,7 @@ def _toposort_tables(
 
 
 
-@boundary
+@helper
 async def _ensure_progress_table(conn: Any, loader: BulkLoader) -> None:
     """Create the transfer progress table if it is not there.
 
@@ -291,7 +291,7 @@ async def _ensure_progress_table(conn: Any, loader: BulkLoader) -> None:
     await loader["ensure_progress"](conn)
 
 
-@boundary
+@helper
 async def _transfer_one_table(
     run: _Run, source_schema: Schema, table: str
 ) -> _TableOutcome:
@@ -305,7 +305,7 @@ async def _transfer_one_table(
 # ---------------------------------------------------------------------------
 
 
-@boundary
+@helper
 async def bulk_transfer(
     source: Database,
     target: Database,

@@ -56,7 +56,7 @@ def get_transaction_mode() -> str:
 
 
 
-@boundary
+@helper
 async def apply(
     connection: FetchingConnection,
     operations: list[Operation],

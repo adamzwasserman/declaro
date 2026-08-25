@@ -50,7 +50,7 @@ def _print_it(message: str, stream: Any) -> int:
     return 1
 
 
-@boundary
+@helper
 def _print_nothing(_message: str, _stream: Any) -> int:
     """This line was not asked for, so nothing is printed."""
     return 0
@@ -83,7 +83,7 @@ async def _that_is_the_answer(message: str, stream: Any, code: int, _rest: Rest)
     return code
 
 
-@boundary
+@helper
 async def _carry_on(_message: str, _stream: Any, _code: int, rest: Rest) -> int:
     """This step had nothing to say, so the rest of the command runs."""
     return await rest()
@@ -96,14 +96,14 @@ _WHEN_SETTLED: dict[bool, Callable[[str, Any, int, Rest], Awaitable[int]]] = {
 }
 
 
-@boundary
+@helper
 async def _stop_at_drift(drift: list[dict[str, str]], _rest: Rest) -> int:
     """The database no longer matches its snapshot, so the command stops."""
     _print_drift_error(drift)
     return 2
 
 
-@boundary
+@helper
 async def _past_the_drift_check(_drift: list[dict[str, str]], rest: Rest) -> int:
     """Nothing has drifted, so the rest of the command runs."""
     return await rest()
@@ -116,7 +116,7 @@ _WHEN_DRIFTED: dict[bool, Callable[[list[dict[str, str]], Rest], Awaitable[int]]
 }
 
 
-@boundary
+@helper
 def _drift_against_the_snapshot(actual: Schema, schema_dir: str) -> list[dict[str, str]]:
     """The snapshot is there and is being read, so compare the two."""
     from declaro_persistum.loader import load_snapshot
@@ -124,7 +124,7 @@ def _drift_against_the_snapshot(actual: Schema, schema_dir: str) -> list[dict[st
     return _check_drift(actual, load_snapshot(schema_dir))
 
 
-@boundary
+@helper
 def _no_snapshot_to_compare(_actual: Schema, _schema_dir: str) -> list[dict[str, str]]:
     """No snapshot, or --force, so there is nothing to have drifted from."""
     return []
@@ -137,7 +137,7 @@ _WHEN_SNAPSHOT_READ: dict[bool, Callable[[Schema, str], list[dict[str, str]]]] =
 }
 
 
-@boundary
+@helper
 def _drift(actual: Schema, schema_dir: str, force: bool) -> list[dict[str, str]]:
     """How the database differs from the snapshot, when there is one to read.
 
@@ -184,7 +184,7 @@ Settle = Callable[
 ]
 
 
-@boundary
+@helper
 async def _refuse_the_ambiguities(
     result: DiffResult,
     _schema_dir: str,
@@ -194,7 +194,7 @@ async def _refuse_the_ambiguities(
     raise AmbiguityError(result["ambiguities"])
 
 
-@boundary
+@helper
 async def _ask_the_operator(
     result: DiffResult,
     schema_dir: str,
@@ -204,7 +204,7 @@ async def _ask_the_operator(
     return rerun(await _resolve_ambiguities_interactive(result["ambiguities"], schema_dir))
 
 
-@boundary
+@helper
 async def _leave_them_alone(
     result: DiffResult,
     _schema_dir: str,
@@ -252,7 +252,7 @@ async def _aborted(_rest: Rest) -> int:
     return 1
 
 
-@boundary
+@helper
 async def _confirmed(rest: Rest) -> int:
     """The operator said yes, so the rest of the command runs."""
     return await rest()
@@ -325,13 +325,13 @@ _WHEN_A_TERMINAL: dict[bool, Callable[[Path, Rest], Awaitable[int]]] = {
 }
 
 
-@boundary
+@helper
 async def _confirm_the_overwrite(snapshot_path: Path, rest: Rest) -> int:
     """A snapshot is already there, so overwriting it has to be agreed to."""
     return await _WHEN_A_TERMINAL[sys.stdin.isatty()](snapshot_path, rest)
 
 
-@boundary
+@helper
 async def _nothing_to_overwrite(_snapshot_path: Path, rest: Rest) -> int:
     """No snapshot there, or --force given, so nothing needs agreeing to."""
     return await rest()
@@ -356,7 +356,7 @@ def _print_the_warnings(warnings: list[str]) -> int:
     return 1
 
 
-@boundary
+@helper
 def _print_no_warnings(_warnings: list[str]) -> int:
     """Nothing to warn about."""
     return 0
@@ -371,7 +371,7 @@ _WHEN_WARNINGS: dict[bool, Callable[[list[str]], int]] = {
 }
 
 
-@boundary
+@helper
 def _warnings_are_fatal(_schema: Schema, _verbose: bool) -> int:
     """--strict was given and the schema drew warnings, so it does not pass."""
     return 2
@@ -414,7 +414,7 @@ def _report_the_errors(
     return 1
 
 
-@boundary
+@helper
 def _report_the_warnings(
     schema: Schema,
     _errors: list[str],
@@ -455,7 +455,7 @@ _WHEN_ENUMS_EXPANDED: dict[bool, Callable[[Schema], Schema]] = {
 }
 
 
-@boundary
+@helper
 def _schema_without_foreign_keys(schema: Schema, verbose: bool) -> Schema:
     """--no-fks was given, so the references come off before the diff."""
     from declaro_persistum.fk_ordering import strip_foreign_keys
@@ -465,7 +465,7 @@ def _schema_without_foreign_keys(schema: Schema, verbose: bool) -> Schema:
     return stripped
 
 
-@boundary
+@helper
 def _schema_keeping_its_foreign_keys(schema: Schema, _verbose: bool) -> Schema:
     """--no-fks was not given, so the references stay."""
     return schema
@@ -555,7 +555,7 @@ SQLITE_RELATIVE = "sqlite:///"
 SQLITE_ABSOLUTE = "sqlite:////"
 
 
-@boundary
+@helper
 def sqlite_path(connection_string: str) -> str:
     """The filename a `sqlite://` URL names, or a refusal that shows the forms.
 
@@ -622,7 +622,7 @@ async def _connect_sqlite(connection_string: str) -> Any:
     return await aiosqlite.connect(sqlite_path(connection_string))
 
 
-@boundary
+@helper
 async def _connect_turso(connection_string: str) -> Any:
     import turso.aio
 
@@ -643,7 +643,7 @@ async def _connect(connection_string: str, dialect: Dialect) -> Any:
     return await connector(connection_string)
 
 
-@boundary
+@helper
 async def _disconnect(connection: Any, dialect: Dialect) -> None:
     """Close a connection.
 
@@ -931,7 +931,7 @@ def _save_the_decisions(schema_dir: str, decisions: dict[str, Decision]) -> int:
     return 1
 
 
-@boundary
+@helper
 def _save_nothing(_schema_dir: str, _decisions: dict[str, Decision]) -> int:
     """Nothing was decided, so there is nothing to write down."""
     return 0

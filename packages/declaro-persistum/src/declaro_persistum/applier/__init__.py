@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from declaro_persistum.applier import postgresql, sqlite, turso
-from declaro_persistum.boundary import boundary, helper
+from declaro_persistum.boundary import helper
 from declaro_persistum.types import Dialect, for_dialect
 
 # A PLAIN DICT. This was `class _Appliers(dict)` with one method, `__missing__`,
@@ -31,7 +31,7 @@ APPLIERS: dict[str, Any] = {
 }
 
 
-@boundary
+@helper
 async def apply(
     connection: Any,
     operations: list[dict[str, Any]],
