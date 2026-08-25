@@ -15,33 +15,55 @@ from declaro_persistum.types import Nothing, resolved, written_as
 
 T = TypeVar("T")
 
+# A ROW AS THE DRIVER WROTE IT. Each driver hands back its own row object,
+# and this module's job is to give the caller either that or whatever their
+# factory makes of it, so the row itself is genuinely the one thing here that
+# cannot be named more tightly.
+Row = dict[str, Any]
+
+# What the caller asked rows to be turned into, or nothing at all. Written
+# down once because the four functions below and the two tables that hold them
+# all take it, and every one of them said `Any`.
+RowFactory = Callable[[Row], T] | None
+
 
 @helper
-def _rows_as_the_driver_wrote_them(rows: list[Any], _row_factory: Any) -> Any:
+def _rows_as_the_driver_wrote_them(
+    rows: list[Row], _row_factory: RowFactory[T]
+) -> list[Row] | list[T]:
     """No factory, so the rows go back exactly as they came off the cursor."""
     return rows
 
 
 @helper
-def _rows_through_the_factory(rows: list[Any], row_factory: Any) -> Any:
+def _rows_through_the_factory(
+    rows: list[Row], row_factory: Callable[[Row], T]
+) -> list[T]:
     """Each row is handed to the caller's factory, in order."""
     return [row_factory(row) for row in rows]
 
 
-_ALL_ROWS: dict[bool, Callable[[list[Any], Any], Any]] = {
+# THE KEY AND THE ARGUMENT TYPES CO-VARY, which Python cannot say. The True
+# entry is only ever called when there is a factory, so it takes one that is
+# not optional; the False entry ignores whatever it is handed. `...` states
+# that the arguments are not constrained here rather than calling them `Any`,
+# which would have said nothing and hidden the difference.
+_ALL_ROWS: dict[bool, Callable[..., list[Row] | list[Any]]] = {
     True: _rows_through_the_factory,
     False: _rows_as_the_driver_wrote_them,
 }
 
 
 @helper
-def _row_as_the_driver_wrote_it(row: Any, _row_factory: Any) -> Any:
+def _row_as_the_driver_wrote_it(
+    row: Row | None, _row_factory: RowFactory[T]
+) -> Row | T | None:
     """Either there is no row to shape or no factory to shape it with."""
     return row
 
 
 @helper
-def _row_through_the_factory(row: Any, row_factory: Any) -> Any:
+def _row_through_the_factory(row: Row, row_factory: Callable[[Row], T]) -> T:
     """There is a row and a factory, so the factory shapes it."""
     return row_factory(row)
 
@@ -49,7 +71,7 @@ def _row_through_the_factory(row: Any, row_factory: Any) -> Any:
 # A ROW THAT IS ABSENT IS NOT PUT THROUGH A FACTORY. `execute_one` asks both
 # halves of that in one key, because a factory called on a missing row would
 # be handed None and asked to make a record of it.
-_ONE_ROW: dict[bool, Callable[[Any, Any], Any]] = {
+_ONE_ROW: dict[bool, Callable[..., Row | Any | None]] = {
     True: _row_through_the_factory,
     False: _row_as_the_driver_wrote_it,
 }
