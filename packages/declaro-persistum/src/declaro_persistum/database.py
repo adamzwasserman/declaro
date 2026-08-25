@@ -30,7 +30,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, Literal, TypedDict, cast
 
-from declaro_persistum.boundary import helper
+from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import DatabaseClosedError
 from declaro_persistum.types import Dialect
 from declaro_persistum.writers import TRANSACTIONS, WriteOne
@@ -77,11 +77,13 @@ ShutdownPolicy = Literal["replicate", "exit_immediately"]
 POLICIES: tuple[str, ...] = ("replicate", "exit_immediately")
 
 
+@helper
 def _policy_stands(_policy: str, _opener: str) -> int:
     """The policy names one of the two answers, so nothing is refused."""
     return 0
 
 
+@helper
 def _refuse_unknown_policy(policy: str, opener: str) -> int:
     """A misspelt policy reads as 'do not replicate', so it is refused by name."""
     raise ValueError(
@@ -99,11 +101,13 @@ _KNOWN_POLICY: dict[bool, Callable[[str, str], int]] = {
 }
 
 
+@helper
 def _replication_stands(_policy: str, _opener: str) -> int:
     """Either there is a primary, or the policy does not ask for one."""
     return 0
 
 
+@helper
 def _refuse_replicating_nowhere(_policy: str, opener: str) -> int:
     """`replicate` with no primary would fail at SIGTERM, so it fails at open."""
     raise ValueError(
@@ -119,6 +123,7 @@ _CAN_HONOUR_POLICY: dict[bool, Callable[[str, str], int]] = {
 }
 
 
+@helper
 def check_shutdown(policy: str, *, can_replicate: bool, opener: str) -> None:
     """Refuse a shutdown policy this database cannot honour.
 
@@ -190,10 +195,12 @@ class WriteLock(TypedDict):
     waiting: int
 
 
+@helper
 def new_write_lock(lock: asyncio.Lock) -> WriteLock:
     return {"lock": lock, "waiting": 0}
 
 
+@helper
 def writers_waiting(db: Database) -> int:
     """How many writers are blocked on the serialise lock right now."""
     serialise = db["serialise"]
@@ -251,6 +258,7 @@ class Database(TypedDict):
     retry_delay_s: float
 
 
+@helper
 def new_database(
     path: str,
     dialect: Dialect,
@@ -299,6 +307,7 @@ def new_database(
     }
 
 
+@helper
 def is_replicated(db: Database) -> bool:
     """True when this database has a primary.
 
@@ -312,11 +321,13 @@ def is_replicated(db: Database) -> bool:
     return db["primary"] is not None
 
 
+@helper
 def _still_open(_db: Database) -> int:
     """The database is open, so the caller may go on."""
     return 0
 
 
+@helper
 def _refuse_closed(_db: Database) -> int:
     """`close` released everything, so there is nothing left to work on."""
     raise DatabaseClosedError("Database has been closed")
@@ -328,10 +339,12 @@ _IS_CLOSED: dict[bool, Callable[[Database], int]] = {
 }
 
 
+@helper
 def _check_open(db: Database) -> None:
     _IS_CLOSED[db["closed"]](db)
 
 
+@helper
 @asynccontextmanager
 async def reading(db: Database) -> AsyncIterator[Any]:
     """A connection for reading, for the span of the block.
@@ -347,6 +360,7 @@ async def reading(db: Database) -> AsyncIterator[Any]:
         await db["close_connection"](conn)
 
 
+@helper
 @asynccontextmanager
 async def _write_connection(db: Database) -> AsyncIterator[Any]:
     """One connection, one transaction, one place a write block can end.
@@ -375,6 +389,7 @@ async def _write_connection(db: Database) -> AsyncIterator[Any]:
         await db["close_connection"](conn)
 
 
+@helper
 @asynccontextmanager
 async def _serialised_write(db: Database) -> AsyncIterator[Any]:
     """Take the serialise lock, then write. Only a replicated database gets here.
@@ -448,6 +463,7 @@ async def nothing_happened(_db: Database) -> bool:
     return False
 
 
+@helper
 @asynccontextmanager
 async def writing(db: Database) -> AsyncIterator[Any]:
     """A connection for writing, for the span of the block.
@@ -472,6 +488,7 @@ async def writing(db: Database) -> AsyncIterator[Any]:
 # ---------------------------------------------------------------------------
 
 
+@helper
 async def replicate(db: Database) -> bool:
     """Bring this copy and its primary into conformity. BOTH DIRECTIONS, one pass.
 
@@ -495,11 +512,13 @@ async def replicate(db: Database) -> bool:
     return await _AFTER_SENDING[await db["replicate_once"](db)](db)
 
 
+@helper
 def _primary_stands(_db: Database) -> int:
     """There is a primary, so there is something to bring into conformity."""
     return 0
 
 
+@helper
 def _refuse_local_only(db: Database) -> int:
     """A local-only database has no second copy, so the request has no meaning."""
     raise ValueError(
@@ -515,6 +534,7 @@ _HAS_A_PRIMARY: dict[bool, Callable[[Database], int]] = {
 }
 
 
+@helper
 async def _bring_the_primary_down(db: Database) -> bool:
     """The writes went up, so now the primary's changes come down."""
     await db["refresh_once"](db)
@@ -529,6 +549,7 @@ _AFTER_SENDING: dict[bool, Callable[[Database], Awaitable[bool]]] = {
 }
 
 
+@helper
 async def replicate_if_idle(db: Database) -> bool:
     """Replicate only when no writer is waiting. Returns whether a pass ran.
 
@@ -552,6 +573,7 @@ _IF_IDLE: dict[bool, Callable[[Database], Awaitable[bool]]] = {
 }
 
 
+@helper
 async def replication_loop(db: Database, wanted: asyncio.Event) -> None:
     """Replicate when work arrives and no writer waits. NOTHING IS ON A CLOCK.
 
@@ -578,6 +600,7 @@ _AFTER_WAKING: dict[bool, Callable[[Database], Awaitable[bool]]] = {
 }
 
 
+@helper
 async def replicate_on_shutdown(db: Database, *, now: Callable[[], float]) -> None:
     """Block until the primary has everything, and SAY SO WHILE IT HAPPENS.
 
@@ -597,11 +620,13 @@ async def replicate_on_shutdown(db: Database, *, now: Callable[[], float]) -> No
     await _ON_SHUTDOWN[is_replicated(db)](db, now)
 
 
+@helper
 async def _nothing_to_deliver(_db: Database, _now: Callable[[], float]) -> int:
     """A local-only database has no primary, so shutdown waits for nothing."""
     return 0
 
 
+@boundary
 async def _deliver_before_exit(db: Database, now: Callable[[], float]) -> int:
     """Retry until the primary has everything, saying so on every attempt."""
     started = now()
@@ -633,6 +658,7 @@ _ON_SHUTDOWN: dict[bool, Callable[[Database, Callable[[], float]], Awaitable[int
 }
 
 
+@helper
 async def refresh(db: Database) -> None:
     """Bring the primary's changes down into the local copy.
 
@@ -642,6 +668,7 @@ async def refresh(db: Database) -> None:
     await _REFRESH[is_replicated(db)](db)
 
 
+@helper
 async def _refresh_from_primary(db: Database) -> int:
     """Take whatever the primary has that this copy does not."""
     _check_open(db)
@@ -656,6 +683,7 @@ _REFRESH: dict[bool, Callable[[Database], Awaitable[int]]] = {
 }
 
 
+@helper
 async def flush(db: Database) -> None:
     """Block until every local write has reached the primary.
 
@@ -666,6 +694,7 @@ async def flush(db: Database) -> None:
     await _FLUSH[is_replicated(db)](db)
 
 
+@helper
 async def _flush_to_primary(db: Database) -> int:
     """Keep sending until the primary takes it, then take back what it has."""
     # IGNORES LOAD. A caller that awaited this has said it is willing to wait;
@@ -683,6 +712,7 @@ _FLUSH: dict[bool, Callable[[Database], Awaitable[int]]] = {
 }
 
 
+@helper
 async def close(db: Database) -> Database:
     """Replicate whatever is left, then release everything.
 
