@@ -1,10 +1,11 @@
 """
-Shared pure functions for SQLite-compatible inspectors (SQLite, Turso/libSQL).
+Shared pure functions for the SQLite-compatible inspectors: SQLite and Turso.
 
 All functions are pure: no I/O, no side effects, no state.
-Both SQLiteInspector and TursoInspector delegate shared logic here.
+The SQLite and Turso inspectors both delegate their shared logic here.
 """
 
+import json
 import re
 from collections.abc import Callable
 from functools import partial, reduce
@@ -349,8 +350,18 @@ def assemble_table(
     return dict(facts)  # type: ignore[return-value]
 
 
+def _declared_dependencies(stored: str | None) -> list[str]:
+    """The `depends_on` column, back as the list the declaration wrote.
+
+    `create_matview_sql` stores it as a JSON array. NULL and the empty string
+    both mean a view that declared none, which is a real answer rather than a
+    failure: the column is nullable and a view need not depend on anything.
+    """
+    return [name for text in [stored] if text for name in json.loads(text)]
+
+
 def views_from_rows(
-    rows: list[tuple], matviews: dict[str, tuple[str, str]]
+    rows: list[tuple], matviews: dict[str, tuple[str, str, list[str]]]
 ) -> dict[str, View]:
     """Convert sqlite_master view rows and matview metadata to `View` values.
 
@@ -370,8 +381,16 @@ def views_from_rows(
     merely noisy — it emptied the cache the view exists to be, on every
     deploy.
 
-    `matviews` maps name to (query, refresh_strategy), read from the metadata
-    table by the caller. I/O stays with the caller; this stays pure.
+    `matviews` maps name to (query, refresh_strategy, depends_on), read from
+    the metadata table by the caller. I/O stays with the caller; this stays
+    pure.
+
+    DEPENDS_ON WAS WRITTEN AND NEVER READ BACK. `create_matview_sql` stores it
+    as a JSON array in the registry, and the read selected three columns of
+    the four, so a declared `depends_on` could not survive a round trip. The
+    feature file has a scenario for exactly this and it passed for months,
+    because the step that claimed to introspect built its answer out of the
+    row the previous step had written.
     """
     return {
         **{
@@ -388,8 +407,9 @@ def views_from_rows(
                 "query": query,
                 "materialized": True,
                 "refresh": refresh,
+                "depends_on": depends_on,
             }
-            for name, (query, refresh) in matviews.items()
+            for name, (query, refresh, depends_on) in matviews.items()
         },
     }
 

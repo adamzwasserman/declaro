@@ -221,6 +221,8 @@ def test_a_view_is_read_with_its_query() -> None:
 def test_a_materialized_view_is_marked_as_one() -> None:
     """The distinction is why the function takes two arguments: a plain view
     is recreated freely and a materialized one holds data."""
-    views = views_from_rows([], {"stats": ("SELECT count(*) FROM users", "manual")})
+    views = views_from_rows(
+        [], {"stats": ("SELECT count(*) FROM users", "manual", ["users"])}
+    )
 
     assert views["stats"]["materialized"] is True

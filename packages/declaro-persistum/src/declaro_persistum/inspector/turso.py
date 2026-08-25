@@ -32,6 +32,7 @@ from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionError
 from declaro_persistum.exceptions import DeclaroError
 from declaro_persistum.inspector.shared import (
+    _declared_dependencies,
     apply_unique_columns,
     as_literal,
     assemble_table,
@@ -594,10 +595,10 @@ async def introspect_views(
         )
     )
     present = await _maybe_await(cursor.fetchall())
-    matviews: dict[str, tuple[str, str]] = {
-        name: (query, refresh)
+    matviews: dict[str, tuple[str, str, list[str]]] = {
+        name: (query, refresh, _declared_dependencies(depends_on))
         for _ in present[:1]
-        for name, query, refresh in await _matview_rows(connection)
+        for name, query, refresh, depends_on in await _matview_rows(connection)
     }
 
     # The fifth folding site. A view's name comes back from
@@ -617,7 +618,7 @@ async def _matview_rows(connection: DbapiConnection) -> list[tuple]:
     """
     cursor = await _maybe_await(
         connection.execute(
-            "SELECT name, query, refresh_strategy "
+            "SELECT name, query, refresh_strategy, depends_on "
             f"FROM {MATVIEW_METADATA_TABLE} ORDER BY name"
         )
     )

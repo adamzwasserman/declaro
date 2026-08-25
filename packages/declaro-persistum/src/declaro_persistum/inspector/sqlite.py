@@ -23,6 +23,7 @@ from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import ConnectionError as DeclaroConnectionError
 from declaro_persistum.exceptions import DeclaroError
 from declaro_persistum.inspector.shared import (
+    _declared_dependencies,
     as_literal,
     assemble_table,
     checks_from_ddl,
@@ -271,7 +272,9 @@ async def table_of(connection: DbapiConnection, table: str) -> Table:
 
 
 @helper
-async def matviews_of(connection: DbapiConnection) -> dict[str, tuple[str, str]]:
+async def matviews_of(
+    connection: DbapiConnection,
+) -> dict[str, tuple[str, str, list[str]]]:
     """The emulated materialized views, from the metadata table.
 
     Absent table means none have been created, which is not an error. This is
@@ -296,11 +299,11 @@ async def matviews_of(connection: DbapiConnection) -> dict[str, tuple[str, str]]
     # The second read happens once for a table that is there and not at all
     # for one that is not, so an absent table asks the engine nothing further.
     return {
-        name: (query, refresh)
+        name: (query, refresh, _declared_dependencies(depends_on))
         for _ in present[:1]
-        for name, query, refresh in await _rows(
+        for name, query, refresh, depends_on in await _rows(
             connection,
-            "SELECT name, query, refresh_strategy "
+            "SELECT name, query, refresh_strategy, depends_on "
             f"FROM {MATVIEW_METADATA_TABLE} ORDER BY name",
         )
     }
