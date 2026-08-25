@@ -50,12 +50,15 @@ passes. The module is reachable; its behaviour is not.
 `instrumentation.py` is that shape today: `__init__.py` imports `LatencyRecord`
 and none of its five functions is called anywhere in src.
 
-NARROWING IT NEEDS A DECISION THIS TEST CANNOT MAKE. "At least one name
-imported AND called in src" also flags `abstractions/arrays.py`, `maps.py`,
-`ranges.py` and `hierarchy.py`, which are consumer-facing helpers that src is
-not supposed to call. Two definitions of "reached" were tried and neither
-separated the two cases. Separating them requires the package to declare which
-modules are a consumer surface, which is an API decision, not a test.
+NARROWING IT NEEDED A DECISION THIS TEST COULD NOT MAKE, and the decision has
+since been made. "At least one name imported AND called in src" used to flag
+`abstractions/arrays.py`, `maps.py`, `ranges.py` and `hierarchy.py` alongside
+the real orphans, and nothing separated a consumer-facing helper from a module
+nobody reaches. The four were deleted on 2026-08-24 under the rule that a
+function with no feature file may go: no feature file described them, nothing
+in src called them, and their tests asserted substrings of SQL no database had
+ever parsed. The distinction this docstring could not draw no longer has two
+sides.
 """
 
 from __future__ import annotations
