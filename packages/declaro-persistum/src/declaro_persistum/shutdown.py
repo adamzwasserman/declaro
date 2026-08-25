@@ -22,7 +22,6 @@ import signal
 import time
 from collections.abc import Callable
 from types import FrameType
-from typing import Any
 
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.database import Database, replicate_on_shutdown
@@ -101,13 +100,26 @@ def _trap_signals(db: Database) -> Callable[[], int]:
             )
             coro = replicate_on_shutdown(_db, now=time.monotonic)
             try:
-                loop = asyncio.get_event_loop()
+                # ASK FOR A RUNNING LOOP, which is the only kind that can take
+                # the work. `get_event_loop` answers with whatever loop object
+                # is lying around, including a closed one, and then this had to
+                # interrogate what it got back. A closed loop reports
+                # `is_running() == False`, which read as "stopped, so run it
+                # here" and raised instead of replicating.
+                #
+                # It also CREATES a loop when there is none and nothing closes
+                # it, which the suite reports as an unraisable exception from
+                # `BaseEventLoop.__del__` attributed to whichever test happened
+                # to be running when the collector fired.
+                #
+                # `get_running_loop` cannot do either. It returns a running
+                # loop or it raises, so the question `_ON_THE_LOOP` used to ask
+                # has one answer and no table is needed for it.
+                loop = asyncio.get_running_loop()
             except RuntimeError:
                 asyncio.run(coro)
             else:
-                # A running loop takes the work as a task; a stopped one runs
-                # it to completion here.
-                _ON_THE_LOOP[loop.is_running()](loop, coro)
+                loop.create_task(coro)
 
         try:
             # TRAPPING SIGTERM IS WHAT THIS MODULE IS FOR, and POSIX offers
@@ -137,23 +149,10 @@ def _trap_signals(db: Database) -> Callable[[], int]:
     return restore
 
 
-@helper
-def _as_a_task(loop: asyncio.AbstractEventLoop, coro: Any) -> None:
-    """The loop is running, so the work joins it."""
-    loop.create_task(coro)
 
 
-@helper
-def _to_completion(loop: asyncio.AbstractEventLoop, coro: Any) -> None:
-    """The loop is stopped, so the work runs here and finishes before we go."""
-    loop.run_until_complete(coro)
 
 
-# Whether the loop is already running.
-_ON_THE_LOOP: dict[bool, Callable[[asyncio.AbstractEventLoop, Any], None]] = {
-    True: _as_a_task,
-    False: _to_completion,
-}
 
 # Whether this database was opened asking to replicate at shutdown.
 _TRAP: dict[bool, Callable[[Database], Callable[[], int]]] = {

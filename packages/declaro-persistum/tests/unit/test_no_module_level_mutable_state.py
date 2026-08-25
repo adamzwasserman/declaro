@@ -44,7 +44,7 @@ def _written_at_runtime(module: object) -> set[str]:
 
     IT USED TO NAME EVERY DICT, LIST AND SET, and that became wrong on
     2026-08-22. Removing the last conditional from `shutdown.py` replaced two
-    `if` statements with `_TRAP` and `_ON_THE_LOOP`, dispatch tables of
+    `if` statements with `_TRAP`, a dispatch table of
     functions built once at import and never touched again. The old test
     failed on them, so two gates were asking for opposite things: one
     required the table, the other forbade any dict.
