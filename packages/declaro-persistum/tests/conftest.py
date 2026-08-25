@@ -30,7 +30,10 @@ def precommit_timeout(request: pytest.FixtureRequest) -> None:
         request.node.add_marker(pytest.mark.timeout(5))
 
 
-DEFAULT_POSTGRESQL_URL = "postgresql://postgres:postgres@localhost/declarotodo"
+# NOT A REAL DATABASE, and it used to be `declarotodo`, which is one. Every
+# name a test suite for a migration engine reaches is a name that suite may
+# empty, so the only default it may carry is one it makes itself.
+DEFAULT_POSTGRESQL_URL = "postgresql://postgres:postgres@localhost/postgres"
 _PROBE_SERVER = "postgresql://postgres:postgres@localhost"
 
 
@@ -49,11 +52,35 @@ def probe_url() -> str:
     which is what `postgresql_schema` already does per test. This is the same
     thing per process, for the files that build their own connection.
 
-    `TEST_POSTGRESQL_URL` still wins, so a caller can point the suite at a
-    database of their choosing and get the old shared behaviour deliberately.
+    `TEST_POSTGRESQL_URL` NAMES THE SERVER, NOT THE DATABASE. It used to name
+    the database and win outright, and this package's `.env` sets it to
+    `declarotodo`, which holds real data. Two things then happened on every
+    full test run:
+
+      the session fixture ran DROP DATABASE "declarotodo" and remade it empty
+
+      every test that migrates introspects the database it is pointed at and
+      diffs it against a small declared schema, so the differ emitted a
+      drop_table for every table it found and the applier ran them
+
+    Both are the suite doing exactly what it was built to do, to a database
+    nobody told it was real. Found on 2026-08-25 with `declarotodo` already at
+    zero tables. A canary table planted there was gone after one run, by the
+    second path, after the first had been closed.
+
+    A migration engine's test suite is destructive by construction. The only
+    safe rule is that it works on a database it made itself, so the server is
+    taken from the caller and the database name never is.
     """
-    chosen = os.environ.get("TEST_POSTGRESQL_URL")
-    return chosen or f"{_PROBE_SERVER}/declaro_probe_{os.getpid()}"
+    return f"{_server_from(os.environ.get('TEST_POSTGRESQL_URL'))}/declaro_probe_{os.getpid()}"
+
+
+def _server_from(url: str | None) -> str:
+    """The server half of a URL a caller gave us, or our own default."""
+    return next(
+        (given.rpartition("/")[0] for given in [url] if given and "/" in given),
+        _PROBE_SERVER,
+    )
 
 
 POSTGRESQL_PROBE_URL = probe_url()
@@ -67,6 +94,17 @@ def _a_probe_database_of_our_own():
     point at a database nobody created and skip, which reads exactly like
     PostgreSQL being unavailable. A silent skip is worse than the collision
     it replaced.
+
+    IT DROPS ONLY THE DATABASE IT NAMES ITSELF. It used to drop whatever
+    `probe_url()` returned, and `probe_url()` prefers `TEST_POSTGRESQL_URL`.
+    This package's `.env` sets that to `declarotodo`, which holds real data,
+    so `DROP DATABASE IF EXISTS "declarotodo"` ran at the start of every full
+    test run and again at the end. Found on 2026-08-25 with `declarotodo`
+    already empty.
+
+    A database someone else named is a database someone else owns. This
+    fixture makes one, so this fixture may drop one; anything else it is
+    pointed at, it uses and leaves alone.
     """
     import asyncio
 
@@ -93,6 +131,9 @@ def _a_probe_database_of_our_own():
         finally:
             await admin.close()
 
+    # SAFE BECAUSE THE NAME IS OURS. `probe_url` builds it from this process
+    # id and never from what a caller passed, so there is no database reached
+    # from here that somebody else owns.
     made = asyncio.run(_make())
     yield
     [asyncio.run(_drop()) for _ in [made] if made]
@@ -153,7 +194,7 @@ def require_postgresql() -> None:
             "Install with: uv pip install asyncpg"
         )
 
-    url = os.environ.get("TEST_POSTGRESQL_URL") or DEFAULT_POSTGRESQL_URL
+    url = f"{_server_from(os.environ.get('TEST_POSTGRESQL_URL'))}/postgres"
 
     async def _probe() -> None:
         conn = await asyncpg.connect(url, timeout=5)
@@ -367,7 +408,10 @@ async def postgresql_schema(request: pytest.FixtureRequest):
     """
     import asyncpg
 
-    url = os.environ.get("TEST_POSTGRESQL_URL", POSTGRESQL_PROBE_URL)
+    # ONE SOURCE FOR WHERE THE SUITE MAY WRITE. This read the environment
+    # directly and so reached whatever database a caller had named, where
+    # `probe_url` reaches only the one this process made.
+    url = POSTGRESQL_PROBE_URL
     name = "t_" + hashlib.sha256(request.node.nodeid.encode()).hexdigest()[:16]
     base, _, _ = url.rpartition("/")
 
