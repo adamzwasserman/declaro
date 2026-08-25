@@ -34,7 +34,7 @@ from declaro_persistum.writers import (
     sqlite_write_one,
     turso_write_one,
 )
-from tests.conftest import probe_url
+from tests.conftest import probe_url, refuse_without_postgresql
 
 pytestmark = [pytest.mark.precommit]
 
@@ -138,7 +138,7 @@ async def test_postgresql_writes_a_row_that_is_still_there_afterwards() -> None:
     try:
         connection = await asyncpg.connect(PROBE_URL)
     except (OSError, asyncpg.PostgresError) as unreachable:
-        pytest.skip(f"no server at {PROBE_URL}: {unreachable}")
+        refuse_without_postgresql(PROBE_URL, unreachable)
 
     try:
         await connection.execute('DROP TABLE IF EXISTS "widgets" CASCADE')

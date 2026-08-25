@@ -53,7 +53,7 @@ from declaro_persistum.abstractions.enums import expand_schema_enums
 from declaro_persistum.differ.core import diff
 from declaro_persistum.inspector import introspect
 from declaro_persistum.types import NOTHING, Operation
-from tests.conftest import probe_url
+from tests.conftest import probe_url, refuse_without_postgresql
 
 # asyncio mode is AUTO, so async tests are collected without a mark. Marking
 # the module would warn on the one synchronous test below.
@@ -322,7 +322,7 @@ async def test_the_change_applies_and_converges_on_postgresql(
     try:
         connection = await asyncpg.connect(PROBE_URL)
     except (OSError, asyncpg.PostgresError) as unreachable:
-        pytest.skip(f"no server at {PROBE_URL}: {unreachable}")
+        refuse_without_postgresql(PROBE_URL, unreachable)
 
     try:
         await _clean(connection)
@@ -354,7 +354,7 @@ async def test_the_change_leaves_the_declared_tables_present_on_postgresql(
     try:
         connection = await asyncpg.connect(PROBE_URL)
     except (OSError, asyncpg.PostgresError) as unreachable:
-        pytest.skip(f"no server at {PROBE_URL}: {unreachable}")
+        refuse_without_postgresql(PROBE_URL, unreachable)
 
     try:
         await _clean(connection)

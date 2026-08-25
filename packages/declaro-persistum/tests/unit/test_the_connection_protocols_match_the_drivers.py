@@ -41,7 +41,7 @@ from declaro_persistum.types import (
     DbapiCursor,
     FetchingConnection,
 )
-from tests.conftest import probe_url
+from tests.conftest import probe_url, refuse_without_postgresql
 
 
 @pytest.mark.sqlite
@@ -96,7 +96,7 @@ async def test_asyncpg_is_a_fetching_connection() -> None:
     try:
         conn = await asyncpg.connect(url)
     except (OSError, asyncpg.PostgresError) as exc:
-        pytest.skip(f"no PostgreSQL at {url}: {type(exc).__name__}: {exc}")
+        refuse_without_postgresql(url, exc)
 
     try:
         assert isinstance(conn, FetchingConnection)
@@ -124,7 +124,7 @@ async def test_asyncpg_is_not_a_dbapi_connection() -> None:
     try:
         conn = await asyncpg.connect(url)
     except (OSError, asyncpg.PostgresError) as exc:
-        pytest.skip(f"no PostgreSQL at {url}: {type(exc).__name__}: {exc}")
+        refuse_without_postgresql(url, exc)
 
     try:
         assert not isinstance(conn, DbapiConnection), (

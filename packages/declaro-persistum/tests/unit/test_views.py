@@ -8,7 +8,7 @@ import pytest
 
 from declaro_persistum.applier.rendering import statements_for
 from declaro_persistum.types import NOTHING, View
-from tests.conftest import probe_url
+from tests.conftest import probe_url, refuse_without_postgresql
 
 
 class TestViewTypedDict:
@@ -262,7 +262,7 @@ async def _postgres():
     try:
         return await asyncpg.connect(url)
     except (OSError, asyncpg.PostgresError) as exc:
-        pytest.skip(f"no PostgreSQL at {url}: {type(exc).__name__}: {exc}")
+        refuse_without_postgresql(url, exc)
 
 
 class TestViewIntrospection:

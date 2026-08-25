@@ -36,7 +36,7 @@ from declaro_persistum.differ import diff
 from declaro_persistum.exceptions import MigrationError
 from declaro_persistum.inspector import introspect
 from declaro_persistum.types import NOTHING
-from tests.conftest import probe_url
+from tests.conftest import probe_url, refuse_without_postgresql
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgresql, pytest.mark.integration]
 
@@ -53,7 +53,7 @@ async def _connect():
     try:
         return await asyncpg.connect(URL)
     except (OSError, asyncpg.PostgresError) as exc:
-        pytest.skip(f"no PostgreSQL at {URL}: {type(exc).__name__}: {exc}")
+        refuse_without_postgresql(URL, exc)
 
 
 async def _clean(conn, *tables: str) -> None:

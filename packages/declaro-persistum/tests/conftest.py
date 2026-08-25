@@ -98,6 +98,32 @@ def _a_probe_database_of_our_own():
     [asyncio.run(_drop()) for _ in [made] if made]
 
 
+def refuse_without_postgresql(url: str, unreachable: BaseException) -> None:
+    """PostgreSQL is a supported backend, so its absence is a failure.
+
+    A SKIP HERE READS AS A PASS. Measured 2026-08-25: with the server down the
+    suite reports 2680 passed, 200 skipped, and 186 of those skips are tests
+    that had been passing. Nobody counts the `s` characters, so a run on a
+    machine without PostgreSQL says the package is tested while the whole
+    PostgreSQL applier, its inspector, its type mapping and the alter-column
+    path only that engine has go unexercised.
+
+    That has already produced a wrong claim here: a session reported seven
+    times that PostgreSQL was unavailable, because the tests that would have
+    said otherwise had quietly skipped.
+
+    `require_postgresql` below has failed rather than skipped since August and
+    its docstring gives the reason. These sites connect inline rather than
+    through the fixture, and this is the same decision for them.
+    """
+    pytest.fail(
+        f"PostgreSQL is a supported backend and is not reachable at {url}: "
+        f"{type(unreachable).__name__}: {unreachable}. Start it, or point "
+        f"TEST_POSTGRESQL_URL at one that is running. This is a failure and "
+        f"not a skip because a skipped backend reads as a tested one."
+    )
+
+
 @pytest.fixture
 def require_postgresql() -> None:
     """Require PostgreSQL for stress tests — by OPENING one.
@@ -348,7 +374,7 @@ async def postgresql_schema(request: pytest.FixtureRequest):
     try:
         admin = await asyncpg.connect(url)
     except (OSError, asyncpg.PostgresError) as exc:
-        pytest.skip(f"no PostgreSQL at {url}: {type(exc).__name__}: {exc}")
+        refuse_without_postgresql(url, exc)
 
     try:
         await admin.execute(f'DROP DATABASE IF EXISTS "{name}"')

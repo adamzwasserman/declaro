@@ -37,7 +37,7 @@ import pytest
 
 from declaro_persistum import close, open_postgresql, open_sqlite, writing
 from declaro_persistum.transfer import bulk_transfer
-from tests.conftest import probe_url
+from tests.conftest import probe_url, refuse_without_postgresql
 
 pytestmark = [pytest.mark.precommit, pytest.mark.postgresql, pytest.mark.integration]
 
@@ -71,7 +71,7 @@ async def _pair() -> tuple[Any, Any]:
     try:
         probe = await asyncpg.connect(PROBE_URL)
     except (OSError, asyncpg.PostgresError) as unreachable:
-        pytest.skip(f"no server at {PROBE_URL}: {unreachable}")
+        refuse_without_postgresql(PROBE_URL, unreachable)
     for table in ("widgets", "_dp_transfer_state"):
         await probe.execute(f'DROP TABLE IF EXISTS "{table}" CASCADE')
     await probe.close()

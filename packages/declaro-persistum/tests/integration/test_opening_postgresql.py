@@ -19,7 +19,7 @@ import os
 import pytest
 
 from declaro_persistum import close, open_postgresql, reading, writing
-from tests.conftest import probe_url
+from tests.conftest import probe_url, refuse_without_postgresql
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgresql, pytest.mark.integration]
 
@@ -38,7 +38,7 @@ async def _open():
             DSN, shutdown="exit_immediately", busy_timeout_s=10.0
         )
     except (OSError, asyncpg.PostgresError) as exc:
-        pytest.skip(f"no PostgreSQL at {DSN}: {type(exc).__name__}: {exc}")
+        refuse_without_postgresql(DSN, exc)
 
 
 async def test_it_opens_and_closes() -> None:

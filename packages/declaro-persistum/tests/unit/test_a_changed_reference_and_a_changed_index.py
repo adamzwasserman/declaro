@@ -50,7 +50,7 @@ from declaro_persistum.applier import apply
 from declaro_persistum.differ.core import diff
 from declaro_persistum.inspector import introspect
 from declaro_persistum.types import NOTHING
-from tests.conftest import probe_url
+from tests.conftest import probe_url, refuse_without_postgresql
 
 pytestmark = [pytest.mark.precommit]
 
@@ -103,7 +103,7 @@ async def _postgresql() -> Any:
     try:
         connection = await asyncpg.connect(PROBE_URL)
     except (OSError, asyncpg.PostgresError) as unreachable:
-        pytest.skip(f"no server at {PROBE_URL}: {unreachable}")
+        refuse_without_postgresql(PROBE_URL, unreachable)
     for table in TOUCHED:
         await connection.execute(f'DROP TABLE IF EXISTS "{table}" CASCADE')
     return connection

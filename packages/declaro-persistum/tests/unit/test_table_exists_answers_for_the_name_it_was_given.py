@@ -47,7 +47,7 @@ from typing import Any
 import pytest
 
 from declaro_persistum.inspector import table_exists
-from tests.conftest import probe_url
+from tests.conftest import probe_url, refuse_without_postgresql
 
 pytestmark = [pytest.mark.precommit]
 
@@ -79,7 +79,7 @@ async def _postgresql() -> Any:
     try:
         return await asyncpg.connect(PROBE_URL)
     except (OSError, asyncpg.PostgresError) as unreachable:
-        pytest.skip(f"no server at {PROBE_URL}: {unreachable}")
+        refuse_without_postgresql(PROBE_URL, unreachable)
 
 
 CONNECT = {"sqlite": _sqlite, "turso": _turso, "postgresql": _postgresql}

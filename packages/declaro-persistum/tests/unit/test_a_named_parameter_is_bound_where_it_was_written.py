@@ -40,7 +40,7 @@ from declaro_persistum.query.executor import (
     _convert_to_asyncpg,
     _convert_to_turso,
 )
-from tests.conftest import probe_url
+from tests.conftest import probe_url, refuse_without_postgresql
 
 
 @pytest.mark.parametrize(
@@ -249,7 +249,7 @@ async def test_asyncpg_accepts_and_answers_the_converted_statement() -> None:
     try:
         conn = await asyncpg.connect(url)
     except (OSError, asyncpg.PostgresError) as exc:
-        pytest.skip(f"no PostgreSQL at {url}: {type(exc).__name__}: {exc}")
+        refuse_without_postgresql(url, exc)
 
     try:
         await conn.execute("DROP TABLE IF EXISTS b CASCADE")

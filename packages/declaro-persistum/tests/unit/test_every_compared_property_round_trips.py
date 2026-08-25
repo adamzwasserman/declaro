@@ -48,7 +48,7 @@ from declaro_persistum.applier import apply
 from declaro_persistum.differ import diff
 from declaro_persistum.inspector import introspect
 from declaro_persistum.types import NOTHING
-from tests.conftest import probe_url
+from tests.conftest import probe_url, refuse_without_postgresql
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.precommit]
 
@@ -372,7 +372,7 @@ async def test_it_round_trips_on_postgresql(prop, value) -> None:
     try:
         conn = await asyncpg.connect(url)
     except (OSError, asyncpg.PostgresError) as exc:
-        pytest.skip(f"no PostgreSQL at {url}: {type(exc).__name__}: {exc}")
+        refuse_without_postgresql(url, exc)
 
     declared = _declaration(prop, value)
     try:
@@ -446,7 +446,7 @@ async def test_an_object_property_round_trips_on_postgresql(kind, prop, value) -
     try:
         conn = await asyncpg.connect(url)
     except (OSError, asyncpg.PostgresError) as exc:
-        pytest.skip(f"no PostgreSQL at {url}: {type(exc).__name__}: {exc}")
+        refuse_without_postgresql(url, exc)
 
     declared = _DECLARE[kind](prop, value)
     try:

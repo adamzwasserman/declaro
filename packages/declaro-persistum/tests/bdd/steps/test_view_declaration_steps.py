@@ -44,6 +44,7 @@ from declaro_persistum.exceptions import LoaderError
 from declaro_persistum.migrations import apply_migrations_async
 from declaro_persistum.pydantic_loader import load_views_from_models
 from declaro_persistum.types import NOTHING
+from tests.conftest import refuse_without_postgresql
 
 scenarios("../features/schema/view_declaration.feature")
 
@@ -141,7 +142,7 @@ async def _database(ctx: Ctx, engine: str) -> Any:
                 url, shutdown="exit_immediately", busy_timeout_s=5.0
             )
         except Exception as exc:  # noqa: BLE001
-            pytest.skip(f"no PostgreSQL at {url}: {type(exc).__name__}: {exc}")
+            refuse_without_postgresql(url, exc)
     ctx["databases"][engine] = database
     return database
 
