@@ -1220,52 +1220,63 @@ def then_transaction_rolled_back(recon_context):
 
 
 @then("the foreign key relationship is preserved")
+@then("foreign key constraints are still enforced")
+@then("foreign key constraints are enforced")
 def then_fk_preserved(recon_context):
-    """Verify FK is preserved by attempting invalid insert."""
+    """The database refuses a row whose parent does not exist.
+
+    THE ONLY PROOF IS AN ATTEMPT. A constraint that exists in the schema and
+    is not enforced looks identical from the outside, so this inserts a book
+    pointing at an author that is not there and requires the engine to refuse
+    it.
+
+    IT USED TO ACCEPT ANY EXCEPTION AS PROOF. The body was `except Exception`
+    with a comment reading "Expected — FK violation caught", so a typo in the
+    SQL, a closed connection, a missing table, or a bug in this package all
+    read as the constraint doing its job. The step passed when the thing it
+    tests was broken and when the test itself was broken.
+
+    SQLite raises `sqlite3.IntegrityError` naming the constraint. That is the
+    type asked for, and anything else travels on.
+    """
+    import sqlite3
+
+    recon_context["run"](recon_context["conn"].execute("PRAGMA foreign_keys = ON"))
     try:
-        recon_context["run"](recon_context["conn"].execute("PRAGMA foreign_keys = ON"))
         recon_context["run"](
             recon_context["conn"].execute(
-                "INSERT INTO books (id, title, author_id) VALUES (999, 'Bad Book', 999)"
+                "INSERT INTO books (id, title, author_id) "
+                "VALUES (999, 'Bad Book', 999)"
             )
         )
         recon_context["run"](recon_context["conn"].commit())
-        # If insert succeeded, FK is not enforced — rollback and fail properly
+    except sqlite3.IntegrityError as refused:
+        assert "FOREIGN KEY" in str(refused).upper(), (
+            f"the engine refused the row for a different reason: {refused}"
+        )
         recon_context["run"](recon_context["conn"].rollback())
-        pytest.fail("FK constraint not enforced — INSERT of invalid author_id succeeded")
-    except Exception as e:
-        if "FK constraint not enforced" in str(e):
-            raise
-        # Expected — FK violation caught
-        recon_context["run"](recon_context["conn"].rollback())
+        return
+
+    recon_context["run"](recon_context["conn"].rollback())
+    pytest.fail(
+        "a book pointing at author 999 was accepted, so the foreign key "
+        "survived the rebuild in name only"
+    )
 
 
-@then("foreign key constraints are still enforced")
-def then_fk_enforced(recon_context):
-    """Verify FK enforcement."""
-    then_fk_preserved(recon_context)
-
-
-@then("foreign key constraints are enforced")
-def then_fk_constraints_enforced(recon_context):
-    """Verify FK enforcement (alias)."""
-    then_fk_preserved(recon_context)
-
-
+@then("the foreign key relationships still work")
 @then("foreign key checks pass after reconstruction")
 def then_fk_checks_pass(recon_context):
-    """Verify FK checks pass."""
+    """The engine's own audit of every foreign key in the table finds nothing.
+
+    Two phrasings, one check. They were two functions, and the second called
+    the first, which is an alias wearing a body.
+    """
     cursor = recon_context["run"](
         recon_context["conn"].execute('PRAGMA foreign_key_check("children")')
     )
     violations = recon_context["run"](cursor.fetchall())
-    assert len(violations) == 0, f"FK violations found: {violations}"
-
-
-@then("the foreign key relationships still work")
-def then_fk_works(recon_context):
-    """Verify FK relationships work."""
-    then_fk_checks_pass(recon_context)
+    assert violations == [], f"the rebuild left broken references: {violations}"
 
 
 @then(parsers.parse('the index "{index_name}" still exists'))
