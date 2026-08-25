@@ -118,20 +118,22 @@ def _clause(
 # ---------------------------------------------------------------------------
 
 
-def _descending(col: str) -> str:
-    """A leading minus asks for DESC, and the name is what follows it."""
-    return f"{_quote_column(col[1:])} DESC"
-
-
-def _ascending(col: str) -> str:
-    """No minus, so the column sorts upwards."""
-    return f"{_quote_column(col)} ASC"
-
-
-_ORDER_DIRECTION: dict[bool, Callable[[str], str]] = {
-    True: _descending,
-    False: _ascending,
+# WHAT A LEADING MINUS CHANGES, which is two things and both are data: the
+# word SQL wants, and how much of the string is the column name.
+#
+# These were two functions differing by that word and that offset. One
+# function over the table is what the shape asked for, and it puts the two
+# spellings side by side where they can be compared.
+_ORDER_DIRECTION: dict[bool, tuple[int, str]] = {
+    True: (1, "DESC"),
+    False: (0, "ASC"),
 }
+
+
+def _order_term(col: str) -> str:
+    """One ORDER BY term, with its direction and the name it sorts on."""
+    skip, direction = _ORDER_DIRECTION[col.startswith("-")]
+    return f"{_quote_column(col[skip:])} {direction}"
 
 
 def _join_sql(join: dict[str, str]) -> str:
@@ -209,7 +211,7 @@ def select(
 
     group_sql = ", ".join(_quote_column(c) for c in (the_group_by or []))
     order_sql = ", ".join(
-        _ORDER_DIRECTION[c.startswith("-")](c) for c in (the_order_by or [])
+        _order_term(c) for c in (the_order_by or [])
     )
 
     # THE STATEMENT IS THE CLAUSES THAT ARE PRESENT, joined. A clause a caller

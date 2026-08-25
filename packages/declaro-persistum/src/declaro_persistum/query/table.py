@@ -126,36 +126,32 @@ def count_(column: str, alias: str | Nothing) -> SQLFunction:
     return _function("COUNT", column, alias=the_alias)
 
 
-@helper
-def sum_(column: str, alias: str | Nothing) -> SQLFunction:
-    # A default in the signature would decide this where no reader
-    # sees it happen and no test reaches it.
-    the_alias = resolved(alias, None)
-    return _function("SUM", column, alias=the_alias)
+# THE FIVE AGGREGATES, which differ by one SQL word and nothing else. They
+# were five copies of the same three lines, including the same comment about
+# the alias, so the word is the table and the function is written once.
+#
+# The public names survive because they are what a caller writes:
+# `sum_("total")` reads as SQL does, and `aggregate("SUM", "total")` would not.
+_AGGREGATES = ("SUM", "AVG", "MIN", "MAX")
 
 
 @helper
-def avg_(column: str, alias: str | Nothing) -> SQLFunction:
-    # A default in the signature would decide this where no reader
-    # sees it happen and no test reaches it.
-    the_alias = resolved(alias, None)
-    return _function("AVG", column, alias=the_alias)
+def _aggregate(word: str) -> Callable[[str, str | Nothing], SQLFunction]:
+    """One aggregate function, named for the SQL word it writes.
+
+    `alias` has no default here for the same reason it has none anywhere in
+    this file: a caller who omits it and a caller who chose `None` would be
+    indistinguishable, and the non-default region would never be exercised.
+    """
+
+    @helper
+    def of(column: str, alias: str | Nothing) -> SQLFunction:
+        return _function(word, column, alias=resolved(alias, None))
+
+    return of
 
 
-@helper
-def min_(column: str, alias: str | Nothing) -> SQLFunction:
-    # A default in the signature would decide this where no reader
-    # sees it happen and no test reaches it.
-    the_alias = resolved(alias, None)
-    return _function("MIN", column, alias=the_alias)
-
-
-@helper
-def max_(column: str, alias: str | Nothing) -> SQLFunction:
-    # A default in the signature would decide this where no reader
-    # sees it happen and no test reaches it.
-    the_alias = resolved(alias, None)
-    return _function("MAX", column, alias=the_alias)
+sum_, avg_, min_, max_ = (_aggregate(word) for word in _AGGREGATES)
 
 
 @helper
