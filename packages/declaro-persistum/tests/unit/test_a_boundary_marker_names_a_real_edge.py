@@ -22,20 +22,23 @@ false. Removing it fails honest-check; keeping it fails Slop Audit. Neither
 tool is wrong about its own question, and the disagreement is theirs to settle
 rather than ours to paper over.
 
-THE OTHER 27 WERE LOOKED AT AND ARE ALSO REAL. Every one does I/O the audit's
-call graph cannot follow: `asyncpg.connect`, `aiosqlite.connect`, `input`,
-`os.environ.get`, `uuid.uuid4`, `logger.warning`, or a read through an injected
-`connection` parameter it cannot see past. Two were demoted to check, and
-honest-check refused both:
+WHERE 14 COMES FROM, on the build named below. Eight are the error-handling
+layer directly above the I/O: the reader inspects one function body and does
+not follow a call into a function that is itself a declared `@boundary`, so it
+sees nothing in a function whose whole job is catching what that boundary
+raised. Six call process-level things it does not count: `os.environ.get`,
+`asyncio.run`, `asyncio.create_task`, `asyncio.get_running_loop`,
+`uuid.uuid4`, and `importlib` loading a file off disk and executing it.
 
-    postgres_database.py:37   HC-P004  asyncpg.connect
-    migration_sql.py:541      HC-P004  uuid.uuid4
+ALL 14 ARE LOAD-BEARING FOR honest-check, which grants a boundary three
+privileges -- I/O, catching, and non-determinism -- and refuses to let a
+non-boundary catch at all. A function that only catches must carry the marker
+for one checker and must not for the other. Removing any of the 14 trades this
+finding for an HC-P002. Both were told, 2026-08-25.
 
-SO 61 IS THE FLOOR, not a to-do list. It cannot go lower while the two tools
-mean different things, and a number that cannot move is worth saying so about
-rather than leaving as an implied backlog. If it drops, either the audit
-learned to see one of these or somebody removed a marker that was carrying its
-weight; both are worth reading the diff for.
+SO 14 IS THE FLOOR while the two disagree, not a to-do list. If it drops,
+either the analyzer learned to see one of these or somebody removed a marker
+that was carrying its weight, and those want different responses.
 
 HOW THE 152 WERE FOUND SAFE TO REMOVE. Not by trusting one tool. Every marker
 Slop Audit flagged was demoted, honest-check was run over the result, and
@@ -65,8 +68,11 @@ pytestmark = pytest.mark.precommit
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 
-# 2026-08-25: 213, then 61 the same day. Only ever downwards.
-BASELINE = 61
+# 2026-08-25: 213, then 61, then 14, all on one unchanged tree. Only the
+# analyzer moved. Record which build a baseline was set against, because
+# without it a number here cannot be told apart from a number about the code.
+BASELINE = 14
+BASELINE_BUILD = "cb42509, built 2026-08-25 12:39"
 
 _AUDIT = shutil.which("slop-audit-l1") or str(
     pathlib.Path.home() / ".local/bin/slop-audit-l1"
@@ -99,10 +105,13 @@ def test_no_more_boundary_markers_than_the_baseline() -> None:
     offenders = _decorations_that_state_an_edge_that_is_not_there()
 
     assert len(offenders) <= BASELINE, (
-        f"{len(offenders)} `@boundary` markers sit on functions that touch "
-        f"nothing, up from {BASELINE}. A marker that names an edge which is "
-        f"not there tells honest-check to stop asking about that function. "
-        f"New since the baseline: {offenders[BASELINE:][:5]}"
+        f"{len(offenders)} `@boundary` markers sit on functions the analyzer "
+        f"sees no I/O in, up from {BASELINE} set against {BASELINE_BUILD}. "
+        f"CHECK THE ANALYZER BEFORE THE CODE: this number has moved three "
+        f"times on an unchanged tree because the tool was rebuilt underneath "
+        f"it. `ls -la ~/.local/share/uv/tools/slop-audit-l1` gives the build "
+        f"date and `--version` does not. New since the baseline: "
+        f"{offenders[BASELINE:][:5]}"
     )
 
 
@@ -119,7 +128,9 @@ def test_the_baseline_is_not_slack() -> None:
     offenders = _decorations_that_state_an_edge_that_is_not_there()
 
     assert len(offenders) == BASELINE, (
-        f"the real count is {len(offenders)} and BASELINE says {BASELINE}. "
-        f"Set BASELINE to {len(offenders)}: a ratchet with slack in it is a "
-        f"ratchet that has stopped."
+        f"the real count is {len(offenders)} and BASELINE says {BASELINE}, "
+        f"set against {BASELINE_BUILD}. Either somebody fixed some, or the "
+        f"analyzer was rebuilt. This assertion caught the rebuild twice "
+        f"today, which is the only reason the wrong figure did not go into a "
+        f"report. Set BASELINE to {len(offenders)} and record the build."
     )
