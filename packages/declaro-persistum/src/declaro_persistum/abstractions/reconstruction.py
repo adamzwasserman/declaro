@@ -35,6 +35,7 @@ from declaro_persistum.applier.shared import (
 )
 from declaro_persistum.applier.spelling import constraint_clause
 from declaro_persistum.boundary import boundary, helper
+from declaro_persistum.reporting import say
 from declaro_persistum.types import NOTHING, Column, Nothing, Operation, changed_to, resolved
 
 logger = logging.getLogger(__name__)
@@ -456,7 +457,7 @@ async def _say_no_column_is_shared(
     _pairs: list[tuple[str, str]],
 ) -> int:
     """Nothing in the old table has a home in the new one."""
-    logger.warning(
+    say(__name__, "warning",
         f"No common columns between old and new schema for '{table_name}'. "
         f"No data will be copied."
     )
@@ -663,7 +664,7 @@ async def execute_reconstruction_async(
         create_sql = generate_create_table_sql(
             temp_table, new_columns, table_constraints
         )
-        logger.debug(f"Creating temp table: {create_sql}")
+        say(__name__, "debug", f"Creating temp table: {create_sql}")
         await connection.execute(create_sql)
 
         # 5. Copy compatible data if requested
@@ -688,18 +689,18 @@ async def execute_reconstruction_async(
         for index_sql in indexes:
             # Replace temp table name with original in index definitions
             recreate_sql = index_sql.replace(f'"{temp_table}"', f'"{table_name}"')
-            logger.debug(f"Recreating index: {recreate_sql}")
+            say(__name__, "debug", f"Recreating index: {recreate_sql}")
             await connection.execute(recreate_sql)
 
         # 10. Re-enable foreign keys if we managed them, and only if they were
         #     on when the rebuild started.
         await _ENFORCEMENT_AFTERWARDS[managed and bool(fk_enabled)](connection)
 
-        logger.info(f"Successfully reconstructed table '{table_name}'")
+        say(__name__, "info", f"Successfully reconstructed table '{table_name}'")
 
-    except Exception as e:
-        logger.error(f"Table reconstruction failed for '{table_name}': {e}")
-        # Re-enable foreign keys before re-raising
+    except Exception:
+        # Re-enable foreign keys before re-raising. The exception carries
+        # what went wrong, so writing it here as well is a second copy.
         await _RESTORE_ENFORCEMENT[managed and bool(fk_enabled)](
             connection, table_name
         )

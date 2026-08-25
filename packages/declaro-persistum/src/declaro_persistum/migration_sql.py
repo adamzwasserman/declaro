@@ -22,6 +22,7 @@ from declaro_persistum.exceptions import MigrationError
 from declaro_persistum.pydantic_loader import (
     load_models_from_module,
 )
+from declaro_persistum.reporting import say
 from declaro_persistum.types import (
     NOTHING,
     Dialect,
@@ -633,7 +634,7 @@ async def _drop_the_leftover(conn: Any, tmp_name: str, _original_name: str) -> i
     """The original survived, so the tmp table is junk and nothing is recovered."""
     await conn.execute(f'DROP TABLE "{tmp_name}"')
     await conn.commit()
-    logger.warning("Dropped leftover tmp table: %s", tmp_name)
+    say(__name__, "warning", "Dropped leftover tmp table: %s", tmp_name)
     return 0
 
 
@@ -675,7 +676,7 @@ async def _rename_into_place(conn: Any, tmp_name: str, original_name: str) -> in
             f"{original_name!r} empty beside them.",
             sql=statement,
             original_error=exc, operation=NOTHING) from exc
-    logger.warning("Recovered orphaned table: %s -> %s", tmp_name, original_name)
+    say(__name__, "warning", "Recovered orphaned table: %s -> %s", tmp_name, original_name)
     return 1
 
 
@@ -730,14 +731,14 @@ async def _clear_the_stamp(conn: Any, recovered: int) -> int:
             ("schema_hash:%",),
         )
         await conn.commit()
-        logger.info(
+        say(__name__, "info",
             f"Cleared schema hash after recovering {recovered} orphaned table(s)"
         )
     except Exception as exc:
         # A stale schema hash that survived means the next start will believe
         # the schema is current when it is not -- worth seeing rather than
         # hiding.
-        logger.warning(
+        say(__name__, "warning",
             "Could not clear the schema hash after recovering %d "
             "orphaned table(s): %s. If the meta table exists, the next "
             "start may skip a migration it should have run.",

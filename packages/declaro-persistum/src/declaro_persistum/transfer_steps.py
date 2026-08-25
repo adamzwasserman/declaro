@@ -20,6 +20,7 @@ from declaro_persistum.bulk_loader import (
     BulkLoader,
 )
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, TransferError
+from declaro_persistum.reporting import say
 from declaro_persistum.types import NOTHING, Nothing, Schema, resolved
 
 logger = logging.getLogger(__name__)
@@ -328,7 +329,6 @@ async def _record_a_failed_table(
 ) -> _TableOutcome:
     """The engine refused this table, and only this table is blamed."""
     error_msg = f"{type(failure).__name__}: {failure}"
-    logger.error(f"Failed to transfer {table}: {error_msg}")
 
     # A TABLE THAT FAILED MOVED NO ROWS, which is zero rather than absent.
     # These two carried `= 0` in the signature, so every caller that omitted
@@ -379,7 +379,7 @@ async def _stream_the_table(
     except Exception as failure:
         return await _record_a_failed_table(run, table, failure)
 
-    logger.info(
+    say(__name__, "info",
         f"Transferred {table}: "
         f"{progress['rows_transferred']}/{progress['total_rows']} rows"
     )
@@ -413,7 +413,7 @@ async def _already_transferred(
     nothing is copied again."""
     recorded = cast(dict[str, Any], status)
     rows = recorded.get("rows_transferred", 0)
-    logger.info(f"Skipping {table}: already completed")
+    say(__name__, "info", f"Skipping {table}: already completed")
     _report(
         run["on_progress"],
         {
@@ -451,7 +451,7 @@ async def _clear_and_transfer(
     made resume useless for the one case it exists to serve.
     """
     recorded = cast(dict[str, Any], status)
-    logger.info(
+    say(__name__, "info",
         f"Restarting {table}: was {recorded['status']}, deleting existing rows"
     )
     await run["target_loader"]["delete_rows"](run["target_conn"], table)
@@ -541,7 +541,7 @@ async def _skip_a_table_with_no_columns(
 ) -> _TableOutcome:
     """The source names this table and declares no column of it, so there is
     nothing to select and nothing to insert."""
-    logger.warning(f"Skipping {table}: no columns found")
+    say(__name__, "warning", f"Skipping {table}: no columns found")
     return {"table": table, "outcome": "skipped", "rows": 0, "error": None}
 
 
@@ -667,7 +667,7 @@ def _warn_and_append_the_cycle(
     sorted_tables: list[str], circular_refs: list[str]
 ) -> list[str]:
     """The tables in a cycle have no order among themselves, so they go last."""
-    logger.warning(
+    say(__name__, "warning",
         f"Circular FK references detected: {circular_refs}. "
         f"FK checks will be disabled during transfer."
     )

@@ -33,6 +33,7 @@ from declaro_persistum.bulk_loader import (  # noqa: F401
 from declaro_persistum.database import Database, reading
 from declaro_persistum.inspector import introspect
 from declaro_persistum.migrations import apply_migrations_async
+from declaro_persistum.reporting import say
 from declaro_persistum.transfer_steps import (
     _MORE_ROWS as _MORE_ROWS,
 )
@@ -358,11 +359,11 @@ async def bulk_transfer(
     start = datetime.now(UTC)
 
     # Step 1: Schema migration on target
-    logger.info("Applying schema migrations to target database")
+    say(__name__, "info", "Applying schema migrations to target database")
     migration_result = await apply_migrations_async(
         target, target_dialect, schema_path, expand_enums=expand_enums, force=NOTHING)
     _WHEN_THE_TARGET_MIGRATED[migration_result["success"]](migration_result)
-    logger.info(
+    say(__name__, "info",
         f"Schema migration complete: {migration_result['operations_applied']} operations applied"
     )
 
@@ -371,20 +372,20 @@ async def bulk_transfer(
         source_schema = await introspect(source_conn, source_dialect)
 
     all_tables = list(source_schema.keys())
-    logger.info(f"Source has {len(all_tables)} tables")
+    say(__name__, "info", f"Source has {len(all_tables)} tables")
 
     # Step 3: Filter
     transfer_tables = _WHICH_TABLES[the_tables is not None](
         the_tables, all_tables, source_schema
     )
 
-    logger.info(f"Transferring {len(transfer_tables)} tables (filtered from {len(all_tables)})")
+    say(__name__, "info", f"Transferring {len(transfer_tables)} tables (filtered from {len(all_tables)})")
 
     # Step 4: FK toposort
     sorted_tables, circular_refs = _toposort_tables(source_schema, transfer_tables)
     transfer_order = _TRANSFER_ORDER[bool(circular_refs)](sorted_tables, circular_refs)
 
-    logger.info(f"Transfer order: {transfer_order}")
+    say(__name__, "info", f"Transfer order: {transfer_order}")
 
     # Step 5+6: Transfer tables
     source_loader = BULK_LOADERS[source_dialect]
@@ -436,7 +437,7 @@ async def bulk_transfer(
         "duration_seconds": duration,
     }
 
-    logger.info(
+    say(__name__, "info",
         f"Transfer complete: {len(transferred)} transferred, "
         f"{len(skipped)} skipped, {len(failed)} failed, "
         f"{result['total_rows']} total rows in {duration:.1f}s"

@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from itertools import accumulate, groupby
 from typing import TypedDict
 
-from declaro_persistum.boundary import helper, recognizer
+from declaro_persistum.boundary import boundary, helper, recognizer
 from declaro_persistum.types import Nothing, resolved
 
 
@@ -225,9 +225,21 @@ def format_jsonl(record: LatencyRecord) -> str:
 
 
 
-@helper
+@boundary
 def emit_record(logger: logging.Logger, record: LatencyRecord) -> None:
-    """Write a LatencyRecord to the latency logger."""
+    """Write a LatencyRecord to the logger the caller chose.
+
+    NOT THROUGH `say`, and this is the one place that is right. `say` writes
+    to the logger named for the module that called it, which is what almost
+    every line in this package wants. A latency record belongs to whichever
+    logger the caller set up for it, so the writer is a parameter here and the
+    caller decides where the line lands.
+
+    That is the other honest shape for I/O: not "return it and let the edge
+    write", but "take the writer as an argument". A blanket conversion to
+    `say` broke this and a test caught it, because the record went to this
+    module's logger instead of the one the caller passed.
+    """
     logger.info(format_jsonl(record))
 
 

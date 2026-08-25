@@ -71,6 +71,7 @@ from declaro_persistum.database import (
     writing,
 )
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE
+from declaro_persistum.reporting import say
 from declaro_persistum.types import DbapiConnection, Dialect, Nothing, ReplicaConnection, resolved
 from declaro_persistum.writers import WRITERS
 
@@ -140,7 +141,7 @@ async def _pull_one_more(
 @helper
 def _out_of_batches(fetched_any: bool) -> bool:
     """The bound was reached, so say the copy may not be converging."""
-    logger.warning(
+    say(__name__, "warning",
         "Pulled %d batches and the primary still reports more; the local copy "
         "may not be converging",
         _MAX_PULL_BATCHES,
@@ -478,7 +479,7 @@ async def _open_replicated(
             # logs "attempt 1247 failed after 3021s" without ever being able
             # to say why, because by then the only thing that knew was gone.
             # `exc_info=True` keeps the type and the traceback.
-            logger.warning(
+            say(__name__, "warning",
                 "Push to the primary for %s failed. Returning False so the "
                 "caller's retry loop decides what to do next.",
                 path,

@@ -33,6 +33,7 @@ from declaro_persistum.applier.shared import (
 from declaro_persistum.applier.sqlite import generate_create_view, generate_drop_view
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, MigrationError
+from declaro_persistum.reporting import say
 from declaro_persistum.types import (
     NOTHING,
     ApplyResult,
@@ -240,7 +241,7 @@ async def _rolled_back(connection: DbapiConnection, op_desc: str) -> None:
     try:
         await connection.rollback()
     except Exception as rollback_exc:
-        logger.warning(
+        say(__name__, "warning",
             "Rollback failed after '%s' failed: %s. The connection "
             "may still hold an open transaction.",
             op_desc, rollback_exc,
@@ -319,7 +320,7 @@ async def _run_rebuild(
         await connection.commit()
         await _restore_enforcement(connection, entry_enforcement[0])
 
-        logger.info(f"Applied: {op_desc}")
+        say(__name__, "info", f"Applied: {op_desc}")
         return ([f"Table reconstruction for {table}"], [])
 
     except A_BUG_IN_THIS_PACKAGE:
@@ -365,7 +366,7 @@ async def _run_directly(
         cursors = [await connection.execute(statement) for statement in statements]
         await connection.commit()
 
-        logger.info(f"Applied: {op_desc}")
+        say(__name__, "info", f"Applied: {op_desc}")
         return (statements[: len(cursors)], [])
 
     except A_BUG_IN_THIS_PACKAGE:
@@ -378,7 +379,7 @@ async def _run_directly(
     except Exception as e:
         await _rolled_back(connection, op_desc)
         skip_msg = f"{op_desc}: {e}"
-        logger.warning(f"Skipped unsupported operation: {skip_msg}")
+        say(__name__, "warning", f"Skipped unsupported operation: {skip_msg}")
         return ([], [skip_msg])
 
 
@@ -420,7 +421,7 @@ _SKIP_SUMMARY: dict[bool, Callable[[list[str]], str | None]] = {
 def _partial_note(executed: list[str], skipped: list[str]) -> str:
     """Say how much of the batch landed, when some of it did not."""
     note = f"Migration partial: {len(executed)} applied, {len(skipped)} skipped"
-    logger.info(note)
+    say(__name__, "info", note)
     return note
 
 

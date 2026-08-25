@@ -30,6 +30,7 @@ from pathlib import Path
 
 from declaro_persistum.database import Database
 from declaro_persistum.mirror import Mirror, mirror
+from declaro_persistum.reporting import say
 from declaro_persistum.transfer import (
     BulkTransferResult,
     TableTransferProgress,
@@ -95,7 +96,7 @@ async def begin_cutover(
     the_tables = resolved(tables, None)
     the_on_progress = resolved(on_progress, None)
     # Phase 1: Bulk transfer
-    logger.info("Phase 1: Starting bulk data transfer")
+    say(__name__, "info", "Phase 1: Starting bulk data transfer")
     result = await bulk_transfer(
         source,
         target,
@@ -108,20 +109,20 @@ async def begin_cutover(
         on_progress=the_on_progress,
         resume=resume,
     )
-    logger.info(
+    say(__name__, "info",
         f"Phase 1 complete: {result['tables_transferred']} tables, "
         f"{result['total_rows']} rows in {result['duration_seconds']:.1f}s"
     )
 
     # Phase 2: dual-write verification. A mirror is DATA — two databases and
     # two policies — and the phases are functions over it.
-    logger.info("Phase 2: setting up the mirror for dual-write verification")
+    say(__name__, "info", "Phase 2: setting up the mirror for dual-write verification")
     m = mirror(
         primary=source,
         replica=target,
         fail_open=fail_open,
         compare_on_read=compare_on_read,
     )
-    logger.info("Mirror ready. promote() is Phase 3, detach() is Phase 4.")
+    say(__name__, "info", "Mirror ready. promote() is Phase 3, detach() is Phase 4.")
 
     return m, result

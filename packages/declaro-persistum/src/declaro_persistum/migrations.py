@@ -207,6 +207,7 @@ from declaro_persistum.migration_sql import (
 from declaro_persistum.pydantic_loader import (
     load_declarations,
 )
+from declaro_persistum.reporting import say
 from declaro_persistum.types import (
     NOTHING,
     Dialect,
@@ -247,7 +248,7 @@ async def _no_schema_file(
     _force: bool,
 ) -> _Migration:
     """Nothing to migrate from, and the caller is told which path was tried."""
-    logger.warning(f"Schema file not found: {schema_path}")
+    say(__name__, "warning", f"Schema file not found: {schema_path}")
     return {
         "db": db,
         "dialect": dialect,
@@ -342,7 +343,7 @@ async def _nothing_has_changed(
     schema_hash: str,
 ) -> _Migration:
     """The stamp matches and the tables are there, so the migration is over."""
-    logger.info("Schema unchanged (hash match) — skipping migration")
+    say(__name__, "info", "Schema unchanged (hash match) — skipping migration")
     return {
         "db": db,
         "dialect": dialect,
@@ -401,7 +402,7 @@ _WHEN_THE_STAMP_IS_WORTH_READING: dict[
 @helper
 def _load_the_schema(schema_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     """The tables and views one models file declares."""
-    logger.info(f"Loading schema from {schema_path}")
+    say(__name__, "info", f"Loading schema from {schema_path}")
     return load_declarations(schema_path)
 
 
@@ -450,8 +451,12 @@ async def _refuse_an_invalid_schema(
     _target_views: dict[str, View],
     errors: list[str],
 ) -> dict[str, Any]:
-    """Every error is logged by itself, and all of them reach the caller."""
-    [logger.error(f"Schema is not valid: {message}") for message in errors]
+    """Every error reaches the caller, in the result, and is not also written.
+
+    This wrote one line per error AND returned them all in `error`. The line
+    was a second copy of a fact the caller already had, on a channel the
+    caller could not read, test or decline.
+    """
     return {
         "success": False,
         "operations_applied": 0,
@@ -469,7 +474,7 @@ async def _stamp_an_empty_schema(
     _target_views: dict[str, View],
 ) -> dict[str, Any]:
     """A models file declaring no table is stamped, so the next call skips."""
-    logger.warning("No tables found in schema models")
+    say(__name__, "warning", "No tables found in schema models")
     await _stamp(plan)
     return {
         "success": True,
@@ -485,7 +490,7 @@ async def _stamp_an_empty_schema(
 def _expand_the_enums(target_schema: Schema) -> dict[str, Any]:
     """Every Literal column becomes a lookup table and an FK to it."""
     expanded = expand_schema_enums(target_schema)
-    logger.info(
+    say(__name__, "info",
         f"Expanded schema to {len(expanded)} tables (including enum lookup tables)"
     )
     return expanded
@@ -511,7 +516,7 @@ async def _nothing_to_change(
     _diff_result: dict[str, Any],
 ) -> dict[str, Any]:
     """The database already holds what the schema declares."""
-    logger.info("Schema is up to date - no migrations needed")
+    say(__name__, "info", "Schema is up to date - no migrations needed")
     await _stamp(plan)
     return {
         "success": True,
@@ -531,8 +536,8 @@ async def _refuse_ambiguous_changes(
     diff_result: dict[str, Any],
 ) -> dict[str, Any]:
     """A rename and a drop-plus-add look alike, and only a person can say."""
-    logger.warning(f"Ambiguous changes detected: {diff_result['ambiguities']}")
-    logger.warning("Skipping migration - manual intervention required")
+    say(__name__, "warning", f"Ambiguous changes detected: {diff_result['ambiguities']}")
+    say(__name__, "warning", "Skipping migration - manual intervention required")
     return {
         "success": False,
         "operations_applied": 0,
@@ -552,13 +557,13 @@ async def _record_the_migration(
     result: dict[str, Any],
 ) -> dict[str, Any]:
     """The operations landed, so the hash is stamped and the run reported."""
-    logger.info(f"Successfully applied {result['operations_applied']} migrations")
+    say(__name__, "info", f"Successfully applied {result['operations_applied']} migrations")
     [
-        logger.warning(f"Migration completed with warnings: {warning}")
+        say(__name__, "warning", f"Migration completed with warnings: {warning}")
         for warning in [result.get("error")]
         if warning
     ]
-    [logger.debug(f"  Executed: {sql}") for sql in result["executed_sql"]]
+    [say(__name__, "debug", f"  Executed: {sql}") for sql in result["executed_sql"]]
     await _stamp(plan)
     return {
         "success": True,
@@ -581,7 +586,6 @@ async def _report_a_failed_apply(
 ) -> dict[str, Any]:
     """The applier refused, and nothing is stamped over a failed run."""
     error_msg = result.get("error", "Unknown error")
-    logger.error(f"Migration failed: {error_msg}")
     return {
         "success": False,
         "operations_applied": 0,
@@ -665,7 +669,7 @@ async def _report_everything_deferred(
     skipped_operations: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Every pending operation needs reconstruction, so none of them run."""
-    logger.info(
+    say(__name__, "info",
         "All pending operations require reconstruction — "
         "skipping auto-migration. Use 'declaro migrate-remote'."
     )
@@ -734,7 +738,7 @@ async def _defer_what_cannot_replicate(
         diff_result["operations"], diff_result["execution_order"]
     )
     [
-        logger.warning(
+        say(__name__, "warning",
             f"Skipping {skipped['op']} on {skipped.get('table', 'N/A')} — "
             f"reconstruction is unsafe on embedded replicas. "
             f"Run 'declaro migrate-remote' to apply this change to cloud."
@@ -796,9 +800,9 @@ async def _consider_what_changed(
     diff_result: dict[str, Any],
 ) -> dict[str, Any]:
     """Log the planned operations, then ask whether any of them is ambiguous."""
-    logger.info(f"Found {len(diff_result['operations'])} schema differences")
+    say(__name__, "info", f"Found {len(diff_result['operations'])} schema differences")
     [
-        logger.info(f"  - {op['op']} on table {op.get('table', 'N/A')}")
+        say(__name__, "info", f"  - {op['op']} on table {op.get('table', 'N/A')}")
         for op in diff_result["operations"]
     ]
     return await _WHEN_THE_CHANGES_ARE_AMBIGUOUS[
@@ -825,7 +829,7 @@ async def _migrate_the_tables(
     target_views: dict[str, View],
 ) -> dict[str, Any]:
     """Introspect the database, diff it against the schema, run the result."""
-    logger.info(f"Loaded {len(target_schema)} tables from schema models")
+    say(__name__, "info", f"Loaded {len(target_schema)} tables from schema models")
 
     expanded = _ENUM_EXPANSION[plan["expand_enums"]](target_schema)
 
@@ -837,7 +841,7 @@ async def _migrate_the_tables(
             conn, plan["dialect"]
         )
 
-    logger.info(
+    say(__name__, "info",
         f"Introspected {len(current_schema)} tables and "
         f"{len(current_views)} views from database"
     )

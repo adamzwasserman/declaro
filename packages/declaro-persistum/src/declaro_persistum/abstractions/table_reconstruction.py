@@ -33,6 +33,7 @@ from declaro_persistum.applier.shared import (
     sqlite_type,
 )
 from declaro_persistum.boundary import boundary, helper
+from declaro_persistum.reporting import say
 from declaro_persistum.types import NOTHING, Column, Nothing, resolved
 
 logger = logging.getLogger(__name__)
@@ -149,7 +150,7 @@ async def reconstruct_table(
         create_sql = _generate_create_table_sql(
             temp_table, new_columns, table_constraints
         )
-        logger.debug(f"Creating temp table: {create_sql}")
+        say(__name__, "debug", f"Creating temp table: {create_sql}")
         await connection.execute(create_sql)
 
         # 4. Copy compatible data if requested. The old table is read only
@@ -214,10 +215,11 @@ async def reconstruct_table(
             if enforcing
         ]
 
-        logger.info(f"Successfully reconstructed table '{table_name}'")
+        say(__name__, "info", f"Successfully reconstructed table '{table_name}'")
 
-    except Exception as e:
-        logger.error(f"Table reconstruction failed for '{table_name}': {e}")
+    except Exception:
+        # The exception carries what went wrong, so writing it here as well
+        # is a second copy on a channel the caller cannot read.
         # Re-enable foreign keys before re-raising, for the same connections
         # this rebuild turned them off for.
         _restored = [
@@ -250,7 +252,7 @@ def _warn_that_no_column_is_shared(table_name: str) -> None:
     An INSERT naming no column is not SQL, so the empty case is a warning
     rather than a statement.
     """
-    logger.warning(
+    say(__name__, "warning",
         f"No common columns between old and new schema for '{table_name}'. "
         f"No data will be copied."
     )
@@ -262,7 +264,7 @@ async def _recreate_index(
 ) -> str:
     """One index, reissued against the table under its final name."""
     recreate_sql = index_sql.replace(f'"{temp_table}"', f'"{table_name}"')
-    logger.debug(f"Recreating index: {recreate_sql}")
+    say(__name__, "debug", f"Recreating index: {recreate_sql}")
     await connection.execute(recreate_sql)
     return recreate_sql
 

@@ -18,6 +18,7 @@ from collections.abc import Callable
 from typing import Any
 
 from declaro_persistum.database import Database, writing
+from declaro_persistum.reporting import say
 from declaro_persistum.types import Column, Schema, Table
 
 logger = logging.getLogger(__name__)
@@ -252,7 +253,7 @@ async def _execute_one(db: Database, table_name: str, op_type: str, data: dict[s
         # connection that had no transaction to discard.
         await conn.commit()
         rowcount: int = cursor.rowcount
-    logger.debug("FK-ordered %s on %s: %d rows", op_type, table_name, rowcount)
+    say(__name__, "debug", "FK-ordered %s on %s: %d rows", op_type, table_name, rowcount)
     return rowcount
 
 

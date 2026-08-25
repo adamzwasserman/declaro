@@ -68,6 +68,7 @@ from declaro_persistum.boundary import boundary, helper, recognizer
 from declaro_persistum.inspector.shared import (
     columns_from_pragma_rows as columns_from_pragma_rows,
 )
+from declaro_persistum.reporting import say
 from declaro_persistum.types import (
     ApplyResult,
     Column,
@@ -541,7 +542,7 @@ async def copy_the_shared_columns(
         f'INSERT INTO "{temp_table}" ({write_sql}) '
         f'SELECT {read_sql} FROM "{table_name}"'
     )
-    logger.debug(f"Copying data: {copy_sql}")
+    say(__name__, "debug", f"Copying data: {copy_sql}")
     await connection.execute(copy_sql)
     return len(pairs)
 

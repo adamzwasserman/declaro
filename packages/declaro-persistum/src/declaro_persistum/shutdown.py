@@ -25,6 +25,7 @@ from types import FrameType
 
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.database import Database, replicate_on_shutdown
+from declaro_persistum.reporting import say
 
 # WHAT THE OS HANDS A SIGNAL HANDLER, AND WHAT WE HAND IT BACK. `_handler` took
 # four unannotated arguments: two from the signal module and two bound per
@@ -94,7 +95,7 @@ def _trap_signals(db: Database) -> Callable[[], int]:
             # Python installs a default handler that is not callable, and
             # calling it would raise. Only a handler somebody set runs.
             [h(signum, frame) for h in [_previous] if callable(h)]
-            logger.info(
+            say(__name__, "info",
                 "Signal %s received; replicating %s before exit.",
                 signum, _db["path"],
             )

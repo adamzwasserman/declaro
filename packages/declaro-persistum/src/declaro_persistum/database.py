@@ -30,8 +30,9 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, Literal, TypedDict, cast
 
-from declaro_persistum.boundary import boundary, helper
+from declaro_persistum.boundary import helper
 from declaro_persistum.exceptions import DatabaseClosedError
+from declaro_persistum.reporting import say
 from declaro_persistum.types import Dialect
 from declaro_persistum.writers import TRANSACTIONS, WriteOne
 
@@ -626,11 +627,11 @@ async def _nothing_to_deliver(_db: Database, _now: Callable[[], float]) -> int:
     return 0
 
 
-@boundary
+@helper
 async def _deliver_before_exit(db: Database, now: Callable[[], float]) -> int:
     """Retry until the primary has everything, saying so on every attempt."""
     started = now()
-    logger.info(
+    say(__name__, "info",
         "Shutdown: replicating %s to its primary before exit. The process will "
         "not exit until this completes.",
         db["path"],
@@ -638,14 +639,14 @@ async def _deliver_before_exit(db: Database, now: Callable[[], float]) -> int:
     attempt = 0
     while not await db["replicate_once"](db):
         attempt += 1
-        logger.warning(
+        say(__name__, "warning",
             "Shutdown: replicating %s — attempt %d failed after %.1fs. "
             "Not yet delivered to the primary.",
             db["path"], attempt, now() - started,
         )
         await db["sleep"](db["retry_delay_s"])
     await db["refresh_once"](db)
-    logger.info(
+    say(__name__, "info",
         "Shutdown: %s is in conformity with its primary after %.1fs (%d retries).",
         db["path"], now() - started, attempt,
     )

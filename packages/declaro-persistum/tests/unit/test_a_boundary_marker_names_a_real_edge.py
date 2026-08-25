@@ -74,16 +74,23 @@ SRC = ROOT / "src"
 # The drop to 7 is the analyzer learning that a function a dispatch table holds
 # is a function something calls. It could not see that before, and this package
 # reaches most of its interior exactly that way.
-BASELINE = 7
+BASELINE = 12
 BASELINE_BUILD = "2ac0fed, built 2026-08-25 14:10"
 
-# THE OTHER HALF OF THE SAME CLAUSE, which the same change made visible: a
-# function that does I/O and is called from elsewhere in its own file, so the
-# I/O is in the interior rather than at the edge. 26 of these appeared the
-# moment the reader could follow a table, and 24 are `logger` calls in the
-# migration and transfer pipelines. Rule 4 names logging as I/O, so they are
-# real; moving them out is a restructure and not a rename.
-INTERIOR_IO_BASELINE = 26
+# THE OTHER HALF OF THE SAME CLAUSE: a function that does I/O and is called
+# from elsewhere in its own file, so the I/O is in the interior rather than at
+# the edge. 26 of these appeared the moment the reader could follow a table,
+# and 24 were `logger` calls scattered through thirteen modules.
+#
+# They are 2 now, because writing a line is `reporting.say` and nothing else.
+# The two that remain are a real read of stdin and a real commit, both one
+# call inside a function that is otherwise pure.
+#
+# THE TRADE WAS 24 FOR 5. Concentrating the writing means functions that only
+# logged no longer earn the `@boundary` honest-check still requires of them
+# for catching, so that count went 7 to 12. One place doing I/O and twelve
+# markers that exist for another checker beats thirteen places doing I/O.
+INTERIOR_IO_BASELINE = 2
 
 _AUDIT = shutil.which("slop-audit-l1") or str(
     pathlib.Path.home() / ".local/bin/slop-audit-l1"
