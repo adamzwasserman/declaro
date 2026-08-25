@@ -299,66 +299,45 @@ async def _restore_the_pragma(connection: Any, table_name: str) -> list[str]:
 
 
 @helper
-async def alter_column_nullability(
-    connection: Any,
-    table_name: str,
-    column_name: str,
-    nullable: bool,
-) -> None:
-    """
-    Change nullability of a column (SET NOT NULL / DROP NOT NULL).
+def _with_the_property(prop: str) -> Callable[[Column, Any], Column]:
+    """A writer that puts one named property onto a column declaration."""
+    return lambda col_def, value: {**col_def, prop: value}
 
-    Args:
-        connection: Database connection
-        table_name: Table name
-        column_name: Column to modify
-        nullable: True to allow NULL, False to disallow
 
-    Example:
-        >>> await alter_column_nullability(conn, "users", "email", False)
-    """
-    # Get current schema
-    columns = await _get_full_table_schema(connection, table_name)
-    changing = _the_column_to_change(table_name, column_name, columns)
-
-    # Update nullability
-    changed = {**columns, column_name: {**changing, "nullable": nullable}}
-
-    # Reconstruct table
-    await reconstruct_table(connection, table_name, changed, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+# HOW EACH PROPERTY IS WRITTEN ONTO A COLUMN. Setting one is the same edit
+# whatever it is called, which is why `alter_column_nullability` and
+# `alter_column_type` were the same function with a different word in one
+# place. Removing a default is not the same edit: it deletes the key rather
+# than setting it to None, because a column with `default: None` and a column
+# with no default are different declarations.
+_HOW_TO_SET: dict[str, Callable[[Column, Any], Column]] = {
+    "nullable": _with_the_property("nullable"),
+    "type": _with_the_property("type"),
+}
 
 
 @helper
-async def alter_column_type(
+async def alter_column_property(
     connection: Any,
     table_name: str,
     column_name: str,
-    new_type: str,
+    prop: str,
+    value: Any,
 ) -> None:
+    """Set one property on one column, and rebuild the table around it.
+
+    SQLite has no ALTER COLUMN, so every change to a column is a rebuild: make
+    the table again with the new declaration and copy the rows across. What
+    varies between one property and the next is only which key the new
+    declaration carries, so that is the argument and not a separate function.
     """
-    Change column type.
-
-    Warning: This may result in data loss if types are incompatible.
-    SQLite is permissive with type conversions.
-
-    Args:
-        connection: Database connection
-        table_name: Table name
-        column_name: Column to modify
-        new_type: New column type (e.g., "TEXT", "INTEGER")
-
-    Example:
-        >>> await alter_column_type(conn, "users", "age", "TEXT")
-    """
-    # Get current schema
     columns = await _get_full_table_schema(connection, table_name)
     changing = _the_column_to_change(table_name, column_name, columns)
-
-    # Update type
-    changed = {**columns, column_name: {**changing, "type": new_type}}
-
-    # Reconstruct table
-    await reconstruct_table(connection, table_name, changed, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+    changed = {**columns, column_name: _HOW_TO_SET[prop](changing, value)}
+    await reconstruct_table(
+        connection, table_name, changed,
+        preserve_data=NOTHING, manage_foreign_keys=NOTHING,
+    )
 
 
 @helper

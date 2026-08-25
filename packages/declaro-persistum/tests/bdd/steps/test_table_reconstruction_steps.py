@@ -23,8 +23,7 @@ from declaro_persistum.abstractions.reconstruction import (
 from declaro_persistum.abstractions.table_reconstruction import (
     _get_full_table_schema,
     alter_column_default,
-    alter_column_nullability,
-    alter_column_type,
+    alter_column_property,
     reconstruct_table,
 )
 from declaro_persistum.applier import apply as apply_operations
@@ -616,7 +615,7 @@ def when_alter_column_not_null(recon_context, column):
     try:
         _enable_fk(recon_context)
         recon_context["run"](
-            alter_column_nullability(recon_context["conn"], table_name, column_name, False)
+            alter_column_property(recon_context["conn"], table_name, column_name, "nullable", False)
         )
         recon_context["run"](recon_context["conn"].commit())
     except Exception as e:
@@ -649,9 +648,7 @@ def when_alter_column_nullable(recon_context, column):
     try:
         _enable_fk(recon_context)
         recon_context["run"](
-            alter_column_nullability(
-                recon_context["conn"], recon_context["table_name"], column, True
-            )
+            alter_column_property(recon_context["conn"], recon_context["table_name"], column, "nullable", True)
         )
         recon_context["run"](recon_context["conn"].commit())
     except Exception as e:
@@ -659,7 +656,7 @@ def when_alter_column_nullable(recon_context, column):
 
 
 @when(parsers.parse('I alter column "{column}" to type "{new_type}"'))
-def when_alter_column_type(recon_context, column, new_type):
+def when_alter_column_property(recon_context, column, new_type):
     """Change column type. Pre-validates data for strict type enforcement."""
     # Captured before the attempt so that, if it fails, the rollback
     # assertions have real prior state to compare against.
@@ -686,7 +683,7 @@ def when_alter_column_type(recon_context, column, new_type):
                         ) from err
 
         recon_context["run"](
-            alter_column_type(recon_context["conn"], recon_context["table_name"], column, new_type)
+            alter_column_property(recon_context["conn"], recon_context["table_name"], column, "type", new_type)
         )
         recon_context["run"](recon_context["conn"].commit())
     except Exception as e:
@@ -743,9 +740,7 @@ def when_alter_nullability(recon_context, column):
     """Generic nullability change."""
     _enable_fk(recon_context)
     recon_context["run"](
-        alter_column_nullability(
-            recon_context["conn"], recon_context["table_name"], column, False
-        )
+        alter_column_property(recon_context["conn"], recon_context["table_name"], column, "nullable", False)
     )
     recon_context["run"](recon_context["conn"].commit())
 
@@ -754,7 +749,7 @@ def when_alter_nullability(recon_context, column):
 def when_alter_column_in_table(recon_context, column, table):
     """Alter column in specific table."""
     _enable_fk(recon_context)
-    recon_context["run"](alter_column_nullability(recon_context["conn"], table, column, True))
+    recon_context["run"](alter_column_property(recon_context["conn"], table, column, "nullable", True))
     recon_context["run"](recon_context["conn"].commit())
 
 
@@ -800,7 +795,7 @@ def when_reconstruction_fails(recon_context):
 
     try:
         recon_context["run"](
-            alter_column_nullability(recon_context["conn"], table, "value", False)
+            alter_column_property(recon_context["conn"], table, "value", "nullable", False)
         )
     except Exception as e:
         recon_context["error"] = e
@@ -811,7 +806,7 @@ def when_reconstruct_table(recon_context):
     """Reconstruct a table with column changes."""
     _enable_fk(recon_context)
     recon_context["run"](
-        alter_column_nullability(recon_context["conn"], "children", "data", False)
+        alter_column_property(recon_context["conn"], "children", "data", "nullable", False)
     )
     recon_context["run"](recon_context["conn"].commit())
 

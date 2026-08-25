@@ -328,20 +328,48 @@ async def _alter_one_property(
     was unreachable, and had it ever happened the operation would have fallen
     through to a rebuild rather than saying so.
     """
-    from declaro_persistum.abstractions.table_reconstruction import (
-        alter_column_default,
-        alter_column_nullability,
-        alter_column_type,
-    )
 
-    specialised: dict[str, Callable[..., Awaitable[Any]]] = {
-        "nullable": alter_column_nullability,
-        "type": alter_column_type,
-        "default": alter_column_default,
-    }
+    # TWO OF THE THREE ENTRIES WERE THE SAME FUNCTION with a different word
+    # written in one place, so the word is the argument now. `default` keeps
+    # its own entry because removing a default deletes the key rather than
+    # setting it to None, and a column with `default: None` is a different
+    # declaration from a column with no default.
     change_key, value = single  # type: ignore[misc]
     column = operation["details"]["column"]
-    await specialised[change_key](connection, table, column, value)
+    await _ALTER_ONE_PROPERTY[change_key == "default"](
+        connection, table, column, change_key, value
+    )
+
+
+@helper
+async def _set_the_property(
+    connection: DbapiConnection, table: str, column: str, prop: str, value: Any
+) -> None:
+    """A property SQLite rebuilds the table to change."""
+    from declaro_persistum.abstractions.table_reconstruction import (
+        alter_column_property,
+    )
+
+    await alter_column_property(connection, table, column, prop, value)
+
+
+@helper
+async def _set_or_remove_the_default(
+    connection: DbapiConnection, table: str, column: str, _prop: str, value: Any
+) -> None:
+    """The default, which is removed rather than set when it goes away."""
+    from declaro_persistum.abstractions.table_reconstruction import (
+        alter_column_default,
+    )
+
+    await alter_column_default(connection, table, column, value)
+
+
+# Whether this is the default, which is the one property that can be removed.
+_ALTER_ONE_PROPERTY: dict[bool, Callable[..., Awaitable[None]]] = {
+    True: _set_or_remove_the_default,
+    False: _set_the_property,
+}
 
 
 @helper

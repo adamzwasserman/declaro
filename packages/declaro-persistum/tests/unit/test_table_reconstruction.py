@@ -12,8 +12,7 @@ import pytest
 from declaro_persistum.abstractions.pragma_compat import pragma_table_info
 from declaro_persistum.abstractions.table_reconstruction import (
     alter_column_default,
-    alter_column_nullability,
-    alter_column_type,
+    alter_column_property,
     reconstruct_table,
 )
 from declaro_persistum.types import NOTHING
@@ -29,7 +28,7 @@ async def test_alter_column_nullability_to_not_null():
         await conn.commit()
 
         # Alter column
-        await alter_column_nullability(conn, "users", "email", False)
+        await alter_column_property(conn, "users", "email", "nullable", False)
         await conn.commit()
 
         # Verify schema
@@ -55,7 +54,7 @@ async def test_alter_column_nullability_to_nullable():
         await conn.commit()
 
         # Alter column
-        await alter_column_nullability(conn, "products", "name", True)
+        await alter_column_property(conn, "products", "name", "nullable", True)
         await conn.commit()
 
         # Verify schema
@@ -79,7 +78,7 @@ async def test_alter_column_type():
         await conn.commit()
 
         # Alter column type
-        await alter_column_type(conn, "metrics", "value", "TEXT")
+        await alter_column_property(conn, "metrics", "value", "type", "TEXT")
         await conn.commit()
 
         # Verify schema
@@ -227,7 +226,7 @@ async def test_reconstruct_fails_with_null_in_not_null_column():
 
         # Try to make title NOT NULL - should fail
         with pytest.raises(sqlite3.IntegrityError, match="NOT NULL constraint failed"):
-            await alter_column_nullability(conn, "posts", "title", False)
+            await alter_column_property(conn, "posts", "title", "nullable", False)
             await conn.commit()
 
 
