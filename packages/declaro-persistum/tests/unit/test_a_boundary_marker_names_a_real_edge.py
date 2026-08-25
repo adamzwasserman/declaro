@@ -22,7 +22,20 @@ false. Removing it fails honest-check; keeping it fails Slop Audit. Neither
 tool is wrong about its own question, and the disagreement is theirs to settle
 rather than ours to paper over.
 
-The other 27 have not been looked at.
+THE OTHER 27 WERE LOOKED AT AND ARE ALSO REAL. Every one does I/O the audit's
+call graph cannot follow: `asyncpg.connect`, `aiosqlite.connect`, `input`,
+`os.environ.get`, `uuid.uuid4`, `logger.warning`, or a read through an injected
+`connection` parameter it cannot see past. Two were demoted to check, and
+honest-check refused both:
+
+    postgres_database.py:37   HC-P004  asyncpg.connect
+    migration_sql.py:541      HC-P004  uuid.uuid4
+
+SO 61 IS THE FLOOR, not a to-do list. It cannot go lower while the two tools
+mean different things, and a number that cannot move is worth saying so about
+rather than leaving as an implied backlog. If it drops, either the audit
+learned to see one of these or somebody removed a marker that was carrying its
+weight; both are worth reading the diff for.
 
 HOW THE 152 WERE FOUND SAFE TO REMOVE. Not by trusting one tool. Every marker
 Slop Audit flagged was demoted, honest-check was run over the result, and
