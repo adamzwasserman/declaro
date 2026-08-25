@@ -57,7 +57,6 @@ said 336.
 from __future__ import annotations
 
 import pathlib
-import re
 import shutil
 import subprocess
 
@@ -68,19 +67,31 @@ pytestmark = pytest.mark.precommit
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
 
-# 2026-08-25: 213, then 61, then 14, all on one unchanged tree. Only the
-# analyzer moved. Record which build a baseline was set against, because
+# 2026-08-25: 213, then 61, then 14, then 7, all on one unchanged tree. Only
+# the analyzer moved. Record which build a baseline was set against, because
 # without it a number here cannot be told apart from a number about the code.
-BASELINE = 14
-BASELINE_BUILD = "cb42509, built 2026-08-25 12:39"
+#
+# The drop to 7 is the analyzer learning that a function a dispatch table holds
+# is a function something calls. It could not see that before, and this package
+# reaches most of its interior exactly that way.
+BASELINE = 7
+BASELINE_BUILD = "2ac0fed, built 2026-08-25 14:10"
+
+# THE OTHER HALF OF THE SAME CLAUSE, which the same change made visible: a
+# function that does I/O and is called from elsewhere in its own file, so the
+# I/O is in the interior rather than at the edge. 26 of these appeared the
+# moment the reader could follow a table, and 24 are `logger` calls in the
+# migration and transfer pipelines. Rule 4 names logging as I/O, so they are
+# real; moving them out is a restructure and not a rename.
+INTERIOR_IO_BASELINE = 26
 
 _AUDIT = shutil.which("slop-audit-l1") or str(
     pathlib.Path.home() / ".local/bin/slop-audit-l1"
 )
 
 
-def _decorations_that_state_an_edge_that_is_not_there() -> list[str]:
-    """Every `@boundary` the analyzer says obtains nothing outside the process."""
+def _clause_four() -> list[str]:
+    """Every clause 4 finding the analyzer reports on this package's source."""
     files = sorted(str(path) for path in SRC.rglob("*.py"))
     finished = subprocess.run(  # noqa: S603
         [_AUDIT, "--honest-code", *files],
@@ -89,11 +100,19 @@ def _decorations_that_state_an_edge_that_is_not_there() -> list[str]:
         timeout=300,
         check=False,
     )
+    return [line for line in finished.stderr.splitlines() if "L1.21.4 " in line]
+
+
+def _decorations_that_state_an_edge_that_is_not_there() -> list[str]:
+    """Every `@boundary` the analyzer says obtains nothing outside the process."""
     return [
-        line
-        for line in finished.stderr.splitlines()
-        if re.search(r"L1\.21\.4 .*declares itself a boundary", line)
+        line for line in _clause_four() if "declares itself a boundary" in line
     ]
+
+
+def _io_in_the_interior() -> list[str]:
+    """Every function doing I/O that something else in its own file calls."""
+    return [line for line in _clause_four() if "performs I/O" in line]
 
 
 @pytest.mark.skipif(
@@ -119,6 +138,21 @@ def test_no_more_boundary_markers_than_the_baseline() -> None:
     not pathlib.Path(_AUDIT).exists(),
     reason=f"the analyzer is not installed at {_AUDIT}",
 )
+def test_no_more_interior_io_than_the_baseline() -> None:
+    """The other half. Rule 4 puts I/O at the edge, and logging is I/O."""
+    offenders = _io_in_the_interior()
+
+    assert len(offenders) <= INTERIOR_IO_BASELINE, (
+        f"{len(offenders)} functions do I/O and are called from elsewhere in "
+        f"their own file, up from {INTERIOR_IO_BASELINE} set against "
+        f"{BASELINE_BUILD}. New: {offenders[INTERIOR_IO_BASELINE:][:5]}"
+    )
+
+
+@pytest.mark.skipif(
+    not pathlib.Path(_AUDIT).exists(),
+    reason=f"the analyzer is not installed at {_AUDIT}",
+)
 def test_the_baseline_is_not_slack() -> None:
     """A baseline left above the real count stops ratcheting silently.
 
@@ -127,7 +161,10 @@ def test_the_baseline_is_not_slack() -> None:
     """
     offenders = _decorations_that_state_an_edge_that_is_not_there()
 
-    assert len(offenders) == BASELINE, (
+    assert (len(offenders), len(_io_in_the_interior())) == (
+        BASELINE,
+        INTERIOR_IO_BASELINE,
+    ), (
         f"the real count is {len(offenders)} and BASELINE says {BASELINE}, "
         f"set against {BASELINE_BUILD}. Either somebody fixed some, or the "
         f"analyzer was rebuilt. This assertion caught the rebuild twice "
