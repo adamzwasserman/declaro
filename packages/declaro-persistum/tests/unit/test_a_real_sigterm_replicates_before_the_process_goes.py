@@ -45,7 +45,9 @@ from declaro_persistum.shutdown import trap_shutdown
 pytestmark = pytest.mark.precommit
 
 
-def _a_database_that_records_its_replication(replicated: list[str]) -> Any:
+def _a_database_that_records_its_replication(
+    replicated: list[str], slept: list[float]
+) -> Any:
     """A Database whose replicate step says it ran, and nothing else.
 
     The keys are the ones `replicate_on_shutdown` reads, taken from
@@ -60,8 +62,17 @@ def _a_database_that_records_its_replication(replicated: list[str]) -> Any:
     async def _refresh_once(_db: Any) -> int:
         return 1
 
-    async def _sleep(_seconds: float) -> None:
-        return None
+    async def _sleep(seconds: float) -> float:
+        """Records the wait rather than taking it, and hands the wait back.
+
+        `_replicate_once` says the primary has everything on its first call,
+        so nothing should ever wait here. An empty body would have returned
+        None to a caller that cannot tell "not written" from "nothing to do";
+        this returns what it was asked for, and the tests assert the list
+        stayed empty, which turns an unexercised key into a claim.
+        """
+        slept.append(seconds)
+        return seconds
 
     return {
         "path": str(Path(tempfile.mkdtemp()) / "t.db"),
@@ -77,7 +88,10 @@ def _a_database_that_records_its_replication(replicated: list[str]) -> Any:
 def test_a_signal_with_no_running_loop_replicates() -> None:
     """The deployment case: a synchronous process taking SIGTERM."""
     replicated: list[str] = []
-    restore = trap_shutdown(_a_database_that_records_its_replication(replicated))
+    slept: list[float] = []
+    restore = trap_shutdown(
+        _a_database_that_records_its_replication(replicated, slept)
+    )
     try:
         signal.raise_signal(signal.SIGTERM)
     finally:
@@ -87,14 +101,19 @@ def test_a_signal_with_no_running_loop_replicates() -> None:
         "SIGTERM arrived and nothing replicated, so a deploy would lose "
         "whatever this process had written"
     )
+    assert slept == [], f"the primary was current and the handler waited: {slept}"
 
 
 def test_a_signal_inside_a_running_loop_replicates() -> None:
     """The other case: the process is already serving requests."""
     replicated: list[str] = []
 
+    slept: list[float] = []
+
     async def _take_the_signal() -> None:
-        restore = trap_shutdown(_a_database_that_records_its_replication(replicated))
+        restore = trap_shutdown(
+            _a_database_that_records_its_replication(replicated, slept)
+        )
         try:
             signal.raise_signal(signal.SIGTERM)
             # The handler hands the work to the running loop as a task, so it
@@ -109,6 +128,7 @@ def test_a_signal_inside_a_running_loop_replicates() -> None:
     assert replicated == ["replicated"], (
         "SIGTERM arrived while a loop was running and nothing replicated"
     )
+    assert slept == [], f"the primary was current and the handler waited: {slept}"
 
 
 def test_a_closed_loop_is_not_mistaken_for_a_stopped_one() -> None:
@@ -123,7 +143,10 @@ def test_a_closed_loop_is_not_mistaken_for_a_stopped_one() -> None:
     asyncio.set_event_loop(closed)
     try:
         replicated: list[str] = []
-        restore = trap_shutdown(_a_database_that_records_its_replication(replicated))
+        slept: list[float] = []
+        restore = trap_shutdown(
+            _a_database_that_records_its_replication(replicated, slept)
+        )
         try:
             signal.raise_signal(signal.SIGTERM)
         finally:
