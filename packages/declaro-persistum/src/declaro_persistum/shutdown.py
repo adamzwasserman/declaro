@@ -110,6 +110,13 @@ def _trap_signals(db: Database) -> Callable[[], int]:
                 _ON_THE_LOOP[loop.is_running()](loop, coro)
 
         try:
+            # TRAPPING SIGTERM IS WHAT THIS MODULE IS FOR, and POSIX offers
+            # no declarative equivalent. The deployment has ephemeral disk, so
+            # a process that exits without replicating loses whatever it
+            # wrote. What the clause warns about is behaviour parked where a
+            # reader does not look, and a reader looking for what happens at
+            # shutdown looks here.
+            # honest-code-allow: L1.21.16 — no declarative equivalent exists
             signal.signal(sig, _handler)
             replaced.append((sig, previous))
         except (ValueError, OSError):
@@ -159,6 +166,9 @@ _TRAP: dict[bool, Callable[[Database], Callable[[], int]]] = {
 def _restored(sig: int, previous: object) -> bool:
     """Put one handler back. False when the platform refuses it."""
     with contextlib.suppress(ValueError, OSError, TypeError):
+        # honest-code-allow: L1.21.16 — putting back a handler this module
+        # replaced, which is the other half of the trap above and has the same
+        # answer: there is no declarative way to restore a POSIX handler.
         signal.signal(sig, previous)  # type: ignore[arg-type]
         return True
     return False
