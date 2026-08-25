@@ -18,8 +18,10 @@ from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.database import (
     Database,
     ShutdownPolicy,
+    already_delivered,
     check_shutdown,
     new_database,
+    no_passes,
     writing,
 )
 from declaro_persistum.types import DbapiConnection, Dialect
@@ -45,23 +47,6 @@ async def connect_sqlite(db: Database) -> Any:
 async def _close_connection(conn: DbapiConnection) -> int:
     await conn.close()
     return 1
-
-
-@helper
-async def _nothing_to_replicate(_db: Database) -> bool:
-    return True
-
-
-@helper
-async def _nothing_to_refresh(_db: Database) -> int:
-    """No passes, because SQLite has no replica to pull from."""
-    return 0
-
-
-@helper
-async def _release(_db: Database) -> int:
-    """No passes, because SQLite has no primary to replicate to at shutdown."""
-    return 0
 
 
 @helper
@@ -105,9 +90,12 @@ async def open_sqlite(
         shutdown=shutdown,
         busy_timeout_s=busy_timeout_s,
         write_one=WRITERS[DIALECT],
-        replicate_once=_nothing_to_replicate,
-        refresh_once=_nothing_to_refresh,
-        release=_release,
+        # SQLite writes to a local file: there is no primary.
+        replicate_once=already_delivered,
+        # No replica to pull from on SQLite.
+        refresh_once=no_passes,
+        # No primary to replicate to at shutdown on SQLite.
+        release=no_passes,
         sleep=asyncio.sleep,
         retry_delay_s=0.001,
     )

@@ -30,6 +30,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any, Literal, TypedDict, cast
 
+from declaro_persistum.boundary import helper
 from declaro_persistum.exceptions import DatabaseClosedError
 from declaro_persistum.types import Dialect
 from declaro_persistum.writers import TRANSACTIONS, WriteOne
@@ -409,6 +410,44 @@ _WRITE_PATH: dict[bool, ForDDL] = {
 }
 
 
+@helper
+async def no_passes(_db: Database) -> int:
+    """Zero passes ran, which is a real answer and not an absence.
+
+    Every `Database` carries `refresh_once`, `release`, `refresh` and `flush`
+    as callables, so an engine with nothing to do still has to answer, and the
+    answer is how many passes it ran.
+
+    NINE IDENTICAL BODIES WITH NINE DIFFERENT DOCSTRINGS stood here and in the
+    three engine modules. The answer is the same in all of them; only the
+    reason differs, so the reason moved to the injection site, where a reader
+    is when they ask why this engine does nothing here.
+    """
+    return 0
+
+
+@helper
+async def already_delivered(_db: Database) -> bool:
+    """Yes, everything is where it belongs, because there is nowhere to send it.
+
+    `replicate_once` answers "has the primary got it all". An engine with no
+    primary has, vacuously, and saying so is what keeps `flush` from looping
+    forever waiting for a delivery that will never be reported.
+    """
+    return True
+
+
+@helper
+async def nothing_happened(_db: Database) -> bool:
+    """No, and that is an answer rather than a failure.
+
+    The same shape as `no_passes` for the calls that report whether a pass
+    happened rather than how many. Two functions and not one because the two
+    return types are different things: a count of passes and a yes or no.
+    """
+    return False
+
+
 @asynccontextmanager
 async def writing(db: Database) -> AsyncIterator[Any]:
     """A connection for writing, for the span of the block.
@@ -476,11 +515,6 @@ _HAS_A_PRIMARY: dict[bool, Callable[[Database], int]] = {
 }
 
 
-async def _sent_nothing(_db: Database) -> bool:
-    """The primary did not take the writes, so the local copy still holds them."""
-    return False
-
-
 async def _bring_the_primary_down(db: Database) -> bool:
     """The writes went up, so now the primary's changes come down."""
     await db["refresh_once"](db)
@@ -489,7 +523,9 @@ async def _bring_the_primary_down(db: Database) -> bool:
 
 _AFTER_SENDING: dict[bool, Callable[[Database], Awaitable[bool]]] = {
     True: _bring_the_primary_down,
-    False: _sent_nothing,
+    # The primary did not take the writes, so the local copy still holds
+    # them.
+    False: nothing_happened,
 }
 
 
@@ -508,14 +544,11 @@ async def replicate_if_idle(db: Database) -> bool:
     return await _IF_IDLE[idle](db)
 
 
-async def _no_pass_now(_db: Database) -> bool:
-    """Closed, local-only, or a writer is waiting. The pass is dropped, not queued."""
-    return False
-
-
 _IF_IDLE: dict[bool, Callable[[Database], Awaitable[bool]]] = {
     True: replicate,
-    False: _no_pass_now,
+    # Closed, local-only, or a writer is waiting: the pass is dropped
+    # rather than queued.
+    False: nothing_happened,
 }
 
 
@@ -539,7 +572,8 @@ async def replication_loop(db: Database, wanted: asyncio.Event) -> None:
 
 
 _AFTER_WAKING: dict[bool, Callable[[Database], Awaitable[bool]]] = {
-    True: _no_pass_now,
+    # Closed, so the wake-up finds nothing to do.
+    True: nothing_happened,
     False: replicate_if_idle,
 }
 
@@ -608,11 +642,6 @@ async def refresh(db: Database) -> None:
     await _REFRESH[is_replicated(db)](db)
 
 
-async def _refresh_nothing(_db: Database) -> int:
-    """No primary, so there is nothing to bring down."""
-    return 0
-
-
 async def _refresh_from_primary(db: Database) -> int:
     """Take whatever the primary has that this copy does not."""
     _check_open(db)
@@ -622,7 +651,8 @@ async def _refresh_from_primary(db: Database) -> int:
 
 _REFRESH: dict[bool, Callable[[Database], Awaitable[int]]] = {
     True: _refresh_from_primary,
-    False: _refresh_nothing,
+    # No primary, so there is nothing to bring down.
+    False: no_passes,
 }
 
 
@@ -634,11 +664,6 @@ async def flush(db: Database) -> None:
     disk, anything not replicated when the process dies is gone.
     """
     await _FLUSH[is_replicated(db)](db)
-
-
-async def _flush_nothing(_db: Database) -> int:
-    """No primary, so every write is already where it is going to be."""
-    return 0
 
 
 async def _flush_to_primary(db: Database) -> int:
@@ -653,7 +678,8 @@ async def _flush_to_primary(db: Database) -> int:
 
 _FLUSH: dict[bool, Callable[[Database], Awaitable[int]]] = {
     True: _flush_to_primary,
-    False: _flush_nothing,
+    # No primary, so every write is already where it is going.
+    False: no_passes,
 }
 
 

@@ -63,9 +63,11 @@ from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.database import (
     Database,
     ShutdownPolicy,
+    already_delivered,
     check_shutdown,
     new_database,
     new_write_lock,
+    no_passes,
     writing,
 )
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE
@@ -389,24 +391,6 @@ async def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
     None someone has to check for.
     """
 
-    @helper
-    async def nothing_to_replicate(_db: Database) -> bool:
-        return True
-
-    @helper
-    async def nothing_to_refresh(_db: Database) -> int:
-        """No passes: a local file has no remote to pull from.
-
-        `refresh` is a callable every `Database` carries, so an engine with
-        nothing to do still has to answer. The answer is the number of passes
-        it ran, and here that is none.
-        """
-        return 0
-
-    @helper
-    async def release(_db: Database) -> int:
-        """No passes: a local file has no primary to replicate to."""
-        return 0
 
     # ONCE, HERE, SERIALLY. See `negotiate_journal_mode`: this is the whole of
     # the fix for the crew race, and the recorded mode is what the engine
@@ -429,9 +413,12 @@ async def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
         serialise=None,  # MVCC: writers run concurrently, which is the point
         shutdown=shutdown,
         write_one=WRITERS[DIALECT],
-        replicate_once=nothing_to_replicate,
-        refresh_once=nothing_to_refresh,
-        release=release,
+        # A local file has no remote, so its writes have arrived.
+        replicate_once=already_delivered,
+        # No remote to pull from: this is a local file.
+        refresh_once=no_passes,
+        # No primary to replicate to at shutdown, for the same reason.
+        release=no_passes,
         sleep=asyncio.sleep,
         retry_delay_s=_DEFAULT_RETRY_DELAY_S,
     )
