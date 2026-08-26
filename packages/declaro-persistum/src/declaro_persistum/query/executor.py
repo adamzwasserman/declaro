@@ -457,23 +457,29 @@ async def _execute_fetch(connection: Any, sql: str, params: Any) -> list[dict[st
 
     @boundary
     async def _fetch_aiosqlite() -> list[dict[str, Any]]:
-        # BORROWED AND GIVEN BACK. This assigned `connection.row_factory` and
-        # left it assigned. The connection belongs to the CALLER -- it is
-        # passed in, not owned here -- so after one query every raw
-        # `conn.execute(...)` they made returned dicts instead of tuples, for
-        # the life of the connection.
+        # THE CURSOR CARRIES THE FACTORY, so nothing shared is touched.
         #
-        # That is also how the scalar defect hid. On a fresh connection a row
-        # is a tuple and `row[0]` works; run any other query first and it is a
-        # dict and `row[0]` is a lookup for the key `0`. The behaviour
-        # depended on what had run before it.
-        previous = connection.row_factory
-        connection.row_factory = _dict_factory
-        try:
-            cursor = await connection.execute(sql, params)
-            return list(await cursor.fetchall())
-        finally:
-            connection.row_factory = previous
+        # This borrowed `connection.row_factory` and gave it back in a
+        # `finally`, which is a read, an await, and a write to state the
+        # caller owns. Two queries on one connection interleave: the second
+        # saves what the first had already set, the first restores the driver
+        # default, and the second restores the dict factory. Measured
+        # 2026-08-25 with six concurrent queries, the connection was left with
+        # `_dict_factory` set for good, so every later raw `conn.execute` the
+        # caller made returned dicts instead of tuples.
+        #
+        # The comment that stood here described exactly that failure as a past
+        # defect: on a fresh connection a row is a tuple and `row[0]` works;
+        # run any other query first and `row[0]` is a lookup for the key `0`.
+        # Restoring in a `finally` fixed the single-query case and left the
+        # concurrent one, because a save-and-restore is not a guard when
+        # anything can run between the save and the restore.
+        #
+        # A cursor is not shared. Setting the factory there is the same
+        # operation with nothing to race over.
+        cursor = await connection.execute(sql, params)
+        cursor.row_factory = _dict_factory
+        return list(await cursor.fetchall())
 
     @boundary
     async def _fetch_turso() -> list[dict[str, Any]]:
@@ -503,24 +509,14 @@ async def _execute_fetch_one(connection: Any, sql: str, params: Any) -> dict[str
 
     @boundary
     async def _fetch_one_aiosqlite() -> dict[str, Any] | None:
-        # BORROWED AND GIVEN BACK, the same way `_fetch_aiosqlite` does it and
-        # for the same reason. This assigned the factory and left it assigned,
-        # so after one `execute_one` every raw `conn.execute(...)` the CALLER
-        # made returned dicts instead of tuples, for the life of a connection
-        # this module does not own.
-        #
-        # The fix was written thirty lines above and did not reach here, which
-        # is how `row[0]` came to raise `KeyError: 0` on somebody else's query
-        # and read as a driver quirk: it depended on whether an `execute_one`
-        # had run first.
-        previous = connection.row_factory
-        connection.row_factory = _dict_factory
-        try:
-            cursor = await connection.execute(sql, params)
-            row = await cursor.fetchone()
-            return dict(row) if row else None
-        finally:
-            connection.row_factory = previous
+        # THE CURSOR CARRIES THE FACTORY, as in `_fetch_aiosqlite` above and
+        # for the same reason: a save-and-restore around an await is a window
+        # two callers can interleave in, and the connection belongs to whoever
+        # passed it. A cursor belongs to this call alone.
+        cursor = await connection.execute(sql, params)
+        cursor.row_factory = _dict_factory
+        row = await cursor.fetchone()
+        return dict(row) if row else None
 
     @boundary
     async def _fetch_one_turso() -> dict[str, Any] | None:
