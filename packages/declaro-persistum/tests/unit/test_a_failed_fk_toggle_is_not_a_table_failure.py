@@ -177,6 +177,21 @@ async def test_a_failed_re_enable_is_reported_loudly_but_does_not_mask(
         assert result["success"] is True, (
             "a teardown failure changed the outcome of a transfer that worked"
         )
+        # AND IT REACHES THE CALLER. "Reported loudly" used to mean an ERROR
+        # in a log, which the caller holding this result cannot read. The
+        # rows transferred, so `success` stays true about the rows, and the
+        # target left enforcing nothing is an error the transfer survived --
+        # which is the field `errors` already exists for.
+        assert "_restore_fk_checks" in result["errors"], (
+            "the target was left with foreign key checks off and the result "
+            f"does not say so: {result['errors']}"
+        )
+        assert "NOT checked against its constraints" in (
+            result["errors"]["_restore_fk_checks"]
+        )
+        assert "the target refused to re-enable foreign key checks" in (
+            result["errors"]["_restore_fk_checks"]
+        ), "the result names the failure but not what caused it"
     finally:
         await close(source)
         await close(target)

@@ -206,17 +206,18 @@ async def _closed(conn: Any) -> Exception | Nothing:
 
 
 @helper
-def _rides_out_on_the_failure(unclosed: Exception | Nothing) -> None:
+def _rides_out_on_the_failure(unclosed: Exception | Nothing) -> Exception | Nothing:
     """A push or pull already failed, so the note goes on that."""
     also_failed(
         cast(BaseException, sys.exception()),
         "closing the sync connection afterwards",
         unclosed,
     )
+    return unclosed
 
 
 @helper
-def _is_the_failure(unclosed: Exception | Nothing) -> None:
+def _is_the_failure(unclosed: Exception | Nothing) -> Exception | Nothing:
     """Replication worked and the close did not, so this IS the failure.
 
     Returning normally would report conformity while leaving a sync
@@ -231,13 +232,15 @@ def _is_the_failure(unclosed: Exception | Nothing) -> None:
 
 
 @helper
-def _nothing_to_carry(_unclosed: Exception | Nothing) -> None:
+def _nothing_to_carry(unclosed: Exception | Nothing) -> Exception | Nothing:
     """It closed, so there is nothing to report."""
-    return None
+    return unclosed
 
 
 # WHETHER SOMETHING IS ALREADY TRAVELLING, AND WHETHER THE CLOSE FAILED.
-_LEFT_OPEN: dict[tuple[bool, bool], Callable[[Exception | Nothing], None]] = {
+_LEFT_OPEN: dict[
+    tuple[bool, bool], Callable[[Exception | Nothing], Exception | Nothing]
+] = {
     (True, True): _rides_out_on_the_failure,
     (True, False): _nothing_to_carry,
     (False, True): _is_the_failure,
@@ -246,8 +249,12 @@ _LEFT_OPEN: dict[tuple[bool, bool], Callable[[Exception | Nothing], None]] = {
 
 
 @helper
-def _left_open(unclosed: Exception | Nothing) -> None:
-    """Put a failed close where the caller will see it."""
+def _left_open(unclosed: Exception | Nothing) -> Exception | Nothing:
+    """Put a failed close where the caller will see it, and hand it back.
+
+    EVERY ENTRY RETURNS THE FAILURE, so the table produces an answer rather
+    than a side effect and a test can read it without catching anything.
+    """
     return _LEFT_OPEN[(sys.exception() is not None, not is_nothing(unclosed))](unclosed)
 
 

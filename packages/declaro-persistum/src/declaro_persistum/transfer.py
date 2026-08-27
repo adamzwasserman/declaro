@@ -32,7 +32,7 @@ from declaro_persistum.bulk_loader import (  # noqa: F401
     TRANSFER_STATE_TABLE as TRANSFER_STATE_TABLE,
 )
 from declaro_persistum.database import Database, reading
-from declaro_persistum.exceptions import TransferError, also_failed
+from declaro_persistum.exceptions import also_failed
 from declaro_persistum.inspector import introspect
 from declaro_persistum.migrations import apply_migrations_async
 from declaro_persistum.reporting import say
@@ -317,57 +317,93 @@ async def _transfer_one_table(
 
 
 @helper
-def _rides_out_on_the_failure(unenforced: Exception | Nothing) -> None:
+def _rides_out_on_the_failure(unenforced: Exception | Nothing) -> Exception | Nothing:
     """Something is already travelling, so the note goes on that."""
     also_failed(
         cast(BaseException, sys.exception()),
         "turning foreign key checks back on at the target",
         unenforced,
     )
+    return unenforced
 
 
 @helper
-def _is_the_failure(unenforced: Exception | Nothing) -> None:
-    """The transfer worked and the restore did not, so this IS the failure.
+def _goes_in_the_result(unenforced: Exception | Nothing) -> Exception | Nothing:
+    """The transfer worked and the restore did not, so the result carries it.
 
-    Returning normally here would hand back `success: True` for a connection
-    that has stopped enforcing its constraints: a report right about the rows
-    and wrong about the database.
+    IT DOES NOT RAISE, and that is a decision rather than an omission. The
+    rows did transfer, so `success` is true about the rows, and a teardown
+    failure must not change the outcome of work that succeeded. That was
+    already settled and is pinned by
+    `test_a_failed_re_enable_is_reported_loudly_but_does_not_mask`.
+
+    What was wrong was where "reported loudly" went. It went to a log, so the
+    caller holding the result could not see it. The failure is handed back
+    here and the caller puts it in `errors`, which is the field that already
+    exists for a failure the transfer survived.
     """
-    raise TransferError(
-        "The transfer finished, but foreign key checks could not be turned "
-        "back on at the target. Anything written on that connection from "
-        "here is NOT checked against its constraints.",
-        phase="restore_fk_checks",
-        table=NOTHING,
-        original_error=cast(Exception, unenforced),
-    )
+    return unenforced
 
 
 @helper
-def _nothing_to_carry(_unenforced: Exception | Nothing) -> None:
+def _nothing_to_carry(unenforced: Exception | Nothing) -> Exception | Nothing:
     """The checks went back on, so there is nothing to report."""
-    return None
+    return unenforced
 
 
 # WHETHER SOMETHING IS ALREADY TRAVELLING, AND WHETHER THE RESTORE FAILED.
 # Between them the two questions have four answers and each is written out,
 # because the pair decides whether the failure is carried out on another
 # exception, raised as its own, or absent.
-_UNENFORCED: dict[tuple[bool, bool], Callable[[Exception | Nothing], None]] = {
+_UNENFORCED: dict[
+    tuple[bool, bool], Callable[[Exception | Nothing], Exception | Nothing]
+] = {
     (True, True): _rides_out_on_the_failure,
     (True, False): _nothing_to_carry,
-    (False, True): _is_the_failure,
+    (False, True): _goes_in_the_result,
     (False, False): _nothing_to_carry,
 }
 
 
 @helper
-def _left_unenforced(unenforced: Exception | Nothing) -> None:
-    """Put a failed restore where the caller will see it."""
+def _left_unenforced(unenforced: Exception | Nothing) -> Exception | Nothing:
+    """Put a failed restore where the caller will see it, and hand it back.
+
+    ALL THREE ENTRIES RETURN THE FAILURE, including the one that raises and
+    the one that had nothing to do. A table whose every entry returns None is
+    dispatching for a side effect, and then a test can only reach it by
+    catching output or an exception. This way the answer is a value: what was
+    left unenforced, or NOTHING.
+    """
     return _UNENFORCED[(sys.exception() is not None, not is_nothing(unenforced))](
         unenforced
     )
+
+
+@helper
+def _no_unenforced_target(_failure: Exception | Nothing) -> dict[str, str]:
+    """The checks went back on, so the result has nothing extra to carry."""
+    return {}
+
+
+@helper
+def _the_unenforced_target(failure: Exception | Nothing) -> dict[str, str]:
+    """The checks did not go back on, and this is what the caller must read."""
+    return {
+        "_restore_fk_checks": (
+            f"foreign key checks could not be turned back on at the target: "
+            f"{type(failure).__name__}: {failure}. Anything written on that "
+            f"connection from here is NOT checked against its constraints."
+        )
+    }
+
+
+# WHETHER THE TARGET WAS LEFT UNENFORCED. Both entries return the mapping the
+# result merges, so neither is an empty body and the caller reads one value.
+_UNENFORCED_ERROR: dict[bool, Callable[[Exception | Nothing], dict[str, str]]] = {
+    True: _the_unenforced_target,
+    False: _no_unenforced_target,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -485,9 +521,14 @@ async def bulk_transfer(
                 for table in transfer_order
             ]
         finally:
-            # Re-enable FK checks
-            await _WHEN_THE_CHECKS_WERE_TURNED_OFF[bool(circular_refs)](
-                target_loader, target_conn
+            # Re-enable FK checks. A failure DOING that leaves the target
+            # accepting writes against constraints nobody is checking, so it
+            # is never dropped: it rides out on whatever is already
+            # travelling, and becomes the failure when nothing else is.
+            unenforced = _left_unenforced(
+                await _WHEN_THE_CHECKS_WERE_TURNED_OFF[bool(circular_refs)](
+                    target_loader, target_conn
+                )
             )
 
     duration = (datetime.now(UTC) - start).total_seconds()
@@ -496,13 +537,20 @@ async def bulk_transfer(
     skipped = [one for one in outcomes if one["outcome"] == "skipped"]
     failed = [one for one in outcomes if one["outcome"] == "failed"]
 
+    # A TARGET LEFT UNENFORCED IS AN ERROR THE TRANSFER SURVIVED, which is
+    # exactly what `errors` is for. `success` stays true about the rows.
+    unenforced_error = _UNENFORCED_ERROR[not is_nothing(unenforced)](unenforced)
+
     result: BulkTransferResult = {
         "success": not failed,
         "tables_transferred": len(transferred),
         "tables_skipped": len(skipped),
         "tables_failed": len(failed),
         "total_rows": sum(one["rows"] for one in outcomes),
-        "errors": {one["table"]: cast(str, one["error"]) for one in failed},
+        "errors": {
+            **{one["table"]: cast(str, one["error"]) for one in failed},
+            **unenforced_error,
+        },
         "duration_seconds": duration,
     }
 
