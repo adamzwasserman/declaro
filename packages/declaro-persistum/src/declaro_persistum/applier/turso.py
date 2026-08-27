@@ -15,11 +15,9 @@ a valid one such as ADD COLUMN. The cost is that a partly-applied batch is a
 real outcome here, which it is not on PostgreSQL.
 """
 
-import contextlib
-import logging
 from collections.abc import Awaitable, Callable
 from functools import reduce
-from typing import Literal
+from typing import Any, Literal
 
 from declaro_persistum.applier.shared import (
     apply_reconstruction_changes,
@@ -44,10 +42,9 @@ from declaro_persistum.types import (
     DbapiConnection,
     Nothing,
     Operation,
+    is_nothing,
     resolved,
 )
-
-logger = logging.getLogger(__name__)
 
 
 @helper
@@ -240,16 +237,25 @@ _DESCRIBED: dict[bool, Callable[[str, list[Operation]], str]] = {
 
 
 @boundary
-async def _rolled_back(connection: DbapiConnection, op_desc: str) -> None:
-    """Undo what the failed operation had done, and say so if that fails too."""
+async def _rolled_back(connection: DbapiConnection) -> Exception | Nothing:
+    """Undo what the failed operation had done, and RETURN what stopped it.
+
+    A rollback that fails leaves the connection holding an open transaction,
+    which is the thing the next caller of that connection needs to know. It
+    used to be written to a log as a warning and dropped, and the two places
+    that wrapped this in `contextlib.suppress` said why: nothing here may
+    replace the exception already travelling.
+
+    That was true and it is no longer the only option. The failure comes back
+    as a value and rides out as a note on whatever is being raised, so the
+    original exception keeps its type and its message and the caller still
+    learns the transaction is open.
+    """
     try:
         await connection.rollback()
+        return NOTHING
     except Exception as rollback_exc:
-        say(__name__, "warning",
-            "Rollback failed after '%s' failed: %s. The connection "
-            "may still hold an open transaction.",
-            op_desc, rollback_exc,
-        )
+        return rollback_exc
 
 
 @boundary
@@ -321,7 +327,7 @@ async def _run_rebuild(
         say(__name__, "info", f"Applied: {op_desc}")
         return ([f"Table reconstruction for {table}"], [])
 
-    except A_BUG_IN_THIS_PACKAGE:
+    except A_BUG_IN_THIS_PACKAGE as ours:
         # OURS, AND NOTHING RAN. A KeyError here means the operation does
         # not match what the differ emits, so no statement reached the
         # engine and no tmp table was created. Reporting it as "Table
@@ -329,25 +335,59 @@ async def _run_rebuild(
         # sends an operator hunting for tables that cannot exist.
         #
         # Measured 2026-08-17 with an operation missing its `changes` key.
-        # The bug we are re-raising matters more than a rollback that
-        # also failed, so this suppresses rather than masks: nothing here
-        # can replace the exception on its way out.
-        with contextlib.suppress(Exception):
-            await connection.rollback()
+        # The bug we are re-raising matters more than a rollback that also
+        # failed, and it still does: the note leaves our exception's type and
+        # message untouched, so this carries the rollback failure without
+        # replacing anything.
+        also_failed(
+            ours,
+            "rolling back after a bug in this package",
+            await _rolled_back(connection),
+        )
         raise
     except Exception as e:
-        await _rolled_back(connection, op_desc)
+        _open_transaction = await _rolled_back(connection)
         _left_unenforced = await _enforcement_restored(connection, entry_enforcement)
         raise also_failed(
-            MigrationError(
-                f"Table reconstruction failed for {table}. "
-                f"Check for orphaned _declaro_tmp tables.",
-                operation=ops[0],
-                original_error=e, sql=NOTHING,
+            also_failed(
+                MigrationError(
+                    f"Table reconstruction failed for {table}. "
+                    f"Check for orphaned _declaro_tmp tables.",
+                    operation=ops[0],
+                    original_error=e, sql=NOTHING,
+                ),
+                f"rolling back after {op_desc!r} failed",
+                _open_transaction,
             ),
             f"putting foreign key enforcement back after {op_desc!r} failed",
             _left_unenforced,
         ) from e
+
+
+@helper
+def _the_refusal_alone(op_desc: str, refused: Exception, _rollback: Any) -> str:
+    """The engine refused the operation and the rollback worked."""
+    return f"{op_desc}: {refused}"
+
+
+@helper
+def _the_refusal_and_an_open_transaction(
+    op_desc: str, refused: Exception, rollback: Any
+) -> str:
+    """The rollback failed too, so the connection is still mid-transaction."""
+    return (
+        f"{op_desc}: {refused}. Rolling back ALSO failed: "
+        f"{type(rollback).__name__}: {rollback}. That connection may still "
+        f"hold an open transaction."
+    )
+
+
+# WHETHER THE ROLLBACK ALSO FAILED. Both entries build the whole message, so
+# the second is not a suffix bolted onto the first.
+_SKIP_MESSAGE: dict[bool, Callable[[str, Exception, Any], str]] = {
+    True: _the_refusal_and_an_open_transaction,
+    False: _the_refusal_alone,
+}
 
 
 @boundary
@@ -372,16 +412,25 @@ async def _run_directly(
         say(__name__, "info", f"Applied: {op_desc}")
         return (statements[: len(cursors)], [])
 
-    except A_BUG_IN_THIS_PACKAGE:
+    except A_BUG_IN_THIS_PACKAGE as ours:
         # The twin of the guard in `_run_rebuild`, for the same reason: our
         # own mistake must not come back as an engine refusal, and a skipped
         # operation is exactly what a bug of ours must never become.
-        with contextlib.suppress(Exception):
-            await connection.rollback()
+        also_failed(
+            ours,
+            "rolling back after a bug in this package",
+            await _rolled_back(connection),
+        )
         raise
     except Exception as e:
-        await _rolled_back(connection, op_desc)
-        skip_msg = f"{op_desc}: {e}"
+        # A ROLLBACK THAT ALSO FAILED GOES INTO THE SKIP MESSAGE. This is the
+        # one path here that returns rather than raises, so there is no
+        # exception to note it on, and the skip message is what the caller
+        # reads. A connection still holding an open transaction belongs in it.
+        open_transaction = await _rolled_back(connection)
+        skip_msg = _SKIP_MESSAGE[not is_nothing(open_transaction)](
+            op_desc, e, open_transaction
+        )
         say(__name__, "warning", f"Skipped unsupported operation: {skip_msg}")
         return ([], [skip_msg])
 

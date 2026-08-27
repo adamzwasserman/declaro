@@ -53,11 +53,11 @@ arrived at connection-per-write three separate times.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
+import sys
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, cast
 
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.database import (
@@ -70,9 +70,21 @@ from declaro_persistum.database import (
     no_passes,
     writing,
 )
-from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE
+from declaro_persistum.exceptions import (
+    A_BUG_IN_THIS_PACKAGE,
+    ConnectionError,
+    also_failed,
+)
 from declaro_persistum.reporting import say
-from declaro_persistum.types import DbapiConnection, Dialect, Nothing, ReplicaConnection, resolved
+from declaro_persistum.types import (
+    NOTHING,
+    DbapiConnection,
+    Dialect,
+    Nothing,
+    ReplicaConnection,
+    is_nothing,
+    resolved,
+)
 from declaro_persistum.writers import WRITERS
 
 __all__ = ["open_turso", "migrating", "negotiate_journal_mode", "replicate_path"]
@@ -177,8 +189,66 @@ async def replicate_path(path: str, *, primary: str, token: str | None) -> None:
         await conn.push()
         await _pull_until_level(conn)
     finally:
-        with contextlib.suppress(Exception):
-            await conn.close()
+        # A CLOSE THAT FAILS IS NOT NOTHING: it leaves a sync connection open
+        # against the primary, and this function opens one per call. It was
+        # suppressed because raising here would replace the push or pull
+        # failure the caller is waiting for. The note does not replace it.
+        _left_open(await _closed(conn))
+
+@boundary
+async def _closed(conn: Any) -> Exception | Nothing:
+    """Release the sync connection, and RETURN whatever stopped it."""
+    try:
+        await conn.close()
+        return NOTHING
+    except Exception as close_exc:
+        return close_exc
+
+
+@helper
+def _rides_out_on_the_failure(unclosed: Exception | Nothing) -> None:
+    """A push or pull already failed, so the note goes on that."""
+    also_failed(
+        cast(BaseException, sys.exception()),
+        "closing the sync connection afterwards",
+        unclosed,
+    )
+
+
+@helper
+def _is_the_failure(unclosed: Exception | Nothing) -> None:
+    """Replication worked and the close did not, so this IS the failure.
+
+    Returning normally would report conformity while leaving a sync
+    connection open against the primary, and this function opens one per call.
+    """
+    raise ConnectionError(
+        f"replication finished, but its sync connection could not be closed: "
+        f"{type(unclosed).__name__}: {unclosed}. That connection is still "
+        f"open against the primary."
+    )
+
+
+@helper
+def _nothing_to_carry(_unclosed: Exception | Nothing) -> None:
+    """It closed, so there is nothing to report."""
+    return None
+
+
+# WHETHER SOMETHING IS ALREADY TRAVELLING, AND WHETHER THE CLOSE FAILED.
+_LEFT_OPEN: dict[tuple[bool, bool], Callable[[Exception | Nothing], None]] = {
+    (True, True): _rides_out_on_the_failure,
+    (True, False): _nothing_to_carry,
+    (False, True): _is_the_failure,
+    (False, False): _nothing_to_carry,
+}
+
+
+@helper
+def _left_open(unclosed: Exception | Nothing) -> None:
+    """Put a failed close where the caller will see it."""
+    return _LEFT_OPEN[(sys.exception() is not None, not is_nothing(unclosed))](unclosed)
+
 
 @helper
 def _the_named_primary(_path: str, primary: str) -> str:

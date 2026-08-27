@@ -45,15 +45,16 @@ such table"). Migration takes its own WAL connection — `turso_database
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from typing import Any, TypedDict
 
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.database import Database, is_replicated
+from declaro_persistum.exceptions import also_failed
 from declaro_persistum.reporting import say
 from declaro_persistum.retry import Retry
+from declaro_persistum.types import NOTHING, Nothing, is_nothing
 from declaro_persistum.write_queue import PendingWrite, Room, drain
 
 logger = logging.getLogger(__name__)
@@ -231,10 +232,22 @@ async def start_crew(
     try:
         for _ in range(size):
             conns.append(await db["connect"](db))
-    except Exception:
-        for conn in conns:
-            with contextlib.suppress(Exception):
-                await db["close_connection"](conn)
+    except Exception as opening_failed:
+        # A CONNECTION THAT WILL NOT CLOSE IS A LEAK, not nothing. It was
+        # suppressed because raising here would replace the open failure the
+        # caller is waiting for; the note leaves that failure's type and
+        # message untouched, so both reach whoever catches it.
+        unclosed = [
+            failure
+            for failure in [await _closed(db, conn) for conn in conns]
+            if not is_nothing(failure)
+        ]
+        also_failed(
+            opening_failed,
+            f"closing the {len(unclosed)} of {len(conns)} connections this "
+            f"partial crew had already opened",
+            _the_first_of(unclosed),
+        )
         raise
 
     stop = asyncio.Event()
@@ -243,6 +256,42 @@ async def start_crew(
         for conn in conns
     ]
     return {"room": room, "stop": stop, "tasks": tasks, "size": size}
+
+
+@boundary
+async def _closed(db: Any, conn: Any) -> Exception | Nothing:
+    """Release one connection, and RETURN whatever stopped it."""
+    try:
+        await db["close_connection"](conn)
+        return NOTHING
+    except Exception as close_exc:
+        return close_exc
+
+
+@helper
+def _no_connection_leaked(_unclosed: list[Exception]) -> Exception | Nothing:
+    """Every connection closed, so there is nothing to carry."""
+    return NOTHING
+
+
+@helper
+def _the_one_that_would_not_close(unclosed: list[Exception]) -> Exception | Nothing:
+    """One of them is enough to name; the count is in the wording."""
+    return unclosed[0]
+
+
+# WHETHER ANY CONNECTION REFUSED TO CLOSE. Both entries answer, so reading
+# `unclosed[0]` never runs against an empty list.
+_FIRST_OF: dict[bool, Callable[[list[Exception]], Exception | Nothing]] = {
+    True: _the_one_that_would_not_close,
+    False: _no_connection_leaked,
+}
+
+
+@helper
+def _the_first_of(unclosed: list[Exception]) -> Exception | Nothing:
+    """The failure to report, or NOTHING when they all closed."""
+    return _FIRST_OF[bool(unclosed)](unclosed)
 
 
 @helper

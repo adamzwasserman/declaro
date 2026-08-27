@@ -82,7 +82,17 @@ SRC = ROOT / "src"
 # `_turn_fk_checks_off` has sat in this list for the same reason all along.
 # The marker is true and the tool cannot confirm it. Five logging findings
 # became one, so the trade was four for one.
-BASELINE = 13
+# 14 after the same trade was made four more times. `_closed` in `crew.py`
+# and in `turso_database.py`, and `_rolled_back` in `applier/turso.py`, each
+# release a resource and hand back what stopped them. The analyzer does not
+# count `.close()` or `.rollback()` as I/O, so each reads as a boundary with
+# no edge. It IS an edge, and the marker is what honest-check requires of a
+# function that catches.
+#
+# THE TRADE, MEASURED. Logging-a-failure findings went 5 to 1 and bare
+# silences went 5 to 1, against this count going 12 to 14. Eight findings
+# gone for two markers, and the two name real edges the tool cannot see.
+BASELINE = 14
 BASELINE_BUILD = "92066fd, built 2026-08-27 12:57"
 
 # THE OTHER HALF OF THE SAME CLAUSE: a function that does I/O and is called
