@@ -17,6 +17,18 @@ import pytest
 pytestmark = pytest.mark.precommit
 
 
+async def never_waits(seconds: float) -> float:
+    """Hands back the wait it was asked for rather than taking it.
+
+    FIVE HAND-ROLLED TWINS OF THE PACKAGE'S OWN NO-ANSWERS stood here, each
+    returning None. `already_delivered` and `no_passes` already say "there is
+    no primary, so everything has arrived" and "zero passes ran", with the
+    reason written at the injection site. Only the sleep has no twin, and it
+    returns the wait so a test can assert nothing waited.
+    """
+    return seconds
+
+
 class _Cursor:
     def __init__(self, rows: list[Any]) -> None:
         self._rows = rows
@@ -62,25 +74,17 @@ def _database(conn: _Conn):
     rather than a fake of the old shape is what keeps this test honest about
     the interface it is exercising.
     """
-    from declaro_persistum.database import Database, nothing_was_trapped, writing
+    from declaro_persistum.database import (
+        Database,
+        already_delivered,
+        no_passes,
+        nothing_was_trapped,
+        writing,
+    )
 
     async def connect(_db):
         return conn
 
-    async def close_connection(_c):
-        return None
-
-    async def nothing(_db):
-        return True
-
-    async def nothing_down(_db):
-        return None
-
-    async def release(_db):
-        return None
-
-    async def sleep(_s):
-        return None
 
     return Database(
         path=":memory:",
@@ -90,15 +94,15 @@ def _database(conn: _Conn):
         primary=None,
         token=None,
         connect=connect,
-        close_connection=close_connection,
+        close_connection=no_passes,
         for_ddl=writing,
         serialise=None,
         shutdown="exit_immediately",
         write_one=_write_one,
-        replicate_once=nothing,
-        refresh_once=nothing_down,
-        release=release,
-        sleep=sleep,
+        replicate_once=already_delivered,
+        refresh_once=no_passes,
+        release=no_passes,
+        sleep=never_waits,
         retry_delay_s=0.001,
         closed=False,
         untrap=nothing_was_trapped,

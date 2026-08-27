@@ -34,7 +34,13 @@ import inspect
 
 import pytest
 
-from declaro_persistum.database import Database, nothing_was_trapped, writing
+from declaro_persistum.database import (
+    Database,
+    already_delivered,
+    no_passes,
+    nothing_was_trapped,
+    writing,
+)
 
 pytestmark = pytest.mark.precommit
 
@@ -95,14 +101,6 @@ async def test_a_drainer_runs_whatever_writer_it_was_given() -> None:
     async def connect(_db):
         return object()
 
-    async def close_connection(_conn):
-        return None
-
-    async def noop(_db):
-        return True
-
-    async def noop_none(_db):
-        return None
 
     def _db(label: str) -> Database:
         return Database(
@@ -113,14 +111,14 @@ async def test_a_drainer_runs_whatever_writer_it_was_given() -> None:
             primary=None,
             token=None,
             connect=connect,
-            close_connection=close_connection,
+            close_connection=no_passes,
             for_ddl=writing,
             serialise=None,
             shutdown="exit_immediately",
             write_one=_recording(label),
-            replicate_once=noop,
-            refresh_once=noop_none,
-            release=noop_none,
+            replicate_once=already_delivered,
+            refresh_once=no_passes,
+            release=no_passes,
             sleep=asyncio.sleep,
             retry_delay_s=0.001,
             closed=False,

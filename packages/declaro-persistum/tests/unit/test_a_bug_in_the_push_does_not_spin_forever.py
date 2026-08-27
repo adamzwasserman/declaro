@@ -30,11 +30,35 @@ import pathlib
 
 import pytest
 
-from declaro_persistum.database import Database, flush, nothing_was_trapped
+from declaro_persistum.database import (
+    Database,
+    flush,
+    no_passes,
+    nothing_was_trapped,
+)
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE
 from declaro_persistum.write_queue import PendingWrite  # noqa: F401  (documents the shape)
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.precommit]
+
+
+async def never_used(*_args: object, **_kwargs: object) -> object:
+    """A door this test never opens, so reaching it is a mistake worth hearing.
+
+    ONE FUNCTION RETURNING None STOOD IN FOR FOUR KEYS HERE. Three of them --
+    connect, for_ddl, write_one -- are never called, because this test is
+    about the retry loop inside `flush`. A None made "nothing to do" and "not
+    written yet" identical, and would have made a wrong call look like a
+    working one.
+
+    The fourth, `close_connection`, and the pass counters take the package's
+    own answers: `no_passes` returns 0 because zero passes ran, which is a
+    true answer rather than an absence.
+    """
+    raise AssertionError(
+        "this test reached a door it does not exercise; either the test or "
+        "the code under it has changed shape"
+    )
 
 
 def _replicated(replicate_once, sleeps: list[float]):
@@ -52,11 +76,6 @@ def _replicated(replicate_once, sleeps: list[float]):
                 f"that will never succeed is a hang, not patience."
             )
 
-    async def refresh_once(_db):
-        return None
-
-    async def nothing(*_args, **_kwargs):
-        return None
 
     return Database(
         path="/tmp/unused.db",
@@ -65,15 +84,15 @@ def _replicated(replicate_once, sleeps: list[float]):
         busy_timeout_s=5.0,
         primary="libsql://example.invalid",
         token="t",
-        connect=nothing,
-        close_connection=nothing,
-        for_ddl=nothing,
+        connect=never_used,
+        close_connection=no_passes,
+        for_ddl=never_used,
         serialise=None,
         shutdown="exit_immediately",
-        write_one=nothing,
+        write_one=never_used,
         replicate_once=replicate_once,
-        refresh_once=refresh_once,
-        release=nothing,
+        refresh_once=no_passes,
+        release=no_passes,
         sleep=sleep,
         retry_delay_s=0.0,
         closed=False,

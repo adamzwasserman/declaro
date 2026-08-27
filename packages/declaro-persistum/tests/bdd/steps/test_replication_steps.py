@@ -28,6 +28,7 @@ from declaro_persistum import database as db_mod
 from declaro_persistum.database import (
     Database,
     new_write_lock,
+    no_passes,
     nothing_was_trapped,
     replicate,
     replicate_if_idle,
@@ -118,10 +119,17 @@ def new_replica_stand_in(rec: dict) -> SimpleNamespace:
         rec["closed"] = True
 
     async def commit() -> None:
-        """Deliberately NOT recorded. `calls` is what the scenarios read to
-        detect REMOTE I/O on a caller path, and a commit is local."""
+        """Deliberately NOT recorded, and None because the driver returns None.
+
+        `calls` is what the scenarios read to detect REMOTE I/O on a caller
+        path, and a commit is local. The None is the DB-API contract rather
+        than an unwritten body: a stub that answers differently from the
+        library it stands for manufactures bugs that are not there.
+        """
+        return None
 
     async def rollback() -> None:
+        """None, for the same reason: that is what the driver's rollback returns."""
         return None
 
     return SimpleNamespace(
@@ -186,10 +194,8 @@ def _make(tmp_path, *, replicated=True, recorder=None, shutdown="exit_immediatel
                 return
             rec["batches"] -= 1
 
-    async def release(db: Database) -> None:
-        return None
-
     async def sleep(_s: float) -> None:
+        """None, because the declared Sleep type is Awaitable[None]."""
         return None
 
     db = Database(
@@ -207,7 +213,7 @@ def _make(tmp_path, *, replicated=True, recorder=None, shutdown="exit_immediatel
         write_one=_write_one,
         replicate_once=replicate_once,
         refresh_once=refresh_once,
-        release=release,
+        release=no_passes,
         sleep=sleep,
         retry_delay_s=0.001,
         closed=False,
