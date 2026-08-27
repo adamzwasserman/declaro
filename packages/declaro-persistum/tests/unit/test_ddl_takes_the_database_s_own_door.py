@@ -160,10 +160,13 @@ async def test_ddl_still_runs_through_the_door_the_database_names(tmp_path) -> N
 
 
 def test_the_door_is_required_at_construction() -> None:
-    """Rule 14. There is no sensible guess for which door an engine needs."""
-    import inspect
+    """Rule 14. There is no sensible guess for which door an engine needs.
 
-    from declaro_persistum.database import new_database
+    THE RECORD IS THE DECLARATION NOW. This read the default off a
+    `new_database` constructor, which took seventeen arguments and returned
+    them plus one constant. It has been deleted: a total TypedDict requires
+    every key, so there is no signature for a default to sit in.
+    """
+    from declaro_persistum.database import Database
 
-    param = inspect.signature(new_database).parameters["for_ddl"]
-    assert param.default is inspect.Parameter.empty
+    assert "for_ddl" in Database.__required_keys__

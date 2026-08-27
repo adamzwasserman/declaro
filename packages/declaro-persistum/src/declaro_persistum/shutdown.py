@@ -24,7 +24,10 @@ from collections.abc import Callable
 from types import FrameType
 
 from declaro_persistum.boundary import boundary, helper
-from declaro_persistum.database import Database, replicate_on_shutdown
+from declaro_persistum.database import (
+    Database,
+    replicate_on_shutdown,
+)
 from declaro_persistum.reporting import say
 
 # WHAT THE OS HANDS A SIGNAL HANDLER, AND WHAT WE HAND IT BACK. `_handler` took
@@ -40,26 +43,19 @@ logger = logging.getLogger(__name__)
 
 
 @helper
-def _noop() -> int:
-    """No handlers restored, because none was trapped.
-
-    `trap_shutdown` hands back the function that undoes it. When no handler
-    could be installed -- not the main thread -- there is nothing to undo,
-    and the caller still gets something to call. How many it put back is a
-    true answer either way, where returning nothing left the two cases
-    looking identical.
-    """
-    return 0
-
-
-@helper
-def trap_shutdown(db: Database) -> Callable[[], int]:
+def trap_shutdown(db: Database) -> Database:
     """Install SIGTERM/SIGINT handlers that replicate before the process exits.
 
-    Returns a callable that puts back whatever handlers were there before.
-    The previous handlers live in that closure and nowhere else, so two
-    databases trapping shutdown in one process cannot overwrite each other's
-    record of what they replaced.
+    RETURNS THE DATABASE, carrying its own undo in `untrap`. It used to hand
+    that undo back as a loose callable, and both openers dropped it on the
+    floor: the handlers went on at open and nothing ever took them off, so a
+    SIGTERM arriving after `close(db)` drove a database that had been
+    released. Returning the finished value means there is nothing for a
+    caller to remember to store.
+
+    The previous handlers live in the `untrap` closure and nowhere else, so
+    two databases trapping shutdown in one process cannot overwrite each
+    other's record of what they replaced.
 
     Does nothing and returns a no-op unless the database was opened with
     `shutdown="replicate"`. Reading the policy off the value means the decision
@@ -69,14 +65,19 @@ def trap_shutdown(db: Database) -> Callable[[], int]:
 
 
 @helper
-def _trap_nothing(_db: Database) -> Callable[[], int]:
-    """This database was not opened asking to replicate, so nothing is trapped."""
-    return _noop
+def _trap_nothing(db: Database) -> Database:
+    """Not opened asking to replicate, so nothing is listening and nothing undoes.
+
+    The database comes back as it went in, already carrying
+    `nothing_was_trapped`, so both halves of this table return the same kind
+    of value and the caller reads one thing.
+    """
+    return db
 
 
 @boundary
-def _trap_signals(db: Database) -> Callable[[], int]:
-    """Install the handlers, and hand back the function that removes them."""
+def _trap_signals(db: Database) -> Database:
+    """Install the handlers, and put the function that removes them in the value."""
     replaced: list[tuple[int, object]] = []
 
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -147,7 +148,7 @@ def _trap_signals(db: Database) -> Callable[[], int]:
         replaced.clear()
         return len(put_back)
 
-    return restore
+    return {**db, "untrap": restore}
 
 
 
@@ -156,7 +157,7 @@ def _trap_signals(db: Database) -> Callable[[], int]:
 
 
 # Whether this database was opened asking to replicate at shutdown.
-_TRAP: dict[bool, Callable[[Database], Callable[[], int]]] = {
+_TRAP: dict[bool, Callable[[Database], Database]] = {
     True: _trap_signals,
     False: _trap_nothing,
 }

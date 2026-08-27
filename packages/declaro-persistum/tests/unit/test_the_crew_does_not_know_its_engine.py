@@ -34,7 +34,7 @@ import inspect
 
 import pytest
 
-from declaro_persistum.database import Database, new_database, writing
+from declaro_persistum.database import Database, nothing_was_trapped, writing
 
 pytestmark = pytest.mark.precommit
 
@@ -43,9 +43,13 @@ def test_the_database_carries_how_to_write() -> None:
     assert "write_one" in Database.__annotations__, (
         "a Database cannot say how its engine writes, so the crew has to guess"
     )
-    params = inspect.signature(new_database).parameters
-    assert params["write_one"].default is inspect.Parameter.empty, (
-        "write_one has a default, so an engine nobody chose would be applied "
+    # THE RECORD ANSWERS THIS DIRECTLY NOW. This used to read the default off
+    # a `new_database` constructor, which was seventeen parameters wrapping a
+    # dict literal and has been deleted. A total TypedDict requires every key,
+    # so there is nowhere for a default to hide and nothing to assert about
+    # one -- the requirement is the declaration.
+    assert "write_one" in Database.__required_keys__, (
+        "write_one is optional, so an engine nobody chose would be applied "
         "to a database nobody checked"
     )
 
@@ -101,7 +105,7 @@ async def test_a_drainer_runs_whatever_writer_it_was_given() -> None:
         return None
 
     def _db(label: str) -> Database:
-        return new_database(
+        return Database(
             path=f"/tmp/{label}.db",
             dialect="sqlite",
             journal_mode="wal",
@@ -119,6 +123,8 @@ async def test_a_drainer_runs_whatever_writer_it_was_given() -> None:
             release=noop_none,
             sleep=asyncio.sleep,
             retry_delay_s=0.001,
+            closed=False,
+            untrap=nothing_was_trapped,
         )
 
     retry = {"attempts": 1, "base_delay_s": 0.0, "max_delay_s": 0.0}

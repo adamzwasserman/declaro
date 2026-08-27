@@ -27,8 +27,8 @@ from pytest_bdd import given, scenarios, then, when
 from declaro_persistum import database as db_mod
 from declaro_persistum.database import (
     Database,
-    new_database,
     new_write_lock,
+    nothing_was_trapped,
     replicate,
     replicate_if_idle,
     replicate_on_shutdown,
@@ -192,7 +192,7 @@ def _make(tmp_path, *, replicated=True, recorder=None, shutdown="exit_immediatel
     async def sleep(_s: float) -> None:
         return None
 
-    db = new_database(
+    db = Database(
         path=str(tmp_path / "copy.db"),
         dialect="sqlite",
         journal_mode="wal",
@@ -210,6 +210,8 @@ def _make(tmp_path, *, replicated=True, recorder=None, shutdown="exit_immediatel
         release=release,
         sleep=sleep,
         retry_delay_s=0.001,
+        closed=False,
+        untrap=nothing_was_trapped,
     )
     return db, rec
 

@@ -132,12 +132,12 @@ async def test_a_crew_refuses_a_replicated_database(tmp_path):
     so N drainers there would queue behind one lock while looking like
     parallelism.
     """
-    from declaro_persistum.database import new_database
+    from declaro_persistum.database import Database, nothing_was_trapped
 
     async def unused(*_a, **_k):
         raise AssertionError("a refused crew must not touch the database")
 
-    replicated = new_database(
+    replicated = Database(
         path=str(tmp_path / "r.db"),
         dialect="sqlite",
         journal_mode="wal",
@@ -155,6 +155,8 @@ async def test_a_crew_refuses_a_replicated_database(tmp_path):
         retry_delay_s=0.1,
         shutdown="exit_immediately",
         write_one=_write_one,
+        closed=False,
+        untrap=nothing_was_trapped,
     )
 
     with pytest.raises(ValueError, match="local databases only"):

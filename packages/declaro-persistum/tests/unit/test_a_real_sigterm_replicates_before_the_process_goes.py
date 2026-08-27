@@ -40,6 +40,7 @@ from typing import Any
 
 import pytest
 
+from declaro_persistum.database import nothing_was_trapped
 from declaro_persistum.shutdown import trap_shutdown
 
 pytestmark = pytest.mark.precommit
@@ -91,7 +92,7 @@ def test_a_signal_with_no_running_loop_replicates() -> None:
     slept: list[float] = []
     restore = trap_shutdown(
         _a_database_that_records_its_replication(replicated, slept)
-    )
+    )["untrap"]
     try:
         signal.raise_signal(signal.SIGTERM)
     finally:
@@ -113,7 +114,7 @@ def test_a_signal_inside_a_running_loop_replicates() -> None:
     async def _take_the_signal() -> None:
         restore = trap_shutdown(
             _a_database_that_records_its_replication(replicated, slept)
-        )
+        )["untrap"]
         try:
             signal.raise_signal(signal.SIGTERM)
             # The handler hands the work to the running loop as a task, so it
@@ -146,7 +147,7 @@ def test_a_closed_loop_is_not_mistaken_for_a_stopped_one() -> None:
         slept: list[float] = []
         restore = trap_shutdown(
             _a_database_that_records_its_replication(replicated, slept)
-        )
+        )["untrap"]
         try:
             signal.raise_signal(signal.SIGTERM)
         finally:
@@ -158,3 +159,67 @@ def test_a_closed_loop_is_not_mistaken_for_a_stopped_one() -> None:
         )
     finally:
         asyncio.set_event_loop(None)
+
+
+async def test_closing_stops_the_listening_it_started() -> None:
+    """The handler comes off with the database, and nothing has to remember.
+
+    MEASURED 2026-08-27, BEFORE THE FIX. `trap_shutdown` handed its undo back
+    as a loose callable and both openers threw it away, so `close` had no way
+    to reach it and never tried:
+
+        closed flag: True
+        handler still ours after close: True
+        replicate ran on the CLOSED database: True
+
+    The handler's closure holds the value as it was at open, so it cannot see
+    the `closed` flag either. A process that opened and closed three databases
+    kept three handlers, none of which ever came off, and a SIGTERM after any
+    close drove a database whose connections had been released.
+    """
+    from declaro_persistum.database import close
+
+    replicated: list[str] = []
+    slept: list[float] = []
+    db = _a_database_that_records_its_replication(replicated, slept)
+    db = {**db, "flush": _did_nothing, "release": _did_nothing,
+          "closed": False, "untrap": nothing_was_trapped}
+
+    # A HARMLESS CATCHER STANDS IN FOR THE HOST'S OWN HANDLER, and it has to
+    # be installed BEFORE the trap. The signal raised below arrives after the
+    # database is closed and ours is gone, so without this the default action
+    # runs and terminates the test runner. It did, once, on the first version
+    # of this test: the run stopped at 75% with no failure and no output.
+    caught: list[str] = []
+    original = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGTERM, lambda *_: caught.append("host"))
+    host = signal.getsignal(signal.SIGTERM)
+    try:
+        trapped = trap_shutdown(db)
+        assert signal.getsignal(signal.SIGTERM) is not host, "nothing trapped"
+
+        closed = await close(trapped)
+
+        assert signal.getsignal(signal.SIGTERM) is host, (
+            "close left this database's signal handler installed"
+        )
+        assert closed["untrap"] is nothing_was_trapped, (
+            "the closed value still claims to have something to untrap, so a "
+            "second close would remove a handler it does not own"
+        )
+
+        replicated.clear()
+        signal.raise_signal(signal.SIGTERM)
+        assert replicated == [], (
+            "a SIGTERM after close replicated a database that was released"
+        )
+        assert caught == ["host"], (
+            "the host's own handler did not run, so the signal went nowhere"
+        )
+    finally:
+        signal.signal(signal.SIGTERM, original)
+
+
+async def _did_nothing(_db: object) -> int:
+    """Close calls flush and release; neither is what this test is about."""
+    return 0

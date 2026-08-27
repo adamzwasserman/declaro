@@ -65,9 +65,9 @@ from declaro_persistum.database import (
     ShutdownPolicy,
     already_delivered,
     check_shutdown,
-    new_database,
     new_write_lock,
     no_passes,
+    nothing_was_trapped,
     writing,
 )
 from declaro_persistum.exceptions import (
@@ -447,8 +447,10 @@ async def open_turso(
     # remove. trap_shutdown returns immediately for "exit_immediately".
     from declaro_persistum.shutdown import trap_shutdown
 
-    trap_shutdown(db)
-    return db
+    # RETURNS THE TRAPPED DATABASE. This used to call trap_shutdown for its
+    # effect and return the untrapped value, so the undo it handed back was
+    # dropped and nothing ever removed the handlers.
+    return trap_shutdown(db)
 
 
 @helper
@@ -476,7 +478,7 @@ async def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
     # granted rather than what was asked for.
     granted = await negotiate_journal_mode(path, "mvcc")
 
-    return new_database(
+    return Database(
         path=path,
         dialect=DIALECT,
         journal_mode=granted,
@@ -500,6 +502,10 @@ async def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
         release=no_passes,
         sleep=asyncio.sleep,
         retry_delay_s=_DEFAULT_RETRY_DELAY_S,
+        # Written here rather than injected: a database that has only
+        # just been built is not closed and has trapped nothing.
+        closed=False,
+        untrap=nothing_was_trapped,
     )
 
 
@@ -579,7 +585,7 @@ async def _open_replicated(
         await held.close()
         return 1
 
-    return new_database(
+    return Database(
         path=path,
         dialect=DIALECT,
         journal_mode="wal",
@@ -601,4 +607,8 @@ async def _open_replicated(
         release=release,
         sleep=asyncio.sleep,
         retry_delay_s=_DEFAULT_RETRY_DELAY_S,
+        # Written here rather than injected: a database that has only
+        # just been built is not closed and has trapped nothing.
+        closed=False,
+        untrap=nothing_was_trapped,
     )

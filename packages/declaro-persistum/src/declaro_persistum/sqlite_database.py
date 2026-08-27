@@ -20,8 +20,8 @@ from declaro_persistum.database import (
     ShutdownPolicy,
     already_delivered,
     check_shutdown,
-    new_database,
     no_passes,
+    nothing_was_trapped,
     writing,
 )
 from declaro_persistum.types import DbapiConnection, Dialect
@@ -77,7 +77,7 @@ async def open_sqlite(
 
     import asyncio
 
-    db = new_database(
+    db = Database(
         path=path,
         dialect=DIALECT,
         journal_mode="wal",
@@ -98,8 +98,14 @@ async def open_sqlite(
         release=no_passes,
         sleep=asyncio.sleep,
         retry_delay_s=0.001,
+        # Written here rather than injected: a database that has only
+        # just been built is not closed and has trapped nothing.
+        closed=False,
+        untrap=nothing_was_trapped,
     )
     from declaro_persistum.shutdown import trap_shutdown
 
-    trap_shutdown(db)
-    return db
+    # RETURNS THE TRAPPED DATABASE. This used to call trap_shutdown for its
+    # effect and return the untrapped value, so the undo it handed back was
+    # dropped and nothing ever removed the handlers.
+    return trap_shutdown(db)

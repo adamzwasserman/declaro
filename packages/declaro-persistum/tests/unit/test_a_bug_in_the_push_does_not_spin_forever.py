@@ -30,7 +30,7 @@ import pathlib
 
 import pytest
 
-from declaro_persistum.database import flush, new_database
+from declaro_persistum.database import Database, flush, nothing_was_trapped
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE
 from declaro_persistum.write_queue import PendingWrite  # noqa: F401  (documents the shape)
 
@@ -58,7 +58,7 @@ def _replicated(replicate_once, sleeps: list[float]):
     async def nothing(*_args, **_kwargs):
         return None
 
-    return new_database(
+    return Database(
         path="/tmp/unused.db",
         dialect="turso",
         journal_mode="wal",
@@ -76,6 +76,8 @@ def _replicated(replicate_once, sleeps: list[float]):
         release=nothing,
         sleep=sleep,
         retry_delay_s=0.0,
+        closed=False,
+        untrap=nothing_was_trapped,
     )
 
 

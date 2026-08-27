@@ -33,7 +33,6 @@ from typing import Any, Literal, TypedDict, cast
 from declaro_persistum.boundary import helper
 from declaro_persistum.exceptions import DatabaseClosedError
 from declaro_persistum.reporting import say
-from declaro_persistum.types import Dialect
 from declaro_persistum.writers import TRANSACTIONS, WriteOne
 
 logger = logging.getLogger(__name__)
@@ -43,7 +42,7 @@ __all__ = [
     "ShutdownPolicy",
     "check_shutdown",
     "WriteLock",
-    "new_database",
+    "nothing_was_trapped",
     "new_write_lock",
     "writers_waiting",
     "reading",
@@ -177,6 +176,11 @@ RefreshOnce = Callable[["Database"], Awaitable[int]]
 Release = Callable[["Database"], Awaitable[int]]
 Sleep = Callable[[float], Awaitable[None]]
 
+# HOW A DATABASE STOPS LISTENING FOR THE SIGNAL THAT ENDS THE PROCESS. It
+# answers how many handlers it put back, so "nothing was trapped" and "the
+# handlers came off" are different answers rather than the same silence.
+Untrap = Callable[[], int]
+
 
 class WriteLock(TypedDict):
     """The serialise lock, and the count of writers waiting on it.
@@ -252,60 +256,12 @@ class Database(TypedDict):
     shutdown: ShutdownPolicy
     write_one: WriteOne
     closed: bool
+    untrap: Untrap
     replicate_once: ReplicateOnce
     refresh_once: RefreshOnce
     release: Release
     sleep: Sleep
     retry_delay_s: float
-
-
-@helper
-def new_database(
-    path: str,
-    dialect: Dialect,
-    journal_mode: str,
-    busy_timeout_s: float,
-    primary: str | None,
-    token: str | None,
-    connect: Connect,
-    close_connection: CloseConnection,
-    for_ddl: ForDDL,
-    serialise: WriteLock | None,
-    shutdown: ShutdownPolicy,
-    write_one: WriteOne,
-    replicate_once: ReplicateOnce,
-    refresh_once: RefreshOnce,
-    release: Release,
-    sleep: Sleep,
-    retry_delay_s: float,
-) -> Database:
-    """Build the value. Every argument is required — see Rule 14.
-
-    No defaults, so a caller who omits `primary` cannot be mistaken for one
-    who chose local. The factories in `turso_database.py` and friends are
-    where a human-facing signature with sensible arguments belongs; this is
-    the shape underneath it.
-    """
-    return {
-        "path": path,
-        "dialect": dialect,
-        "journal_mode": journal_mode,
-        "busy_timeout_s": busy_timeout_s,
-        "primary": primary,
-        "token": token,
-        "connect": connect,
-        "close_connection": close_connection,
-        "for_ddl": for_ddl,
-        "serialise": serialise,
-        "shutdown": shutdown,
-        "write_one": write_one,
-        "closed": False,
-        "replicate_once": replicate_once,
-        "refresh_once": refresh_once,
-        "release": release,
-        "sleep": sleep,
-        "retry_delay_s": retry_delay_s,
-    }
 
 
 @helper
@@ -438,6 +394,19 @@ async def no_passes(_db: Database) -> int:
     three engine modules. The answer is the same in all of them; only the
     reason differs, so the reason moved to the injection site, where a reader
     is when they ask why this engine does nothing here.
+    """
+    return 0
+
+
+@helper
+def nothing_was_trapped() -> int:
+    """No signal handler was installed, so none comes off. Zero is the answer.
+
+    NOT AN EMPTY BODY. `close` reads this count, and "there was nothing to
+    remove" has to look different from "this was never written". A database
+    that has only just been built has trapped nothing, which is a fact about
+    the value rather than a default absorbing anybody's omission -- the same
+    kind of fact as `closed: False` beside it.
     """
     return 0
 
@@ -727,4 +696,10 @@ async def close(db: Database) -> Database:
     """
     await flush(db)
     await db["release"](db)
-    return {**db, "closed": True}
+    # THE HANDLERS THIS DATABASE INSTALLED COME OFF WITH IT. `trap_shutdown`
+    # used to hand the undo back as a loose callable and both openers dropped
+    # it, so a SIGTERM arriving after this line drove a released database.
+    # The value returned says nothing is trapped any more, so a second close
+    # finds nothing left to remove rather than removing somebody else's.
+    _put_back = db["untrap"]()
+    return {**db, "closed": True, "untrap": nothing_was_trapped}

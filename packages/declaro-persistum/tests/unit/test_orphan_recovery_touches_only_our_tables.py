@@ -62,7 +62,7 @@ def _database(conn: _Conn):
     rather than a fake of the old shape is what keeps this test honest about
     the interface it is exercising.
     """
-    from declaro_persistum.database import new_database, writing
+    from declaro_persistum.database import Database, nothing_was_trapped, writing
 
     async def connect(_db):
         return conn
@@ -82,7 +82,7 @@ def _database(conn: _Conn):
     async def sleep(_s):
         return None
 
-    return new_database(
+    return Database(
         path=":memory:",
         dialect="sqlite",
         journal_mode="wal",
@@ -100,6 +100,8 @@ def _database(conn: _Conn):
         release=release,
         sleep=sleep,
         retry_delay_s=0.001,
+        closed=False,
+        untrap=nothing_was_trapped,
     )
 
 

@@ -184,12 +184,17 @@ class TestTheShutdownPolicyIsActedOn:
 
         before = signal.getsignal(signal.SIGTERM)
         try:
-            release = trap_shutdown({"shutdown": "replicate", "path": "x.db"})
+            trapped = trap_shutdown({"shutdown": "replicate", "path": "x.db"})
             assert signal.getsignal(signal.SIGTERM) is not before, (
                 'a database carrying shutdown="replicate" installed no '
                 "handler; the policy would be stored and ignored"
             )
-            release()
+            # THE UNDO TRAVELS IN THE RECORD. It used to come back as a loose
+            # callable, and both openers dropped it, so nothing ever removed
+            # the handler.
+            assert trapped["untrap"]() == 2, (
+                "the database does not carry a working way to stop listening"
+            )
         finally:
             signal.signal(signal.SIGTERM, before)
 
