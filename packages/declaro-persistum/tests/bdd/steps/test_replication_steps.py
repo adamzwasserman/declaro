@@ -80,7 +80,16 @@ def new_recorder(*, batches: int, failures: int) -> dict:
     wants a clean pass says `batches=0, failures=0` rather than leaving the
     reader to find out what zero arguments means.
     """
-    return {"calls": [], "batches": batches, "failures": failures, "closed": False}
+    return {
+        "calls": [],
+        "batches": batches,
+        "failures": failures,
+        "closed": False,
+        # EVERY WAIT THE RETRY LOOP TAKES. Nothing recorded these, so a loop
+        # that waited when the primary was already current was invisible to
+        # every scenario in this file.
+        "waits": [],
+    }
 
 
 def new_replica_stand_in(rec: dict) -> SimpleNamespace:
@@ -194,9 +203,15 @@ def _make(tmp_path, *, replicated=True, recorder=None, shutdown="exit_immediatel
                 return
             rec["batches"] -= 1
 
-    async def sleep(_s: float) -> None:
-        """None, because the declared Sleep type is Awaitable[None]."""
-        return None
+    async def sleep(seconds: float) -> None:
+        """Records the wait rather than taking it, so a scenario can read it.
+
+        The declared `Sleep` type answers None, which is what `asyncio.sleep`
+        does, so this returns None and the wait goes into `rec` instead.
+        Nothing asserted on it before, and a retry loop that waits when the
+        primary is already current is a defect no scenario here could see.
+        """
+        rec["waits"].append(seconds)
 
     db = Database(
         path=str(tmp_path / "copy.db"),
@@ -249,6 +264,7 @@ def _when_replicate_runs(ctx):
         db, rec = _make(ctx["tmp_path"], recorder=new_recorder(batches=2, failures=0))
         await replicate(db)
         ctx["calls"] = list(rec["calls"])
+        ctx["waits"] = list(rec["waits"])
 
     asyncio.run(run())
 
@@ -265,6 +281,13 @@ def _then_up_before_down(ctx):
     )
     assert calls.index("up") < calls.index("down"), (
         f"the primary's changes came down before local commits went up: {calls}"
+    )
+    # AND IT DID NOT WAIT. The recorder's push succeeds on the first attempt,
+    # so a retry delay taken here is time spent for nothing. Nothing recorded
+    # the waits before, so a loop that slept on a primary already current was
+    # invisible to every scenario in this file.
+    assert ctx["waits"] == [], (
+        f"replication waited {ctx['waits']} on a push that succeeded first time"
     )
 
 
