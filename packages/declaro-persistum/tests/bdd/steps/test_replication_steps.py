@@ -128,18 +128,30 @@ def new_replica_stand_in(rec: dict) -> SimpleNamespace:
         rec["closed"] = True
 
     async def commit() -> None:
-        """Deliberately NOT recorded, and None because the driver returns None.
+        """persistum never commits on a SYNC connection, so reaching this is news.
 
-        `calls` is what the scenarios read to detect REMOTE I/O on a caller
-        path, and a commit is local. The None is the DB-API contract rather
-        than an unwritten body: a stub that answers differently from the
-        library it stands for manufactures bugs that are not there.
+        `ReplicaConnection` declares `commit` and `rollback` because pyturso's
+        `ConnectionSync` has them, verified against the library on 2026-08-23.
+        Persistum only pushes, pulls and closes on one: data writes go to the
+        local connection, which is a real aiosqlite connection here.
+
+        So these two are doors this test never opens, and `return None` made a
+        wrong call look like a working one. Refusing keeps the driver's return
+        type honest -- nothing here claims a commit answers anything -- while
+        saying loudly if persistum ever starts committing on the replication
+        connection, which would be a change worth noticing.
         """
-        return None
+        raise AssertionError(
+            "persistum committed on the sync connection; replication writes "
+            "belong on the local connection"
+        )
 
     async def rollback() -> None:
-        """None, for the same reason: that is what the driver's rollback returns."""
-        return None
+        """Never called either, for the same reason as `commit` above."""
+        raise AssertionError(
+            "persistum rolled back on the sync connection; replication writes "
+            "belong on the local connection"
+        )
 
     return SimpleNamespace(
         push=push, pull=pull, close=close, commit=commit, rollback=rollback
