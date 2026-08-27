@@ -14,6 +14,7 @@ Usage:
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -31,6 +32,7 @@ from declaro_persistum.bulk_loader import (  # noqa: F401
     TRANSFER_STATE_TABLE as TRANSFER_STATE_TABLE,
 )
 from declaro_persistum.database import Database, reading
+from declaro_persistum.exceptions import TransferError, also_failed
 from declaro_persistum.inspector import introspect
 from declaro_persistum.migrations import apply_migrations_async
 from declaro_persistum.reporting import say
@@ -184,7 +186,15 @@ from declaro_persistum.transfer_steps import (
 from declaro_persistum.transfer_steps import (
     logger as logger,
 )
-from declaro_persistum.types import NOTHING, Dialect, Nothing, Schema, Table, resolved
+from declaro_persistum.types import (
+    NOTHING,
+    Dialect,
+    Nothing,
+    Schema,
+    Table,
+    is_nothing,
+    resolved,
+)
 
 
 class BulkTransferResult(TypedDict):
@@ -299,6 +309,65 @@ async def _transfer_one_table(
     """Everything one table goes through, from its columns to its rows."""
     columns = list(source_schema.get(table, {}).get("columns", {}).keys())
     return await _WHEN_THE_TABLE_HAS_COLUMNS[bool(columns)](run, table, columns)
+
+
+# ---------------------------------------------------------------------------
+# A target left with its foreign key checks off
+# ---------------------------------------------------------------------------
+
+
+@helper
+def _rides_out_on_the_failure(unenforced: Exception | Nothing) -> None:
+    """Something is already travelling, so the note goes on that."""
+    also_failed(
+        cast(BaseException, sys.exception()),
+        "turning foreign key checks back on at the target",
+        unenforced,
+    )
+
+
+@helper
+def _is_the_failure(unenforced: Exception | Nothing) -> None:
+    """The transfer worked and the restore did not, so this IS the failure.
+
+    Returning normally here would hand back `success: True` for a connection
+    that has stopped enforcing its constraints: a report right about the rows
+    and wrong about the database.
+    """
+    raise TransferError(
+        "The transfer finished, but foreign key checks could not be turned "
+        "back on at the target. Anything written on that connection from "
+        "here is NOT checked against its constraints.",
+        phase="restore_fk_checks",
+        table=NOTHING,
+        original_error=cast(Exception, unenforced),
+    )
+
+
+@helper
+def _nothing_to_carry(_unenforced: Exception | Nothing) -> None:
+    """The checks went back on, so there is nothing to report."""
+    return None
+
+
+# WHETHER SOMETHING IS ALREADY TRAVELLING, AND WHETHER THE RESTORE FAILED.
+# Between them the two questions have four answers and each is written out,
+# because the pair decides whether the failure is carried out on another
+# exception, raised as its own, or absent.
+_UNENFORCED: dict[tuple[bool, bool], Callable[[Exception | Nothing], None]] = {
+    (True, True): _rides_out_on_the_failure,
+    (True, False): _nothing_to_carry,
+    (False, True): _is_the_failure,
+    (False, False): _nothing_to_carry,
+}
+
+
+@helper
+def _left_unenforced(unenforced: Exception | Nothing) -> None:
+    """Put a failed restore where the caller will see it."""
+    return _UNENFORCED[(sys.exception() is not None, not is_nothing(unenforced))](
+        unenforced
+    )
 
 
 # ---------------------------------------------------------------------------

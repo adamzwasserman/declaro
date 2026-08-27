@@ -17,12 +17,12 @@ This module provides safe, transactional table reconstruction while preserving:
 Reference: https://www.sqlite.org/lang_altertable.html#making_other_kinds_of_table_schema_changes
 """
 
-import logging
 from collections.abc import Callable
 from typing import Any
 
 from declaro_persistum.abstractions.pragma_compat import (
     create_index_statements,
+    enforcement_restored,
     table_column_names,
 )
 from declaro_persistum.applier.shared import (
@@ -33,11 +33,9 @@ from declaro_persistum.applier.shared import (
     sqlite_type,
 )
 from declaro_persistum.boundary import boundary, helper
+from declaro_persistum.exceptions import also_failed
 from declaro_persistum.reporting import say
 from declaro_persistum.types import NOTHING, Column, Nothing, resolved
-
-logger = logging.getLogger(__name__)
-
 
 
 @helper
@@ -217,13 +215,20 @@ async def reconstruct_table(
 
         say(__name__, "info", f"Successfully reconstructed table '{table_name}'")
 
-    except Exception:
+    except Exception as original:
         # The exception carries what went wrong, so writing it here as well
         # is a second copy on a channel the caller cannot read.
         # Re-enable foreign keys before re-raising, for the same connections
-        # this rebuild turned them off for.
-        _restored = [
-            await _restore_the_pragma(connection, table_name)
+        # this rebuild turned them off for. A failure DOING that rides out on
+        # the exception rather than going to a log, because it leaves the
+        # connection enforcing nothing and the caller has to know.
+        _carried = [
+            also_failed(
+                original,
+                f"putting foreign key enforcement back on after the failed "
+                f"rebuild of {table_name!r}",
+                await enforcement_restored(connection),
+            )
             for enforcing in [manage_foreign_keys and fk_enabled]
             if enforcing
         ]
@@ -278,26 +283,6 @@ async def _check_the_foreign_keys(connection: Any, table_name: str) -> list[Any]
     violations = list(await check_cursor.fetchall())
     _refused = [refuse_the_violations(broken) for broken in [violations] if broken]
     return violations
-
-
-@boundary
-async def _restore_the_pragma(connection: Any, table_name: str) -> list[str]:
-    """Put enforcement back after a failed rebuild, and say what ran."""
-    try:
-        await connection.execute("PRAGMA foreign_keys = ON")
-        return ["PRAGMA foreign_keys = ON"]
-    except Exception as fk_exc:
-        # The original failure is about to be re-raised, but this one leaves
-        # the connection enforcing nothing. A caller that catches the
-        # reconstruction error and carries on would write against unchecked
-        # constraints and never know.
-        logger.error(
-            "Could not re-enable foreign keys after the failed "
-            "reconstruction of '%s': %s. THIS CONNECTION NOW HAS "
-            "FOREIGN KEY ENFORCEMENT OFF.",
-            table_name, fk_exc,
-        )
-        return []
 
 
 @helper

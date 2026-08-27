@@ -736,38 +736,38 @@ _WHEN_THERE_ARE_CYCLES: dict[
 
 
 @boundary
-async def _turn_fk_checks_back_on(loader: BulkLoader, conn: Any) -> int:
+async def _turn_fk_checks_back_on(loader: BulkLoader, conn: Any) -> Exception | Nothing:
     """TEARDOWN, so this does NOT raise: it runs in a `finally` and would
     replace whatever failure is already in flight with its own.
 
-    It is an ERROR rather than a warning because of what it leaves behind. The
-    connection is still enforcing nothing, so a caller that reuses it writes
-    against unchecked constraints and never knows. That is worth waking
-    someone for even though the transfer itself succeeded.
+    IT RETURNS THE FAILURE INSTEAD. It used to write an error to a log and
+    return the count 1, which the caller discarded, so the count said the same
+    thing whether the work happened or not. What it leaves behind is the
+    reason that matters: the connection is still enforcing nothing, so anyone
+    who reuses it writes against unchecked constraints and never knows.
+
+    The caller decides where the failure goes, because only the caller knows
+    whether the transfer itself failed. If something is already travelling
+    this rides out on it; if the transfer succeeded, this IS the failure.
     """
     try:
         await loader["enable_fk_checks"](conn)
+        return NOTHING
     except Exception as exc:
-        logger.error(
-            "Could not re-enable foreign key checks on the target "
-            "after the transfer: %s. The connection is left NOT "
-            "enforcing them, so anything written on it from here "
-            "is unchecked.",
-            exc,
-            exc_info=True,
-        )
-    return 1
+        return exc
 
 
 @helper
-async def _leave_the_checks_as_they_are(_loader: BulkLoader, _conn: Any) -> int:
+async def _leave_the_checks_as_they_are(
+    _loader: BulkLoader, _conn: Any
+) -> Exception | Nothing:
     """They were never turned off, so there is nothing to put back."""
-    return 0
+    return NOTHING
 
 
 # How many connections had enforcement put back: one or none.
 _WHEN_THE_CHECKS_WERE_TURNED_OFF: dict[
-    bool, Callable[[BulkLoader, Any], Awaitable[int]]
+    bool, Callable[[BulkLoader, Any], Awaitable[Exception | Nothing]]
 ] = {
     True: _turn_fk_checks_back_on,
     False: _leave_the_checks_as_they_are,

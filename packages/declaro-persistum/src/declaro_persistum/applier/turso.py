@@ -32,7 +32,11 @@ from declaro_persistum.applier.shared import (
 # Turso uses identical view generation to SQLite.
 from declaro_persistum.applier.sqlite import generate_create_view, generate_drop_view
 from declaro_persistum.boundary import boundary, helper
-from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, MigrationError
+from declaro_persistum.exceptions import (
+    A_BUG_IN_THIS_PACKAGE,
+    MigrationError,
+    also_failed,
+)
 from declaro_persistum.reporting import say
 from declaro_persistum.types import (
     NOTHING,
@@ -250,9 +254,9 @@ async def _rolled_back(connection: DbapiConnection, op_desc: str) -> None:
 
 @boundary
 async def _enforcement_restored(
-    connection: DbapiConnection, entry_enforcement: list[int], op_desc: str
-) -> int:
-    """Put `PRAGMA foreign_keys` back, and say loudly if that fails.
+    connection: DbapiConnection, entry_enforcement: list[int]
+) -> Exception | Nothing:
+    """Put `PRAGMA foreign_keys` back, and RETURN what stopped it.
 
     THE LIST HOLDS THE CALLER'S VALUE ONLY ONCE IT HAS BEEN READ, and that is
     what makes it a list. This was a plain local assigned inside the
@@ -263,27 +267,21 @@ async def _enforcement_restored(
     Nothing had been turned off at that point, so there is nothing to put
     back and the count is zero.
 
-    Returns how many values were restored, so a caller can see the work
-    happened rather than inferring it from silence.
+    RETURNS THE FAILURE RATHER THAN LOGGING IT. This cannot raise, because the
+    operation's own failure is already travelling and would be replaced. So it
+    used to log an error and return a count of 0, and the single caller
+    discarded the count. Leaving enforcement off is worse than the original
+    failure, since later writes are accepted against constraints nobody is
+    checking, and that was reported only to a log no caller can read.
     """
     try:
-        return len(
-            [
-                await _restore_enforcement(connection, value)
-                for value in entry_enforcement
-            ]
-        )
+        _restored = [
+            await _restore_enforcement(connection, value)
+            for value in entry_enforcement
+        ]
+        return NOTHING
     except Exception as fk_exc:
-        # Leaving FK enforcement off silently is worse than the
-        # original failure: later writes would be accepted
-        # against constraints nobody is checking.
-        logger.error(
-            "Could not re-enable foreign keys after '%s' "
-            "failed: %s. THIS CONNECTION NOW HAS FOREIGN KEY "
-            "ENFORCEMENT OFF.",
-            op_desc, fk_exc,
-        )
-        return 0
+        return fk_exc
 
 
 @boundary
@@ -339,12 +337,17 @@ async def _run_rebuild(
         raise
     except Exception as e:
         await _rolled_back(connection, op_desc)
-        await _enforcement_restored(connection, entry_enforcement, op_desc)
-        raise MigrationError(
-            f"Table reconstruction failed for {table}. "
-            f"Check for orphaned _declaro_tmp tables.",
-            operation=ops[0],
-            original_error=e, sql=NOTHING) from e
+        _left_unenforced = await _enforcement_restored(connection, entry_enforcement)
+        raise also_failed(
+            MigrationError(
+                f"Table reconstruction failed for {table}. "
+                f"Check for orphaned _declaro_tmp tables.",
+                operation=ops[0],
+                original_error=e, sql=NOTHING,
+            ),
+            f"putting foreign key enforcement back after {op_desc!r} failed",
+            _left_unenforced,
+        ) from e
 
 
 @boundary

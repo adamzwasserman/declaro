@@ -18,12 +18,12 @@ This module provides:
 Reference: https://www.sqlite.org/lang_altertable.html#making_other_kinds_of_table_schema_changes
 """
 
-import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from declaro_persistum.abstractions.pragma_compat import (
     create_index_statements,
+    enforcement_restored,
     table_column_names,
 )
 from declaro_persistum.applier.shared import (
@@ -35,11 +35,9 @@ from declaro_persistum.applier.shared import (
 )
 from declaro_persistum.applier.spelling import constraint_clause
 from declaro_persistum.boundary import boundary, helper
+from declaro_persistum.exceptions import also_failed
 from declaro_persistum.reporting import say
 from declaro_persistum.types import NOTHING, Column, Nothing, Operation, changed_to, resolved
-
-logger = logging.getLogger(__name__)
-
 
 # =============================================================================
 # Pure SQL Generation Functions (Shared)
@@ -553,34 +551,16 @@ _ENFORCEMENT_AFTERWARDS: dict[bool, Callable[[Any], Awaitable[list[Any]]]] = {
 }
 
 
-@boundary
-async def _restore_enforcement_after_failure(connection: Any, table_name: str) -> bool:
-    """Put enforcement back before the failure is re-raised."""
-    try:
-        await connection.execute("PRAGMA foreign_keys = ON")
-        return True
-    except Exception as fk_exc:
-        # The original failure is about to be re-raised, but this one
-        # leaves the connection enforcing nothing. A caller that
-        # catches the reconstruction error and carries on would write
-        # against unchecked constraints and never know.
-        logger.error(
-            "Could not re-enable foreign keys after the failed "
-            "reconstruction of '%s': %s. THIS CONNECTION NOW HAS "
-            "FOREIGN KEY ENFORCEMENT OFF.",
-            table_name, fk_exc,
-        )
-        return False
-
-
 @helper
-async def _nothing_to_restore(_connection: Any, _table_name: str) -> bool:
+async def _nothing_to_restore(_connection: Any) -> Exception | Nothing:
     """Enforcement was off before the rebuild, or the caller manages it."""
-    return False
+    return NOTHING
 
 
-_RESTORE_ENFORCEMENT: dict[bool, Callable[[Any, str], Awaitable[bool]]] = {
-    True: _restore_enforcement_after_failure,
+_RESTORE_ENFORCEMENT: dict[
+    bool, Callable[[Any], Awaitable[Exception | Nothing]]
+] = {
+    True: enforcement_restored,
     False: _nothing_to_restore,
 }
 
@@ -698,11 +678,16 @@ async def execute_reconstruction_async(
 
         say(__name__, "info", f"Successfully reconstructed table '{table_name}'")
 
-    except Exception:
+    except Exception as original:
         # Re-enable foreign keys before re-raising. The exception carries
         # what went wrong, so writing it here as well is a second copy.
-        await _RESTORE_ENFORCEMENT[managed and bool(fk_enabled)](
-            connection, table_name
+        # A failure DOING that leaves the connection enforcing nothing, so it
+        # rides out on the exception where whoever catches it will see it.
+        also_failed(
+            original,
+            f"putting foreign key enforcement back on after the failed "
+            f"rebuild of {table_name!r}",
+            await _RESTORE_ENFORCEMENT[managed and bool(fk_enabled)](connection),
         )
         raise
 

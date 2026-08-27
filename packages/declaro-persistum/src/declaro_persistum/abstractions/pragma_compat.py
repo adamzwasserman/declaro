@@ -14,6 +14,7 @@ import inspect
 from typing import Any
 
 from declaro_persistum.boundary import boundary, helper
+from declaro_persistum.types import NOTHING, Nothing
 
 __all__ = [
     "pragma_table_info",
@@ -137,3 +138,27 @@ async def create_index_statements(connection: Any, table_name: str) -> list[str]
     # A partial index and a dropped one both read back as no SQL, and neither
     # is a statement to return.
     return [row[0] for row in statements if row and row[0]]
+
+
+@boundary
+async def enforcement_restored(connection: Any) -> Exception | Nothing:
+    """Turn `PRAGMA foreign_keys` back on, and RETURN whatever stopped it.
+
+    ONE DEFINITION FOR BOTH REBUILD PATHS. `reconstruction.py` and
+    `table_reconstruction.py` each carried their own copy, character for
+    character the same, and the gate that watches those two modules caught
+    them the moment they converged. A fix to one would have missed the other,
+    which is what the `_map_type` crash cost this package three times over.
+
+    IT DOES NOT RAISE AND IT DOES NOT LOG. It runs in an `except`, so raising
+    would replace the rebuild failure already travelling and the caller would
+    never learn what actually went wrong. Both copies wrote an error to a log
+    instead and returned a value every caller discarded, so a connection left
+    with enforcement OFF reached nobody at all. The failure comes back as a
+    value and the caller puts it on the exception going out.
+    """
+    try:
+        await _maybe_await(connection.execute("PRAGMA foreign_keys = ON"))
+        return NOTHING
+    except Exception as fk_exc:
+        return fk_exc

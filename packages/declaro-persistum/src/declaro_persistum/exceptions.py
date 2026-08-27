@@ -15,7 +15,15 @@ an expert stack tracer to figure out where they went wrong."
 from collections.abc import Callable
 from typing import Any
 
-from declaro_persistum.types import NOTHING, Ambiguity, Nothing, Operation, resolved
+from declaro_persistum.boundary import helper
+from declaro_persistum.types import (
+    NOTHING,
+    Ambiguity,
+    Nothing,
+    Operation,
+    is_nothing,
+    resolved,
+)
 
 
 def _given(parts: tuple[str, ...]) -> list[str]:
@@ -506,3 +514,61 @@ a contention check retry a `KeyError('busy')`: the word matched and the cause
 was ours. A type is decidable; a string is a guess about somebody else's
 wording.
 """
+
+
+# =============================================================================
+# A failure inside a teardown
+# =============================================================================
+
+
+@helper
+def _note_the_teardown(
+    going_out: BaseException, doing: str, failure: Any
+) -> BaseException:
+    """The teardown failed too, so the exception on its way out carries it."""
+    going_out.add_note(
+        f"{doing} ALSO failed: {type(failure).__name__}: {failure}. "
+        f"That work was NOT done."
+    )
+    return going_out
+
+
+@helper
+def _teardown_did_its_work(
+    going_out: BaseException, _doing: str, _failure: Any
+) -> BaseException:
+    """The teardown succeeded, so the exception goes out as it arrived."""
+    return going_out
+
+
+# WHETHER THE TEARDOWN HAS A FAILURE TO REPORT. Both entries return the
+# exception, so neither is a function with an empty body and the caller reads
+# one value either way.
+_ALSO_FAILED: dict[bool, Callable[[BaseException, str, Any], BaseException]] = {
+    True: _note_the_teardown,
+    False: _teardown_did_its_work,
+}
+
+
+@helper
+def also_failed(
+    going_out: BaseException, doing: str, failure: Exception | Nothing
+) -> BaseException:
+    """Carry a teardown's failure out on the exception already in flight.
+
+    THIS IS WHAT A TEARDOWN DOES INSTEAD OF LOGGING. A restore step runs in a
+    `finally` or an `except` and must not raise, because its own failure would
+    replace the one already travelling and the caller would never learn what
+    actually went wrong. So four of them caught, wrote an error to a log and
+    returned a count. The log was a channel no caller can read, and every one
+    of those four callers threw the count away, so a connection left with
+    foreign key enforcement OFF was reported to nobody at all.
+
+    A note goes on the exception object the caller already receives. It reaches
+    whoever catches it, prints in the traceback, and cannot be filtered out by
+    logging configuration. The original failure still leads; this rides along.
+
+    `doing` names the work in the words an operator needs, because by the time
+    anyone reads it the connection is already in the state being described.
+    """
+    return _ALSO_FAILED[not is_nothing(failure)](going_out, doing, failure)

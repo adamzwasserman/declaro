@@ -74,8 +74,16 @@ SRC = ROOT / "src"
 # The drop to 7 is the analyzer learning that a function a dispatch table holds
 # is a function something calls. It could not see that before, and this package
 # reaches most of its interior exactly that way.
-BASELINE = 12
-BASELINE_BUILD = "2ac0fed, built 2026-08-25 14:10"
+# 2026-08-27: 13, and the extra one is a TRADE rather than a regression.
+# `_turn_fk_checks_back_on` used to write its failure to a log, which the
+# analyzer counted as an edge. It returns the failure now, so the only I/O it
+# has left is `loader["enable_fk_checks"](conn)`, and the analyzer cannot see
+# through a dict lookup to know that is a database call. Its twin
+# `_turn_fk_checks_off` has sat in this list for the same reason all along.
+# The marker is true and the tool cannot confirm it. Five logging findings
+# became one, so the trade was four for one.
+BASELINE = 13
+BASELINE_BUILD = "92066fd, built 2026-08-27 12:57"
 
 # THE OTHER HALF OF THE SAME CLAUSE: a function that does I/O and is called
 # from elsewhere in its own file, so the I/O is in the interior rather than at
