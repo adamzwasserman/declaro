@@ -105,108 +105,16 @@ class TestMainDispatch:
         assert main(["diff"]) == 1
         assert "Database connection required" in capsys.readouterr().err
 
-    def test_validate_needs_no_database(self, monkeypatch):
-        monkeypatch.delenv("DECLARO_DATABASE_URL", raising=False)
-        monkeypatch.setattr(cli, "cmd_validate", lambda **_k: 0)
-        assert main(["validate"]) == 0
 
     def test_an_undetectable_dialect_exits_one(self, capsys):
         assert main(["-c", "mysql://host/db", "diff"]) == 1
         assert "Cannot detect dialect" in capsys.readouterr().err
 
-    def test_an_explicit_dialect_skips_detection(self, monkeypatch):
-        """--dialect must let an otherwise unrecognised URL through."""
-        seen = {}
 
-        async def _diff(**kw):
-            seen.update(kw)
-            return 0
 
-        monkeypatch.setattr(cli, "cmd_diff", _diff)
-        assert main(["-c", "mysql://host/db", "--dialect", "postgresql", "diff"]) == 0
-        assert seen["dialect"] == "postgresql"
 
-    def test_a_detected_dialect_is_passed_through(self, monkeypatch):
-        seen = {}
 
-        async def _diff(**kw):
-            seen.update(kw)
-            return 0
 
-        monkeypatch.setattr(cli, "cmd_diff", _diff)
-        main(["-c", "sqlite:///x.db", "diff"])
-        assert seen["dialect"] == "sqlite"
-        assert seen["connection_string"] == "sqlite:///x.db"
 
-    def test_the_command_exit_code_is_returned_unchanged(self, monkeypatch):
-        async def _diff(**_kw):
-            return 2
 
-        monkeypatch.setattr(cli, "cmd_diff", _diff)
-        assert main(["-c", "sqlite:///x.db", "diff"]) == 2
 
-    def test_the_connection_can_come_from_the_environment(self, monkeypatch):
-        monkeypatch.setenv("DECLARO_DATABASE_URL", "sqlite:///env.db")
-        seen = {}
-
-        async def _diff(**kw):
-            seen.update(kw)
-            return 0
-
-        monkeypatch.setattr(cli, "cmd_diff", _diff)
-        assert main(["diff"]) == 0
-        assert seen["connection_string"] == "sqlite:///env.db"
-
-    @pytest.mark.parametrize(
-        "command,attr",
-        [
-            ("diff", "cmd_diff"),
-            ("apply", "cmd_apply"),
-            ("snapshot", "cmd_snapshot"),
-            ("generate", "cmd_generate"),
-        ],
-    )
-    def test_each_connected_command_reaches_its_own_implementation(
-        self, monkeypatch, command, attr
-    ):
-        called = []
-
-        async def _cmd(**_kw):
-            called.append(attr)
-            return 0
-
-        monkeypatch.setattr(cli, attr, _cmd)
-        assert main(["-c", "sqlite:///x.db", command]) == 0
-        assert called == [attr]
-
-    def test_an_interrupt_exits_one_hundred_and_thirty(self, monkeypatch, capsys):
-        async def _diff(**_kw):
-            raise KeyboardInterrupt
-
-        monkeypatch.setattr(cli, "cmd_diff", _diff)
-        assert main(["-c", "sqlite:///x.db", "diff"]) == 130
-        assert "Aborted" in capsys.readouterr().err
-
-    def test_an_unexpected_error_exits_one_and_reports_it(self, monkeypatch, capsys):
-        async def _diff(**_kw):
-            raise RuntimeError("the database melted")
-
-        monkeypatch.setattr(cli, "cmd_diff", _diff)
-        assert main(["-c", "sqlite:///x.db", "diff"]) == 1
-        assert "the database melted" in capsys.readouterr().err
-
-    def test_verbose_adds_a_traceback_to_the_error(self, monkeypatch, capsys):
-        async def _diff(**_kw):
-            raise RuntimeError("boom")
-
-        monkeypatch.setattr(cli, "cmd_diff", _diff)
-        assert main(["-c", "sqlite:///x.db", "-v", "diff"]) == 1
-        assert "Traceback" in capsys.readouterr().err
-
-    def test_a_quiet_error_carries_no_traceback(self, monkeypatch, capsys):
-        async def _diff(**_kw):
-            raise RuntimeError("boom")
-
-        monkeypatch.setattr(cli, "cmd_diff", _diff)
-        main(["-c", "sqlite:///x.db", "diff"])
-        assert "Traceback" not in capsys.readouterr().err

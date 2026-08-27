@@ -431,11 +431,22 @@ _TRACEBACK: dict[bool, Callable[[], int]] = {
 
 @boundary
 def _dispatch(
-    args: argparse.Namespace, connection_string: str | None, dialect: Dialect | None
+    args: argparse.Namespace,
+    connection_string: str | None,
+    dialect: Dialect | None,
+    commands: dict[str, Callable[..., int]],
 ) -> int:
-    """Run the named command and turn what it raises into an exit code."""
+    """Run the named command and turn what it raises into an exit code.
+
+    `commands` IS AN ARGUMENT, NOT A MODULE GLOBAL. It was read off module
+    scope, so the only handle a test had on "a command that raises" was to
+    replace `cmd_diff` on the module -- eleven of them did, which stops the
+    real function running and is the thing this package does not do. The
+    table travels in, the same way `Database` carries the callables it needs
+    rather than reaching for them by name.
+    """
     try:
-        return COMMANDS[args.command](args, connection_string, dialect)
+        return commands[args.command](args, connection_string, dialect)
     except KeyboardInterrupt:
         print("\nAborted.", file=sys.stderr)
         return 130
@@ -481,7 +492,7 @@ def _with_connection(args: argparse.Namespace, connection_string: str | None) ->
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
-    return _dispatch(args, connection_string, dialect)
+    return _dispatch(args, connection_string, dialect, COMMANDS)
 
 
 @boundary
