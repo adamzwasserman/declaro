@@ -269,27 +269,31 @@ async def _closed(db: Any, conn: Any) -> Exception | Nothing:
 
 
 @helper
-def _no_connection_leaked(_unclosed: list[Exception]) -> Exception | Nothing:
+def _no_connection_leaked(_unclosed: list[Exception | Nothing]) -> Exception | Nothing:
     """Every connection closed, so there is nothing to carry."""
     return NOTHING
 
 
 @helper
-def _the_one_that_would_not_close(unclosed: list[Exception]) -> Exception | Nothing:
+def _the_one_that_would_not_close(
+    unclosed: list[Exception | Nothing],
+) -> Exception | Nothing:
     """One of them is enough to name; the count is in the wording."""
     return unclosed[0]
 
 
 # WHETHER ANY CONNECTION REFUSED TO CLOSE. Both entries answer, so reading
 # `unclosed[0]` never runs against an empty list.
-_FIRST_OF: dict[bool, Callable[[list[Exception]], Exception | Nothing]] = {
+_FIRST_OF: dict[
+    bool, Callable[[list[Exception | Nothing]], Exception | Nothing]
+] = {
     True: _the_one_that_would_not_close,
     False: _no_connection_leaked,
 }
 
 
 @helper
-def _the_first_of(unclosed: list[Exception]) -> Exception | Nothing:
+def _the_first_of(unclosed: list[Exception | Nothing]) -> Exception | Nothing:
     """The failure to report, or NOTHING when they all closed."""
     return _FIRST_OF[bool(unclosed)](unclosed)
 

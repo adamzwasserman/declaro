@@ -225,7 +225,8 @@ def _is_the_failure(unclosed: Exception | Nothing) -> None:
     raise ConnectionError(
         f"replication finished, but its sync connection could not be closed: "
         f"{type(unclosed).__name__}: {unclosed}. That connection is still "
-        f"open against the primary."
+        f"open against the primary.",
+        dialect="turso",
     )
 
 
