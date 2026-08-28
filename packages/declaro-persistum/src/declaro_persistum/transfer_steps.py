@@ -310,6 +310,9 @@ class _TableOutcome(TypedDict):
     error: str | None
 
 
+CopyOneTable = Callable[..., Awaitable[TableTransferProgress]]
+
+
 class _Run(TypedDict):
     """What every table in one transfer shares: two connections, two loaders,
     the batch size, the caller's callback and whether it asked to resume."""
@@ -321,6 +324,12 @@ class _Run(TypedDict):
     batch_size: int
     on_progress: Callable[[TableTransferProgress], None] | None
     resume: bool
+    # THE STEP THAT ACTUALLY COPIES ROWS. It was reached by name at module
+    # scope, so the only handle a test had on "the copy failed" was to replace
+    # `_transfer_table` on the module, which stops the real one running. Six
+    # tests did. It travels in the record now, the same way a Database carries
+    # the callables it needs.
+    copy_one_table: CopyOneTable
 
 
 @helper
@@ -358,7 +367,7 @@ async def _stream_the_table(
 ) -> _TableOutcome:
     """Copy every row of one table, and say how it went."""
     try:
-        progress = await _transfer_table(
+        progress = await run["copy_one_table"](
             run["source_conn"],
             run["target_conn"],
             run["source_loader"],

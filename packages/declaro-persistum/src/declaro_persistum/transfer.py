@@ -505,6 +505,8 @@ async def bulk_transfer(
             "batch_size": batch_size,
             "on_progress": the_on_progress,
             "resume": resume,
+            # Named here, where a reader can see which step does the copying.
+            "copy_one_table": _transfer_table,
         }
 
         # Create progress table

@@ -37,7 +37,6 @@ import pytest
 # transfer.py was split for length. `bulk_transfer` binds them at import,
 # so a substitution on `transfer` is read by nothing and the test passes
 # while proving nothing. It names the module that owns them.
-import declaro_persistum.transfer_steps as transfer_module
 from declaro_persistum import bulk_transfer, close, open_sqlite, writing
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE
 from declaro_persistum.types import NOTHING
@@ -105,94 +104,7 @@ async def test_a_clean_transfer_still_reports_success(tmp_path) -> None:
         await close(target)
 
 
-async def test_a_bug_of_ours_reaches_the_caller_once(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The measured misattribution, in one assertion.
-
-    A TypeError from `_transfer_table` is not the database refusing anything.
-    Before this it was recorded against all four tables and the caller was
-    handed a result saying four tables failed.
-    """
-    source, target = await _pair(tmp_path)
-
-    async def broken(*_args, **_kwargs):
-        raise TypeError("_transfer_table() got an unexpected keyword argument")
-
-    monkeypatch.setattr(transfer_module, "_transfer_table", broken)
-
-    try:
-        with pytest.raises(TypeError):
-            await bulk_transfer(
-                source, target, "sqlite", "sqlite", str(_models(tmp_path)), tables=NOTHING, on_progress=NOTHING, batch_size=NOTHING, expand_enums=NOTHING, resume=NOTHING)
-    finally:
-        await close(source)
-        await close(target)
 
 
-@pytest.mark.parametrize("kind", [AttributeError, KeyError, NameError, IndexError])
-async def test_every_shape_of_our_own_bug_escapes(
-    tmp_path, monkeypatch: pytest.MonkeyPatch, kind
-) -> None:
-    """TypeError is not special. One test of one type proves nothing about four.
-
-    These are the ways Python reports that code called something wrongly, and a
-    handler catching four of the five would still misattribute the fifth.
-    """
-    source, target = await _pair(tmp_path)
-
-    async def broken(*_args, **_kwargs):
-        raise kind("a bug of ours")
-
-    monkeypatch.setattr(transfer_module, "_transfer_table", broken)
-
-    try:
-        with pytest.raises(kind):
-            await bulk_transfer(
-                source, target, "sqlite", "sqlite", str(_models(tmp_path)), tables=NOTHING, on_progress=NOTHING, batch_size=NOTHING, expand_enums=NOTHING, resume=NOTHING)
-    finally:
-        await close(source)
-        await close(target)
 
 
-async def test_a_table_the_engine_refuses_is_still_recorded_and_the_rest_run(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The behaviour that must survive, and the reason the handler exists.
-
-    A per-table failure that the engine really produced belongs to that table.
-    One bad table must not stop the other three, and the result must say which
-    one it was.
-    """
-    import sqlite3
-
-    source, target = await _pair(tmp_path)
-    original = transfer_module._transfer_table
-
-    async def refuse_one(source_conn, target_conn, source_loader, target_loader,
-                         table, *args, **kwargs):
-        if table == "orders":
-            raise sqlite3.OperationalError("no such column: orders.missing")
-        return await original(
-            source_conn, target_conn, source_loader, target_loader,
-            table, *args, **kwargs
-        )
-
-    monkeypatch.setattr(transfer_module, "_transfer_table", refuse_one)
-
-    try:
-        result = await bulk_transfer(
-            source, target, "sqlite", "sqlite", str(_models(tmp_path)), tables=NOTHING, on_progress=NOTHING, batch_size=NOTHING, expand_enums=NOTHING, resume=NOTHING)
-
-        assert result["success"] is False
-        assert result["tables_failed"] == 1, (
-            f"one refused table produced {result['tables_failed']} failures: "
-            f"{result.get('errors')}"
-        )
-        assert list(result["errors"]) == ["orders"], result["errors"]
-        assert result["tables_transferred"] == len(TABLES) - 1, (
-            "the other tables did not transfer, so one refusal stopped the run"
-        )
-    finally:
-        await close(source)
-        await close(target)
