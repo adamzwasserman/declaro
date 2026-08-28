@@ -512,8 +512,12 @@ async def bulk_transfer(
         # Create progress table
         await _ensure_progress_table(target_conn, target_loader)
 
-        # Disable FK checks when the schema has a cycle in it.
-        await _WHEN_THERE_ARE_CYCLES[bool(circular_refs)](
+        # Disable FK checks when the schema has a cycle in it, and KEEP THE
+        # COUNT. Both halves of that pair exist to answer how many connections
+        # had their checks turned off, and the restore below re-derived the
+        # same fact from `circular_refs` instead of reading it. Two mechanisms
+        # deciding one thing is how they drift apart.
+        turned_off = await _WHEN_THERE_ARE_CYCLES[bool(circular_refs)](
             target_loader, target_conn, circular_refs
         )
 
@@ -528,7 +532,7 @@ async def bulk_transfer(
             # is never dropped: it rides out on whatever is already
             # travelling, and becomes the failure when nothing else is.
             unenforced = _left_unenforced(
-                await _WHEN_THE_CHECKS_WERE_TURNED_OFF[bool(circular_refs)](
+                await _WHEN_THE_CHECKS_WERE_TURNED_OFF[bool(turned_off)](
                     target_loader, target_conn
                 )
             )

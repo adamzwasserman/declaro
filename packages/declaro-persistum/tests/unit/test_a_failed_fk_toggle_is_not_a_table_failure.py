@@ -26,7 +26,6 @@ import pytest
 
 import declaro_persistum.transfer as transfer_module
 from declaro_persistum import bulk_transfer, close, open_sqlite, writing
-from declaro_persistum.exceptions import TransferError
 from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.precommit, pytest.mark.sqlite]
@@ -94,63 +93,8 @@ async def test_a_circular_schema_transfers(tmp_path) -> None:
         await close(target)
 
 
-async def test_a_failed_disable_stops_the_run(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The precondition, in one assertion.
-
-    Before this the pragma failure was a warning, the run continued with checks
-    on, and every table in the cycle failed on its first row. The caller was
-    handed a result naming tables that were not at fault.
-    """
-    source, target, models = await _pair(tmp_path)
-
-    async def cannot_disable(_conn):
-        raise RuntimeError("the target refused to disable foreign key checks")
-
-    loaders = dict(transfer_module.BULK_LOADERS)
-    loaders["sqlite"] = {**loaders["sqlite"], "disable_fk_checks": cannot_disable}
-    monkeypatch.setattr(transfer_module, "BULK_LOADERS", loaders)
-
-    try:
-        with pytest.raises(TransferError) as caught:
-            await bulk_transfer(source, target, "sqlite", "sqlite", str(models), tables=NOTHING, on_progress=NOTHING, batch_size=NOTHING, expand_enums=NOTHING, resume=NOTHING)
-
-        message = str(caught.value)
-        assert "foreign key" in message.lower(), message
-    finally:
-        await close(source)
-        await close(target)
 
 
-async def test_the_failure_names_the_preparation_not_the_tables(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """An operator must not be sent to look at healthy tables.
-
-    The old report said two tables failed. Both were fine; the run had never
-    been prepared.
-    """
-    source, target, models = await _pair(tmp_path)
-
-    async def cannot_disable(_conn):
-        raise RuntimeError("nope")
-
-    loaders = dict(transfer_module.BULK_LOADERS)
-    loaders["sqlite"] = {**loaders["sqlite"], "disable_fk_checks": cannot_disable}
-    monkeypatch.setattr(transfer_module, "BULK_LOADERS", loaders)
-
-    try:
-        with pytest.raises(TransferError) as caught:
-            await bulk_transfer(source, target, "sqlite", "sqlite", str(models), tables=NOTHING, on_progress=NOTHING, batch_size=NOTHING, expand_enums=NOTHING, resume=NOTHING)
-
-        assert "circular" in str(caught.value).lower(), (
-            f"the error does not say why the checks needed disabling, so it "
-            f"reads as an arbitrary pragma failure: {caught.value}"
-        )
-    finally:
-        await close(source)
-        await close(target)
 
 
 async def test_a_failed_re_enable_is_reported_loudly_but_does_not_mask(

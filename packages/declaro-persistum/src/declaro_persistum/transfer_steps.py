@@ -721,7 +721,11 @@ async def _turn_fk_checks_off(
             f"satisfies them: {', '.join(sorted(circular_refs))}. "
             f"Transferring now would fail on the first row of each and "
             f"report those tables as the problem.", phase=NOTHING, table=NOTHING, original_error=NOTHING) from exc
-    return None
+    # ONE CONNECTION HAD ITS CHECKS TURNED OFF, which is what the restore step
+    # needs to know. This said `return None` under an `-> int` signature, so
+    # the pair claimed to answer a count and one half answered nothing. mypy
+    # had reported it as an incompatible return type all along.
+    return 1
 
 
 @helper
