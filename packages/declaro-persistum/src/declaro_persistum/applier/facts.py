@@ -17,7 +17,7 @@ other two had declared it all along, `usage.md` documented importing it, and
 the import raised. A row here has both columns or it is not a row.
 """
 
-from typing import Literal, TypedDict, cast
+from typing import Literal, TypedDict
 
 TransactionMode = Literal["all_or_nothing", "per_operation"]
 
@@ -41,10 +41,16 @@ FACTS: dict[str, AppliedBy] = {
 # reported this file within an hour of my writing it, which is fair: replacing
 # six functions with a table and then adding two functions over the table is
 # the same shape one layer up.
-def fact_of(engine: str, fact: str) -> str:
+# THE TWO COLUMNS A ROW HAS, as a type. `FACTS[engine][fact]` needs a literal
+# key, and naming the columns here means a column no row carries is refused
+# when the code is checked rather than when it runs.
+FactName = Literal["dialect", "transaction_mode"]
+
+
+def fact_of(engine: str, fact: FactName) -> str:
     """One column of one engine's row.
 
     Both are read with `[]`. An engine nobody described raises here rather
     than answering, and so does a column no row carries.
     """
-    return cast(str, FACTS[engine][fact])
+    return FACTS[engine][fact]

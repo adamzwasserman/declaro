@@ -11,7 +11,7 @@ can promise which the SQLite and Turso ones cannot.
 from collections.abc import Callable
 from typing import Any
 
-from declaro_persistum.applier.facts import fact_of
+from declaro_persistum.applier.facts import FactName, fact_of
 from declaro_persistum.applier.rendering import (
     statements_for as render_statements,
 )
@@ -209,7 +209,7 @@ def generate_operation_sql(operation: Operation) -> str:
 # in `shared.py` rather than at a fourth copy.
 
 
-def _reads(fact: str) -> Callable[[], Any]:
+def _reads(fact: FactName) -> Callable[[], Any]:
     """Bind this engine and one column, keeping a no-argument function."""
 
     def ask() -> Any:

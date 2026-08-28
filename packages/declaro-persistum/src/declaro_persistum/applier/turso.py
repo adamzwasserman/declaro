@@ -19,7 +19,7 @@ from collections.abc import Awaitable, Callable
 from functools import reduce
 from typing import Any
 
-from declaro_persistum.applier.facts import fact_of
+from declaro_persistum.applier.facts import FactName, fact_of
 from declaro_persistum.applier.shared import (
     apply_reconstruction_changes,
     dry_run_preview,
@@ -564,7 +564,7 @@ __all__ = [
 ]
 
 
-def _reads(fact: str) -> Callable[[], Any]:
+def _reads(fact: FactName) -> Callable[[], Any]:
     """Bind this engine and one column, keeping a no-argument function."""
 
     def ask() -> Any:

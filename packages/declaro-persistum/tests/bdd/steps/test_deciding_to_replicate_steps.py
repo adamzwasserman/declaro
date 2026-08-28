@@ -242,3 +242,27 @@ def _then_loop_ran(ctx):
     assert ctx["order"] == ["sent", "received"], (
         f"a commit set the event and the loop did not replicate: {ctx['order']}"
     )
+
+
+@when("flush is awaited")
+def _when_flush(ctx):
+    from declaro_persistum.database import flush
+
+    asyncio.run(flush(ctx["db"]))
+
+
+@when("refresh is awaited")
+def _when_refresh(ctx):
+    from declaro_persistum.database import refresh
+
+    asyncio.run(refresh(ctx["db"]))
+
+
+@then("nothing was sent or received")
+def _then_nothing_moved(ctx):
+    assert ctx["order"] == [], f"a database with no primary reached for one anyway: {ctx['order']}"
+
+
+@then("it received")
+def _then_received(ctx):
+    assert "received" in ctx["order"], f"refresh brought nothing down: {ctx['order']}"

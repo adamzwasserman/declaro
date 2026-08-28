@@ -99,3 +99,36 @@ Feature: When a replica decides a replication pass is worth taking
     Given a database with a primary
     When the loop runs and a commit says there is work
     Then a pass ran
+
+  # THE TWO DIRECTIONS A CALLER CAN ASK FOR BY NAME. `flush` blocks until local
+  # writes have reached the primary; `refresh` brings the primary's changes
+  # down. Both are one line: look up whether this database has a primary, and
+  # call. The table and the words were the only things that differed.
+  #
+  # ON A DATABASE WITH NO PRIMARY BOTH RETURN AT ONCE, and that is an answer
+  # rather than an omission. A local file has nowhere to send and nothing to
+  # fetch, and a caller that awaited either has been told so.
+
+  @precommit
+  Scenario: flush sends local writes and waits for them to land
+    Given a database with a primary
+    When flush is awaited
+    Then it sent before it received
+
+  @precommit
+  Scenario: flush on a database with no primary returns at once
+    Given a database with no primary
+    When flush is awaited
+    Then nothing was sent or received
+
+  @precommit
+  Scenario: refresh brings the primary's changes down
+    Given a database with a primary
+    When refresh is awaited
+    Then it received
+
+  @precommit
+  Scenario: refresh on a database with no primary returns at once
+    Given a database with no primary
+    When refresh is awaited
+    Then nothing was sent or received

@@ -638,16 +638,6 @@ _ON_SHUTDOWN: dict[bool, Callable[[Database, Callable[[], float]], Awaitable[int
 
 
 @helper
-async def refresh(db: Database) -> None:
-    """Bring the primary's changes down into the local copy.
-
-    The other direction. Named for what it does to the local file rather
-    than "pull", which describes the wire and not the effect.
-    """
-    await _REFRESH[is_replicated(db)](db)
-
-
-@helper
 async def _refresh_from_primary(db: Database) -> int:
     """Take whatever the primary has that this copy does not."""
     _check_open(db)
@@ -660,17 +650,6 @@ _REFRESH: dict[bool, Callable[[Database], Awaitable[int]]] = {
     # No primary, so there is nothing to bring down.
     False: no_passes,
 }
-
-
-@helper
-async def flush(db: Database) -> None:
-    """Block until every local write has reached the primary.
-
-    The deliberate durability call. Writes reach the primary on a background
-    schedule; a caller that needs them there NOW says so here. On ephemeral
-    disk, anything not replicated when the process dies is gone.
-    """
-    await _FLUSH[is_replicated(db)](db)
 
 
 @helper
@@ -712,3 +691,48 @@ async def close(db: Database) -> Database:
     # finds nothing left to remove rather than removing somebody else's.
     _put_back = db["untrap"]()
     return {**db, "closed": True, "untrap": nothing_was_trapped}
+
+
+# THE TWO DIRECTIONS A CALLER ASKS FOR BY NAME, one row each. Both were one
+# line -- look up whether this database has a primary, and call -- so the table
+# and the words were the only things that differed.
+#
+# ON A LOCAL FILE BOTH RETURN AT ONCE, and that is an answer rather than an
+# omission: there is nowhere to send and nothing to fetch, and a caller that
+# awaited either has been told so.
+_DIRECTIONS: dict[str, tuple[dict[bool, Any], str]] = {
+    "flush": (
+        _FLUSH,
+        "Block until every local write has reached the primary.\n\n"
+        "    The deliberate durability call. Writes reach the primary on a\n"
+        "    background schedule; a caller that needs them there NOW says so\n"
+        "    here. On ephemeral disk, anything not replicated when the process\n"
+        "    dies is gone.\n    ",
+    ),
+    "refresh": (
+        _REFRESH,
+        "Bring the primary's changes down into the local copy.\n\n"
+        "    The other direction. Named for what it does to the local file\n"
+        '    rather than "pull", which describes the wire and not the effect.\n'
+        "    ",
+    ),
+}
+
+
+def _direction(name: str) -> Callable[[Database], Awaitable[None]]:
+    """Build the function a caller names for one direction of replication."""
+
+    table, purpose = _DIRECTIONS[name]
+
+    @helper
+    async def move(db: Database) -> None:
+        await table[is_replicated(db)](db)
+
+    move.__name__ = name
+    move.__qualname__ = name
+    move.__doc__ = purpose
+    return move
+
+
+flush = _direction("flush")
+refresh = _direction("refresh")
