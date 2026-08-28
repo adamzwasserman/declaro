@@ -14,7 +14,6 @@ with its arguments. Nothing of ours is stopped from running, and `replicate`,
 from __future__ import annotations
 
 import asyncio
-
 from typing import Any, TypedDict
 
 import pytest
