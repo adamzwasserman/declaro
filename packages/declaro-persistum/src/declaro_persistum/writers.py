@@ -57,6 +57,7 @@ class DbApiConnection(Protocol):
     async def execute(self, sql: str, parameters: Sequence[object] = ..., /) -> object:
         raise NotImplementedError("CODE NOT WRITTEN")
 
+    # honest-code-allow: L1.21.1 - a Protocol's members ARE its names and cannot become one function over a table: generating them leaves mypy nothing to check, and mypy is the only thing enforcing this contract. writers/what_a_connection_must_offer.feature tests what can be tested, that the contract covers every method the code calls on a connection
     @helper
     async def commit(self) -> None:
         raise NotImplementedError("CODE NOT WRITTEN")
