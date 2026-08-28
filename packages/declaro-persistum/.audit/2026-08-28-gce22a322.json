@@ -1,0 +1,3381 @@
+{
+  "repo": ".",
+  "analyzer_version": "1.0.0+gce22a322",
+  "state_bounds": "on",
+  "results": {
+    "L1.1": {
+      "value": 8.2,
+      "band": "Not Healthy",
+      "details": "36 doc-only / 440 commits"
+    },
+    "L1.2": {
+      "value": 70.2,
+      "band": "Not Healthy",
+      "details": "309 code-only / 440 commits"
+    },
+    "L1.3": {
+      "value": 20.9,
+      "band": "Healthy",
+      "details": "92 mixed doc-and-code / 440 commits"
+    },
+    "L1.4": {
+      "value": 13.9,
+      "band": "Not Healthy",
+      "details": "34855 doc / 251601 total lines added"
+    },
+    "L1.5": {
+      "value": 36.1,
+      "band": "Not Healthy",
+      "details": "74597 deleted / 206559 added code lines"
+    },
+    "L1.6": {
+      "value": 11.8,
+      "band": "Not Healthy",
+      "details": "52 net-negative / 440 commits"
+    },
+    "L1.7": {
+      "value": 28.6,
+      "band": "Healthy",
+      "details": "126 delete-heavy / 440 commits"
+    },
+    "L1.8": {
+      "value": 1.51,
+      "band": "Healthy",
+      "details": "48058 test / 31785 production LOC"
+    },
+    "L1.9": {
+      "value": "absent",
+      "band": "Slop",
+      "details": "no .pre-commit-config.yaml and no .husky directory at the repository root"
+    },
+    "L1.10": {
+      "value": 0,
+      "band": "Slop",
+      "details": "no .yml or .yaml workflow files in .github/workflows"
+    },
+    "L1.11": {
+      "value": "absent",
+      "band": "Slop",
+      "details": "no Dockerfile and no docker-compose.yml at the repository root"
+    },
+    "lang": "python",
+    "L1.16": {
+      "value": 0.0,
+      "band": "Healthy",
+      "details": "0 lines with trailing ws"
+    },
+    "L1.17": {
+      "value": 0.0,
+      "band": "Healthy",
+      "details": "0/71 files >1k LOC, 0 >4k LOC; 1 >1k LOC scoped out (tests), 249 >1k LOC scoped out (vendored)"
+    },
+    "L1.18": {
+      "value": 3.1,
+      "band": "Healthy",
+      "details": "41/1312 functions reference unbounded external mutable state (python)"
+    },
+    "L1.15": {
+      "value": 29.48,
+      "band": "Slop",
+      "details": "937 escapes in 31785 production LOC"
+    },
+    "L1.19": {
+      "value": 121,
+      "band": "n/a",
+      "details": "121 finite decision points enumerated across 71 files; the share a test exercises is a different number and needs a test-execution trace; coverage not measured (test execution disabled)"
+    },
+    "L1.12": {
+      "value": 0.01,
+      "band": "Healthy",
+      "details": "2 flagged line(s) of 31785 production python LOC (31785 of them analyzed) (0 unreferenced definition(s), 2 unreachable statement(s)); 1012 definition(s) undecidable and excluded from the numerator, 5 referenced only by tests, 27 runtime entry point(s); lower bound - dynamic dispatch, reflection and framework registration are not resolved; 100 of them listed below",
+      "findings": [
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "name": "",
+          "kind": "statement",
+          "category": "unreachable",
+          "line": 510,
+          "end_line": 510
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "name": "",
+          "kind": "statement",
+          "category": "unreachable",
+          "line": 875,
+          "end_line": 875
+        }
+      ],
+      "undecidable": [
+        {
+          "file": "examples/todo_app_django_style/app.py",
+          "name": "lifespan",
+          "kind": "function",
+          "line": 75,
+          "end_line": 80,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_django_style/app.py",
+          "name": "db_settings",
+          "kind": "function",
+          "line": 92,
+          "end_line": 113,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_django_style/app.py",
+          "name": "use_sqlite",
+          "kind": "function",
+          "line": 117,
+          "end_line": 131,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_django_style/app.py",
+          "name": "use_postgres",
+          "kind": "function",
+          "line": 135,
+          "end_line": 156,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_django_style/app.py",
+          "name": "use_turso_cloud",
+          "kind": "function",
+          "line": 160,
+          "end_line": 182,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_django_style/app.py",
+          "name": "use_turso_embedded",
+          "kind": "function",
+          "line": 186,
+          "end_line": 200,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_django_style/app.py",
+          "name": "index",
+          "kind": "function",
+          "line": 208,
+          "end_line": 225,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_django_style/app.py",
+          "name": "create_todo",
+          "kind": "function",
+          "line": 228,
+          "end_line": 246,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_django_style/app.py",
+          "name": "toggle_todo",
+          "kind": "function",
+          "line": 249,
+          "end_line": 270,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_django_style/app.py",
+          "name": "delete_todo",
+          "kind": "function",
+          "line": 273,
+          "end_line": 279,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_django_style/app.py",
+          "name": "get_count",
+          "kind": "function",
+          "line": 282,
+          "end_line": 293,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_django_style/db.py",
+          "name": "_connect_sqlite",
+          "kind": "function",
+          "line": 147,
+          "end_line": 151,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_django_style/db.py",
+          "name": "_connect_postgresql",
+          "kind": "function",
+          "line": 155,
+          "end_line": 162,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_django_style/db.py",
+          "name": "_connect_turso_embedded",
+          "kind": "function",
+          "line": 166,
+          "end_line": 173,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_django_style/db.py",
+          "name": "_connect_turso_cloud",
+          "kind": "function",
+          "line": 177,
+          "end_line": 189,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_django_style/db.py",
+          "name": "get_connection",
+          "kind": "function",
+          "line": 238,
+          "end_line": 246,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_native/app.py",
+          "name": "lifespan",
+          "kind": "function",
+          "line": 74,
+          "end_line": 79,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_native/app.py",
+          "name": "db_settings",
+          "kind": "function",
+          "line": 91,
+          "end_line": 112,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_native/app.py",
+          "name": "use_sqlite",
+          "kind": "function",
+          "line": 116,
+          "end_line": 130,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_native/app.py",
+          "name": "use_postgres",
+          "kind": "function",
+          "line": 134,
+          "end_line": 155,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_native/app.py",
+          "name": "use_turso_cloud",
+          "kind": "function",
+          "line": 159,
+          "end_line": 181,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_native/app.py",
+          "name": "use_turso_embedded",
+          "kind": "function",
+          "line": 185,
+          "end_line": 199,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_native/app.py",
+          "name": "index",
+          "kind": "function",
+          "line": 207,
+          "end_line": 224,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_native/app.py",
+          "name": "create_todo",
+          "kind": "function",
+          "line": 227,
+          "end_line": 245,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_native/app.py",
+          "name": "toggle_todo",
+          "kind": "function",
+          "line": 248,
+          "end_line": 269,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_native/app.py",
+          "name": "delete_todo",
+          "kind": "function",
+          "line": 272,
+          "end_line": 278,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_native/app.py",
+          "name": "get_count",
+          "kind": "function",
+          "line": 281,
+          "end_line": 292,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_native/db.py",
+          "name": "_connect_sqlite",
+          "kind": "function",
+          "line": 147,
+          "end_line": 151,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_native/db.py",
+          "name": "_connect_postgresql",
+          "kind": "function",
+          "line": 155,
+          "end_line": 162,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_native/db.py",
+          "name": "_connect_turso_embedded",
+          "kind": "function",
+          "line": 166,
+          "end_line": 173,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_native/db.py",
+          "name": "_connect_turso_cloud",
+          "kind": "function",
+          "line": 177,
+          "end_line": 189,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_native/db.py",
+          "name": "get_connection",
+          "kind": "function",
+          "line": 238,
+          "end_line": 246,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_prisma_style/app.py",
+          "name": "lifespan",
+          "kind": "function",
+          "line": 75,
+          "end_line": 80,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_prisma_style/app.py",
+          "name": "db_settings",
+          "kind": "function",
+          "line": 92,
+          "end_line": 113,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_prisma_style/app.py",
+          "name": "use_sqlite",
+          "kind": "function",
+          "line": 117,
+          "end_line": 131,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_prisma_style/app.py",
+          "name": "use_postgres",
+          "kind": "function",
+          "line": 135,
+          "end_line": 156,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_prisma_style/app.py",
+          "name": "use_turso_cloud",
+          "kind": "function",
+          "line": 160,
+          "end_line": 182,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_prisma_style/app.py",
+          "name": "use_turso_embedded",
+          "kind": "function",
+          "line": 186,
+          "end_line": 200,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_prisma_style/app.py",
+          "name": "index",
+          "kind": "function",
+          "line": 208,
+          "end_line": 225,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_prisma_style/app.py",
+          "name": "create_todo",
+          "kind": "function",
+          "line": 228,
+          "end_line": 246,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_prisma_style/app.py",
+          "name": "toggle_todo",
+          "kind": "function",
+          "line": 249,
+          "end_line": 270,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_prisma_style/app.py",
+          "name": "delete_todo",
+          "kind": "function",
+          "line": 273,
+          "end_line": 279,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_prisma_style/app.py",
+          "name": "get_count",
+          "kind": "function",
+          "line": 282,
+          "end_line": 293,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_prisma_style/db.py",
+          "name": "_connect_sqlite",
+          "kind": "function",
+          "line": 147,
+          "end_line": 151,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_prisma_style/db.py",
+          "name": "_connect_postgresql",
+          "kind": "function",
+          "line": 155,
+          "end_line": 162,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_prisma_style/db.py",
+          "name": "_connect_turso_embedded",
+          "kind": "function",
+          "line": 166,
+          "end_line": 173,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_prisma_style/db.py",
+          "name": "_connect_turso_cloud",
+          "kind": "function",
+          "line": 177,
+          "end_line": 189,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "examples/todo_app_prisma_style/db.py",
+          "name": "get_connection",
+          "kind": "function",
+          "line": 238,
+          "end_line": 246,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/pragma_compat.py",
+          "name": "_rows",
+          "kind": "function",
+          "line": 39,
+          "end_line": 41,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/pragma_compat.py",
+          "name": "as_identifier",
+          "kind": "function",
+          "line": 45,
+          "end_line": 58,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/pragma_compat.py",
+          "name": "pragma_table_info",
+          "kind": "function",
+          "line": 62,
+          "end_line": 64,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/pragma_compat.py",
+          "name": "pragma_index_list",
+          "kind": "function",
+          "line": 68,
+          "end_line": 70,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/pragma_compat.py",
+          "name": "pragma_index_info",
+          "kind": "function",
+          "line": 74,
+          "end_line": 76,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/pragma_compat.py",
+          "name": "pragma_foreign_key_list",
+          "kind": "function",
+          "line": 80,
+          "end_line": 82,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/pragma_compat.py",
+          "name": "table_column_names",
+          "kind": "function",
+          "line": 103,
+          "end_line": 106,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/pragma_compat.py",
+          "name": "create_index_statements",
+          "kind": "function",
+          "line": 110,
+          "end_line": 140,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/pragma_compat.py",
+          "name": "enforcement_restored",
+          "kind": "function",
+          "line": 144,
+          "end_line": 164,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "generate_create_table_sql",
+          "kind": "function",
+          "line": 48,
+          "end_line": 111,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_column_clause",
+          "kind": "function",
+          "line": 115,
+          "end_line": 154,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_references_clause",
+          "kind": "function",
+          "line": 158,
+          "end_line": 182,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_the_columns_to_copy",
+          "kind": "function",
+          "line": 186,
+          "end_line": 188,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_refuse_an_empty_copy",
+          "kind": "function",
+          "line": 192,
+          "end_line": 194,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "generate_data_copy_sql",
+          "kind": "function",
+          "line": 206,
+          "end_line": 233,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "get_reconstruction_columns",
+          "kind": "function",
+          "line": 237,
+          "end_line": 267,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_columns_as_they_are",
+          "kind": "function",
+          "line": 271,
+          "end_line": 275,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_alter_the_column",
+          "kind": "function",
+          "line": 288,
+          "end_line": 315,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_no_such_column",
+          "kind": "function",
+          "line": 319,
+          "end_line": 323,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_apply_alter_column",
+          "kind": "function",
+          "line": 337,
+          "end_line": 339,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_apply_drop_column",
+          "kind": "function",
+          "line": 343,
+          "end_line": 346,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_apply_add_foreign_key",
+          "kind": "function",
+          "line": 350,
+          "end_line": 366,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_without_the_foreign_key",
+          "kind": "function",
+          "line": 370,
+          "end_line": 376,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_apply_drop_foreign_key",
+          "kind": "function",
+          "line": 380,
+          "end_line": 386,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_read_the_foreign_key_pragma",
+          "kind": "function",
+          "line": 406,
+          "end_line": 410,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_the_caller_owns_the_pragma",
+          "kind": "function",
+          "line": 414,
+          "end_line": 417,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_stop_enforcing_foreign_keys",
+          "kind": "function",
+          "line": 430,
+          "end_line": 433,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_leave_enforcement_alone",
+          "kind": "function",
+          "line": 437,
+          "end_line": 439,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_say_no_column_is_shared",
+          "kind": "function",
+          "line": 451,
+          "end_line": 462,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_copy_the_rows",
+          "kind": "function",
+          "line": 474,
+          "end_line": 491,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_copy_no_rows",
+          "kind": "function",
+          "line": 495,
+          "end_line": 503,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_no_violations",
+          "kind": "function",
+          "line": 517,
+          "end_line": 519,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_enforce_foreign_keys_again",
+          "kind": "function",
+          "line": 529,
+          "end_line": 537,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_leave_enforcement_as_it_was",
+          "kind": "function",
+          "line": 541,
+          "end_line": 545,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_nothing_to_restore",
+          "kind": "function",
+          "line": 555,
+          "end_line": 557,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "execute_reconstruction_async",
+          "kind": "function",
+          "line": 569,
+          "end_line": 692,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_validate_columns",
+          "kind": "function",
+          "line": 701,
+          "end_line": 727,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "name": "_map_type",
+          "kind": "function",
+          "line": 740,
+          "end_line": 758,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "name": "columns_to_copy",
+          "kind": "function",
+          "line": 42,
+          "end_line": 74,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "name": "reconstruct_table",
+          "kind": "function",
+          "line": 78,
+          "end_line": 235,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "name": "_disable_foreign_keys",
+          "kind": "function",
+          "line": 239,
+          "end_line": 249,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "name": "_recreate_index",
+          "kind": "function",
+          "line": 267,
+          "end_line": 274,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "name": "_check_the_foreign_keys",
+          "kind": "function",
+          "line": 280,
+          "end_line": 285,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "name": "_with_the_property",
+          "kind": "function",
+          "line": 289,
+          "end_line": 291,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "name": "alter_column_property",
+          "kind": "function",
+          "line": 307,
+          "end_line": 327,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "name": "alter_column_default",
+          "kind": "function",
+          "line": 331,
+          "end_line": 364,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "name": "_with_default",
+          "kind": "function",
+          "line": 368,
+          "end_line": 370,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "name": "_without_default",
+          "kind": "function",
+          "line": 374,
+          "end_line": 376,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "name": "_no_such_column",
+          "kind": "function",
+          "line": 386,
+          "end_line": 395,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "name": "_the_named_column",
+          "kind": "function",
+          "line": 399,
+          "end_line": 403,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "name": "_the_column_to_change",
+          "kind": "function",
+          "line": 415,
+          "end_line": 421,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "name": "_get_full_table_schema",
+          "kind": "function",
+          "line": 432,
+          "end_line": 489,
+          "reason": "decorated (a decorator can register the name with a framework)"
+        }
+      ],
+      "test_only": [
+        {
+          "file": "src/declaro_persistum/exceptions.py",
+          "name": "NotSupportedError",
+          "kind": "class",
+          "line": 466,
+          "end_line": 481,
+          "reason": "referenced only from the test tree"
+        },
+        {
+          "file": "src/declaro_persistum/fk_ordering.py",
+          "name": "execute_fk_ordered",
+          "kind": "function",
+          "line": 260,
+          "end_line": 291,
+          "reason": "referenced only from the test tree"
+        },
+        {
+          "file": "src/declaro_persistum/retry.py",
+          "name": "NO_RETRY",
+          "kind": "constant",
+          "line": 117,
+          "end_line": 117,
+          "reason": "referenced only from the test tree"
+        },
+        {
+          "file": "src/declaro_persistum/retry.py",
+          "name": "ON_CONTENTION",
+          "kind": "constant",
+          "line": 120,
+          "end_line": 120,
+          "reason": "referenced only from the test tree"
+        },
+        {
+          "file": "src/declaro_persistum/validator.py",
+          "name": "validate_schema_strict",
+          "kind": "function",
+          "line": 677,
+          "end_line": 688,
+          "reason": "referenced only from the test tree"
+        }
+      ],
+      "counts": {
+        "unreferenced": 0,
+        "unreachable": 2,
+        "undecidable": 1012,
+        "test_only": 5,
+        "entry_points": 27,
+        "definitions": 1805,
+        "files_unparsed": 0,
+        "files_token_pasting": 0
+      },
+      "production_loc": 31785,
+      "flagged_lines": 2,
+      "unreadable": 0
+    },
+    "L1.14": {
+      "value": 0,
+      "band": "Healthy",
+      "details": "0 distinct secret(s) in 0 occurrence(s) across 379 scanned file(s); 0 of the secret(s) are in production code, 0 only in documentation and 0 only in the test tree; scope: git-tracked files only; the canon's second Slop arm, a confirmed true positive, is not evaluated: no credential is validated against its issuer",
+      "findings": [],
+      "counts": {
+        "total": 0,
+        "in_tests": 0,
+        "in_docs": 0,
+        "in_production": 0,
+        "occurrences": 0,
+        "by_rule": {}
+      },
+      "confirmed": "not evaluated",
+      "files_scanned": 379
+    },
+    "L1.13": {
+      "value": 32.71,
+      "band": "Slop",
+      "details": "5427 of 16593 production code lines inside a repeated 50-token window, identifiers and literals normalized, large data tables discounted as L1.17 discounts them, across 71 file(s)"
+    },
+    "L1.20": {
+      "value": "not run",
+      "band": "n/a",
+      "details": "test execution disabled"
+    },
+    "L1.18b": {
+      "verdict": "neutral",
+      "value": "41 neutral / 0 promiscuous / 0 unresolved",
+      "band": "n/a",
+      "counts": {
+        "neutral": 41,
+        "promiscuous": 0,
+        "unresolved": 0
+      },
+      "coverage": {
+        "neutral": {
+          "observe_only": 38,
+          "drives_decision": 3
+        },
+        "promiscuous": {
+          "observe_only": 0,
+          "drives_decision": 0
+        },
+        "unresolved": {
+          "observe_only": 0,
+          "drives_decision": 0
+        }
+      },
+      "resolvable_fraction": 1.0,
+      "silence": {
+        "count": 0,
+        "fraction": 0.0,
+        "by_reason": {
+          "external_boundary": 0,
+          "unmodeled_callee": 0,
+          "dynamic_dispatch": 0,
+          "injected_slot": 0,
+          "unmodeled_construct": 0,
+          "unparsed_region": 0,
+          "mutable_alias": 0
+        },
+        "sites": []
+      },
+      "partition": {
+        "deciding_states": 3,
+        "uncounted": 0,
+        "ordered_classes": [],
+        "unordered_classes": [
+          4,
+          4,
+          4
+        ]
+      },
+      "census": {
+        "declared": 758,
+        "by_kind": {
+          "module_binding": 507,
+          "class_body_binding": 230,
+          "receiver_attribute": 21
+        },
+        "files": 71,
+        "admitted": 41,
+        "visited": 757,
+        "judged": 41,
+        "unread_kinds": [],
+        "visited_fraction": 0.999,
+        "judged_fraction": 0.054
+      },
+      "findings": [
+        {
+          "state": "app",
+          "verdict": "neutral",
+          "drives_decision": true,
+          "file": "examples/todo_app_django_style/app.py",
+          "line": 83,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 4,
+            "ordered": false,
+            "counted": true
+          }
+        },
+        {
+          "state": "app",
+          "verdict": "neutral",
+          "drives_decision": true,
+          "file": "examples/todo_app_native/app.py",
+          "line": 82,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 4,
+            "ordered": false,
+            "counted": true
+          }
+        },
+        {
+          "state": "app",
+          "verdict": "neutral",
+          "drives_decision": true,
+          "file": "examples/todo_app_prisma_style/app.py",
+          "line": 83,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 4,
+            "ordered": false,
+            "counted": true
+          }
+        },
+        {
+          "state": "_schema",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "examples/todo_app_django_style/app.py",
+          "line": 71,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "templates",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "examples/todo_app_django_style/app.py",
+          "line": 84,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "_schema",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "examples/todo_app_native/app.py",
+          "line": 70,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "templates",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "examples/todo_app_native/app.py",
+          "line": 83,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "_schema",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "examples/todo_app_prisma_style/app.py",
+          "line": 71,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "templates",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "examples/todo_app_prisma_style/app.py",
+          "line": 84,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "logger",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/applier/shared.py",
+          "line": 517,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "logger",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/bulk_loader.py",
+          "line": 42,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "logger",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/crew.py",
+          "line": 60,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "logger",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/cutover.py",
+          "line": 41,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "logger",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/database.py",
+          "line": 38,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "self.file",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/exceptions.py",
+          "line": 99,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "self.line",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/exceptions.py",
+          "line": 100,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "self.ambiguities",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/exceptions.py",
+          "line": 114,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "self.cycle",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/exceptions.py",
+          "line": 136,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "self.tables",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/exceptions.py",
+          "line": 137,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "self.differences",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/exceptions.py",
+          "line": 176,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "self.last_snapshot",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/exceptions.py",
+          "line": 177,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "self.current_time",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/exceptions.py",
+          "line": 178,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "self.dialect",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/exceptions.py",
+          "line": 228,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "self.operation",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/exceptions.py",
+          "line": 254,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "self.sql",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/exceptions.py",
+          "line": 255,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "self.original_error",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/exceptions.py",
+          "line": 256,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "self.rollback_error",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/exceptions.py",
+          "line": 295,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "self.table",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/exceptions.py",
+          "line": 336,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "self.column",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/exceptions.py",
+          "line": 337,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "self.reference",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/exceptions.py",
+          "line": 338,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "self.path",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/exceptions.py",
+          "line": 366,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "self.phase",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/exceptions.py",
+          "line": 448,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "self.table",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/exceptions.py",
+          "line": 449,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "self.original_error",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/exceptions.py",
+          "line": 450,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "logger",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/fk_ordering.py",
+          "line": 24,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "logger",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/migration_sql.py",
+          "line": 35,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "RowFactory",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/query/executor.py",
+          "line": 27,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "Handler",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/shutdown.py",
+          "line": 38,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "logger",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/shutdown.py",
+          "line": 42,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "logger",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/transfer_steps.py",
+          "line": 26,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        },
+        {
+          "state": "logger",
+          "verdict": "neutral",
+          "drives_decision": false,
+          "file": "src/declaro_persistum/turso_database.py",
+          "line": 93,
+          "silence": "",
+          "construct": "",
+          "silence_line": 0,
+          "partition": {
+            "classes": 1,
+            "ordered": true,
+            "counted": true
+          }
+        }
+      ],
+      "bucketed": {
+        "counts": {
+          "tests": 224,
+          "vendored": 3071
+        },
+        "paths": []
+      },
+      "details": "finite-testability: 41 neutral, 0 promiscuous, 0 unresolved across 41 pieces of state; resolvable fraction 1.0; silence 0.0; 0 of 3 deciding partitions uncounted. Cardinality is per state and does not compose: two states that decide the same branch multiply, and this version reports each separately rather than guessing the product."
+    },
+    "path_cover": {
+      "value": 1339,
+      "band": "n/a",
+      "functions": 1312,
+      "details": "1,339 end-to-end runs cover every branch across 1,312 functions (per-function edge cover, python)"
+    },
+    "thread_surface": {
+      "verdict": "clean",
+      "value": "0 exposed / 0 review / 0 candidate",
+      "band": "n/a",
+      "counts": {
+        "exposed": 0,
+        "review": 0,
+        "candidate": 0
+      },
+      "findings": [],
+      "bucketed": {
+        "counts": {
+          "tests": 224,
+          "vendored": 3071
+        },
+        "paths": []
+      },
+      "files_read": 71,
+      "files_parsed": 71,
+      "details": "thread-safety surface: 0 hand-overrides of the thread-safety guarantee, 0 lower-severity footguns, 0 low-precision candidate shape(s) across 0 sites; read over 71 of 71 file(s) in scope that the parser could read"
+    },
+    "absolute_paths": {
+      "verdict": "flagged",
+      "value": 2,
+      "band": "Slop",
+      "details": "2 hardcoded machine-specific absolute path(s) across 1 file(s)",
+      "findings": [
+        {
+          "file": "src/declaro_persistum/turso_database.py",
+          "line": 432,
+          "path": "/tmp/app.db"
+        },
+        {
+          "file": "src/declaro_persistum/turso_database.py",
+          "line": 433,
+          "path": "/tmp/app.db"
+        }
+      ]
+    },
+    "interleaving_robustness": {
+      "verdict": "n/a",
+      "value": "n/a",
+      "band": "n/a",
+      "unmodeled": [],
+      "modeled_elsewhere": [],
+      "modeled_in_file": [],
+      "details": "interleaving-robustness meter is Rust/loom/shuttle only; python not supported yet"
+    },
+    "honest_code": {
+      "value": 63.2,
+      "band": "Slop",
+      "details": "12 of 19 decided clauses hold across 310 files. Declared exceptions: 2. 0 file(s) could not be read. 109 boundary declarations withheld a finding. 1 block of another language were not examined. Not decided (1): Strangler Pattern for Migration (L1.21.17). Strangler Pattern for Migration decides nothing in any language and never will: it is a property of how a migration is sequenced over weeks, and no file carries the sequence of the work that produced it",
+      "findings": [
+        {
+          "file": "src/declaro_persistum/boundary.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "boundary, helper, link, recognizer",
+          "line": 35,
+          "detail": "4 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: boundary, helper, link, recognizer",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/database.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "refresh, flush",
+          "line": 632,
+          "detail": "2 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: refresh, flush",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/database.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "no_passes, already_delivered, nothing_happened",
+          "line": 386,
+          "detail": "3 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: no_passes, already_delivered, nothing_happened",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/turso_database.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "_close_connection, release",
+          "line": 417,
+          "detail": "2 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: _close_connection, release",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/writers.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "commit, rollback",
+          "line": 61,
+          "detail": "2 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: commit, rollback",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/exceptions.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "__init__, __init__",
+          "line": 241,
+          "detail": "2 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: __init__, __init__",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/migration_sql.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "stored_hash_sql, _the_database_holds_tables, temp_table_name",
+          "line": 233,
+          "detail": "3 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: stored_hash_sql, _the_database_holds_tables, temp_table_name",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/migration_sql.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "store_hash_sql, user_tables_sql",
+          "line": 254,
+          "detail": "2 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: store_hash_sql, user_tables_sql",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/inspector/postgresql.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "_column_from_row, _index_from_row",
+          "line": 329,
+          "detail": "2 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: _column_from_row, _index_from_row",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/inspector/turso.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "_referring_to, _with_check",
+          "line": 239,
+          "detail": "2 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: _referring_to, _with_check",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/applier/postgresql.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "get_dialect, get_transaction_mode",
+          "line": 32,
+          "detail": "2 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: get_dialect, get_transaction_mode",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/applier/templates.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "_sqlite_rows, _postgresql_rows",
+          "line": 131,
+          "detail": "2 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: _sqlite_rows, _postgresql_rows",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/enums.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "add_enum_value_sql, remove_enum_value_sql",
+          "line": 126,
+          "detail": "2 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: add_enum_value_sql, remove_enum_value_sql",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/pragma_compat.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "pragma_table_info, pragma_index_list, pragma_index_info, pragma_foreign_key_list",
+          "line": 62,
+          "detail": "4 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: pragma_table_info, pragma_index_list, pragma_index_info, pragma_foreign_key_list",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/materialized_views.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "is_matview_sql, get_matview_metadata_sql, list_matviews_sql",
+          "line": 249,
+          "detail": "3 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: is_matview_sql, get_matview_metadata_sql, list_matviews_sql",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/query/builder.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "with_limit, with_offset",
+          "line": 625,
+          "detail": "2 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: with_limit, with_offset",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/query/builder.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "_the_star, _as_name",
+          "line": 559,
+          "detail": "2 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: _the_star, _as_name",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_native/db.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "get_sqlite_config, get_turso_embedded_config",
+          "line": 58,
+          "detail": "2 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: get_sqlite_config, get_turso_embedded_config",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_native/app.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "use_sqlite, use_turso_embedded",
+          "line": 116,
+          "detail": "2 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: use_sqlite, use_turso_embedded",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_prisma_style/db.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "get_sqlite_config, get_turso_embedded_config",
+          "line": 58,
+          "detail": "2 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: get_sqlite_config, get_turso_embedded_config",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_prisma_style/app.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "use_sqlite, use_turso_embedded",
+          "line": 117,
+          "detail": "2 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: use_sqlite, use_turso_embedded",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_django_style/db.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "get_sqlite_config, get_turso_embedded_config",
+          "line": 58,
+          "detail": "2 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: get_sqlite_config, get_turso_embedded_config",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_django_style/app.py",
+          "withheld_by": "",
+          "clause": "L1.21.1",
+          "symbol": "use_sqlite, use_turso_embedded",
+          "line": 117,
+          "detail": "2 functions leave one shape behind once every name and quoted string is erased, so what separates them is words: use_sqlite, use_turso_embedded",
+          "instead": "replace them with one function over a table, where each row carries the words that function would have pasted in",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/instrumentation.py",
+          "withheld_by": "",
+          "clause": "L1.21.20",
+          "symbol": "emit_record",
+          "line": 229,
+          "detail": "writes a log line the signature does not admit. This file opens 1 logging edge(s) onto a global nothing declared",
+          "instead": "return the failure to the caller, and route what is left through one logging function of your own that every other function calls",
+          "undecided": "whether the return value already names the failure is not readable from the callee alone, and a caller handed something that says what went wrong has not lost it"
+        },
+        {
+          "file": "src/declaro_persistum/fk_ordering.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_execute_one",
+          "line": 240,
+          "detail": "performs I/O (commit, execute) and is reached by another function here",
+          "instead": "take the data as a parameter and let the caller at the edge do the I/O",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/shutdown.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_trap_signals",
+          "line": 79,
+          "detail": "declares itself a boundary and makes no call this reader counts as I/O, so the declaration states an edge that is not there",
+          "instead": "take the declaration off, or move the read or the call this function was meant to be the edge for into it",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/shutdown.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_handler",
+          "line": 90,
+          "detail": "declares itself a boundary and makes no call this reader counts as I/O, so the declaration states an edge that is not there",
+          "instead": "take the declaration off, or move the read or the call this function was meant to be the edge for into it",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/turso_database.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "replicate_once",
+          "line": 562,
+          "detail": "declares itself a boundary and makes no call this reader counts as I/O, so the declaration states an edge that is not there",
+          "instead": "take the declaration off, or move the read or the call this function was meant to be the edge for into it",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/turso_database.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_closed",
+          "line": 222,
+          "detail": "declares itself a boundary and makes no call this reader counts as I/O, so the declaration states an edge that is not there",
+          "instead": "take the declaration off, or move the read or the call this function was meant to be the edge for into it",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/turso_database.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_the_folder_for",
+          "line": 202,
+          "detail": "declares itself a boundary and makes no call this reader counts as I/O, so the declaration states an edge that is not there",
+          "instead": "take the declaration off, or move the read or the call this function was meant to be the edge for into it",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/crew.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_closed",
+          "line": 262,
+          "detail": "declares itself a boundary and makes no call this reader counts as I/O, so the declaration states an edge that is not there",
+          "instead": "take the declaration off, or move the read or the call this function was meant to be the edge for into it",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/transfer_steps.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_turn_fk_checks_back_on",
+          "line": 752,
+          "detail": "declares itself a boundary and makes no call this reader counts as I/O, so the declaration states an edge that is not there",
+          "instead": "take the declaration off, or move the read or the call this function was meant to be the edge for into it",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/transfer_steps.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_turn_fk_checks_off",
+          "line": 701,
+          "detail": "declares itself a boundary and makes no call this reader counts as I/O, so the declaration states an edge that is not there",
+          "instead": "take the declaration off, or move the read or the call this function was meant to be the edge for into it",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/transfer_steps.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_stream_the_table",
+          "line": 362,
+          "detail": "declares itself a boundary and makes no call this reader counts as I/O, so the declaration states an edge that is not there",
+          "instead": "take the declaration off, or move the read or the call this function was meant to be the edge for into it",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/write_queue.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "drain",
+          "line": 331,
+          "detail": "declares itself a boundary and makes no call this reader counts as I/O, so the declaration states an edge that is not there",
+          "instead": "take the declaration off, or move the read or the call this function was meant to be the edge for into it",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/write_queue.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "deposit",
+          "line": 208,
+          "detail": "declares itself a boundary and makes no call this reader counts as I/O, so the declaration states an edge that is not there",
+          "instead": "take the declaration off, or move the read or the call this function was meant to be the edge for into it",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/migration_sql.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "temp_table_name",
+          "line": 536,
+          "detail": "declares itself a boundary and makes no call this reader counts as I/O, so the declaration states an edge that is not there",
+          "instead": "take the declaration off, or move the read or the call this function was meant to be the edge for into it",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/inspector/postgresql.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "introspect",
+          "line": 108,
+          "detail": "declares itself a boundary and makes no call this reader counts as I/O, so the declaration states an edge that is not there",
+          "instead": "take the declaration off, or move the read or the call this function was meant to be the edge for into it",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_confirm_the_overwrite",
+          "line": 329,
+          "detail": "performs I/O (stdin.isatty) and is reached by another function here",
+          "instead": "take the data as a parameter and let the caller at the edge do the I/O",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/applier/turso.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_rolled_back",
+          "line": 240,
+          "detail": "declares itself a boundary and makes no call this reader counts as I/O, so the declaration states an edge that is not there",
+          "instead": "take the declaration off, or move the read or the call this function was meant to be the edge for into it",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/applier/sqlite.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_execute_operation",
+          "line": 139,
+          "detail": "declares itself a boundary and makes no call this reader counts as I/O, so the declaration states an edge that is not there",
+          "instead": "take the declaration off, or move the read or the call this function was meant to be the edge for into it",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_native/db.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "commit",
+          "line": 258,
+          "detail": "performs I/O (commit) and is reached by another function here",
+          "instead": "take the data as a parameter and let the caller at the edge do the I/O",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_native/db.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_run",
+          "line": 249,
+          "detail": "performs I/O (commit, execute) and is reached by another function here",
+          "instead": "take the data as a parameter and let the caller at the edge do the I/O",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_native/db.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_connect_postgresql",
+          "line": 155,
+          "detail": "performs I/O (asyncpg.connect) and is reached by another function here",
+          "instead": "take the data as a parameter and let the caller at the edge do the I/O",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_native/db.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_connect_sqlite",
+          "line": 147,
+          "detail": "performs I/O (aiosqlite.connect) and is reached by another function here",
+          "instead": "take the data as a parameter and let the caller at the edge do the I/O",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_prisma_style/db.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "commit",
+          "line": 258,
+          "detail": "performs I/O (commit) and is reached by another function here",
+          "instead": "take the data as a parameter and let the caller at the edge do the I/O",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_prisma_style/db.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_run",
+          "line": 249,
+          "detail": "performs I/O (commit, execute) and is reached by another function here",
+          "instead": "take the data as a parameter and let the caller at the edge do the I/O",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_prisma_style/db.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_connect_postgresql",
+          "line": 155,
+          "detail": "performs I/O (asyncpg.connect) and is reached by another function here",
+          "instead": "take the data as a parameter and let the caller at the edge do the I/O",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_prisma_style/db.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_connect_sqlite",
+          "line": 147,
+          "detail": "performs I/O (aiosqlite.connect) and is reached by another function here",
+          "instead": "take the data as a parameter and let the caller at the edge do the I/O",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_django_style/db.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "commit",
+          "line": 258,
+          "detail": "performs I/O (commit) and is reached by another function here",
+          "instead": "take the data as a parameter and let the caller at the edge do the I/O",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_django_style/db.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_run",
+          "line": 249,
+          "detail": "performs I/O (commit, execute) and is reached by another function here",
+          "instead": "take the data as a parameter and let the caller at the edge do the I/O",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_django_style/db.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_connect_postgresql",
+          "line": 155,
+          "detail": "performs I/O (asyncpg.connect) and is reached by another function here",
+          "instead": "take the data as a parameter and let the caller at the edge do the I/O",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_django_style/db.py",
+          "withheld_by": "",
+          "clause": "L1.21.4",
+          "symbol": "_connect_sqlite",
+          "line": 147,
+          "detail": "performs I/O (aiosqlite.connect) and is reached by another function here",
+          "instead": "take the data as a parameter and let the caller at the edge do the I/O",
+          "undecided": ""
+        },
+        {
+          "file": "src/declaro_persistum/shutdown.py",
+          "withheld_by": "",
+          "clause": "L1.21.8",
+          "symbol": "ValueError OSError TypeError",
+          "line": 169,
+          "detail": "silences ValueError OSError TypeError with no handler at all, so the block returns as though it succeeded",
+          "instead": "let it raise and map the type to a response at the boundary",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_native/db.py",
+          "withheld_by": "",
+          "clause": "L1.21.13",
+          "symbol": "get_database(_current_db)",
+          "line": 123,
+          "detail": "reads `_current_db`, which another function here writes, so its behaviour depends on something no caller can see",
+          "instead": "take `_current_db` as a parameter, so the dependency is in the signature",
+          "undecided": "whether a table nobody writes is a knob disguised as a fact is not readable from a file, so only the ones some function turns were checked"
+        },
+        {
+          "file": "examples/todo_app_prisma_style/db.py",
+          "withheld_by": "",
+          "clause": "L1.21.13",
+          "symbol": "get_database(_current_db)",
+          "line": 123,
+          "detail": "reads `_current_db`, which another function here writes, so its behaviour depends on something no caller can see",
+          "instead": "take `_current_db` as a parameter, so the dependency is in the signature",
+          "undecided": "whether a table nobody writes is a knob disguised as a fact is not readable from a file, so only the ones some function turns were checked"
+        },
+        {
+          "file": "examples/todo_app_django_style/db.py",
+          "withheld_by": "",
+          "clause": "L1.21.13",
+          "symbol": "get_database(_current_db)",
+          "line": 123,
+          "detail": "reads `_current_db`, which another function here writes, so its behaviour depends on something no caller can see",
+          "instead": "take `_current_db` as a parameter, so the dependency is in the signature",
+          "undecided": "whether a table nobody writes is a knob disguised as a fact is not readable from a file, so only the ones some function turns were checked"
+        },
+        {
+          "file": "examples/todo_app_django_style/templates/db_select.html",
+          "withheld_by": "",
+          "clause": "L1.21.7",
+          "symbol": "innerHTML",
+          "line": 133,
+          "detail": "innerHTML describes how, somewhere the reader has to go and find",
+          "instead": "replace the listener with an attribute that declares the intent, such as hx-post, hx-target or hx-trigger, so the behaviour reads off the element",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_prisma_style/templates/db_select.html",
+          "withheld_by": "",
+          "clause": "L1.21.7",
+          "symbol": "innerHTML",
+          "line": 133,
+          "detail": "innerHTML describes how, somewhere the reader has to go and find",
+          "instead": "replace the listener with an attribute that declares the intent, such as hx-post, hx-target or hx-trigger, so the behaviour reads off the element",
+          "undecided": ""
+        },
+        {
+          "file": "examples/todo_app_native/templates/db_select.html",
+          "withheld_by": "",
+          "clause": "L1.21.7",
+          "symbol": "innerHTML",
+          "line": 133,
+          "detail": "innerHTML describes how, somewhere the reader has to go and find",
+          "instead": "replace the listener with an attribute that declares the intent, such as hx-post, hx-target or hx-trigger, so the behaviour reads off the element",
+          "undecided": ""
+        },
+        {
+          "file": "tests/unit/test_the_check_scanner_survives_what_sqlite_accepts.py",
+          "withheld_by": "",
+          "clause": "L1.21.15",
+          "symbol": "test_the_schema_converges_whatever_sqlite_accepted",
+          "line": 121,
+          "detail": "this step never runs: the runner calls it and throws away what it returns, so an asynchronous body is handed back unstarted",
+          "instead": "drop the async and call the asynchronous work through a runner inside the step. Until then, re-read every scenario that asserts an absence, because those pass on a step that did nothing",
+          "undecided": ""
+        },
+        {
+          "file": "tests/bdd/steps/common_steps.py",
+          "withheld_by": "",
+          "clause": "L1.21.15",
+          "symbol": "then_count_is",
+          "line": 96,
+          "detail": "33 lines of setup, which is a readout on the code under test rather than on the test",
+          "instead": "make the function under test pure, so the step is call it and check the result",
+          "undecided": ""
+        },
+        {
+          "file": "tests/bdd/steps/test_table_reconstruction_steps.py",
+          "withheld_by": "",
+          "clause": "L1.21.15",
+          "symbol": "then_invalid_fk_succeeds",
+          "line": 1725,
+          "detail": "39 lines of setup, which is a readout on the code under test rather than on the test",
+          "instead": "make the function under test pure, so the step is call it and check the result",
+          "undecided": ""
+        },
+        {
+          "file": "tests/bdd/steps/test_table_reconstruction_steps.py",
+          "withheld_by": "",
+          "clause": "L1.21.15",
+          "symbol": "then_fk_checked",
+          "line": 1552,
+          "detail": "45 lines of setup, which is a readout on the code under test rather than on the test",
+          "instead": "make the function under test pure, so the step is call it and check the result",
+          "undecided": ""
+        },
+        {
+          "file": "tests/bdd/steps/test_table_reconstruction_steps.py",
+          "withheld_by": "",
+          "clause": "L1.21.15",
+          "symbol": "then_only_explicit_indexes",
+          "line": 1400,
+          "detail": "41 lines of setup, which is a readout on the code under test rather than on the test",
+          "instead": "make the function under test pure, so the step is call it and check the result",
+          "undecided": ""
+        },
+        {
+          "file": "tests/bdd/steps/test_table_reconstruction_steps.py",
+          "withheld_by": "",
+          "clause": "L1.21.15",
+          "symbol": "then_unique_preserved",
+          "line": 1355,
+          "detail": "41 lines of setup, which is a readout on the code under test rather than on the test",
+          "instead": "make the function under test pure, so the step is call it and check the result",
+          "undecided": ""
+        },
+        {
+          "file": "tests/bdd/steps/test_table_reconstruction_steps.py",
+          "withheld_by": "",
+          "clause": "L1.21.15",
+          "symbol": "then_indexes_functional",
+          "line": 1309,
+          "detail": "42 lines of setup, which is a readout on the code under test rather than on the test",
+          "instead": "make the function under test pure, so the step is call it and check the result",
+          "undecided": ""
+        },
+        {
+          "file": "tests/bdd/steps/test_table_reconstruction_steps.py",
+          "withheld_by": "",
+          "clause": "L1.21.15",
+          "symbol": "then_fk_preserved",
+          "line": 1225,
+          "detail": "39 lines of setup, which is a readout on the code under test rather than on the test",
+          "instead": "make the function under test pure, so the step is call it and check the result",
+          "undecided": ""
+        },
+        {
+          "file": "tests/bdd/steps/test_table_reconstruction_steps.py",
+          "withheld_by": "",
+          "clause": "L1.21.15",
+          "symbol": "when_drop_column",
+          "line": 911,
+          "detail": "106 lines of setup, which is a readout on the code under test rather than on the test",
+          "instead": "make the function under test pure, so the step is call it and check the result",
+          "undecided": ""
+        },
+        {
+          "file": "tests/bdd/steps/test_table_reconstruction_steps.py",
+          "withheld_by": "",
+          "clause": "L1.21.15",
+          "symbol": "when_alter_column_property",
+          "line": 659,
+          "detail": "31 lines of setup, which is a readout on the code under test rather than on the test",
+          "instead": "make the function under test pure, so the step is call it and check the result",
+          "undecided": ""
+        },
+        {
+          "file": "tests/bdd/steps/test_table_reconstruction_steps.py",
+          "withheld_by": "",
+          "clause": "L1.21.15",
+          "symbol": "given_table_contains_data",
+          "line": 262,
+          "detail": "65 lines of setup, which is a readout on the code under test rather than on the test",
+          "instead": "make the function under test pure, so the step is call it and check the result",
+          "undecided": ""
+        },
+        {
+          "file": "tests/bdd/steps/test_table_reconstruction_steps.py",
+          "withheld_by": "",
+          "clause": "L1.21.15",
+          "symbol": "given_table_with_columns",
+          "line": 202,
+          "detail": "56 lines of setup, which is a readout on the code under test rather than on the test",
+          "instead": "make the function under test pure, so the step is call it and check the result",
+          "undecided": ""
+        },
+        {
+          "file": "tests/bdd/steps/test_replication_steps.py",
+          "withheld_by": "",
+          "clause": "L1.21.15",
+          "symbol": "_then_converges",
+          "line": 290,
+          "detail": "37 lines of setup, which is a readout on the code under test rather than on the test",
+          "instead": "make the function under test pure, so the step is call it and check the result",
+          "undecided": ""
+        },
+        {
+          "file": "tests/bdd/steps/database_steps.py",
+          "withheld_by": "",
+          "clause": "L1.21.15",
+          "symbol": "when_query_completed",
+          "line": 207,
+          "detail": "34 lines of setup, which is a readout on the code under test rather than on the test",
+          "instead": "make the function under test pure, so the step is call it and check the result",
+          "undecided": ""
+        }
+      ],
+      "undecided": [
+        "L1.21.17"
+      ],
+      "allowed": [
+        {
+          "file": "src/declaro_persistum/shutdown.py",
+          "clause": "L1.21.16",
+          "symbol": "signal.signal",
+          "line": 173,
+          "detail": "signal.signal parks behaviour where the reader does not look",
+          "reason": "putting back a handler this module"
+        },
+        {
+          "file": "src/declaro_persistum/shutdown.py",
+          "clause": "L1.21.16",
+          "symbol": "signal.signal",
+          "line": 134,
+          "detail": "signal.signal parks behaviour where the reader does not look",
+          "reason": "no declarative equivalent exists"
+        }
+      ],
+      "declared": [
+        {
+          "file": "src/declaro_persistum/bulk_loader.py",
+          "clause": "L1.21.4",
+          "symbol": "dbapi_enable_fk_checks",
+          "line": 492,
+          "detail": "performs I/O (execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/bulk_loader.py",
+          "clause": "L1.21.4",
+          "symbol": "dbapi_disable_fk_checks",
+          "line": 487,
+          "detail": "performs I/O (execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/bulk_loader.py",
+          "clause": "L1.21.4",
+          "symbol": "dbapi_write_progress",
+          "line": 459,
+          "detail": "performs I/O (commit, execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/bulk_loader.py",
+          "clause": "L1.21.4",
+          "symbol": "dbapi_read_progress",
+          "line": 447,
+          "detail": "performs I/O (execute, fetchone) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/bulk_loader.py",
+          "clause": "L1.21.4",
+          "symbol": "dbapi_ensure_progress",
+          "line": 441,
+          "detail": "performs I/O (commit, execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/bulk_loader.py",
+          "clause": "L1.21.4",
+          "symbol": "dbapi_commit",
+          "line": 434,
+          "detail": "performs I/O (commit) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/bulk_loader.py",
+          "clause": "L1.21.4",
+          "symbol": "dbapi_delete_rows",
+          "line": 426,
+          "detail": "performs I/O (execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/bulk_loader.py",
+          "clause": "L1.21.4",
+          "symbol": "dbapi_count_rows",
+          "line": 419,
+          "detail": "performs I/O (execute, fetchone) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/bulk_loader.py",
+          "clause": "L1.21.4",
+          "symbol": "dbapi_read_rows",
+          "line": 373,
+          "detail": "performs I/O (execute, fetchall) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/bulk_loader.py",
+          "clause": "L1.21.4",
+          "symbol": "postgres_enable_fk_checks",
+          "line": 365,
+          "detail": "performs I/O (execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/bulk_loader.py",
+          "clause": "L1.21.4",
+          "symbol": "postgres_disable_fk_checks",
+          "line": 360,
+          "detail": "performs I/O (execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/bulk_loader.py",
+          "clause": "L1.21.4",
+          "symbol": "postgres_write_progress",
+          "line": 333,
+          "detail": "performs I/O (execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/bulk_loader.py",
+          "clause": "L1.21.4",
+          "symbol": "postgres_ensure_progress",
+          "line": 319,
+          "detail": "performs I/O (execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/bulk_loader.py",
+          "clause": "L1.21.4",
+          "symbol": "postgres_delete_rows",
+          "line": 306,
+          "detail": "performs I/O (execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/mirror.py",
+          "clause": "L1.21.4",
+          "symbol": "to",
+          "line": 272,
+          "detail": "performs I/O (commit, execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/mirror.py",
+          "clause": "L1.21.4",
+          "symbol": "_read",
+          "line": 168,
+          "detail": "performs I/O (execute, fetchall) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/pydantic_loader.py",
+          "clause": "L1.21.4",
+          "symbol": "_import_module_file",
+          "line": 390,
+          "detail": "performs I/O (loader.exec_module, util.spec_from_file_location) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/turso_database.py",
+          "clause": "L1.21.4",
+          "symbol": "_set_journal_mode",
+          "line": 309,
+          "detail": "performs I/O (execute, fetchone) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/writers.py",
+          "clause": "L1.21.4",
+          "symbol": "dbapi_transaction",
+          "line": 189,
+          "detail": "performs I/O (commit) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/writers.py",
+          "clause": "L1.21.4",
+          "symbol": "postgres_write_one",
+          "line": 137,
+          "detail": "performs I/O (execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/writers.py",
+          "clause": "L1.21.4",
+          "symbol": "sqlite_write_one",
+          "line": 122,
+          "detail": "performs I/O (commit, execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/writers.py",
+          "clause": "L1.21.4",
+          "symbol": "turso_write_one",
+          "line": 108,
+          "detail": "performs I/O (commit, execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/loader.py",
+          "clause": "L1.21.4",
+          "symbol": "_read_pending_decisions",
+          "line": 497,
+          "detail": "performs I/O (read_text) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/loader.py",
+          "clause": "L1.21.4",
+          "symbol": "_load_toml_file",
+          "line": 133,
+          "detail": "performs I/O (read_text) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/write_queue.py",
+          "clause": "L1.21.4",
+          "symbol": "_one_attempt",
+          "line": 464,
+          "detail": "performs I/O (execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/migration_sql.py",
+          "clause": "L1.21.4",
+          "symbol": "_clear_the_stamp",
+          "line": 718,
+          "detail": "performs I/O (commit, execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/migration_sql.py",
+          "clause": "L1.21.4",
+          "symbol": "_recover_one",
+          "line": 692,
+          "detail": "performs I/O (execute, fetchone) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/migration_sql.py",
+          "clause": "L1.21.4",
+          "symbol": "_rename_into_place",
+          "line": 642,
+          "detail": "performs I/O (commit, execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/migration_sql.py",
+          "clause": "L1.21.4",
+          "symbol": "_drop_the_leftover",
+          "line": 633,
+          "detail": "performs I/O (commit, execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/migration_sql.py",
+          "clause": "L1.21.4",
+          "symbol": "_count_tables_on_dbapi",
+          "line": 503,
+          "detail": "performs I/O (execute, fetchone) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/migration_sql.py",
+          "clause": "L1.21.4",
+          "symbol": "_read_stamp_from_dbapi",
+          "line": 372,
+          "detail": "performs I/O (execute, fetchone) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/migration_sql.py",
+          "clause": "L1.21.4",
+          "symbol": "_run_on_dbapi",
+          "line": 319,
+          "detail": "performs I/O (commit, execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/migration_sql.py",
+          "clause": "L1.21.4",
+          "symbol": "_run_on_postgres",
+          "line": 313,
+          "detail": "performs I/O (execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/inspector/turso.py",
+          "clause": "L1.21.4",
+          "symbol": "_matview_rows",
+          "line": 613,
+          "detail": "performs I/O (execute, fetchall) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/inspector/turso.py",
+          "clause": "L1.21.4",
+          "symbol": "introspect_views",
+          "line": 566,
+          "detail": "performs I/O (execute, fetchall) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/inspector/turso.py",
+          "clause": "L1.21.4",
+          "symbol": "table_exists",
+          "line": 500,
+          "detail": "performs I/O (execute, fetchone) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/inspector/turso.py",
+          "clause": "L1.21.4",
+          "symbol": "_index_ddl",
+          "line": 474,
+          "detail": "performs I/O (execute, fetchone) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/inspector/turso.py",
+          "clause": "L1.21.4",
+          "symbol": "_get_columns",
+          "line": 354,
+          "detail": "performs I/O (execute, fetchall) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/inspector/turso.py",
+          "clause": "L1.21.4",
+          "symbol": "_get_table_constraints",
+          "line": 334,
+          "detail": "performs I/O (execute, fetchall) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/inspector/sqlite.py",
+          "clause": "L1.21.4",
+          "symbol": "table_exists",
+          "line": 424,
+          "detail": "performs I/O (execute, fetchall) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/inspector/sqlite.py",
+          "clause": "L1.21.4",
+          "symbol": "_rows",
+          "line": 71,
+          "detail": "performs I/O (execute, fetchall) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_resolve_ambiguities_interactive",
+          "line": 950,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_save_the_decisions",
+          "line": 925,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_ask_about",
+          "line": 916,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_decide_a_type_change",
+          "line": 894,
+          "detail": "performs I/O (input, print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_decide_a_rename",
+          "line": 858,
+          "detail": "performs I/O (input, print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_print_the_operations",
+          "line": 799,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_print_no_changes",
+          "line": 793,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_print_drift_error",
+          "line": 720,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_connect_sqlite",
+          "line": 619,
+          "detail": "performs I/O (aiosqlite.connect) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_connect_postgresql",
+          "line": 612,
+          "detail": "performs I/O (asyncpg.connect) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_sql_to_stdout",
+          "line": 537,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_sql_to_a_file",
+          "line": 529,
+          "detail": "performs I/O (print, write_text) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_not_pushed_to_the_cloud",
+          "line": 491,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_pushed_to_the_cloud",
+          "line": 482,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_report_the_errors",
+          "line": 400,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_schema_passes",
+          "line": 381,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_print_the_warnings",
+          "line": 348,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_ask_about_overwriting",
+          "line": 315,
+          "detail": "performs I/O (input) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_refuse_without_a_terminal",
+          "line": 289,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_ask_before_applying",
+          "line": 269,
+          "detail": "performs I/O (input) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_aborted",
+          "line": 249,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_that_is_the_answer",
+          "line": 80,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/parts.py",
+          "clause": "L1.21.4",
+          "symbol": "_print_it",
+          "line": 47,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/main.py",
+          "clause": "L1.21.4",
+          "symbol": "_refuse_missing_connection",
+          "line": 499,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/main.py",
+          "clause": "L1.21.4",
+          "symbol": "_with_connection",
+          "line": 489,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/main.py",
+          "clause": "L1.21.4",
+          "symbol": "_dispatch",
+          "line": 433,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/main.py",
+          "clause": "L1.21.4",
+          "symbol": "_run_migrate_remote",
+          "line": 355,
+          "detail": "performs I/O (environ.get) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/main.py",
+          "clause": "L1.21.4",
+          "symbol": "get_connection_string",
+          "line": 236,
+          "detail": "performs I/O (environ.get) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/commands.py",
+          "clause": "L1.21.4",
+          "symbol": "with_the_models",
+          "line": 701,
+          "detail": "performs I/O (print, tempfile.TemporaryDirectory) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/commands.py",
+          "clause": "L1.21.4",
+          "symbol": "against_the_cloud",
+          "line": 709,
+          "detail": "performs I/O (print, tempfile.TemporaryDirectory) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/commands.py",
+          "clause": "L1.21.4",
+          "symbol": "show_the_differences",
+          "line": 803,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/commands.py",
+          "clause": "L1.21.4",
+          "symbol": "write_the_snapshot",
+          "line": 580,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/commands.py",
+          "clause": "L1.21.4",
+          "symbol": "against_the_database",
+          "line": 444,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/commands.py",
+          "clause": "L1.21.4",
+          "symbol": "apply_the_diff",
+          "line": 460,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/commands.py",
+          "clause": "L1.21.4",
+          "symbol": "run_the_operations",
+          "line": 478,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/commands.py",
+          "clause": "L1.21.4",
+          "symbol": "not_applied",
+          "line": 516,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/cli/commands.py",
+          "clause": "L1.21.4",
+          "symbol": "applied",
+          "line": 489,
+          "detail": "performs I/O (print) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/applier/postgresql.py",
+          "clause": "L1.21.4",
+          "symbol": "_executed_statements",
+          "line": 108,
+          "detail": "performs I/O (execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/applier/turso.py",
+          "clause": "L1.21.4",
+          "symbol": "_run_directly",
+          "line": 394,
+          "detail": "performs I/O (commit, execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/applier/turso.py",
+          "clause": "L1.21.4",
+          "symbol": "_run_rebuild",
+          "line": 294,
+          "detail": "performs I/O (commit, execute, fetchone) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/applier/turso.py",
+          "clause": "L1.21.4",
+          "symbol": "_restore_enforcement",
+          "line": 64,
+          "detail": "performs I/O (execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/applier/sqlite.py",
+          "clause": "L1.21.4",
+          "symbol": "_run_batch",
+          "line": 171,
+          "detail": "performs I/O (commit, execute, fetchone) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/applier/sqlite.py",
+          "clause": "L1.21.4",
+          "symbol": "_run_statements",
+          "line": 110,
+          "detail": "performs I/O (execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/applier/sqlite.py",
+          "clause": "L1.21.4",
+          "symbol": "_restore_enforcement",
+          "line": 54,
+          "detail": "performs I/O (execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "clause": "L1.21.4",
+          "symbol": "_enforce_foreign_keys_again",
+          "line": 529,
+          "detail": "performs I/O (execute, fetchall) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "clause": "L1.21.4",
+          "symbol": "_stop_enforcing_foreign_keys",
+          "line": 430,
+          "detail": "performs I/O (execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/reconstruction.py",
+          "clause": "L1.21.4",
+          "symbol": "_read_the_foreign_key_pragma",
+          "line": 406,
+          "detail": "performs I/O (execute, fetchone) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/pragma_compat.py",
+          "clause": "L1.21.4",
+          "symbol": "_rows",
+          "line": 39,
+          "detail": "performs I/O (execute, fetchall) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "clause": "L1.21.4",
+          "symbol": "table_constraints_of",
+          "line": 578,
+          "detail": "performs I/O (execute, fetchall) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "clause": "L1.21.4",
+          "symbol": "_index_columns",
+          "line": 512,
+          "detail": "performs I/O (execute, fetchall) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "clause": "L1.21.4",
+          "symbol": "_get_full_table_schema",
+          "line": 432,
+          "detail": "performs I/O (execute, fetchall) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "clause": "L1.21.4",
+          "symbol": "_check_the_foreign_keys",
+          "line": 280,
+          "detail": "performs I/O (execute, fetchall) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "clause": "L1.21.4",
+          "symbol": "_recreate_index",
+          "line": 267,
+          "detail": "performs I/O (execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "clause": "L1.21.4",
+          "symbol": "_disable_foreign_keys",
+          "line": 239,
+          "detail": "performs I/O (execute, fetchone) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/abstractions/table_reconstruction.py",
+          "clause": "L1.21.4",
+          "symbol": "reconstruct_table",
+          "line": 78,
+          "detail": "performs I/O (execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/query/executor.py",
+          "clause": "L1.21.4",
+          "symbol": "_execute_update",
+          "line": 615,
+          "detail": "performs I/O (commit, execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/query/executor.py",
+          "clause": "L1.21.4",
+          "symbol": "_update_turso",
+          "line": 632,
+          "detail": "performs I/O (commit, execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/query/executor.py",
+          "clause": "L1.21.4",
+          "symbol": "_update_aiosqlite",
+          "line": 626,
+          "detail": "performs I/O (commit, execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/query/executor.py",
+          "clause": "L1.21.4",
+          "symbol": "_update_asyncpg",
+          "line": 620,
+          "detail": "performs I/O (execute) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/query/executor.py",
+          "clause": "L1.21.4",
+          "symbol": "_execute_fetch_scalar",
+          "line": 587,
+          "detail": "performs I/O (execute, fetchone) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/query/executor.py",
+          "clause": "L1.21.4",
+          "symbol": "_scalar_turso",
+          "line": 601,
+          "detail": "performs I/O (execute, fetchone) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/query/executor.py",
+          "clause": "L1.21.4",
+          "symbol": "_scalar_aiosqlite",
+          "line": 596,
+          "detail": "performs I/O (execute, fetchone) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/query/executor.py",
+          "clause": "L1.21.4",
+          "symbol": "_execute_fetch_one",
+          "line": 501,
+          "detail": "performs I/O (execute, fetchone) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/query/executor.py",
+          "clause": "L1.21.4",
+          "symbol": "_fetch_one_turso",
+          "line": 522,
+          "detail": "performs I/O (execute, fetchone) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/query/executor.py",
+          "clause": "L1.21.4",
+          "symbol": "_fetch_one_aiosqlite",
+          "line": 511,
+          "detail": "performs I/O (execute, fetchone) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/query/executor.py",
+          "clause": "L1.21.4",
+          "symbol": "_execute_fetch",
+          "line": 449,
+          "detail": "performs I/O (execute, fetchall) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/query/executor.py",
+          "clause": "L1.21.4",
+          "symbol": "_fetch_turso",
+          "line": 485,
+          "detail": "performs I/O (execute, fetchall) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        },
+        {
+          "file": "src/declaro_persistum/query/executor.py",
+          "clause": "L1.21.4",
+          "symbol": "_fetch_aiosqlite",
+          "line": 459,
+          "detail": "performs I/O (execute, fetchall) and is reached by another function here",
+          "reason": "a boundary declaration on the function withheld this; the call graph inference would otherwise have reported it"
+        }
+      ],
+      "unreadable_files": 0,
+      "unexamined": 1
+    }
+  }
+}
