@@ -41,6 +41,28 @@ repos:
 
   - repo: local
     hooks:
+      # THE BEADS FLUSH, WHICH INSTALLING pre-commit DISPLACED. `.git/hooks/
+      # pre-commit` was the beads hook before today; pre-commit moved it to
+      # `pre-commit.legacy` and does not chain to it, so the flush stopped
+      # running the moment this config started working. Measured 2026-08-28.
+      #
+      # It is here rather than left as a legacy file because a hook that lives
+      # only in one clone's .git is a hook nobody else gets, and a reader of
+      # this file would not know it existed.
+      #
+      # It flushes pending issue changes into .beads/issues.jsonl before the
+      # commit, so the daemon's own auto-flush cannot fire afterwards and
+      # leave the commit without them. Both `bd` missing and the flush failing
+      # are non-fatal: this never blocks a commit on its own account, which is
+      # what the hook it replaces did.
+      - id: beads-flush
+        name: flush pending beads issues
+        entry: sh -c 'command -v bd >/dev/null 2>&1 || exit 0; bd sync --flush-only >/dev/null 2>&1 || true; git add .beads/issues.jsonl 2>/dev/null || true'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
       # THE SUITE RUNS ON PUSH, NOT ON COMMIT, and the numbers are why.
       # Measured 2026-08-28 on 3,034 tests:
       #
