@@ -146,3 +146,45 @@ def _then_refuses(ctx):
 def _then_gives_back(ctx, expected):
     assert ctx["refusal"] is None, ctx["refusal"]
     assert ctx["answer"] == expected, ctx["answer"]
+
+
+@when(parsers.parse('a temporary name is made for "{table}"'))
+def _when_temp_name(ctx, table):
+    ctx["names"] = [ms.temp_table_name(table)]
+    ctx["table"] = table
+
+
+@when(parsers.parse('two temporary names are made for "{table}"'))
+def _when_two_temp_names(ctx, table):
+    ctx["names"] = [ms.temp_table_name(table), ms.temp_table_name(table)]
+    ctx["table"] = table
+
+
+@then("it begins with the temporary prefix")
+def _then_prefixed(ctx):
+    assert ctx["names"][0].startswith(ms.TMP_PREFIX), ctx["names"][0]
+
+
+@then("it carries the table's own name")
+def _then_carries_table(ctx):
+    assert ctx["table"] in ctx["names"][0], ctx["names"][0]
+
+
+@then("they are not the same name")
+def _then_differ(ctx):
+    first, second = ctx["names"]
+    assert first != second, (
+        f"two rebuilds of the same table got the same temporary name "
+        f"({first!r}), so a retry collides with what the last attempt left"
+    )
+
+
+@then("the tail is exactly as wide as the constant says")
+def _then_width(ctx):
+    name = ctx["names"][0]
+    tail = name[len(ms.TMP_PREFIX) + len(ctx["table"]) :]
+    assert len(tail) == ms._SUFFIX_WIDTH, (
+        f"the tail {tail!r} is {len(tail)} characters and _SUFFIX_WIDTH says "
+        f"{ms._SUFFIX_WIDTH}. Orphan recovery strips that many BY POSITION, so "
+        f"a mismatch takes the wrong characters off every recovered name."
+    )

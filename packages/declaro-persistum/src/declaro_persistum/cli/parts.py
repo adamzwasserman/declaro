@@ -323,19 +323,26 @@ _WHEN_A_TERMINAL: dict[bool, Callable[[Path, Rest], Awaitable[int]]] = {
 
 
 @helper
-async def _confirm_the_overwrite(snapshot_path: Path, rest: Rest) -> int:
-    """A snapshot is already there, so overwriting it has to be agreed to."""
-    return await _WHEN_A_TERMINAL[sys.stdin.isatty()](snapshot_path, rest)
+async def _confirm_the_overwrite(snapshot_path: Path, rest: Rest, a_terminal: bool) -> int:
+    """A snapshot is already there, so overwriting it has to be agreed to.
+
+    WHETHER THERE IS A TERMINAL IS TOLD TO THIS, NOT READ BY IT. It called
+    `sys.stdin.isatty()` itself while carrying a marker saying it did no I/O,
+    which was both a lie about the function and the reason the no-terminal
+    case could only be reached by faking stdin. The CLI command reads it, next
+    to the `snapshot_path.exists()` it already reads, and this dispatches.
+    """
+    return await _WHEN_A_TERMINAL[a_terminal](snapshot_path, rest)
 
 
 @helper
-async def _nothing_to_overwrite(_snapshot_path: Path, rest: Rest) -> int:
+async def _nothing_to_overwrite(_snapshot_path: Path, rest: Rest, _a_terminal: bool) -> int:
     """No snapshot there, or --force given, so nothing needs agreeing to."""
     return await rest()
 
 
 # Whether an existing snapshot stands in the way.
-_WHEN_OVERWRITING: dict[bool, Callable[[Path, Rest], Awaitable[int]]] = {
+_WHEN_OVERWRITING: dict[bool, Callable[[Path, Rest, bool], Awaitable[int]]] = {
     True: _confirm_the_overwrite,
     False: _nothing_to_overwrite,
 }

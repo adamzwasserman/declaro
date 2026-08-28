@@ -17,6 +17,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from declaro_persistum.boundary import boundary
 from declaro_persistum.database import Database, writing
 from declaro_persistum.reporting import say
 from declaro_persistum.types import Column, Schema, Table
@@ -235,8 +236,16 @@ _WHEN_UNKNOWN_OPS: dict[bool, Callable[[list[str], list[DMLOp]], list[DMLOp]]] =
 }
 
 
+@boundary
 async def _execute_one(db: Database, table_name: str, op_type: str, data: dict[str, Any]) -> int:
-    """One statement, on its own write connection, committed before returning."""
+    """One statement, on its own write connection, committed before returning.
+
+    THE EDGE OF THIS MODULE, AND IT CARRIED NO MARKER. Everything else here
+    orders operations and decides which are safe; this is the one function
+    that opens a connection and writes. Reading it without the marker, a
+    reader has to work out for themselves which of the two it is, which is
+    the whole reason the markers exist.
+    """
     sql, params = STATEMENTS[op_type](table_name, data)
     async with writing(db) as conn:
         cursor = await conn.execute(sql, params)

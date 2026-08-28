@@ -546,10 +546,19 @@ _SUFFIX_WIDTH = 9
 
 @boundary
 def temp_table_name(table: str) -> str:
-    """The name a reconstruction copies rows into. Pure.
+    """The name a reconstruction copies rows into.
 
-    The random tail is what stops a retry colliding with a tmp table the
+    NOT PURE, WHICH THIS DOCSTRING USED TO CLAIM. It reads `uuid.uuid4()`, so
+    two calls with the same argument give different answers. That is the point:
+    the random tail is what stops a retry colliding with a tmp table the
     previous attempt left behind.
+
+    THE MARKER IS FOR THE RANDOMNESS, and the audit cannot see it. honest-check
+    grants a boundary three privileges -- I/O, catching, and reading something
+    non-deterministic -- and this uses the third. The Slop Audit reads clause 4
+    as obtaining something outside the process, and a random number is not
+    that, so it reports a declaration with no edge behind it. Both are right
+    about their own rule.
     """
     return f"{TMP_PREFIX}{table}_{uuid.uuid4().hex[:8]}"
 

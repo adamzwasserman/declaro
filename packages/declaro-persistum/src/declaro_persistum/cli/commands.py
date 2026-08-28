@@ -593,8 +593,11 @@ async def cmd_snapshot(
         finally:
             await _disconnect(connection, dialect)
 
+    # BOTH READS HAPPEN HERE, at the command, which is the edge. Whether a
+    # snapshot is in the way and whether anybody is at the terminal are both
+    # facts about the world, and the dispatcher below only decides.
     return await _WHEN_OVERWRITING[snapshot_path.exists() and not force](
-        snapshot_path, write_the_snapshot
+        snapshot_path, write_the_snapshot, sys.stdin.isatty()
     )
 
 

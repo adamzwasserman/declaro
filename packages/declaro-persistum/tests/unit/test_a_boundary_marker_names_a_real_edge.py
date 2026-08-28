@@ -96,6 +96,38 @@ SRC = ROOT / "src"
 # opened. Making a directory is as much an edge as opening the file in it, and
 # the analyzer does not count `mkdir` as I/O. The marker is true; the tool
 # cannot see it.
+# 2026-08-28: ALL 15 READ, AND ALL 15 ARE TRUE MARKERS. Three causes, none a
+# defect here, so none is declared as an exception: fifteen markers each
+# carrying a paragraph would bury the two that might one day be real.
+#
+#   A VERB THE READER DOES NOT KNOW -- 7 sites, all real I/O.
+#     introspect          connection.fetch()   asyncpg's only read verb
+#     _closed             conn.close()         twice, turso and crew
+#     _rolled_back        conn.rollback()
+#     _execute_operation  conn.rollback()
+#     replicate_once      conn.push()          pyturso replication
+#     _the_folder_for     mkdir                a directory on a disk
+#   `execute` and `commit` are recognised; these are not.
+#
+#   NON-DETERMINISM RATHER THAN I/O -- 4 sites. honest-check grants a boundary
+#   three privileges, I/O, catching and reading something non-deterministic,
+#   and REQUIRES the marker on these. Clause 4 reads a boundary as obtaining
+#   something outside the process, and a random number is not that. Both rules
+#   are right and a function cannot satisfy both, so the marker stays: one tool
+#   fails without it and the other only reports.
+#     temp_table_name  uuid4      deposit      uuid4 and a loop future
+#     _trap_signals    signal      _handler    the same, from inside it
+#
+#   I/O THROUGH A CALLABLE HELD IN A RECORD -- 3 sites, and this is the shape
+#   of the whole package. A Database carries connect, close_connection,
+#   write_one, replicate_once and refresh_once as fields; a BulkLoader carries
+#   its pragma toggles; a _Run carries the step that copies a table. The call
+#   goes through a dict, so there is no attribute access to read.
+#     _turn_fk_checks_off      loader["disable_fk_checks"](conn)
+#     _turn_fk_checks_back_on  loader["enable_fk_checks"](conn)
+#     _stream_the_table        run["copy_one_table"](...)
+#
+# Reported to the audit team on 2026-08-28.
 BASELINE = 15
 BASELINE_BUILD = "92066fd, built 2026-08-27 12:57"
 
@@ -112,7 +144,20 @@ BASELINE_BUILD = "92066fd, built 2026-08-27 12:57"
 # logged no longer earn the `@boundary` honest-check still requires of them
 # for catching, so that count went 7 to 12. One place doing I/O and twelve
 # markers that exist for another checker beats thirteen places doing I/O.
-INTERIOR_IO_BASELINE = 2
+# ZERO, AND BOTH WERE REAL. This half of the clause found two defects and no
+# false positives, which is the opposite of the other half above.
+#
+#   `_execute_one` in fk_ordering.py opened a connection and wrote, and
+#   carried no marker at all. Everything else in that module orders operations
+#   and decides which are safe; this was the one function that touches a
+#   database, and a reader had to work that out for themselves.
+#
+#   `_confirm_the_overwrite` in cli/parts.py called `sys.stdin.isatty()` while
+#   carrying `@helper`, which says it does no I/O. The command reads it now,
+#   beside the `snapshot_path.exists()` it already read, and the dispatcher
+#   only decides. That also made the no-terminal case reachable from a test
+#   without faking stdin, which is what `overwriting_a_snapshot.feature` does.
+INTERIOR_IO_BASELINE = 0
 
 _AUDIT = shutil.which("slop-audit-l1") or str(pathlib.Path.home() / ".local/bin/slop-audit-l1")
 

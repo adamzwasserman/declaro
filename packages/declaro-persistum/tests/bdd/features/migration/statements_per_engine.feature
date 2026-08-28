@@ -63,3 +63,24 @@ Feature: The statements a migration runs, spelled for each engine
   Scenario: an engine nobody wrote a placeholder for is refused
     When "_placeholder" is asked for "mysql"
     Then it refuses and names the engines it has
+
+  # THE NAME A REBUILD COPIES ROWS INTO. It carries a random tail so a retry
+  # does not collide with a table the previous attempt left behind, and the
+  # recovery rule strips that tail BY POSITION -- which is right only while the
+  # width stays what the constant says.
+
+  @precommit
+  Scenario: a temporary name carries the prefix orphan recovery looks for
+    When a temporary name is made for "users"
+    Then it begins with the temporary prefix
+    And it carries the table's own name
+
+  @precommit
+  Scenario: two temporary names for one table differ
+    When two temporary names are made for "users"
+    Then they are not the same name
+
+  @precommit
+  Scenario: the random tail is the width the recovery rule strips
+    When a temporary name is made for "users"
+    Then the tail is exactly as wide as the constant says
