@@ -403,7 +403,17 @@ async def migrating(db: Database) -> AsyncIterator[Any]:
 
 
 @helper
-async def _close_connection(conn: DbapiConnection) -> int:
+async def _close_connection(conn: Any) -> int:
+    """Close one connection and say one was closed.
+
+    ONE DEFINITION FOR BOTH CLOSERS. `release` on a replicated database had
+    the same two lines over the connection it holds, so what differed was
+    where the connection came from and not what happens to it.
+
+    THE COUNT IS WHY IT RETURNS ANYTHING. A local file carries `no_passes` as
+    its release and answers zero, so a caller reading the number can tell a
+    release that closed something from one that had nothing to close.
+    """
     await conn.close()
     return 1
 
@@ -595,8 +605,8 @@ async def _open_replicated(
 
     @helper
     async def release(_db: Database) -> int:
-        await held.close()
-        return 1
+        """The held connection, closed through the one closer."""
+        return await _close_connection(held)
 
     return Database(
         path=path,

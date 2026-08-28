@@ -132,3 +132,29 @@ Feature: When a replica decides a replication pass is worth taking
     Given a database with no primary
     When refresh is awaited
     Then nothing was sent or received
+
+  # THE THREE ANSWERS AN ENGINE WITH NOTHING TO DO STILL HAS TO GIVE. Every
+  # Database carries these as callables, so a local file cannot decline the
+  # question; it answers, and the answer is the point.
+  #
+  # THEY ARE THREE ANSWERS, NOT ONE. Zero passes ran, everything is delivered,
+  # and no pass happened are different facts of different types, and each is
+  # the do-nothing half of a different pair.
+
+  @precommit
+  Scenario: no_passes says zero passes ran
+    Given a database with no primary
+    When no_passes is asked how many passes ran
+    Then it answers 0 passes
+
+  @precommit
+  Scenario: already_delivered says everything has arrived
+    Given a database with no primary
+    When already_delivered is asked whether the primary has it all
+    Then it answers yes
+
+  @precommit
+  Scenario: nothing_happened says no pass ran
+    Given a database with no primary
+    When nothing_happened is asked to run a pass
+    Then it answers that no pass ran

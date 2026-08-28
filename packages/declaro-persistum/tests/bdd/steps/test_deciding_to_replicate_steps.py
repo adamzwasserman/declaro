@@ -266,3 +266,24 @@ def _then_nothing_moved(ctx):
 @then("it received")
 def _then_received(ctx):
     assert "received" in ctx["order"], f"refresh brought nothing down: {ctx['order']}"
+
+
+@when("no_passes is asked how many passes ran")
+def _when_no_passes(ctx):
+    ctx["answer"] = asyncio.run(no_passes(ctx["db"]))
+
+
+@when("already_delivered is asked whether the primary has it all")
+def _when_already_delivered(ctx):
+    from declaro_persistum.database import already_delivered
+
+    ctx["answer"] = asyncio.run(already_delivered(ctx["db"]))
+
+
+@then("it answers yes")
+def _then_yes(ctx):
+    assert ctx["answer"] is True, (
+        f"answered {ctx['answer']!r}; an engine with no primary has delivered "
+        f"everything vacuously, and saying otherwise makes flush loop forever "
+        f"waiting for a delivery nothing will report"
+    )

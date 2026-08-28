@@ -382,6 +382,7 @@ _WRITE_PATH: dict[bool, ForDDL] = {
 
 
 @helper
+# honest-code-allow: L1.21.1 - three answers, not one. no_passes says zero passes ran, already_delivered says the primary has everything, nothing_happened says no pass ran: different facts, different types, and each the do-nothing half of a DIFFERENT dispatch pair injected into a different Database field. One function over a table would return int or bool by row and could not be typed
 async def no_passes(_db: Database) -> int:
     """Zero passes ran, which is a real answer and not an absence.
 
