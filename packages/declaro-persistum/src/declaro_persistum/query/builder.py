@@ -523,6 +523,7 @@ def _is_star(col: str) -> bool:
     return col == "*"
 
 
+# honest-code-allow: L1.21.1 - _the_star and _as_name are already the two rows of the _QUOTING table below, which is the shape this clause asks for. Collapsing them into one function over a table would mean a table whose only column is the whole body, and would leave _QUOTING with nothing to dispatch to
 def _the_star(_col: str) -> str:
     """Every column, written the way SQL writes it."""
     return "*"
@@ -589,34 +590,50 @@ def _quote_column(col: str) -> str:
 # Query composition helpers
 
 
-def with_limit(query: Query, limit: int) -> Query:
-    """Add or replace LIMIT on a query.
+# ADDING OR REPLACING A PAGING CLAUSE, one row each. Both split the statement
+# on their keyword, kept the half before it, and appended the clause with a new
+# value. The keyword was the only thing that differed.
+#
+# THE SPLIT IS WHAT MAKES IT ADD-OR-REPLACE RATHER THAN APPEND. Calling it
+# twice must leave one clause: `... LIMIT 4 LIMIT 1` is a plausible string and
+# not a statement. Splitting needs no guard, because a query carrying no such
+# clause splits into one piece, which is the query itself.
+_PAGING: dict[str, tuple[str, str]] = {
+    "with_limit": (
+        " LIMIT ",
+        "Add or replace LIMIT on a query.\n\n"
+        "    Splitting needs no guard: a query that carries none splits into\n"
+        "    one piece, which is the query itself.\n    ",
+    ),
+    "with_offset": (
+        " OFFSET ",
+        "Add or replace OFFSET on a query.\n\n"
+        "    Anything written after the OFFSET value is dropped, which is what\n"
+        "    the split has always done.\n    ",
+    ),
+}
 
-    Splitting on " LIMIT " needs no guard: a query that carries none splits
-    into one piece, which is the query itself.
-    """
-    sql = query["sql"].split(" LIMIT ")[0]
 
-    return {
-        "sql": f"{sql} LIMIT {limit}",
-        "params": query["params"],
-        "dialect": query["dialect"],
-    }
+def _pages_by(name: str) -> Callable[[Query, int], Query]:
+    """Build the function that sets one paging clause."""
+
+    keyword, purpose = _PAGING[name]
+
+    def page(query: Query, value: int) -> Query:
+        return {
+            "sql": f"{query['sql'].split(keyword)[0]}{keyword}{value}",
+            "params": query["params"],
+            "dialect": query["dialect"],
+        }
+
+    page.__name__ = name
+    page.__qualname__ = name
+    page.__doc__ = purpose
+    return page
 
 
-def with_offset(query: Query, offset: int) -> Query:
-    """Add or replace OFFSET on a query.
-
-    Anything written after the OFFSET value is dropped, which is what the
-    split has always done.
-    """
-    sql = query["sql"].split(" OFFSET ")[0]
-
-    return {
-        "sql": f"{sql} OFFSET {offset}",
-        "params": query["params"],
-        "dialect": query["dialect"],
-    }
+with_limit = _pages_by("with_limit")
+with_offset = _pages_by("with_offset")
 
 
 def with_params(query: Query, **new_params: Any) -> Query:
