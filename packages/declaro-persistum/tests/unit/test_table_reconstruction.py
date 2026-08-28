@@ -47,9 +47,7 @@ async def test_alter_column_nullability_to_nullable():
     """Test changing column from NOT NULL to nullable."""
     async with aiosqlite.connect(":memory:") as conn:
         # Create table
-        await conn.execute(
-            "CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL)"
-        )
+        await conn.execute("CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
         await conn.execute("INSERT INTO products (id, name) VALUES (1, 'Product 1')")
         await conn.commit()
 
@@ -142,9 +140,7 @@ async def test_reconstruct_preserves_data():
     """Test that reconstruction preserves all data."""
     async with aiosqlite.connect(":memory:") as conn:
         # Create table with data
-        await conn.execute(
-            "CREATE TABLE customers (id INTEGER PRIMARY KEY, email TEXT, name TEXT)"
-        )
+        await conn.execute("CREATE TABLE customers (id INTEGER PRIMARY KEY, email TEXT, name TEXT)")
         for i in range(100):
             await conn.execute(
                 f"INSERT INTO customers (id, email, name) VALUES ({i}, 'user{i}@test.com', 'User {i}')"
@@ -157,7 +153,9 @@ async def test_reconstruct_preserves_data():
             "email": {"type": "TEXT", "nullable": False},
             "name": {"type": "TEXT", "nullable": True},
         }
-        await reconstruct_table(conn, "customers", columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+        await reconstruct_table(
+            conn, "customers", columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING
+        )
         await conn.commit()
 
         # Verify all data preserved
@@ -188,9 +186,7 @@ async def test_reconstruct_preserves_foreign_keys():
         )
 
         await conn.execute("INSERT INTO authors (id, name) VALUES (1, 'Author 1')")
-        await conn.execute(
-            "INSERT INTO books (id, title, author_id) VALUES (1, 'Book 1', 1)"
-        )
+        await conn.execute("INSERT INTO books (id, title, author_id) VALUES (1, 'Book 1', 1)")
         await conn.commit()
 
         # Reconstruct books table
@@ -199,7 +195,9 @@ async def test_reconstruct_preserves_foreign_keys():
             "title": {"type": "TEXT", "nullable": True},  # Changed to nullable
             "author_id": {"type": "INTEGER", "references": "authors.id"},
         }
-        await reconstruct_table(conn, "books", columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+        await reconstruct_table(
+            conn, "books", columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING
+        )
         await conn.commit()
 
         # Verify FK still enforced
@@ -208,9 +206,7 @@ async def test_reconstruct_preserves_foreign_keys():
         # the SQL, which is the one thing that would make this test claim FK
         # enforcement survived reconstruction when it had not been checked.
         with pytest.raises(sqlite3.IntegrityError, match="FOREIGN KEY constraint failed"):
-            await conn.execute(
-                "INSERT INTO books (id, title, author_id) VALUES (2, 'Book 2', 999)"
-            )
+            await conn.execute("INSERT INTO books (id, title, author_id) VALUES (2, 'Book 2', 999)")
             await conn.commit()
 
 
@@ -247,7 +243,9 @@ async def test_reconstruct_with_composite_primary_key():
             "b": {"type": "INTEGER", "primary_key": True},
             "data": {"type": "TEXT", "nullable": False},
         }
-        await reconstruct_table(conn, "composite_pk", columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+        await reconstruct_table(
+            conn, "composite_pk", columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING
+        )
         await conn.commit()
 
         # Verify composite PK preserved

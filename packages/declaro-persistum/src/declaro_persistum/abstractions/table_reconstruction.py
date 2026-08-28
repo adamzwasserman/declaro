@@ -128,9 +128,7 @@ async def reconstruct_table(
         # and enforcement stays reported as off, which is what the rest of
         # this function assumed when it skipped the read.
         state_read = [
-            await _disable_foreign_keys(connection)
-            for managed in [manage_foreign_keys]
-            if managed
+            await _disable_foreign_keys(connection) for managed in [manage_foreign_keys] if managed
         ]
         fk_enabled = [*state_read, 0][0]
 
@@ -145,9 +143,7 @@ async def reconstruct_table(
         # 2026-08-19, the third constraint kind this rebuild lost after the
         # unique and the foreign key.
         table_constraints = await table_constraints_of(connection, table_name)
-        create_sql = _generate_create_table_sql(
-            temp_table, new_columns, table_constraints
-        )
+        create_sql = _generate_create_table_sql(temp_table, new_columns, table_constraints)
         say(__name__, "debug", f"Creating temp table: {create_sql}")
         await connection.execute(create_sql)
 
@@ -155,22 +151,16 @@ async def reconstruct_table(
         # when a copy is wanted, and a schema sharing no column with it gets
         # the warning instead of an INSERT naming nothing.
         stored_columns = [
-            await table_column_names(connection, table_name)
-            for wanted in [preserve_data]
-            if wanted
+            await table_column_names(connection, table_name) for wanted in [preserve_data] if wanted
         ]
-        shared_columns = [
-            columns_to_copy(stored, list(new_columns)) for stored in stored_columns
-        ]
+        shared_columns = [columns_to_copy(stored, list(new_columns)) for stored in stored_columns]
         _copied = [
             await copy_the_shared_columns(connection, table_name, temp_table, pairs)
             for pairs in shared_columns
             if pairs
         ]
         _warned = [
-            _warn_that_no_column_is_shared(table_name)
-            for pairs in shared_columns
-            if not pairs
+            _warn_that_no_column_is_shared(table_name) for pairs in shared_columns if not pairs
         ]
 
         # 5. Get indexes and constraints to recreate
@@ -249,31 +239,26 @@ async def _disable_foreign_keys(connection: Any) -> int:
     return enabled
 
 
-
-
 def _warn_that_no_column_is_shared(table_name: str) -> None:
     """Nothing is in both tables, so the rebuilt table comes out empty.
 
     An INSERT naming no column is not SQL, so the empty case is a warning
     rather than a statement.
     """
-    say(__name__, "warning",
-        f"No common columns between old and new schema for '{table_name}'. "
-        f"No data will be copied."
+    say(
+        __name__,
+        "warning",
+        f"No common columns between old and new schema for '{table_name}'. No data will be copied.",
     )
 
 
 @boundary
-async def _recreate_index(
-    connection: Any, index_sql: str, temp_table: str, table_name: str
-) -> str:
+async def _recreate_index(connection: Any, index_sql: str, temp_table: str, table_name: str) -> str:
     """One index, reissued against the table under its final name."""
     recreate_sql = index_sql.replace(f'"{temp_table}"', f'"{table_name}"')
     say(__name__, "debug", f"Recreating index: {recreate_sql}")
     await connection.execute(recreate_sql)
     return recreate_sql
-
-
 
 
 @boundary
@@ -322,8 +307,11 @@ async def alter_column_property(
     changing = _the_column_to_change(table_name, column_name, columns)
     changed = {**columns, column_name: _HOW_TO_SET[prop](changing, value)}
     await reconstruct_table(
-        connection, table_name, changed,
-        preserve_data=NOTHING, manage_foreign_keys=NOTHING,
+        connection,
+        table_name,
+        changed,
+        preserve_data=NOTHING,
+        manage_foreign_keys=NOTHING,
     )
 
 
@@ -355,13 +343,13 @@ async def alter_column_default(
     # asks for that value, so the two are separate functions.
     changed = {
         **columns,
-        column_name: _WHEN_A_DEFAULT_IS_GIVEN[default_value is not None](
-            changing, default_value
-        ),
+        column_name: _WHEN_A_DEFAULT_IS_GIVEN[default_value is not None](changing, default_value),
     }
 
     # Reconstruct table
-    await reconstruct_table(connection, table_name, changed, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+    await reconstruct_table(
+        connection, table_name, changed, preserve_data=NOTHING, manage_foreign_keys=NOTHING
+    )
 
 
 @helper
@@ -383,9 +371,7 @@ _WHEN_A_DEFAULT_IS_GIVEN: dict[bool, Callable[[Column, str | None], Column]] = {
 
 
 @helper
-def _no_such_column(
-    table_name: str, column_name: str, _columns: dict[str, Column]
-) -> Column:
+def _no_such_column(table_name: str, column_name: str, _columns: dict[str, Column]) -> Column:
     """A column this table does not have, named so the caller finds it.
 
     BEFORE ANYTHING IS DROPPED. The rebuild these three functions call drops
@@ -396,36 +382,26 @@ def _no_such_column(
 
 
 @helper
-def _the_named_column(
-    _table_name: str, column_name: str, columns: dict[str, Column]
-) -> Column:
+def _the_named_column(_table_name: str, column_name: str, columns: dict[str, Column]) -> Column:
     """The definition the table holds for this column."""
     return columns[column_name]
 
 
-_WHEN_THE_COLUMN_EXISTS: dict[
-    bool, Callable[[str, str, dict[str, Column]], Column]
-] = {
+_WHEN_THE_COLUMN_EXISTS: dict[bool, Callable[[str, str, dict[str, Column]], Column]] = {
     True: _the_named_column,
     False: _no_such_column,
 }
 
 
 @helper
-def _the_column_to_change(
-    table_name: str, column_name: str, columns: dict[str, Column]
-) -> Column:
+def _the_column_to_change(table_name: str, column_name: str, columns: dict[str, Column]) -> Column:
     """The column about to be altered, or a refusal naming it."""
-    return _WHEN_THE_COLUMN_EXISTS[column_name in columns](
-        table_name, column_name, columns
-    )
+    return _WHEN_THE_COLUMN_EXISTS[column_name in columns](table_name, column_name, columns)
 
 
 # =============================================================================
 # Internal Helper Functions
 # =============================================================================
-
-
 
 
 @boundary
@@ -604,8 +580,6 @@ async def table_constraints_of(connection: Any, table_name: str) -> dict[str, An
     }
 
 
-
-
 @helper
 def _generate_create_table_sql(
     table_name: str,
@@ -635,9 +609,7 @@ def _generate_create_table_sql(
     # constraint differently from the create that first made it.
     from declaro_persistum.applier.spelling import constraint_clause
 
-    pk_columns = [
-        col_name for col_name, col_def in columns.items() if col_def.get("primary_key")
-    ]
+    pk_columns = [col_name for col_name, col_def in columns.items() if col_def.get("primary_key")]
     col_defs: list[str] = [
         # A key over one column is written on that column; a key over several
         # cannot be, so it becomes a clause of its own below.
@@ -646,10 +618,7 @@ def _generate_create_table_sql(
             for col_name, col_def in columns.items()
         ],
         *[_composite_primary_key(keys) for keys in [pk_columns] if len(keys) > 1],
-        *[
-            constraint_clause(name, definition)
-            for name, definition in (constraints or {}).items()
-        ],
+        *[constraint_clause(name, definition) for name, definition in (constraints or {}).items()],
     ]
 
     columns_sql = ",\n    ".join(col_defs)

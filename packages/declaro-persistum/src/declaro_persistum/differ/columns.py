@@ -507,19 +507,13 @@ def _compute_column_alterations(
         "type": same_type(current.get("type"), target.get("type"), dialect),
         "nullable": current_nullable == target_nullable,
         "default": same_default(current_default, target_default, dialect),
-        **{
-            prop: _same_constraint(prop, current.get(prop), target.get(prop))
-            for prop in compared
-        },
+        **{prop: _same_constraint(prop, current.get(prop), target.get(prop)) for prop in compared},
     }
     recorded: dict[str, Any] = {
         "type": {"from": current.get("type"), "to": target.get("type")},
         "nullable": {"from": current_nullable, "to": target_nullable},
         "default": {"from": current_default, "to": target_default},
-        **{
-            prop: {"from": current.get(prop), "to": target.get(prop)}
-            for prop in compared
-        },
+        **{prop: {"from": current.get(prop), "to": target.get(prop)} for prop in compared},
     }
     changes: dict[str, Any] = {
         prop: recorded[prop] for prop, settled in agreed.items() if not settled
@@ -588,9 +582,7 @@ def same_default(current: Any, target: Any, dialect: Dialect) -> bool:
     whether `true` and `1` are the same default on SQLite, which stores
     booleans as integers. Not measured, so not folded.
     """
-    return _WHEN_EITHER_IS_ABSENT[current is None or target is None](
-        current, target, dialect
-    )
+    return _WHEN_EITHER_IS_ABSENT[current is None or target is None](current, target, dialect)
 
 
 @helper
@@ -665,6 +657,6 @@ def _column_key_operations(
     """The operations one column's foreign key needs, if any."""
     current_ref = current_col.get("references")
     target_ref = target_col.get("references")
-    return _COLUMN_KEY[
-        (bool(current_ref), bool(target_ref), current_ref == target_ref)
-    ](table_name, col_name, current_col, target_col, changed_action)
+    return _COLUMN_KEY[(bool(current_ref), bool(target_ref), current_ref == target_ref)](
+        table_name, col_name, current_col, target_col, changed_action
+    )

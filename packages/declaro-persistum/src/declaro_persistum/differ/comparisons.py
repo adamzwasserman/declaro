@@ -8,7 +8,6 @@ one division that leaves the dependency running one way.
 Every name is re-exported from `core`, so nothing that imports from there
 had to change."""
 
-
 import re
 from collections.abc import Callable
 from itertools import accumulate
@@ -57,9 +56,7 @@ def _wraps_the_whole(text: str) -> bool:
     expression and taking them off would change what it says.
     """
     return (
-        text.startswith("(")
-        and text.endswith(")")
-        and _first_balanced(text) in (-1, len(text) - 1)
+        text.startswith("(") and text.endswith(")") and _first_balanced(text) in (-1, len(text) - 1)
     )
 
 
@@ -200,9 +197,7 @@ def _comparable(value: Any, spelled: dict[str, str]) -> Any:
     that reaches one argument and not the other is the shape all three had.
     """
     return applied_to_text(
-        lambda text: _canonical_spacing(
-            spelled.get(text.strip().lower().replace(" ", ""), text)
-        ),
+        lambda text: _canonical_spacing(spelled.get(text.strip().lower().replace(" ", ""), text)),
         value,
     )
 
@@ -262,23 +257,19 @@ def _same_spelling(current: Any, target: Any, dialect: Dialect) -> bool:
     current_number = _as_number(current)
     target_number = _as_number(target)
 
-    return _WHEN_BOTH_ARE_NUMBERS[
-        current_number is not None and target_number is not None
-    ](current, target, current_number, target_number)
+    return _WHEN_BOTH_ARE_NUMBERS[current_number is not None and target_number is not None](
+        current, target, current_number, target_number
+    )
 
 
 @helper
-def _same_number(
-    _current: Any, _target: Any, current_number: Any, target_number: Any
-) -> bool:
+def _same_number(_current: Any, _target: Any, current_number: Any, target_number: Any) -> bool:
     """Both denote a number, so the numbers decide it."""
     return bool(current_number == target_number)
 
 
 @helper
-def _same_keyword(
-    current: Any, target: Any, _current_number: Any, _target_number: Any
-) -> bool:
+def _same_keyword(current: Any, target: Any, _current_number: Any, _target_number: Any) -> bool:
     """At least one is opaque, so the two spellings are compared verbatim.
 
     EACH SIDE FOLDED ON ITS OWN, THEN COMPARED. This asked whether both were
@@ -287,8 +278,7 @@ def _same_keyword(
     has been fixed for.
     """
     return bool(
-        applied_to_text(_folded_keyword, current)
-        == applied_to_text(_folded_keyword, target)
+        applied_to_text(_folded_keyword, current) == applied_to_text(_folded_keyword, target)
     )
 
 
@@ -368,9 +358,9 @@ def _replaced_key(
     changed_action: bool,
 ) -> list[Operation]:
     """The key points somewhere else now, so the old one goes and a new one comes."""
-    return _dropped_key(
+    return _dropped_key(table_name, col_name, current_col, target_col, changed_action) + _added_key(
         table_name, col_name, current_col, target_col, changed_action
-    ) + _added_key(table_name, col_name, current_col, target_col, changed_action)
+    )
 
 
 @helper
@@ -398,11 +388,7 @@ def _restated_key(
             "details": {
                 "column": col_name,
                 "references": target_col.get("references"),
-                **{
-                    key: target_col[key]
-                    for key in ("on_delete", "on_update")
-                    if key in target_col
-                },
+                **{key: target_col[key] for key in ("on_delete", "on_update") if key in target_col},
             },
         },
     ]
@@ -419,9 +405,7 @@ def _kept_key(
     return []
 
 
-_WHEN_ACTION_CHANGED: dict[
-    bool, Callable[[str, str, Column, Column], list[Operation]]
-] = {
+_WHEN_ACTION_CHANGED: dict[bool, Callable[[str, str, Column, Column], list[Operation]]] = {
     True: _restated_key,
     False: _kept_key,
 }
@@ -436,9 +420,7 @@ def _same_reference(
     changed_action: bool,
 ) -> list[Operation]:
     """The key points where it did, so only its actions can have changed."""
-    return _WHEN_ACTION_CHANGED[changed_action](
-        table_name, col_name, current_col, target_col
-    )
+    return _WHEN_ACTION_CHANGED[changed_action](table_name, col_name, current_col, target_col)
 
 
 # WHAT THE TWO SIDES SAY ABOUT ONE COLUMN'S FOREIGN KEY, as the three facts
@@ -600,9 +582,7 @@ _WHEN_BOTH_ARE_MAPPINGS: dict[bool, Callable[[Any, Any], bool]] = {
 @helper
 def _canonical_expression(expression: Any) -> Any:
     """One spelling for expressions the engines write differently."""
-    return applied_to_text(
-        lambda text: _canonical_spacing(text).replace("<>", "!="), expression
-    )
+    return applied_to_text(lambda text: _canonical_spacing(text).replace("<>", "!="), expression)
 
 
 @helper
@@ -675,9 +655,7 @@ def _compared_constraints(
 
 
 @helper
-def _replaced_constraint(
-    table_name: str, const_name: str, definition: Any
-) -> list[Operation]:
+def _replaced_constraint(table_name: str, const_name: str, definition: Any) -> list[Operation]:
     """A constraint the two sides spell differently: the old goes, the new comes."""
     return [
         {

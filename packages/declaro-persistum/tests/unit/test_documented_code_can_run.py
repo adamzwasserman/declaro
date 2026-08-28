@@ -152,7 +152,8 @@ def _absent_names(source: str, known: set[str]) -> set[str]:
             local.add(node.arg)
 
     called = {
-        n for node in ast.walk(tree)
+        n
+        for node in ast.walk(tree)
         if isinstance(node, ast.Call) and (n := getattr(node.func, "id", None))
     }
     return (claimed | (called - local - set(dir(builtins)))) - known
@@ -185,7 +186,8 @@ def test_the_gate_can_see_the_samples_at_all() -> None:
     """A gate that parses nothing passes forever."""
     blocks = sum(
         len(re.findall(r"```python\n(.*?)```", p.read_text(), re.S))
-        for p in _documents() if p.exists()
+        for p in _documents()
+        if p.exists()
     )
     assert blocks > 60, f"found only {blocks} python blocks across the docs"
 
@@ -297,18 +299,14 @@ def test_no_sample_calls_a_function_the_wrong_way() -> None:
         required = {
             n
             for n, p in params.items()
-            if p.default is p.empty
-            and p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
+            if p.default is p.empty and p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
         }
         missing = required - given - set(list(params)[: len(node.args)])
         if unknown or missing:
             wrong.append(
-                f"{path.name}: {name}() unknown={sorted(unknown)} "
-                f"missing={sorted(missing)}"
+                f"{path.name}: {name}() unknown={sorted(unknown)} missing={sorted(missing)}"
             )
-    assert not wrong, "documented calls that cannot run:\n  " + "\n  ".join(
-        sorted(set(wrong))
-    )
+    assert not wrong, "documented calls that cannot run:\n  " + "\n  ".join(sorted(set(wrong)))
 
 
 def test_no_sample_passes_a_value_outside_its_vocabulary() -> None:

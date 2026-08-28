@@ -177,8 +177,7 @@ class TestStripForeignKeys:
     def test_references_on_delete_and_on_update_are_removed(self):
         schema = {
             "posts": _t(
-                author=_col(references="users.id", on_delete="CASCADE",
-                            on_update="RESTRICT")
+                author=_col(references="users.id", on_delete="CASCADE", on_update="RESTRICT")
             )
         }
         col = strip_foreign_keys(schema)["posts"]["columns"]["author"]
@@ -187,11 +186,7 @@ class TestStripForeignKeys:
         assert "on_update" not in col
 
     def test_every_other_column_attribute_survives(self):
-        schema = {
-            "posts": _t(
-                author=_col(references="users.id", nullable=False, type="integer")
-            )
-        }
+        schema = {"posts": _t(author=_col(references="users.id", nullable=False, type="integer"))}
         col = strip_foreign_keys(schema)["posts"]["columns"]["author"]
         assert col == {"type": "integer", "nullable": False}
 
@@ -282,9 +277,7 @@ class TestSortOperations:
             ("posts", "delete", {"id": 4}),
         ]
         out = sort_operations(CHAIN, ops)
-        assert sorted(out, key=lambda o: o[2]["id"]) == sorted(
-            ops, key=lambda o: o[2]["id"]
-        )
+        assert sorted(out, key=lambda o: o[2]["id"]) == sorted(ops, key=lambda o: o[2]["id"])
 
 
 class TestStatements:
@@ -308,9 +301,7 @@ class TestStatements:
         assert params == (7, "a")
 
     def test_an_update_splits_the_set_clause_from_the_where_clause(self):
-        assert STATEMENTS["update"](
-            "users", {"name": "ada", "_where": {"id": 7}}
-        ) == (
+        assert STATEMENTS["update"]("users", {"name": "ada", "_where": {"id": 7}}) == (
             'UPDATE "users" SET "name" = ? WHERE "id" = ?',
             ("ada", 7),
         )
@@ -345,12 +336,9 @@ class TestExecuteFkOrdered:
             busy_timeout_s=5.0,
         )
         async with reading(db) as conn:
+            await conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY)")
             await conn.execute(
-                'CREATE TABLE users (id INTEGER PRIMARY KEY)'
-            )
-            await conn.execute(
-                'CREATE TABLE posts (id INTEGER PRIMARY KEY, '
-                'author INTEGER REFERENCES users(id))'
+                "CREATE TABLE posts (id INTEGER PRIMARY KEY, author INTEGER REFERENCES users(id))"
             )
             await conn.execute("PRAGMA foreign_keys = ON")
             await conn.commit()

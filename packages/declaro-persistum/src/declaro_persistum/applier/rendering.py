@@ -84,9 +84,7 @@ def _alter_type(table: str, column: str, change: Any, dialect: Dialect) -> list[
 
 
 @helper
-def _alter_nullable(
-    table: str, column: str, change: Any, dialect: Dialect
-) -> list[str]:
+def _alter_nullable(table: str, column: str, change: Any, dialect: Dialect) -> list[str]:
     """Whether the column accepts NULL, which is two different statements."""
     row = _NULLABILITY[bool(_changed_to(change))]
     return render(row, TEMPLATES[dialect][row], table=table, column=column)
@@ -99,18 +97,14 @@ _NULLABILITY: dict[bool, str] = {
 
 
 @helper
-def _alter_default(
-    table: str, column: str, change: Any, dialect: Dialect
-) -> list[str]:
+def _alter_default(table: str, column: str, change: Any, dialect: Dialect) -> list[str]:
     """A default set, or a default removed."""
     value = _changed_to(change)
     return _DEFAULT_CHANGE[value is None](table, column, value, dialect)
 
 
 @helper
-def _drop_the_default(
-    table: str, column: str, _value: Any, dialect: Dialect
-) -> list[str]:
+def _drop_the_default(table: str, column: str, _value: Any, dialect: Dialect) -> list[str]:
     """The column has no default any more."""
     return render(
         "alter_column:no_default",
@@ -121,9 +115,7 @@ def _drop_the_default(
 
 
 @helper
-def _set_the_default(
-    table: str, column: str, value: Any, dialect: Dialect
-) -> list[str]:
+def _set_the_default(table: str, column: str, value: Any, dialect: Dialect) -> list[str]:
     """The column's new default, written as the declaration spells it."""
     return render(
         "alter_column:default",
@@ -200,9 +192,7 @@ def _refuse_empty_alter_column(
     )
 
 
-_WHEN_ALTERED: dict[
-    bool, Callable[[str, str, dict[str, Any], list[str]], list[str]]
-] = {
+_WHEN_ALTERED: dict[bool, Callable[[str, str, dict[str, Any], list[str]], list[str]]] = {
     True: _the_alter_statements,
     False: _refuse_empty_alter_column,
 }
@@ -231,9 +221,7 @@ def _postgresql_alter_column(operation: Operation, dialect: Dialect) -> list[str
 
 
 @helper
-def _added_check(
-    table: str, name: str, definition: dict[str, Any], dialect: Dialect
-) -> list[str]:
+def _added_check(table: str, name: str, definition: dict[str, Any], dialect: Dialect) -> list[str]:
     """A CHECK, added after the fact."""
     return render(
         "add_constraint:check",
@@ -245,9 +233,7 @@ def _added_check(
 
 
 @helper
-def _added_unique(
-    table: str, name: str, definition: dict[str, Any], dialect: Dialect
-) -> list[str]:
+def _added_unique(table: str, name: str, definition: dict[str, Any], dialect: Dialect) -> list[str]:
     """A UNIQUE over the columns the declaration names."""
     return render(
         "add_constraint:unique",
@@ -258,9 +244,7 @@ def _added_unique(
     )
 
 
-_ADDED_CONSTRAINT: dict[
-    str, Callable[[str, str, dict[str, Any], Dialect], list[str]]
-] = {
+_ADDED_CONSTRAINT: dict[str, Callable[[str, str, dict[str, Any], Dialect], list[str]]] = {
     "check": _added_check,
     "unique": _added_unique,
 }
@@ -279,9 +263,7 @@ def _refuse_added_constraint(
     _table: str, _name: str, kind: Any, _definition: dict[str, Any], _dialect: Dialect
 ) -> list[str]:
     """A kind this engine does not write, named so the author finds it."""
-    raise ValueError(
-        f"Unknown constraint type: {kind}. Written here: {sorted(_ADDED_CONSTRAINT)}."
-    )
+    raise ValueError(f"Unknown constraint type: {kind}. Written here: {sorted(_ADDED_CONSTRAINT)}.")
 
 
 _KNOWN_ADDED_CONSTRAINT: dict[
@@ -312,9 +294,7 @@ def _postgresql_add_constraint(operation: Operation, dialect: Dialect) -> list[s
 
 
 @helper
-def _postgresql_drop_foreign_key(
-    operation: Operation, dialect: Dialect
-) -> list[str]:
+def _postgresql_drop_foreign_key(operation: Operation, dialect: Dialect) -> list[str]:
     """THE CONVENTION NAME IS ONLY HALF OF WHAT EXISTS.
 
     A key we created carries `fk_{table}_{column}_{ref_table}`. A key created
@@ -388,9 +368,7 @@ def _drop_materialized_view(operation: Operation, dialect: Dialect) -> list[str]
 
 
 @helper
-def _emulated_materialized_view(
-    operation: Operation, _dialect: Dialect
-) -> list[str]:
+def _emulated_materialized_view(operation: Operation, _dialect: Dialect) -> list[str]:
     """The table, its triggers, and its registry row."""
     from declaro_persistum.applier.sqlite import generate_create_view
 
@@ -398,9 +376,7 @@ def _emulated_materialized_view(
 
 
 @helper
-def _drop_emulated_materialized_view(
-    operation: Operation, _dialect: Dialect
-) -> list[str]:
+def _drop_emulated_materialized_view(operation: Operation, _dialect: Dialect) -> list[str]:
     """The table standing in for the view, and its registry row."""
     from declaro_persistum.applier.sqlite import generate_drop_view
 
@@ -415,9 +391,7 @@ def _native_materialized_view(operation: Operation, dialect: Dialect) -> list[st
 
 
 @helper
-def _drop_native_materialized_view(
-    operation: Operation, dialect: Dialect
-) -> list[str]:
+def _drop_native_materialized_view(operation: Operation, dialect: Dialect) -> list[str]:
     """DROP MATERIALIZED VIEW, which is a different statement from DROP VIEW.
 
     Emitting DROP VIEW against a materialized one is refused with
@@ -453,17 +427,13 @@ _DROP_VIEW: dict[bool, Composer] = {
 @helper
 def _create_view(operation: Operation, dialect: Dialect) -> list[str]:
     """Whether the view holds its rows decides everything about it."""
-    return _CREATE_VIEW[bool(operation["details"].get("materialized"))](
-        operation, dialect
-    )
+    return _CREATE_VIEW[bool(operation["details"].get("materialized"))](operation, dialect)
 
 
 @helper
 def _drop_view(operation: Operation, dialect: Dialect) -> list[str]:
     """The same question, asked again on the way out."""
-    return _DROP_VIEW[bool(operation["details"].get("materialized"))](
-        operation, dialect
-    )
+    return _DROP_VIEW[bool(operation["details"].get("materialized"))](operation, dialect)
 
 
 # =============================================================================

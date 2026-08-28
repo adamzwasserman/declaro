@@ -63,9 +63,7 @@ async def apply(
     docstring of the package's main entry point, and nothing could see it.
     """
     applier = for_dialect(APPLIERS, dialect, "Appliers")
-    return await applier(
-        connection, operations, execution_order, dry_run=dry_run
-    )
+    return await applier(connection, operations, execution_order, dry_run=dry_run)
 
 
 # The per-operation renderer is what varies. The loop over `execution_order`

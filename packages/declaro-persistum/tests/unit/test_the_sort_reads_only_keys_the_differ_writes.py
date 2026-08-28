@@ -54,9 +54,7 @@ USERS = {
 
 def _every_operation() -> dict[str, dict]:
     """One real operation of each type, from the differ rather than by hand."""
-    with_email = {
-        "users": {"columns": {**USERS["columns"], "email": {"type": "text"}}}
-    }
+    with_email = {"users": {"columns": {**USERS["columns"], "email": {"type": "text"}}}}
     with_index = {"users": {**USERS, "indexes": {"ix_n": {"columns": ["name"]}}}}
     posts_plain = {
         "users": USERS,
@@ -139,9 +137,7 @@ def _every_operation() -> dict[str, dict]:
             {
                 "users": {
                     **USERS,
-                    "constraints": {
-                        "ck2": {"type": "check", "expression": "name <> 'x'"}
-                    },
+                    "constraints": {"ck2": {"type": "check", "expression": "name <> 'x'"}},
                 }
             },
         ),
@@ -183,9 +179,7 @@ def test_the_sort_still_reads_the_keys_this_file_knows_about() -> None:
         "index",
         "name",
         "references",
-    ], (
-        f"the sort reads {READS}; this file was written for a different set"
-    )
+    ], f"the sort reads {READS}; this file was written for a different set"
 
 
 def test_only_a_key_the_differ_may_omit_is_read_with_a_default() -> None:
@@ -201,9 +195,7 @@ def test_only_a_key_the_differ_may_omit_is_read_with_a_default() -> None:
     `depends_on` is the exception and is genuinely optional: a view that
     selects from nothing declares no dependencies.
     """
-    with_default = sorted(
-        set(re.findall(r'\["details"\]\.get\(\s*"([a-z_]+)"\s*,', _SOURCE))
-    )
+    with_default = sorted(set(re.findall(r'\["details"\]\.get\(\s*"([a-z_]+)"\s*,', _SOURCE)))
 
     assert with_default == ["depends_on"], (
         f"the sort supplies a default for {with_default}. Every key but "

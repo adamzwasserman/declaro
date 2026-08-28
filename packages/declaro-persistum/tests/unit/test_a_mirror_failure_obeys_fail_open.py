@@ -98,9 +98,7 @@ async def test_a_read_still_answers_when_the_mirror_may_fail_open() -> None:
     """fail_open=True means the cutover must not take production down."""
     primary, replica = await _pair(replica_has_the_table=False)
     try:
-        rows, after = await compare(
-            _mirror(primary, replica, fail_open=True), SELECT, ()
-        )
+        rows, after = await compare(_mirror(primary, replica, fail_open=True), SELECT, ())
 
         assert rows == [(1, "first")], rows
         assert after["divergences"] == [], after["divergences"]
@@ -118,9 +116,7 @@ async def test_a_disagreement_is_recorded_rather_than_raised() -> None:
     primary, replica = await _pair(replica_has_the_table=True)
     await _run(replica, 'UPDATE "widgets" SET name = ? WHERE id = ?', ("other", 1))
     try:
-        rows, after = await compare(
-            _mirror(primary, replica, fail_open=False), SELECT, ()
-        )
+        rows, after = await compare(_mirror(primary, replica, fail_open=False), SELECT, ())
 
         assert rows == [(1, "first")], rows
         assert len(after["divergences"]) == 1, after["divergences"]
@@ -134,9 +130,7 @@ async def test_agreement_records_nothing() -> None:
     """The control. A mirror that agrees must stay quiet."""
     primary, replica = await _pair(replica_has_the_table=True)
     try:
-        rows, after = await compare(
-            _mirror(primary, replica, fail_open=False), SELECT, ()
-        )
+        rows, after = await compare(_mirror(primary, replica, fail_open=False), SELECT, ())
 
         assert rows == [(1, "first")] and after["divergences"] == []
     finally:
@@ -179,9 +173,7 @@ async def test_a_write_raises_when_the_mirror_must_not_fail_open() -> None:
     primary, replica = await _pair(replica_has_the_table=False)
     try:
         with pytest.raises(Exception) as caught:
-            await parallel_write(
-                _mirror(primary, replica, fail_open=False), INSERT, (2, "second")
-            )
+            await parallel_write(_mirror(primary, replica, fail_open=False), INSERT, (2, "second"))
 
         assert "widgets" in str(caught.value), caught.value
     finally:
@@ -217,9 +209,7 @@ async def test_the_primary_keeps_the_write_the_replica_refused() -> None:
     """
     primary, replica = await _pair(replica_has_the_table=False)
     try:
-        await parallel_write(
-            _mirror(primary, replica, fail_open=True), INSERT, (2, "second")
-        )
+        await parallel_write(_mirror(primary, replica, fail_open=True), INSERT, (2, "second"))
 
         async with writing(primary) as connection:
             cursor = await connection.execute(SELECT)

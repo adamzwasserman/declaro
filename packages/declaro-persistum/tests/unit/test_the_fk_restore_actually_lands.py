@@ -45,8 +45,7 @@ async def _seeded(path: pathlib.Path):
     await conn.execute("PRAGMA foreign_keys = ON")
     await conn.execute("CREATE TABLE parent (id INTEGER PRIMARY KEY)")
     await conn.execute(
-        "CREATE TABLE child (id INTEGER PRIMARY KEY, pid INTEGER "
-        "REFERENCES parent(id), note TEXT)"
+        "CREATE TABLE child (id INTEGER PRIMARY KEY, pid INTEGER REFERENCES parent(id), note TEXT)"
     )
     await conn.execute("INSERT INTO parent VALUES (1)")
     await conn.execute("INSERT INTO child VALUES (1, 1, 'x')")
@@ -128,7 +127,10 @@ async def test_a_reconstruction_leaves_the_restore_to_whoever_commits(
                 "id": {"type": "INTEGER", "primary_key": True},
                 "pid": {"type": "INTEGER"},
                 "note": {"type": "TEXT", "nullable": False},
-            }, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+            },
+            preserve_data=NOTHING,
+            manage_foreign_keys=NOTHING,
+        )
 
         assert await _enforcement(conn) == 0, (
             "`reconstruct_table` restored enforcement on its own. If it can "
@@ -163,7 +165,10 @@ async def test_a_failed_reconstruction_also_leaves_enforcement_on(
             await reconstruct_table(
                 conn,
                 "child",
-                {"id": {"type": "NOT A REAL TYPE ("}}, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+                {"id": {"type": "NOT A REAL TYPE ("}},
+                preserve_data=NOTHING,
+                manage_foreign_keys=NOTHING,
+            )
 
         assert await _enforcement(conn) == 1, (
             "a failed reconstruction left enforcement off, so a caller that "
@@ -196,11 +201,12 @@ async def test_a_reconstruction_that_managed_nothing_changes_nothing(
                 "pid": {"type": "INTEGER"},
                 "note": {"type": "TEXT"},
             },
-            manage_foreign_keys=False, preserve_data=NOTHING)
+            manage_foreign_keys=False,
+            preserve_data=NOTHING,
+        )
 
         assert await _enforcement(conn) == 0, (
-            "the reconstruction turned enforcement on despite being told not "
-            "to manage it"
+            "the reconstruction turned enforcement on despite being told not to manage it"
         )
     finally:
         await conn.close()

@@ -100,15 +100,11 @@ def _given_odd_type(ctx, tmp_path):
 
 @given("a folder holding both a bad reference and an unrecognised type")
 def _given_both(ctx, tmp_path):
-    ctx["folder"] = _a_folder_holding(
-        tmp_path, orders=_BAD_REFERENCE, gadgets=_ODD_TYPE
-    )
+    ctx["folder"] = _a_folder_holding(tmp_path, orders=_BAD_REFERENCE, gadgets=_ODD_TYPE)
 
 
 def _validate(ctx, capsys, *, strict: bool, verbose: bool) -> None:
-    ctx["code"] = cmd_validate(
-        schema_dir=ctx["folder"], strict=strict, verbose=verbose
-    )
+    ctx["code"] = cmd_validate(schema_dir=ctx["folder"], strict=strict, verbose=verbose)
     out = capsys.readouterr()
     ctx["printed"] = out.out + out.err
 
@@ -130,9 +126,7 @@ def _when_validate_verbose(ctx, capsys):
 
 @when("_report_the_errors is given two errors")
 def _when_report_errors(ctx, capsys):
-    ctx["code"] = _report_the_errors(
-        {}, ["the first thing", "the second thing"], [], False, False
-    )
+    ctx["code"] = _report_the_errors({}, ["the first thing", "the second thing"], [], False, False)
     ctx["printed"] = capsys.readouterr().out
 
 

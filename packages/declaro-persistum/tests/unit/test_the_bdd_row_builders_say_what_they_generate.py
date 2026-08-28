@@ -146,9 +146,7 @@ def test_every_row_in_a_batch_has_its_own_primary_key() -> None:
     rows = todos(50)
     ids = [r["id"] for r in rows]
 
-    assert len(set(ids)) == 50, (
-        f"{50 - len(set(ids))} of 50 generated todos share an id"
-    )
+    assert len(set(ids)) == 50, f"{50 - len(set(ids))} of 50 generated todos share an id"
 
 
 def test_every_generated_user_has_its_own_email() -> None:

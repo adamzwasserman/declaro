@@ -82,11 +82,12 @@ async def introspect(
     # to choose between, and `schema_name` was spelled `_schema_name`
     # here and `schema_name` in the PostgreSQL entry, so no caller
     # could pass it through the table at all.
-    _ = resolved(schema_name, 'main')
+    _ = resolved(schema_name, "main")
     include_views = resolved(include_views, False)
     try:
-        cursor = await _maybe_await(connection.execute(
-            """
+        cursor = await _maybe_await(
+            connection.execute(
+                """
             SELECT name, sql FROM sqlite_master
             WHERE type = 'table'
               AND name NOT LIKE 'sqlite_%'
@@ -97,7 +98,8 @@ async def introspect(
               AND name NOT LIKE 'turso_%'
             ORDER BY name
             """
-        ))
+            )
+        )
         tables = await _maybe_await(cursor.fetchall())
 
         # A materialized view is a real TABLE on this engine too, and must
@@ -119,9 +121,7 @@ async def introspect(
         # later.
         schema = restore_reference_case(
             {
-                declared_name(row[0], row[1]): await _introspect_table(
-                    connection, row[0]
-                )
+                declared_name(row[0], row[1]): await _introspect_table(connection, row[0])
                 for row in tables
                 if row[0] not in backing
             }
@@ -131,9 +131,7 @@ async def introspect(
 
     except Exception as e:
         error_msg = str(e).lower()
-        _WHEN_UNREACHABLE[
-            any(word in error_msg for word in ("network", "connection", "http"))
-        ](e)
+        _WHEN_UNREACHABLE[any(word in error_msg for word in ("network", "connection", "http"))](e)
 
 
 @helper
@@ -213,10 +211,7 @@ def _referring_as_declared(
     columns: dict[str, Column], declared: dict[str, str]
 ) -> dict[str, Column]:
     """Every column of one table, pointing at names as they were written."""
-    return {
-        name: _reference_as_declared(column, declared)
-        for name, column in columns.items()
-    }
+    return {name: _reference_as_declared(column, declared) for name, column in columns.items()}
 
 
 @helper
@@ -307,11 +302,11 @@ def declared_name(stored: str, ddl: str | None) -> str:
 # capture stops at whitespace or the opening paren. Anchored at the start so
 # a `CREATE TABLE` inside a string literal later in the DDL cannot match.
 _CREATE_TABLE_NAME = re.compile(
-    r'^\s*CREATE\s+(?:TEMP\s+|TEMPORARY\s+)?(?:UNIQUE\s+)?'
-    r'(?:TABLE|INDEX|VIEW)\s+'
-    r'(?:IF\s+NOT\s+EXISTS\s+)?'
+    r"^\s*CREATE\s+(?:TEMP\s+|TEMPORARY\s+)?(?:UNIQUE\s+)?"
+    r"(?:TABLE|INDEX|VIEW)\s+"
+    r"(?:IF\s+NOT\s+EXISTS\s+)?"
     r'(?:"(?P<quoted>[^"]+)"|`(?P<btick>[^`]+)`|\[(?P<brack>[^\]]+)\]'
-    r'|(?P<bare>[^\s(]+))',
+    r"|(?P<bare>[^\s(]+))",
     re.IGNORECASE,
 )
 
@@ -335,10 +330,11 @@ async def _get_table_constraints(
     connection: DbapiConnection, table_name: str
 ) -> dict[str, dict[str, str]]:
     """The named table-level constraints, from the stored CREATE TABLE."""
-    cursor = await _maybe_await(connection.execute(
-        f"SELECT sql FROM sqlite_master WHERE type='table' "
-        f"AND name='{as_literal(table_name)}'"
-    ))
+    cursor = await _maybe_await(
+        connection.execute(
+            f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{as_literal(table_name)}'"
+        )
+    )
     rows = await _maybe_await(cursor.fetchall())
     # No row means no such table, and a row whose `sql` is unset says nothing
     # about constraints. Both read as none declared.
@@ -369,8 +365,7 @@ async def _get_columns(
     # and this one had not, so enabling the comparison would have rebuilt
     # every Turso table with a CHECK on every deploy.
     cursor = await connection.execute(
-        f"SELECT sql FROM sqlite_master WHERE type='table' "
-        f"AND name='{as_literal(table_name)}'"
+        f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{as_literal(table_name)}'"
     )
     ddl_rows = await cursor.fetchall()
     checks = _checks_in(ddl_rows)
@@ -452,9 +447,7 @@ async def _get_indexes(
     index_info: dict[str, list[tuple]] = {
         name: await pragma_index_info(connection, name) for name in wanted
     }
-    index_sql: dict[str, str | None] = {
-        name: await _index_ddl(connection, name) for name in wanted
-    }
+    index_sql: dict[str, str | None] = {name: await _index_ddl(connection, name) for name in wanted}
 
     indexes = indexes_from_rows(index_rows, index_info, index_sql)
 
@@ -464,10 +457,7 @@ async def _get_indexes(
     # the migration reported success while doing the same work forever. The
     # index's own DDL keeps the original, and that is what `declared_name`
     # reads.
-    return {
-        declared_name(name, index_sql.get(name)): index
-        for name, index in indexes.items()
-    }
+    return {declared_name(name, index_sql.get(name)): index for name, index in indexes.items()}
 
 
 @boundary
@@ -478,10 +468,12 @@ async def _index_ddl(connection: DbapiConnection, index_name: str) -> str | None
     it. `indexes_from_rows` reads the text only to recover a partial index's
     WHERE clause, which appears in no PRAGMA.
     """
-    cursor = await _maybe_await(connection.execute(
-        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
-        (index_name,),
-    ))
+    cursor = await _maybe_await(
+        connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
+            (index_name,),
+        )
+    )
     row = await _maybe_await(cursor.fetchone())
     return row[0] if row else None
 
@@ -521,11 +513,12 @@ async def table_exists(
     # from nowhere because the wrapper could not pass an argument two of the
     # three entries would refuse.
     _ = schema_name
-    cursor = await _maybe_await(connection.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' "
-        "AND lower(name) = lower(?)",
-        (table_name,),
-    ))
+    cursor = await _maybe_await(
+        connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND lower(name) = lower(?)",
+            (table_name,),
+        )
+    )
     result = await _maybe_await(cursor.fetchone())
     return result is not None
 
@@ -567,8 +560,9 @@ async def introspect_views(
     connection: DbapiConnection,
 ) -> dict[str, View]:
     """Introspect views from Turso/libSQL."""
-    cursor = await _maybe_await(connection.execute(
-        """
+    cursor = await _maybe_await(
+        connection.execute(
+            """
         SELECT name, sql
         FROM sqlite_master
         WHERE type = 'view'
@@ -576,7 +570,8 @@ async def introspect_views(
           AND name NOT LIKE '_litestream_%'
         ORDER BY name
         """
-    ))
+        )
+    )
     rows = await _maybe_await(cursor.fetchall())
 
     # The emulated materialized views live in a metadata table, not in

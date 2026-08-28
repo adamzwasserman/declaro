@@ -19,38 +19,38 @@ fake = Faker()
 # =============================================================================
 
 EDGE_CASE_STRINGS = [
-    "",                              # Empty string
-    " ",                             # Single space
-    "   ",                           # Multiple spaces
-    "\t\n\r",                        # Whitespace chars
-    "a" * 10000,                     # Very long string
-    "Robert'); DROP TABLE users--", # SQL injection attempt
-    "<script>alert(1)</script>",    # XSS attempt
-    "emoji: 👍🎉🚀🌟💯",              # Emojis
-    "العربية",                        # RTL text (Arabic)
-    "中文字符测试",                     # Chinese characters
-    "日本語テスト",                     # Japanese characters
-    "Ελληνικά",                       # Greek
-    "\x00\x01\x02",                  # Control characters
-    "line1\nline2\nline3",          # Newlines
-    "tab\there",                    # Tab character
-    "null\x00byte",                 # Null byte in middle
-    "'single'quotes'",              # Single quotes
-    '"double"quotes"',              # Double quotes
-    "back\\slash",                  # Backslash
-    "percent%sign",                 # Percent sign (LIKE wildcard)
-    "underscore_char",              # Underscore (LIKE wildcard)
-    "mixed'\"\\%_special",          # Mixed special chars
+    "",  # Empty string
+    " ",  # Single space
+    "   ",  # Multiple spaces
+    "\t\n\r",  # Whitespace chars
+    "a" * 10000,  # Very long string
+    "Robert'); DROP TABLE users--",  # SQL injection attempt
+    "<script>alert(1)</script>",  # XSS attempt
+    "emoji: 👍🎉🚀🌟💯",  # Emojis
+    "العربية",  # RTL text (Arabic)
+    "中文字符测试",  # Chinese characters
+    "日本語テスト",  # Japanese characters
+    "Ελληνικά",  # Greek
+    "\x00\x01\x02",  # Control characters
+    "line1\nline2\nline3",  # Newlines
+    "tab\there",  # Tab character
+    "null\x00byte",  # Null byte in middle
+    "'single'quotes'",  # Single quotes
+    '"double"quotes"',  # Double quotes
+    "back\\slash",  # Backslash
+    "percent%sign",  # Percent sign (LIKE wildcard)
+    "underscore_char",  # Underscore (LIKE wildcard)
+    "mixed'\"\\%_special",  # Mixed special chars
 ]
 
 EDGE_CASE_INTEGERS = [
     0,
     1,
     -1,
-    2147483647,                     # INT_MAX (32-bit)
-    -2147483648,                    # INT_MIN (32-bit)
-    9223372036854775807,            # BIGINT_MAX (64-bit)
-    -9223372036854775808,           # BIGINT_MIN (64-bit)
+    2147483647,  # INT_MAX (32-bit)
+    -2147483648,  # INT_MIN (32-bit)
+    9223372036854775807,  # BIGINT_MAX (64-bit)
+    -9223372036854775808,  # BIGINT_MIN (64-bit)
 ]
 
 EDGE_CASE_DATES = [
@@ -69,17 +69,14 @@ EDGE_CASE_DATES = [
 # =============================================================================
 
 
-
 # =============================================================================
 # User Factory
 # =============================================================================
 
 
-
 # =============================================================================
 # Order Factory
 # =============================================================================
-
 
 
 # =============================================================================
@@ -92,7 +89,7 @@ sql_safe_text = st.text(
     max_size=1000,
     alphabet=st.characters(
         blacklist_categories=("Cs",),  # Exclude surrogates
-        blacklist_characters="\x00",   # Exclude null bytes
+        blacklist_characters="\x00",  # Exclude null bytes
     ),
 )
 
@@ -141,7 +138,6 @@ sql_in_list = st.lists(st.integers(), min_size=0, max_size=100)
 # `create_batch(n)` is kept as `todos(n)` rather than folded into `todo()`
 # with a count argument, because a caller asking for one row and a caller
 # asking for a thousand want different return types and should say so.
-
 
 
 # TWO FUNCTIONS PER ROW, BECAUSE THERE ARE TWO QUESTIONS.
@@ -206,7 +202,6 @@ def some_user() -> dict[str, Any]:
     )
 
 
-
 def todos(count: int) -> list[dict[str, Any]]:
     """`count` generated todos, every one distinct.
 
@@ -237,15 +232,11 @@ def any_todo(draw: st.DrawFn) -> dict[str, Any]:
             st.text(
                 min_size=1,
                 max_size=500,
-                alphabet=st.characters(
-                    blacklist_categories=("Cs",), blacklist_characters="\x00"
-                ),
+                alphabet=st.characters(blacklist_categories=("Cs",), blacklist_characters="\x00"),
             )
         ),
         "completed": draw(st.booleans()),
     }
-
-
 
 
 def users(count: int) -> list[dict[str, Any]]:
@@ -265,11 +256,7 @@ def any_user(draw: st.DrawFn) -> dict[str, Any]:
     }
 
 
-
-
-def an_order(
-    *, id: str, user_id: str, total: Any, status: str, created_at: Any
-) -> dict[str, Any]:
+def an_order(*, id: str, user_id: str, total: Any, status: str, created_at: Any) -> dict[str, Any]:
     """An order with every field specified. Generates nothing."""
     return {
         "id": id,

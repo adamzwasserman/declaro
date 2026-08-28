@@ -13,10 +13,12 @@ import os
 import pytest
 from dotenv import load_dotenv
 
-# Load .env file for test credentials
+# Load .env file for test credentials. THE IMPORT BELOW IS AFTER IT ON
+# PURPOSE: anything imported from here on may read the environment at
+# import time, and this is the line that puts the credentials in it.
 load_dotenv()
 
-from declaro_persistum.types import Schema
+from declaro_persistum.types import Schema  # noqa: E402
 
 # =============================================================================
 # Test Level Configuration
@@ -355,7 +357,7 @@ def temp_schema_dir(tmp_path):
 def temp_schema_with_users(temp_schema_dir):
     """Create a temporary schema directory with a users table."""
     users_toml = temp_schema_dir / "tables" / "users.toml"
-    users_toml.write_text('''
+    users_toml.write_text("""
 [users]
 primary_key = ["id"]
 
@@ -373,7 +375,7 @@ unique = true
 type = "timestamptz"
 nullable = false
 default = "now()"
-''')
+""")
     return temp_schema_dir
 
 

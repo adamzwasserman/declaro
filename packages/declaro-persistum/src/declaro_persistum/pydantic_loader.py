@@ -399,9 +399,7 @@ def _import_module_file(module_path: Path) -> Any:
 
     module_name = f"_dp_model_{module_path.stem}_{id(module_path)}"
     spec = importlib.util.spec_from_file_location(module_name, module_path)
-    loader = _WHEN_A_MODULE_HAS_NO_LOADER[spec is None or spec.loader is None](
-        spec, module_path
-    )
+    loader = _WHEN_A_MODULE_HAS_NO_LOADER[spec is None or spec.loader is None](spec, module_path)
 
     module = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
     sys.modules[module_name] = module
@@ -525,9 +523,7 @@ def views_from_module(module: Any) -> dict[str, View]:
     checked = [
         _WHEN_A_VIEW_KEY_IS_UNKNOWN[bool(unknown)](obj, unknown)
         for obj in declared
-        for unknown in [
-            sorted(set(obj) - set(VIEW_REQUIRED) - set(VIEW_OPTIONAL))
-        ]
+        for unknown in [sorted(set(obj) - set(VIEW_REQUIRED) - set(VIEW_OPTIONAL))]
     ]
     return {view["name"]: view for view in checked}
 
@@ -618,9 +614,7 @@ def load_schema_from_models(models_dir: str | Path) -> Schema:
     ]
     _WHEN_A_TABLE_IS_DECLARED_TWICE[bool(collisions)](collisions)
 
-    schema: Schema = {
-        table_name: definition for _py_file, table_name, definition in declared
-    }
+    schema: Schema = {table_name: definition for _py_file, table_name, definition in declared}
     return _WHEN_NOTHING_IS_DECLARED[not schema](models_path, schema)
 
 

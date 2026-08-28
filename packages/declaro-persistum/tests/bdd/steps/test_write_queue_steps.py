@@ -8,6 +8,7 @@ exception would be asserting the stand-in.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sqlite3
 from pathlib import Path
 from typing import Any, TypedDict
@@ -252,14 +253,13 @@ def _then_isolated(ctx):
 @then("the good row is in the database")
 def _then_good_row(ctx):
     cursor = ctx["conn"].execute(f"SELECT body FROM {TABLE} WHERE id = 30")
-    assert cursor.fetchone() == ("fine",), (
-        "the doomed write took the good one down with it"
-    )
+    assert cursor.fetchone() == ("fine",), "the doomed write took the good one down with it"
 
 
 @when("a caller deposits a doomed write and then abandons its ticket")
 def _when_abandon(ctx):
     """Abandoning means never collecting. The ticket's waiter is gone."""
+
     async def abandon() -> None:
         ticket = deposit(
             ctx["room"],
@@ -269,10 +269,8 @@ def _when_abandon(ctx):
         task = asyncio.ensure_future(collect(ctx["room"], ticket))
         await asyncio.sleep(0)
         task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
 
     ctx["run"](abandon())
 

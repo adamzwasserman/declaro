@@ -182,9 +182,9 @@ def test_the_two_generators_emit_the_same_sql(shape: str) -> None:
 
     columns = _SHAPES[shape]
 
-    assert generate_create_table_sql(
+    assert generate_create_table_sql("t", columns, NOTHING) == _generate_create_table_sql(
         "t", columns, NOTHING
-    ) == _generate_create_table_sql("t", columns, NOTHING), (
+    ), (
         f"the two create-table generators disagree on {shape}; a rebuild "
         f"through one of them writes a table the other would not"
     )
@@ -237,9 +237,7 @@ async def test_the_index_reader_returns_explicit_indexes_only() -> None:
     )
 
     async with aiosqlite.connect(":memory:") as conn:
-        await conn.execute(
-            "CREATE TABLE t (id INTEGER PRIMARY KEY, email TEXT UNIQUE, name TEXT)"
-        )
+        await conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, email TEXT UNIQUE, name TEXT)")
         await conn.execute("CREATE INDEX ix_name ON t(name)")
 
         listed = {row[1] for row in await pragma_index_list(conn, "t")}
@@ -250,9 +248,7 @@ async def test_the_index_reader_returns_explicit_indexes_only() -> None:
 
         statements = await create_index_statements(conn, "t")
 
-        assert len(statements) == 1, (
-            f"expected only the explicit index, got {statements}"
-        )
+        assert len(statements) == 1, f"expected only the explicit index, got {statements}"
         assert "ix_name" in statements[0], statements
         assert not any("sqlite_autoindex" in s for s in statements), (
             f"an automatic index was reissued as a CREATE INDEX, which is a "

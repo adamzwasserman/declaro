@@ -117,9 +117,7 @@ async def test_one_refusal_does_not_block_the_rest_of_the_batch() -> None:
         result = await _apply(connection, [CREATE_WIDGETS, ADD_CONSTRAINT])
 
         cursor = connection.cursor()
-        await cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='widgets'"
-        )
+        await cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='widgets'")
         assert await cursor.fetchall(), "the operation before the refusal did not run"
         assert result["success"] is False, result
     finally:
@@ -174,9 +172,7 @@ async def test_a_dry_run_returns_the_sql_and_touches_nothing() -> None:
         result = await _apply(connection, [CREATE_WIDGETS], dry_run=True)
 
         cursor = connection.cursor()
-        await cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='widgets'"
-        )
+        await cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='widgets'")
         assert not await cursor.fetchall(), "a dry run created the table"
         assert result, result
     finally:

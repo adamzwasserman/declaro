@@ -78,9 +78,8 @@ def test_a_round_trip_emits_no_operations(dialect: str) -> None:
     """The measured defect, in one assertion, on every engine."""
     plan = diff(INTROSPECTED, DECLARED, dialect=dialect, decisions=NOTHING)
 
-    assert plan["operations"] == [], (
-        "an unchanged schema still migrates: "
-        + str([(o["op"], o["details"]) for o in plan["operations"]])
+    assert plan["operations"] == [], "an unchanged schema still migrates: " + str(
+        [(o["op"], o["details"]) for o in plan["operations"]]
     )
 
 
@@ -100,8 +99,7 @@ def test_a_primary_key_is_not_null_without_being_told_twice(
     dialect: str,
 ) -> None:
     """Declaring a primary key has already declared NOT NULL."""
-    current = {"t": {"columns": {"c": {"type": "text", "nullable": False,
-                                       "primary_key": True}}}}
+    current = {"t": {"columns": {"c": {"type": "text", "nullable": False, "primary_key": True}}}}
     target = {"t": {"columns": {"c": {"type": "text", "primary_key": True}}}}
 
     assert diff(current, target, dialect=dialect, decisions=NOTHING)["operations"] == []
@@ -158,8 +156,7 @@ def test_a_real_nullability_change_is_still_emitted(dialect: str) -> None:
 @pytest.mark.parametrize("dialect", DIALECTS)
 def test_dropping_a_primary_key_is_still_a_change(dialect: str) -> None:
     """The rule reads nullability off `primary_key`, so losing it must show."""
-    current = {"t": {"columns": {"c": {"type": "text", "nullable": False,
-                                       "primary_key": True}}}}
+    current = {"t": {"columns": {"c": {"type": "text", "nullable": False, "primary_key": True}}}}
     target = {"t": {"columns": {"c": {"type": "text", "nullable": True}}}}
 
     ops = diff(current, target, dialect=dialect, decisions=NOTHING)["operations"]
@@ -267,7 +264,7 @@ import tempfile  # noqa: E402
 
 import pytest as _pytest  # noqa: E402
 
-from declaro_persistum.types import NOTHING
+from declaro_persistum.types import NOTHING  # noqa: E402
 
 VOCABULARY = {
     "t": {
@@ -298,7 +295,10 @@ async def test_a_sqlite_round_trip_emits_no_operations() -> None:
     try:
         plan = diff({}, VOCABULARY, dialect="sqlite", decisions=NOTHING)
         await apply(
-            conn, plan["operations"], plan["execution_order"], "sqlite",
+            conn,
+            plan["operations"],
+            plan["execution_order"],
+            "sqlite",
             dry_run=False,
         )
         actual = await introspect(conn, "sqlite")
@@ -306,9 +306,7 @@ async def test_a_sqlite_round_trip_emits_no_operations() -> None:
 
         assert second["operations"] == [], (
             "an unchanged schema migrates on every deploy: "
-            + json.dumps(
-                [(o["op"], o["details"]) for o in second["operations"]], default=str
-            )
+            + json.dumps([(o["op"], o["details"]) for o in second["operations"]], default=str)
         )
     finally:
         await conn.close()
@@ -330,12 +328,18 @@ async def test_a_boolean_default_survives_the_write_and_the_read() -> None:
     try:
         plan = diff({}, schema, dialect="sqlite", decisions=NOTHING)
         await apply(
-            conn, plan["operations"], plan["execution_order"], "sqlite",
+            conn,
+            plan["operations"],
+            plan["execution_order"],
+            "sqlite",
             dry_run=False,
         )
         actual = await introspect(conn, "sqlite")
 
-        assert diff({"t": actual["t"]}, schema, dialect="sqlite", decisions=NOTHING)["operations"] == [], (
+        assert (
+            diff({"t": actual["t"]}, schema, dialect="sqlite", decisions=NOTHING)["operations"]
+            == []
+        ), (
             f"declared {schema['t']['columns']['flag']['default']!r}, read back "
             f"{actual['t']['columns']['flag'].get('default')!r}"
         )
@@ -385,9 +389,7 @@ def test_the_expression_table_translates_only_what_needs_it() -> None:
 # what should have been noticed the first time.
 
 
-TRANSLATED = {
-    "t": {"columns": {"made_at": {"type": "timestamptz", "default": "now()"}}}
-}
+TRANSLATED = {"t": {"columns": {"made_at": {"type": "timestamptz", "default": "now()"}}}}
 
 
 @pytest.mark.parametrize("dialect", ["sqlite", "turso"])
@@ -396,24 +398,21 @@ def test_a_translated_default_matches_what_the_engine_stored(dialect: str) -> No
     from declaro_persistum.applier.shared import EXPRESSION_DEFAULTS
 
     stored = EXPRESSION_DEFAULTS[dialect]["now()"]
-    current = {"t": {"columns": {"made_at": {"type": "timestamptz",
-                                            "default": stored}}}}
+    current = {"t": {"columns": {"made_at": {"type": "timestamptz", "default": stored}}}}
 
     assert diff(current, TRANSLATED, dialect=dialect, decisions=NOTHING)["operations"] == []
 
 
 def test_postgresql_needs_no_translation_and_still_matches() -> None:
     """The engine whose language these are written in."""
-    current = {"t": {"columns": {"made_at": {"type": "timestamptz",
-                                            "default": "now()"}}}}
+    current = {"t": {"columns": {"made_at": {"type": "timestamptz", "default": "now()"}}}}
 
     assert diff(current, TRANSLATED, dialect="postgresql", decisions=NOTHING)["operations"] == []
 
 
 def test_a_real_default_change_survives_the_translation() -> None:
     """The floor. Translating both sides into equality would hide a change."""
-    current = {"t": {"columns": {"made_at": {"type": "timestamptz",
-                                            "default": "'2020-01-01'"}}}}
+    current = {"t": {"columns": {"made_at": {"type": "timestamptz", "default": "'2020-01-01'"}}}}
 
     ops = diff(current, TRANSLATED, dialect="sqlite", decisions=NOTHING)["operations"]
 
@@ -457,18 +456,15 @@ def test_a_quoted_literal_keeps_its_case(dialect: str) -> None:
     ops = diff(current, target, dialect=dialect, decisions=NOTHING)["operations"]
 
     assert [o["op"] for o in ops] == ["alter_column"], (
-        f"'Pending' and 'pending' are different values and the change was "
-        f"folded away: {ops}"
+        f"'Pending' and 'pending' are different values and the change was folded away: {ops}"
     )
 
 
 @pytest.mark.parametrize("dialect", DIALECTS)
 def test_a_bare_keyword_still_folds(dialect: str) -> None:
     """The floor. Removing the fold entirely would pass the test above."""
-    current = {"t": {"columns": {"c": {"type": "timestamptz",
-                                       "default": "CURRENT_TIMESTAMP"}}}}
-    target = {"t": {"columns": {"c": {"type": "timestamptz",
-                                      "default": "current_timestamp"}}}}
+    current = {"t": {"columns": {"c": {"type": "timestamptz", "default": "CURRENT_TIMESTAMP"}}}}
+    target = {"t": {"columns": {"c": {"type": "timestamptz", "default": "current_timestamp"}}}}
 
     assert diff(current, target, dialect=dialect, decisions=NOTHING)["operations"] == []
 
@@ -499,9 +495,7 @@ def test_a_space_inside_a_string_default_is_not_cosmetic(dialect: str) -> None:
 @pytest.mark.parametrize("dialect", DIALECTS)
 def test_a_space_outside_quotes_still_folds(dialect: str) -> None:
     """The floor. Removing the fold entirely would pass the test above."""
-    current = {"t": {"columns": {"c": {"type": "text",
-                                       "default": "(datetime ('now'))"}}}}
-    target = {"t": {"columns": {"c": {"type": "text",
-                                      "default": "(datetime('now'))"}}}}
+    current = {"t": {"columns": {"c": {"type": "text", "default": "(datetime ('now'))"}}}}
+    target = {"t": {"columns": {"c": {"type": "text", "default": "(datetime('now'))"}}}}
 
     assert diff(current, target, dialect=dialect, decisions=NOTHING)["operations"] == []

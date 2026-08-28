@@ -32,17 +32,17 @@ from declaro_persistum.query.conditions import OPERATORS, render
 
 # Every operator, its condition, and the SQL fragment it must produce.
 CASES = [
-    ("eq",         {"status": "active"},                 "status = :"),
-    ("eq_explicit",{"status": {"eq": "active"}},         "status = :"),
-    ("ne",         {"status": {"ne": "active"}},         "status != :"),
-    ("gt",         {"age": {"gt": 18}},                  "age > :"),
-    ("gte",        {"age": {"gte": 18}},                 "age >= :"),
-    ("lt",         {"age": {"lt": 65}},                  "age < :"),
-    ("lte",        {"age": {"lte": 65}},                 "age <= :"),
-    ("like",       {"name": {"like": "a%"}},             "name LIKE :"),
-    ("startswith", {"name": {"startswith": "a"}},        "name LIKE :"),
-    ("endswith",   {"name": {"endswith": "z"}},          "name LIKE :"),
-    ("contains",   {"name": {"contains": "mid"}},        "name LIKE :"),
+    ("eq", {"status": "active"}, "status = :"),
+    ("eq_explicit", {"status": {"eq": "active"}}, "status = :"),
+    ("ne", {"status": {"ne": "active"}}, "status != :"),
+    ("gt", {"age": {"gt": 18}}, "age > :"),
+    ("gte", {"age": {"gte": 18}}, "age >= :"),
+    ("lt", {"age": {"lt": 65}}, "age < :"),
+    ("lte", {"age": {"lte": 65}}, "age <= :"),
+    ("like", {"name": {"like": "a%"}}, "name LIKE :"),
+    ("startswith", {"name": {"startswith": "a"}}, "name LIKE :"),
+    ("endswith", {"name": {"endswith": "z"}}, "name LIKE :"),
+    ("contains", {"name": {"contains": "mid"}}, "name LIKE :"),
 ]
 
 
@@ -60,9 +60,23 @@ def test_every_operator_in_the_table_has_a_case():
     of a bounded set unexercised — the exact gap a bounded set makes
     avoidable.
     """
-    covered = {"eq", "ne", "gt", "gte", "lt", "lte", "like", "startswith",
-               "endswith", "contains", "in", "not_in", "between",
-               "is_null", "is_not_null"}
+    covered = {
+        "eq",
+        "ne",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "like",
+        "startswith",
+        "endswith",
+        "contains",
+        "in",
+        "not_in",
+        "between",
+        "is_null",
+        "is_not_null",
+    }
     assert set(OPERATORS) == covered, (
         f"untested operators: {sorted(set(OPERATORS) - covered)}; "
         f"tested but absent: {sorted(covered - set(OPERATORS))}"
@@ -108,9 +122,7 @@ class TestComposition:
         assert len(params) == 2
 
     def test_explicit_or(self):
-        sql, params = render(
-            {"or": [{"status": "active"}, {"status": "pending"}]}, "w"
-        )
+        sql, params = render({"or": [{"status": "active"}, {"status": "pending"}]}, "w")
         assert " OR " in sql
         assert len(params) == 2
 
@@ -141,9 +153,7 @@ class TestItIsDeterministic:
         assert render(c, "w") == render(c, "w")
 
     def test_two_conditions_on_one_column_do_not_collide(self):
-        sql, params = render(
-            {"and": [{"age": {"gt": 18}}, {"age": {"lt": 65}}]}, "w"
-        )
+        sql, params = render({"and": [{"age": {"gt": 18}}, {"age": {"lt": 65}}]}, "w")
         assert len(params) == 2, (sql, params)
 
 

@@ -128,9 +128,7 @@ def test_diff_changes_nothing(tmp_path: Path) -> None:
     _run(tmp_path, ADDS_A_COLUMN, "diff")
 
     connection = sqlite3.connect(tmp_path / "probe.db")
-    columns = [
-        row[1] for row in connection.execute('PRAGMA table_info("users")').fetchall()
-    ]
+    columns = [row[1] for row in connection.execute('PRAGMA table_info("users")').fetchall()]
     connection.close()
     assert columns == ["id", "name"], columns
 

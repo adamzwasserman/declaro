@@ -41,7 +41,7 @@ pytestmark = [pytest.mark.precommit, pytest.mark.postgresql, pytest.mark.integra
 
 PROBE_URL = probe_url()
 
-MODELS = '''
+MODELS = """
 from uuid import UUID
 from pydantic import BaseModel
 from declaro_persistum import table
@@ -52,7 +52,7 @@ class Widget(BaseModel):
     id: UUID
     name: str
     count: int
-'''
+"""
 
 ROWS = [
     (uuid.uuid4(), "first", 1),
@@ -85,17 +85,14 @@ async def _postgresql() -> Any:
         refuse_without_postgresql(PROBE_URL, unreachable)
     await probe.execute('DROP TABLE IF EXISTS "widgets" CASCADE')
     await probe.close()
-    return await open_postgresql(
-        PROBE_URL, shutdown="exit_immediately", busy_timeout_s=5.0
-    )
+    return await open_postgresql(PROBE_URL, shutdown="exit_immediately", busy_timeout_s=5.0)
 
 
 async def _make_widgets(database: Any, dialect: str, *, with_rows: bool) -> None:
     uuid_type = "UUID" if dialect == "postgresql" else "TEXT"
     async with writing(database) as connection:
         await connection.execute(
-            f'CREATE TABLE "widgets" (id {uuid_type} PRIMARY KEY, '
-            f"name TEXT, count INTEGER)"
+            f'CREATE TABLE "widgets" (id {uuid_type} PRIMARY KEY, name TEXT, count INTEGER)'
         )
         if not with_rows:
             return
@@ -230,9 +227,7 @@ async def test_a_uuid_arrives_as_a_string_sqlite_can_hold(
         )
 
         async with writing(target) as connection:
-            cursor = await connection.execute(
-                'SELECT id FROM "widgets" ORDER BY name'
-            )
+            cursor = await connection.execute('SELECT id FROM "widgets" ORDER BY name')
             landed = [r[0] for r in await cursor.fetchall()]
 
         assert landed == [str(row[0]) for row in ROWS], landed

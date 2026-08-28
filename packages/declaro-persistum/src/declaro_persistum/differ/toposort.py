@@ -110,16 +110,13 @@ def _handle_drop_table(
     keys = [
         fk_idx
         for fk_idx, _fk_table, _ in dropped_fks
-        if all_operations[fk_idx]["details"]["references"].startswith(
-            f"{table_name}."
-        )
+        if all_operations[fk_idx]["details"]["references"].startswith(f"{table_name}.")
     ]
     # Views selecting from it go before it.
     views = [
         idx
         for idx, other in enumerate(all_operations)
-        if other["op"] == "drop_view"
-        and table_name in other["details"].get("depends_on", [])
+        if other["op"] == "drop_view" and table_name in other["details"].get("depends_on", [])
     ]
     # A TABLE THAT REFERENCES THIS ONE MUST GO FIRST. PostgreSQL refuses to
     # drop a table another still points at, so a plan that dropped the parent
@@ -155,8 +152,7 @@ def _handle_drop_column(
         idx_idx
         for idx_idx, idx_table, _ in dropped_indexes
         if idx_table == table_name
-        and col_name
-        in all_operations[idx_idx]["details"]["definition"]["columns"]
+        and col_name in all_operations[idx_idx]["details"]["definition"]["columns"]
     ]
     return keys + indexes
 
@@ -204,11 +200,7 @@ def _handle_add_foreign_key(
     ref_table = parts[0]
 
     # The table it points at, when this migration is the one creating it.
-    table = [
-        created_tables[name]
-        for name in [ref_table]
-        if ref and name in created_tables
-    ]
+    table = [created_tables[name] for name in [ref_table] if ref and name in created_tables]
     # And the COLUMN it points at, when that arrives here too. A key emitted
     # against a column one statement early is refused by every engine.
     columns = [
@@ -262,8 +254,7 @@ def _handle_alter_column(
         for idx_idx, idx_table, _ in dropped_indexes
         if retyped
         and idx_table == table_name
-        and col_name
-        in all_operations[idx_idx]["details"]["definition"]["columns"]
+        and col_name in all_operations[idx_idx]["details"]["definition"]["columns"]
     ]
 
 
@@ -323,14 +314,28 @@ def _depends_on_nothing(
 
 
 OP_DEPENDENCY_HANDLERS: dict = {
-    "drop_table": lambda op, op_idx, all_ops, **kw: _handle_drop_table(op, op_idx, all_ops, kw["dropped_fks"]),
-    "drop_column": lambda op, _op_idx, all_ops, **kw: _handle_drop_column(op, all_ops, kw["dropped_fks"], kw["dropped_indexes"]),
-    "create_table": lambda op, _op_idx, _all_ops, **kw: _handle_create_table(op, kw["created_tables"]),
+    "drop_table": lambda op, op_idx, all_ops, **kw: _handle_drop_table(
+        op, op_idx, all_ops, kw["dropped_fks"]
+    ),
+    "drop_column": lambda op, _op_idx, all_ops, **kw: _handle_drop_column(
+        op, all_ops, kw["dropped_fks"], kw["dropped_indexes"]
+    ),
+    "create_table": lambda op, _op_idx, _all_ops, **kw: _handle_create_table(
+        op, kw["created_tables"]
+    ),
     "add_column": lambda op, _op_idx, _all_ops, **kw: _handle_add_column(op, kw["created_tables"]),
-    "add_foreign_key": lambda op, _op_idx, all_ops, **kw: _handle_add_foreign_key(op, all_ops, kw["created_tables"]),
-    "add_index": lambda op, _op_idx, all_ops, **kw: _handle_add_index(op, all_ops, kw["created_tables"]),
-    "alter_column": lambda op, _op_idx, all_ops, **kw: _handle_alter_column(op, all_ops, kw["dropped_indexes"]),
-    "create_view": lambda op, _op_idx, _all_ops, **kw: _handle_create_view(op, kw["created_tables"], kw["created_views"]),
+    "add_foreign_key": lambda op, _op_idx, all_ops, **kw: _handle_add_foreign_key(
+        op, all_ops, kw["created_tables"]
+    ),
+    "add_index": lambda op, _op_idx, all_ops, **kw: _handle_add_index(
+        op, all_ops, kw["created_tables"]
+    ),
+    "alter_column": lambda op, _op_idx, all_ops, **kw: _handle_alter_column(
+        op, all_ops, kw["dropped_indexes"]
+    ),
+    "create_view": lambda op, _op_idx, _all_ops, **kw: _handle_create_view(
+        op, kw["created_tables"], kw["created_views"]
+    ),
     "drop_view": lambda op, op_idx, all_ops, **_kw: _handle_drop_view(op, op_idx, all_ops),
     # THESE SEVEN DEPEND ON NOTHING, and saying so is what lets the table be
     # read with []. They were absent, so `.get` returned None and a guard
@@ -389,9 +394,7 @@ def _refuse_cycle(operations: list[Operation], stuck: set[int]) -> list[Operatio
 # entries, and the refusal is a value in the table rather than a path through
 # an `if`.
 @helper
-def _the_ready_operations(
-    operations: list[Operation], _stuck: set[int]
-) -> list[Operation]:
+def _the_ready_operations(operations: list[Operation], _stuck: set[int]) -> list[Operation]:
     """Something is ready, so the operations are handed back unchanged."""
     return operations
 
@@ -503,10 +506,7 @@ def _refuse_unranked_operation(op_type: str) -> int:
     has existed. Whether that ever produced a wrong order I did not manage to
     demonstrate; what is certain is that nothing would have said so.
     """
-    raise ValueError(
-        f"No sort priority for operation {op_type!r}. "
-        f"Ranked: {sorted(_PRIORITIES)}."
-    )
+    raise ValueError(f"No sort priority for operation {op_type!r}. Ranked: {sorted(_PRIORITIES)}.")
 
 
 _WHEN_RANKED: dict[bool, Callable[[str], int]] = {

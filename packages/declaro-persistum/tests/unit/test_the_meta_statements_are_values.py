@@ -154,8 +154,7 @@ def test_asking_for_user_tables_excludes_our_own(dialect: str) -> None:
     sql = user_tables_sql(dialect)
 
     assert META_TABLE in sql, (
-        f"the {dialect} query does not mention {META_TABLE}, so it cannot "
-        f"exclude it: {sql}"
+        f"the {dialect} query does not mention {META_TABLE}, so it cannot exclude it: {sql}"
     )
 
 
@@ -175,9 +174,7 @@ def test_sqlite_excludes_its_internal_tables_too() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "builder", [stored_hash_sql, store_hash_sql, user_tables_sql]
-)
+@pytest.mark.parametrize("builder", [stored_hash_sql, store_hash_sql, user_tables_sql])
 def test_an_unknown_dialect_raises_and_names_the_ones_that_exist(builder) -> None:
     """A dispatch on a bounded set must not fall through.
 

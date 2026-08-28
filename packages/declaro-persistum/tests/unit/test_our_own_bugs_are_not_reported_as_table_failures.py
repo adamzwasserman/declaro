@@ -52,8 +52,7 @@ def _models(directory: pathlib.Path) -> pathlib.Path:
         "from pydantic import BaseModel\n"
         "from declaro_persistum import table, field\n"
         + "".join(
-            f'@table("{t}")\nclass M_{t}(BaseModel):\n'
-            f"    id: str = field(primary_key=True)\n\n"
+            f'@table("{t}")\nclass M_{t}(BaseModel):\n    id: str = field(primary_key=True)\n\n'
             for t in TABLES
         )
     )
@@ -95,16 +94,20 @@ async def test_a_clean_transfer_still_reports_success(tmp_path) -> None:
     source, target = await _pair(tmp_path)
     try:
         result = await bulk_transfer(
-            source, target, "sqlite", "sqlite", str(_models(tmp_path)), tables=NOTHING, on_progress=NOTHING, batch_size=NOTHING, expand_enums=NOTHING, resume=NOTHING)
+            source,
+            target,
+            "sqlite",
+            "sqlite",
+            str(_models(tmp_path)),
+            tables=NOTHING,
+            on_progress=NOTHING,
+            batch_size=NOTHING,
+            expand_enums=NOTHING,
+            resume=NOTHING,
+        )
         assert result["success"] is True, result
         assert result["tables_transferred"] == len(TABLES)
         assert result["tables_failed"] == 0
     finally:
         await close(source)
         await close(target)
-
-
-
-
-
-

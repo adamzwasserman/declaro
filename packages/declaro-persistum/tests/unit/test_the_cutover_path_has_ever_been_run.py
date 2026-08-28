@@ -40,7 +40,7 @@ from declaro_persistum.mirror import detach, promote
 
 pytestmark = [pytest.mark.precommit, pytest.mark.sqlite]
 
-MODELS = '''
+MODELS = """
 from typing import Literal
 from pydantic import BaseModel
 from declaro_persistum import table
@@ -51,7 +51,7 @@ class Widget(BaseModel):
     id: int
     name: str
     status: Literal["draft", "live"]
-'''
+"""
 
 ROWS = [(1, "first", "draft"), (2, "second", "live"), (3, "third", "live")]
 
@@ -78,8 +78,7 @@ async def _seed(database: Any) -> None:
 
     async with writing(database) as connection:
         await connection.execute(
-            'CREATE TABLE "widgets" (id INTEGER PRIMARY KEY, name TEXT, '
-            'status TEXT)'
+            'CREATE TABLE "widgets" (id INTEGER PRIMARY KEY, name TEXT, status TEXT)'
         )
         for row in ROWS:
             await connection.execute(

@@ -71,9 +71,7 @@ def _refusal(ctx, make):
 @when("a local SQLite database is opened")
 def _when_open_sqlite(ctx):
     path = ctx["tmp"] / "local.db"
-    ctx["db"] = ctx["run"](
-        open_sqlite(str(path), shutdown="exit_immediately", busy_timeout_s=5.0)
-    )
+    ctx["db"] = ctx["run"](open_sqlite(str(path), shutdown="exit_immediately", busy_timeout_s=5.0))
     ctx["connected"] = path.exists()
 
 
@@ -109,9 +107,7 @@ def _when_open_bad_policy(ctx):
     """
     _refusal(
         ctx,
-        lambda: open_sqlite(
-            str(ctx["tmp"] / "x.db"), shutdown="replicate", busy_timeout_s=5.0
-        ),
+        lambda: open_sqlite(str(ctx["tmp"] / "x.db"), shutdown="replicate", busy_timeout_s=5.0),
     )
 
 
@@ -154,9 +150,7 @@ def _when_open_unreachable_primary(ctx):
     """
     try:
         ctx["db"] = ctx["run"](
-            open_turso(
-                str(ctx["tmp"] / "r.db"), A_PRIMARY, "tok", shutdown="exit_immediately"
-            )
+            open_turso(str(ctx["tmp"] / "r.db"), A_PRIMARY, "tok", shutdown="exit_immediately")
         )
         ctx["refused"] = None
     except Exception as e:
@@ -178,7 +172,9 @@ def _then_open_fails_loudly(ctx):
 @when("a local Turso database is opened")
 def _when_open_turso_local(ctx):
     ctx["db"] = ctx["run"](
-        open_turso(str(ctx["tmp"] / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
+        open_turso(
+            str(ctx["tmp"] / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
+        )
     )
 
 
@@ -223,9 +219,7 @@ def _when_open_turso_replicated(ctx):
     url, token = _real_primary()
     try:
         ctx["db"] = ctx["run"](
-            open_turso(
-                str(ctx["tmp"] / "r.db"), url, token, shutdown="exit_immediately"
-            )
+            open_turso(str(ctx["tmp"] / "r.db"), url, token, shutdown="exit_immediately")
         )
     except OSError as exc:
         pytest.skip(f"the primary at {url[:34]} is not reachable: {exc}")
@@ -274,11 +268,7 @@ def _then_derived(ctx):
 @then("nothing else has to be updated to keep them agreeing")
 def _then_single_source(ctx):
     """No second flag. A stored boolean is a copy that can go stale."""
-    flags = [
-        k
-        for k, v in ctx["db"].items()
-        if isinstance(v, bool) and "replic" in k.lower()
-    ]
+    flags = [k for k, v in ctx["db"].items() if isinstance(v, bool) and "replic" in k.lower()]
 
     assert flags == [], (
         f"the Database carries {flags} beside `primary`. Two places to say one "

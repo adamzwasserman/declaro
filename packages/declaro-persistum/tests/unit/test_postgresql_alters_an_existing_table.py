@@ -152,7 +152,9 @@ async def _deploy(connection: Any, declared: dict[str, Any]) -> None:
     plan = diff(
         {n: actual[n] for n in declared if n in actual},
         declared,
-        dialect="postgresql", decisions=NOTHING)
+        dialect="postgresql",
+        decisions=NOTHING,
+    )
     await apply(
         connection,
         plan["operations"],
@@ -162,9 +164,7 @@ async def _deploy(connection: Any, declared: dict[str, Any]) -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "_label,before,after", STEPS, ids=[s[0].replace(" ", "_") for s in STEPS]
-)
+@pytest.mark.parametrize("_label,before,after", STEPS, ids=[s[0].replace(" ", "_") for s in STEPS])
 async def test_the_change_applies(
     _label: str, before: dict[str, Any], after: dict[str, Any]
 ) -> None:
@@ -180,9 +180,7 @@ async def test_the_change_applies(
         await connection.close()
 
 
-@pytest.mark.parametrize(
-    "label,before,after", STEPS, ids=[s[0].replace(" ", "_") for s in STEPS]
-)
+@pytest.mark.parametrize("label,before,after", STEPS, ids=[s[0].replace(" ", "_") for s in STEPS])
 async def test_the_change_converges(
     label: str, before: dict[str, Any], after: dict[str, Any]
 ) -> None:
@@ -196,7 +194,9 @@ async def test_the_change_converges(
         remaining = diff(
             {n: actual[n] for n in after if n in actual},
             after,
-            dialect="postgresql", decisions=NOTHING)["operations"]
+            dialect="postgresql",
+            decisions=NOTHING,
+        )["operations"]
 
         assert remaining == [], (
             f"{label} migrates on every deploy: "
@@ -207,9 +207,7 @@ async def test_the_change_converges(
         await connection.close()
 
 
-@pytest.mark.parametrize(
-    "label,before,after", STEPS, ids=[s[0].replace(" ", "_") for s in STEPS]
-)
+@pytest.mark.parametrize("label,before,after", STEPS, ids=[s[0].replace(" ", "_") for s in STEPS])
 async def test_the_rows_are_still_there_afterwards(
     label: str, before: dict[str, Any], after: dict[str, Any]
 ) -> None:
@@ -229,12 +227,8 @@ async def test_the_rows_are_still_there_afterwards(
         for table in after:
             columns = after[table]["columns"]
             names = ", ".join(f'"{c}"' for c in columns)
-            values = ", ".join(
-                "1" if columns[c]["type"] == "integer" else "'x'" for c in columns
-            )
-            await connection.execute(
-                f'INSERT INTO "{table}" ({names}) VALUES ({values})'
-            )
+            values = ", ".join("1" if columns[c]["type"] == "integer" else "'x'" for c in columns)
+            await connection.execute(f'INSERT INTO "{table}" ({names}) VALUES ({values})')
 
         await _deploy(connection, after)
 

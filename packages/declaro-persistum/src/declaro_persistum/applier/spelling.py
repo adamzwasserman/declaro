@@ -84,11 +84,7 @@ def sqlite_type(type_str: str) -> str:
     type_lower = type_str.lower()
     spellings = [
         *[storage for fragment, storage in _SQLITE_BY_FRAGMENT if fragment in type_lower],
-        *[
-            _SQLITE_STORAGE_CLASS[name]
-            for name in [type_lower]
-            if name in _SQLITE_STORAGE_CLASS
-        ],
+        *[_SQLITE_STORAGE_CLASS[name] for name in [type_lower] if name in _SQLITE_STORAGE_CLASS],
         *[storage for prefix, storage in _SQLITE_BY_PREFIX if type_lower.startswith(prefix)],
         type_str.upper(),
     ]
@@ -154,10 +150,7 @@ def same_type(left: str | None, right: str | None, dialect: Dialect) -> bool:
 @helper
 def _refuse_unmappable_dialect(dialect: Dialect) -> Dialect:
     """No engine by this name declares how it spells a type."""
-    raise ValueError(
-        f"cannot spell types for dialect {dialect!r}. "
-        f"Supported: {sorted(TYPE_MAPS)}."
-    )
+    raise ValueError(f"cannot spell types for dialect {dialect!r}. Supported: {sorted(TYPE_MAPS)}.")
 
 
 @helper
@@ -237,26 +230,30 @@ EXPRESSION_DEFAULTS: dict[str, dict[str, str]] = {
 # variant bits are wrong, so it is not v4, and anything that parses or
 # validates it is being lied to. Translating it would replace a loud syntax
 # error with a quiet wrong value.
-_NO_UUID = MappingProxyType({
-    "gen_random_uuid()": (
-        "SQLite has no UUID generator, and a random hex string is not a "
-        "v4 UUID. Have the application supply the id"
-    ),
-    "uuid_generate_v4()": (
-        "SQLite has no UUID generator, and a random hex string is not a "
-        "v4 UUID. Have the application supply the id"
-    ),
-})
+_NO_UUID = MappingProxyType(
+    {
+        "gen_random_uuid()": (
+            "SQLite has no UUID generator, and a random hex string is not a "
+            "v4 UUID. Have the application supply the id"
+        ),
+        "uuid_generate_v4()": (
+            "SQLite has no UUID generator, and a random hex string is not a "
+            "v4 UUID. Have the application supply the id"
+        ),
+    }
+)
 
 # WRITTEN ONCE, WHOLE. This was built with sqlite's entry and then mutated on
 # the next two lines to add turso and postgresql, so the table a reader sees
 # was not the table the code used. Every dialect is here, and the mapping
 # cannot be changed after import.
-NO_EQUIVALENT = MappingProxyType({
-    "sqlite": _NO_UUID,
-    "turso": _NO_UUID,
-    "postgresql": MappingProxyType({}),
-})
+NO_EQUIVALENT = MappingProxyType(
+    {
+        "sqlite": _NO_UUID,
+        "turso": _NO_UUID,
+        "postgresql": MappingProxyType({}),
+    }
+)
 
 
 @helper
@@ -295,15 +292,12 @@ def _refuse_unspellable_expression(
 ) -> str:
     """This engine has no way to write the expression the column declares."""
     raise ValueError(
-        f"column {column!r} defaults to {value}, which {dialect} cannot "
-        f"spell. {refusal[0]}."
+        f"column {column!r} defaults to {value}, which {dialect} cannot spell. {refusal[0]}."
     )
 
 
 @helper
-def _the_spellable_expression(
-    value: str, _dialect: str, _column: str, _refusal: list[str]
-) -> str:
+def _the_spellable_expression(value: str, _dialect: str, _column: str, _refusal: list[str]) -> str:
     """An expression this engine can write, handed back to be spelled."""
     return value
 
@@ -455,8 +449,7 @@ DEFAULTS: dict[str, RenderDefault] = {
 def _refuse_unrenderable_dialect(dialect: Dialect) -> Dialect:
     """No engine by this name declares how it writes a default."""
     raise ValueError(
-        f"cannot render a column for dialect {dialect!r}. "
-        f"Supported: {sorted(DEFAULTS)}."
+        f"cannot render a column for dialect {dialect!r}. Supported: {sorted(DEFAULTS)}."
     )
 
 
@@ -476,19 +469,21 @@ _WHEN_UNRENDERABLE: dict[bool, Callable[[Dialect], Dialect]] = {
 def _foreign_key_clause(col: Column, reference: str) -> str:
     """REFERENCES, with whichever cascade actions the column declares."""
     ref_table, ref_col = reference.split(".")
-    return " ".join([
-        f'REFERENCES "{ref_table}"("{ref_col}")',
-        *[
-            f"ON DELETE {action.upper().replace('_', ' ')}"
-            for action in [col.get("on_delete")]
-            if action
-        ],
-        *[
-            f"ON UPDATE {action.upper().replace('_', ' ')}"
-            for action in [col.get("on_update")]
-            if action
-        ],
-    ])
+    return " ".join(
+        [
+            f'REFERENCES "{ref_table}"("{ref_col}")',
+            *[
+                f"ON DELETE {action.upper().replace('_', ' ')}"
+                for action in [col.get("on_delete")]
+                if action
+            ],
+            *[
+                f"ON UPDATE {action.upper().replace('_', ' ')}"
+                for action in [col.get("on_update")]
+                if action
+            ],
+        ]
+    )
 
 
 @helper
@@ -519,11 +514,7 @@ def column_definition(name: str, col: Column, dialect: Dialect) -> str:
             if key in col
         ],
         *[f"CHECK ({col[key]})" for key in ["check"] if key in col],
-        *[
-            _foreign_key_clause(col, col[key])
-            for key in ["references"]
-            if key in col
-        ],
+        *[_foreign_key_clause(col, col[key]) for key in ["references"] if key in col],
     ]
 
     return " ".join(parts)

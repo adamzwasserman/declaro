@@ -86,8 +86,7 @@ def diff_views(
     changed = [
         name
         for name in old_names & new_names
-        if old_views[name].get("materialized", False)
-        != new_views[name].get("materialized", False)
+        if old_views[name].get("materialized", False) != new_views[name].get("materialized", False)
         or old_views[name].get("query") != new_views[name].get("query")
     ]
     operations.extend(

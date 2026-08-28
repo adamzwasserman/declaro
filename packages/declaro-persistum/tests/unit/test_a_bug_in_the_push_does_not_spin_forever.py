@@ -76,7 +76,6 @@ def _replicated(replicate_once, sleeps: list[float]):
                 f"that will never succeed is a hang, not patience."
             )
 
-
     return Database(
         path="/tmp/unused.db",
         dialect="turso",
@@ -136,6 +135,7 @@ async def test_a_bug_of_ours_escapes_the_loop_rather_than_spinning() -> None:
     A TypeError from calling `push` wrongly is not a network failure and will
     never succeed, so it must leave the loop.
     """
+
     async def our_bug(_db) -> bool:
         raise TypeError("push() got an unexpected keyword argument")
 
@@ -180,9 +180,7 @@ async def test_the_real_replicate_once_lets_our_bug_out(tmp_path) -> None:
 
     url, token = _credentials()
     try:
-        db = await open_turso(
-            str(tmp_path / "r.db"), url, token, shutdown="exit_immediately"
-        )
+        db = await open_turso(str(tmp_path / "r.db"), url, token, shutdown="exit_immediately")
     except OSError as exc:
         pytest.skip(f"the primary is not reachable: {exc}")
 

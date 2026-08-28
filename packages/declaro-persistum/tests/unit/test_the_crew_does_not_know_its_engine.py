@@ -76,8 +76,13 @@ def test_the_drainer_names_no_engine() -> None:
     body = inspect.getsource(crew.drainer)
     # `execute` alone is the callback drain() calls, not engine knowledge.
     # What matters is whether the drainer speaks to the connection itself.
-    for tell in ("BEGIN CONCURRENT", "BEGIN IMMEDIATE", ".commit()",
-                 "conn.execute(", "transaction()"):
+    for tell in (
+        "BEGIN CONCURRENT",
+        "BEGIN IMMEDIATE",
+        ".commit()",
+        "conn.execute(",
+        "transaction()",
+    ):
         assert tell not in body, (
             f"drainer still contains {tell!r}; it is deciding for one engine "
             f"while accepting a Database that could be any of them"
@@ -100,7 +105,6 @@ async def test_a_drainer_runs_whatever_writer_it_was_given() -> None:
 
     async def connect(_db):
         return object()
-
 
     def _db(label: str) -> Database:
         return Database(

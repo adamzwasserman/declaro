@@ -85,7 +85,9 @@ async def _deploy(connection: Any, dialect: str, declared: dict) -> dict:
     plan = diff(
         {name: actual[name] for name in declared if name in actual},
         declared,
-        dialect=dialect, decisions=NOTHING)
+        dialect=dialect,
+        decisions=NOTHING,
+    )
     return await apply(
         connection,
         plan["operations"],
@@ -151,8 +153,7 @@ async def test_introspection_returns_the_name_that_was_declared(
         actual = await introspect(connection, dialect)
 
         assert table_name in actual, (
-            f"{dialect} introspected {sorted(actual)}, and {table_name!r} "
-            f"is not among them"
+            f"{dialect} introspected {sorted(actual)}, and {table_name!r} is not among them"
         )
     finally:
         await connection.close()
@@ -219,9 +220,7 @@ def test_a_ddl_that_names_a_different_table_is_not_believed() -> None:
     today. It is one version away, and the failure it would cause is a table
     introspected under a name no declaration can match.
     """
-    assert declared_name("qualname", "CREATE TABLE main.QualName (id INTEGER)") == (
-        "qualname"
-    )
+    assert declared_name("qualname", "CREATE TABLE main.QualName (id INTEGER)") == ("qualname")
 
 
 def test_a_table_with_no_stored_ddl_keeps_its_catalogue_name() -> None:
@@ -248,14 +247,8 @@ async def test_a_mixed_case_table_survives_being_altered() -> None:
     import turso.aio
 
     declared = {"UserProfile": DECLARED}
-    altered = {
-        "UserProfile": {
-            "columns": {**DECLARED["columns"], "email": {"type": "text"}}
-        }
-    }
-    connection = await turso.aio.connect(
-        os.path.join(tempfile.mkdtemp(), "altered.db")
-    )
+    altered = {"UserProfile": {"columns": {**DECLARED["columns"], "email": {"type": "text"}}}}
+    connection = await turso.aio.connect(os.path.join(tempfile.mkdtemp(), "altered.db"))
     try:
         await _deploy(connection, "turso", declared)
         await _deploy(connection, "turso", altered)
@@ -305,11 +298,12 @@ async def test_a_reference_to_a_capitalised_table_converges(dialect: str) -> Non
         remaining = diff(
             {n: actual[n] for n in FK_SCHEMA if n in actual},
             FK_SCHEMA,
-            dialect=dialect, decisions=NOTHING)["operations"]
+            dialect=dialect,
+            decisions=NOTHING,
+        )["operations"]
 
         assert remaining == [], (
-            f"{dialect} rebuilds Post on every deploy: "
-            f"{[(o['op'], o['table']) for o in remaining]}"
+            f"{dialect} rebuilds Post on every deploy: {[(o['op'], o['table']) for o in remaining]}"
         )
     finally:
         await connection.close()
@@ -400,8 +394,7 @@ async def test_an_index_reads_back_under_the_name_it_was_given(
         actual = await introspect(connection, dialect)
 
         assert "IxUserName" in actual["users"].get("indexes", {}), (
-            f"{dialect} introspected "
-            f"{sorted(actual['users'].get('indexes', {}))}"
+            f"{dialect} introspected {sorted(actual['users'].get('indexes', {}))}"
         )
     finally:
         await connection.close()
@@ -417,7 +410,9 @@ async def test_a_capitalised_index_converges(dialect: str) -> None:
         remaining = diff(
             {n: actual[n] for n in INDEXED if n in actual},
             INDEXED,
-            dialect=dialect, decisions=NOTHING)["operations"]
+            dialect=dialect,
+            decisions=NOTHING,
+        )["operations"]
 
         assert remaining == [], [(o["op"], o["table"]) for o in remaining]
     finally:
@@ -434,9 +429,7 @@ async def test_a_view_reads_back_under_the_name_it_was_given(
     connection = await ENGINES[dialect]()
     try:
         await _deploy(connection, dialect, {"users": DECLARED})
-        await connection.execute(
-            'CREATE VIEW "ActiveUsers" AS SELECT id FROM "users"'
-        )
+        await connection.execute('CREATE VIEW "ActiveUsers" AS SELECT id FROM "users"')
         await connection.commit()
 
         _tables, views = await introspect_with_views(connection, dialect)

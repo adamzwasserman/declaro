@@ -170,8 +170,7 @@ async def test_the_index_lists_the_newest_first(app_dir: str) -> None:
     response = await app.index(_request())
 
     assert [t["title"] for t in response.context["todos"]] == ["newer", "older"], (
-        "the index is not newest-first, so a reader's most recent todo is at "
-        "the bottom of the page"
+        "the index is not newest-first, so a reader's most recent todo is at the bottom of the page"
     )
 
 

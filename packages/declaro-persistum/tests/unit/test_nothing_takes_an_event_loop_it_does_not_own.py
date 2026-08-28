@@ -61,9 +61,7 @@ def _offenders() -> list[str]:
         where = path.relative_to(ROOT)
 
         found += [
-            f"{where}:{line} asyncio.{name}"
-            for line, name in _calls(tree)
-            if name in _REFUSED
+            f"{where}:{line} asyncio.{name}" for line, name in _calls(tree) if name in _REFUSED
         ]
         # A loop made here must be closed here. `.close()` anywhere in the same
         # function is the coarse version of that and is what a fixture does.

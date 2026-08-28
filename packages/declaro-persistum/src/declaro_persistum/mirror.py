@@ -122,25 +122,19 @@ def _kept_to_the_mirror(m: Mirror, primary_rows: Any, _error: Exception) -> tupl
 
 
 @helper
-def _handed_to_the_caller(
-    _m: Mirror, _primary_rows: Any, error: Exception
-) -> tuple[Any, Mirror]:
+def _handed_to_the_caller(_m: Mirror, _primary_rows: Any, error: Exception) -> tuple[Any, Mirror]:
     """fail_closed: by now the mirror is production, so its failure is the caller's."""
     raise error
 
 
-_WHEN_THE_MIRROR_FAILS: dict[
-    bool, Callable[[Mirror, Any, Exception], tuple[Any, Mirror]]
-] = {
+_WHEN_THE_MIRROR_FAILS: dict[bool, Callable[[Mirror, Any, Exception], tuple[Any, Mirror]]] = {
     True: _kept_to_the_mirror,
     False: _handed_to_the_caller,
 }
 
 
 @helper
-def _recorded(
-    m: Mirror, sql: str, primary_rows: Any, replica_rows: Any
-) -> tuple[Any, Mirror]:
+def _recorded(m: Mirror, sql: str, primary_rows: Any, replica_rows: Any) -> tuple[Any, Mirror]:
     """The two disagreed, so the disagreement joins the list."""
     divergence: Divergence = {
         "sql": sql,
@@ -151,9 +145,7 @@ def _recorded(
 
 
 @helper
-def _agreed(
-    m: Mirror, _sql: str, primary_rows: Any, _replica_rows: Any
-) -> tuple[Any, Mirror]:
+def _agreed(m: Mirror, _sql: str, primary_rows: Any, _replica_rows: Any) -> tuple[Any, Mirror]:
     """The two answered the same thing, so there is nothing to record."""
     return primary_rows, m
 
@@ -181,9 +173,7 @@ async def _against_the_replica(
         replica_rows = await _read(m["replica"], sql, params)
     except Exception as error:
         return _WHEN_THE_MIRROR_FAILS[m["fail_open"]](m, primary_rows, error)
-    return _WHEN_THEY_DIFFER[primary_rows != replica_rows](
-        m, sql, primary_rows, replica_rows
-    )
+    return _WHEN_THEY_DIFFER[primary_rows != replica_rows](m, sql, primary_rows, replica_rows)
 
 
 @helper
@@ -258,9 +248,7 @@ _WHEN_THE_WRITE_FAILS: dict[bool, Callable[[Mirror, str, Exception], Mirror]] = 
 
 
 @boundary
-async def parallel_write(
-    m: Mirror, sql: str, params: Any
-) -> Mirror:
+async def parallel_write(m: Mirror, sql: str, params: Any) -> Mirror:
     """Write to both, at the same time, and report a mirror failure per policy.
 
     The two writes run concurrently rather than in sequence: a cutover's

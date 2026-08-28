@@ -354,18 +354,14 @@ async def cmd_diff(
         @helper
         async def show_the_diff() -> int:
             """Diff, settle anything ambiguous, and print what would happen."""
-            result = diff(
-                actual, target, dialect=dialect, decisions=load_decisions(schema_dir)
-            )
+            result = diff(actual, target, dialect=dialect, decisions=load_decisions(schema_dir))
             _print_diff_result(
                 await _settled(
                     result,
                     schema_dir,
                     unattended,
                     interactive,
-                    lambda made: diff(
-                        actual, target, dialect=dialect, decisions=made
-                    ),
+                    lambda made: diff(actual, target, dialect=dialect, decisions=made),
                 ),
                 verbose,
             )
@@ -469,9 +465,7 @@ async def cmd_apply(
                     schema_dir,
                     unattended,
                     interactive,
-                    lambda made: diff(
-                        actual, target, dialect=dialect, decisions=made
-                    ),
+                    lambda made: diff(actual, target, dialect=dialect, decisions=made),
                 )
 
                 @boundary
@@ -519,9 +513,7 @@ async def cmd_apply(
                         return 1
 
                     # Whether the applier got through the whole plan.
-                    return {True: applied, False: not_applied}[
-                        apply_result["success"]
-                    ]()
+                    return {True: applied, False: not_applied}[apply_result["success"]]()
 
                 @helper
                 async def show_then_run() -> int:
@@ -531,9 +523,7 @@ async def cmd_apply(
                         "\n(dry run - no changes applied)",
                         sys.stdout,
                         0,
-                        lambda: _WHEN_ASKING[interactive and not unattended](
-                            run_the_operations
-                        ),
+                        lambda: _WHEN_ASKING[interactive and not unattended](run_the_operations),
                     )
 
                 return await _WHEN_SETTLED[not result["operations"]](
@@ -591,8 +581,7 @@ async def cmd_snapshot(
                 "\n".join(
                     [f"  Tables: {len(actual)}"]
                     + [
-                        f"    {table}: "
-                        f"{len(actual[table].get('columns', {}))} columns"
+                        f"    {table}: {len(actual[table].get('columns', {}))} columns"
                         for table in sorted(actual.keys())
                     ]
                 ),
@@ -777,9 +766,7 @@ async def cmd_migrate_remote(
 
                     # Safety guard: detect when pull failed silently
                     create_ops = [
-                        op
-                        for op in diff_result["operations"]
-                        if op["op"] == "create_table"
+                        op for op in diff_result["operations"] if op["op"] == "create_table"
                     ]
                     # A cloud database that reads as empty while the schema
                     # declares tables is the shape a failed pull leaves behind,
@@ -804,23 +791,17 @@ async def cmd_migrate_remote(
                         """List what will change, then refuse, rehearse or run."""
                         _note(
                             from_scratch and init,
-                            f"--init: creating {len(create_ops)} tables on "
-                            f"empty cloud DB",
+                            f"--init: creating {len(create_ops)} tables on empty cloud DB",
                             sys.stdout,
                         )
-                        print(
-                            f"Found {len(diff_result['operations'])} "
-                            f"schema differences:"
-                        )
+                        print(f"Found {len(diff_result['operations'])} schema differences:")
                         print(
                             "\n".join(
                                 f"  - {op['op']} on {op.get('table', 'N/A')}"
                                 for op in diff_result["operations"]
                             )
                         )
-                        return await _WHEN_SETTLED[
-                            bool(diff_result.get("ambiguities"))
-                        ](
+                        return await _WHEN_SETTLED[bool(diff_result.get("ambiguities"))](
                             f"\nAmbiguous changes detected: "
                             f"{diff_result.get('ambiguities')}\n"
                             f"Aborting — resolve ambiguities first.",
@@ -932,9 +913,7 @@ async def cmd_generate(
         @helper
         async def write_the_sql() -> int:
             """Diff, then render the operations as statements."""
-            result = diff(
-                actual, target, dialect=dialect, decisions=load_decisions(schema_dir)
-            )
+            result = diff(actual, target, dialect=dialect, decisions=load_decisions(schema_dir))
 
             # Nothing here can answer an ambiguity, so the command refuses.
             _WHEN_UNANSWERABLE[bool(result["ambiguities"])](result["ambiguities"])
@@ -955,9 +934,7 @@ async def cmd_generate(
                     sys.stderr,
                 )
 
-                return _WHEN_OUTPUT_NAMED[bool(output)](
-                    "\n".join(sql_statements) + "\n", output
-                )
+                return _WHEN_OUTPUT_NAMED[bool(output)]("\n".join(sql_statements) + "\n", output)
 
             return await _WHEN_SETTLED[not result["operations"]](
                 "-- No changes needed", sys.stderr, 0, render

@@ -72,9 +72,7 @@ def _users(**overrides: Any) -> dict[str, Any]:
     return {"users": {**USERS, **overrides}}
 
 
-WITH_EMAIL = {
-    "users": {"columns": {**USERS["columns"], "email": {"type": "text"}}}
-}
+WITH_EMAIL = {"users": {"columns": {**USERS["columns"], "email": {"type": "text"}}}}
 WITH_INDEX = _users(indexes={"ix_name": {"columns": ["name"]}})
 POSTS_PLAIN = {
     "users": USERS,
@@ -99,9 +97,7 @@ A_MATVIEW = {
         "refresh": "manual",
     }
 }
-WITH_CHECK = _users(
-    constraints={"ck_id": {"type": "check", "expression": "id > 0"}}
-)
+WITH_CHECK = _users(constraints={"ck_id": {"type": "check", "expression": "id > 0"}})
 
 # (label, current, target). A state is a schema, optionally paired with the
 # views declared against it, because a view is diffed by `diff_views` and a
@@ -209,9 +205,7 @@ CASES: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
 # perfectly well, and it is the applier that will not run them.
 REFUSED_BY_SQLITE = {"add a constraint", "drop a constraint"}
 
-APPLIED_CASES = [
-    case for case in CASES if case[0] not in REFUSED_BY_SQLITE
-]
+APPLIED_CASES = [case for case in CASES if case[0] not in REFUSED_BY_SQLITE]
 
 
 def _operations_of(current: Any, target: Any) -> set[str]:
@@ -227,9 +221,7 @@ def _operations_of(current: Any, target: Any) -> set[str]:
     return {
         operation["op"]
         for operation in (
-            *diff(
-                current_schema, target_schema, dialect="sqlite", decisions=NOTHING
-            )["operations"],
+            *diff(current_schema, target_schema, dialect="sqlite", decisions=NOTHING)["operations"],
             *diff_views(current_views, target_views),
         )
     }
@@ -270,9 +262,7 @@ def test_the_cases_cover_the_operations_they_claim_to() -> None:
 @pytest.mark.parametrize(
     "label,current,target",
     [case for case in CASES if case[0] in REFUSED_BY_SQLITE],
-    ids=[
-        case[0].replace(" ", "_") for case in CASES if case[0] in REFUSED_BY_SQLITE
-    ],
+    ids=[case[0].replace(" ", "_") for case in CASES if case[0] in REFUSED_BY_SQLITE],
 )
 async def test_what_sqlite_refuses_it_refuses_out_loud(
     label: str, current: Any, target: Any
@@ -314,9 +304,7 @@ def _state(case_half: Any) -> tuple[dict, dict]:
     return case_half if isinstance(case_half, tuple) else (case_half, {})
 
 
-async def _apply_plan(
-    connection: Any, current: Any, target: Any, dialect: str
-) -> None:
+async def _apply_plan(connection: Any, current: Any, target: Any, dialect: str) -> None:
     """Everything that changes between two states: its tables, then its views.
 
     THE VIEWS WERE NOT APPLIED HERE AT ALL. `diff` answers for tables and
@@ -358,7 +346,9 @@ async def _converged(connection: Any, target: Any, dialect: str) -> list:
     return diff(
         {name: actual[name] for name in target_schema if name in actual},
         target_schema,
-        dialect=dialect, decisions=NOTHING)["operations"]
+        dialect=dialect,
+        decisions=NOTHING,
+    )["operations"]
 
 
 @pytest.mark.parametrize(
@@ -494,9 +484,7 @@ async def _clean(connection: Any) -> None:
 
 @pytest.mark.postgresql
 @pytest.mark.integration
-@pytest.mark.parametrize(
-    "label,current,target", CASES, ids=[c[0].replace(" ", "_") for c in CASES]
-)
+@pytest.mark.parametrize("label,current,target", CASES, ids=[c[0].replace(" ", "_") for c in CASES])
 async def test_the_change_applies_and_converges_on_postgresql(
     label: str, current: dict, target: dict
 ) -> None:
@@ -526,9 +514,7 @@ async def test_the_change_applies_and_converges_on_postgresql(
 
 @pytest.mark.postgresql
 @pytest.mark.integration
-@pytest.mark.parametrize(
-    "label,current,target", CASES, ids=[c[0].replace(" ", "_") for c in CASES]
-)
+@pytest.mark.parametrize("label,current,target", CASES, ids=[c[0].replace(" ", "_") for c in CASES])
 async def test_the_change_leaves_the_declared_tables_present_on_postgresql(
     label: str, current: dict, target: dict
 ) -> None:

@@ -54,7 +54,7 @@ pytestmark = [pytest.mark.precommit]
 # A VIEW IS DATA, NOT A DECORATED CLASS, because it has a name and a SELECT
 # and no fields for a class to hold. `views_from_module` picks it up by shape:
 # a module-level dict carrying at least `name` and `query`.
-GOOD_VIEW = '''
+GOOD_VIEW = """
 from pydantic import BaseModel
 from declaro_persistum import table
 
@@ -66,9 +66,9 @@ class Widget(BaseModel):
 
 
 live_widgets = {"name": "live_widgets", "query": "SELECT id FROM widgets"}
-'''
+"""
 
-BROKEN = '''
+BROKEN = """
 from pydantic import BaseModel
 from declaro_persistum import table
 
@@ -78,13 +78,13 @@ this_name_does_not_exist()
 @table("orphans")
 class Orphan(BaseModel):
     id: int
-'''
+"""
 
 # A field-level key AND a Meta key, which is the case the removal branch
 # exists for. Without a field-level `primary_key=True` the loop has nothing to
 # remove and a mutation that deletes it survives, which is how the first
 # version of this file measured nothing.
-CONTRADICTORY = '''
+CONTRADICTORY = """
 from pydantic import BaseModel
 from declaro_persistum import table, field
 
@@ -96,9 +96,9 @@ class Pair(BaseModel):
 
     class Meta:
         primary_key = ["left", "right"]
-'''
+"""
 
-COMPOSITE = '''
+COMPOSITE = """
 from pydantic import BaseModel
 from declaro_persistum import table
 
@@ -110,7 +110,7 @@ class Pair(BaseModel):
 
     class Meta:
         primary_key = ["left", "right"]
-'''
+"""
 
 
 def _models_dir(**files: str) -> str:
@@ -185,6 +185,6 @@ def test_a_composite_key_leaves_no_flag_on_the_columns() -> None:
 
     schema = load_schema_from_models(directory)
 
-    assert not any(
-        col.get("primary_key") for col in schema["pairs"]["columns"].values()
-    ), schema["pairs"]["columns"]
+    assert not any(col.get("primary_key") for col in schema["pairs"]["columns"].values()), schema[
+        "pairs"
+    ]["columns"]

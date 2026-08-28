@@ -64,8 +64,7 @@ def test_each_dialect_spells_the_declared_type_its_own_way(
 
     for dialect, want in expected.items():
         assert map_type(declared, dialect) == want, (
-            f"{declared!r} on {dialect}: got {map_type(declared, dialect)!r}, "
-            f"want {want!r}"
+            f"{declared!r} on {dialect}: got {map_type(declared, dialect)!r}, want {want!r}"
         )
 
 
@@ -115,9 +114,7 @@ def test_there_is_one_type_map_not_three() -> None:
             f"{module.__name__} carries its own copy of the affinity mapping; "
             f"three copies is three places for a dialect to be forgotten"
         )
-        assert "sqlite_type" in src, (
-            f"{module.__name__} does not reach the shared mapping at all"
-        )
+        assert "sqlite_type" in src, f"{module.__name__} does not reach the shared mapping at all"
 
 
 def test_a_declared_column_renders_per_dialect_end_to_end() -> None:

@@ -54,8 +54,6 @@ def get_transaction_mode() -> str:
     return "all_or_nothing"
 
 
-
-
 @helper
 async def apply(
     connection: FetchingConnection,
@@ -105,9 +103,7 @@ async def _preview(
 
 
 @boundary
-async def _executed_statements(
-    connection: FetchingConnection, statements: list[str]
-) -> list[str]:
+async def _executed_statements(connection: FetchingConnection, statements: list[str]) -> list[str]:
     """Run each statement in order and hand back the ones that reached the engine.
 
     One result comes back per statement, so the count of results is the count
@@ -130,9 +126,7 @@ async def _execute_operation(
     """Run one operation's statements and hand back the block that ran."""
     sql = sql_statements[position]
     try:
-        return ";\n".join(
-            await _executed_statements(connection, per_operation[position])
-        )
+        return ";\n".join(await _executed_statements(connection, per_operation[position]))
     except Exception as e:
         raise MigrationError(
             f"Failed to execute operation {position + 1}/{len(execution_order)}",
@@ -179,8 +173,8 @@ async def _run_batch(
         raise
     except Exception as e:
         raise MigrationError(
-            f"Migration failed: {e}",
-            original_error=e, operation=NOTHING, sql=NOTHING) from e
+            f"Migration failed: {e}", original_error=e, operation=NOTHING, sql=NOTHING
+        ) from e
 
 
 _WHEN_DRY_RUN: dict[bool, Callable[..., Any]] = {
@@ -194,8 +188,6 @@ _WHEN_DRY_RUN: dict[bool, Callable[..., Any]] = {
 # dialect-independent, so it now lives once in `applier/__init__.py` beside the
 # `SQL_GENERATORS` table, and this module keeps only what varies:
 # `generate_operation_sql`.
-
-
 
 
 @helper
@@ -216,118 +208,20 @@ def generate_operation_sql(operation: Operation) -> str:
     return ";\n".join(statements_for(operation))
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # A `to: None` MEANS THE DEFAULT IS GONE, which is DROP DEFAULT rather than
 # `SET DEFAULT None`.
-
-
-
-
-
-
-
-
-
-
 
 
 # WHICH PROPERTIES THIS RENDERER WRITES, in the order it writes them. The
 # order of the statements is the order of this table.
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # WHAT EACH CONSTRAINT TYPE IS WRITTEN AS. Two entries, read by subscript.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 # =============================================================================
 # Extended Schema Objects (Addendum) - Standalone Functions
 # =============================================================================
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 # HOISTED OUT OF THE FUNCTION. This table was a local variable rebuilt on

@@ -89,9 +89,7 @@ def test_the_other_rebuilder_writes_it_the_same_way(shape: str) -> None:
     )
 
     value = _DEFAULTS[shape]
-    rendered = _generate_create_table_sql(
-        "t", {"c": {"type": "text", "default": value}}, NOTHING
-    )
+    rendered = _generate_create_table_sql("t", {"c": {"type": "text", "default": value}}, NOTHING)
 
     assert sqlite_default(value) in rendered, rendered
 
@@ -126,9 +124,7 @@ def test_the_rebuild_has_no_default_rule_of_its_own() -> None:
     ],
     ids=["nothing", "an expression", "a bare function", "zero", "negative", "a float", "a flag"],
 )
-def test_each_spelling_is_keyed_by_the_type_it_answers(
-    value: object, spelling: str
-) -> None:
+def test_each_spelling_is_keyed_by_the_type_it_answers(value: object, spelling: str) -> None:
     """The vocabulary, stated as a table rather than an ordering.
 
     The chain this replaces tested `value is None`, then `isinstance(value,
@@ -145,7 +141,10 @@ def test_each_spelling_is_keyed_by_the_type_it_answers(
     [({"a": 1}, "a dict"), (["a"], "a list"), ((1, 2), "a pair")],
     ids=["a dict", "a list", "a pair"],
 )
-def test_a_default_with_no_sqlite_spelling_is_refused(value: object, shape: str) -> None:
+def test_a_default_with_no_sqlite_spelling_is_refused(
+    value: object,
+    shape: str,  # noqa: ARG001 - parametrize unpacks it; it names the case
+) -> None:
     """A default the writer cannot spell is a question, not a formatted repr.
 
     `f"DEFAULT {value}"` accepts every Python object, so a value nobody

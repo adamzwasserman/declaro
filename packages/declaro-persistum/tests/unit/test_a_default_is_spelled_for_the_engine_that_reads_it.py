@@ -57,9 +57,7 @@ PORTABLE = ["now()", "true", "false", "CURRENT_TIMESTAMP"]
 
 @pytest.mark.parametrize("default", PORTABLE)
 @pytest.mark.parametrize("dialect", DIALECTS)
-def test_a_portable_default_is_accepted_by_every_engine(
-    default: str, dialect: str
-) -> None:
+def test_a_portable_default_is_accepted_by_every_engine(default: str, dialect: str) -> None:
     """It must render, whichever engine is the target."""
     rendered = column_definition("c", {"type": "text", "default": default}, dialect)
 
@@ -100,9 +98,7 @@ def test_a_portable_default_produces_a_value_on_sqlite(default: str) -> None:
 
 def test_postgresql_keeps_its_own_spelling() -> None:
     """Translation must not run in the direction that needs no translation."""
-    rendered = column_definition(
-        "c", {"type": "timestamptz", "default": "now()"}, "postgresql"
-    )
+    rendered = column_definition("c", {"type": "timestamptz", "default": "now()"}, "postgresql")
 
     assert "now()" in rendered, rendered
 
@@ -115,9 +111,7 @@ def test_a_default_with_no_equivalent_is_refused_by_name() -> None:
     that matters.
     """
     with pytest.raises(ValueError) as caught:
-        column_definition(
-            "id", {"type": "uuid", "default": "gen_random_uuid()"}, "sqlite"
-        )
+        column_definition("id", {"type": "uuid", "default": "gen_random_uuid()"}, "sqlite")
 
     message = str(caught.value)
     assert "gen_random_uuid" in message, message
@@ -127,9 +121,7 @@ def test_a_default_with_no_equivalent_is_refused_by_name() -> None:
 def test_the_refusal_names_the_engine_and_what_to_do() -> None:
     """An error a reader cannot act on is a crash with better manners."""
     with pytest.raises(ValueError) as caught:
-        column_definition(
-            "id", {"type": "uuid", "default": "gen_random_uuid()"}, "sqlite"
-        )
+        column_definition("id", {"type": "uuid", "default": "gen_random_uuid()"}, "sqlite")
 
     message = str(caught.value)
     assert "sqlite" in message.lower(), message
@@ -156,9 +148,7 @@ def test_postgresql_still_accepts_what_only_it_can_spell() -> None:
 @pytest.mark.parametrize("dialect", DIALECTS)
 def test_a_literal_default_is_untouched(dialect: str) -> None:
     """Translation applies to the expression vocabulary, not to every string."""
-    rendered = column_definition(
-        "c", {"type": "text", "default": "'pending'"}, dialect
-    )
+    rendered = column_definition("c", {"type": "text", "default": "'pending'"}, dialect)
 
     assert "'pending'" in rendered, rendered
 
@@ -192,9 +182,7 @@ def test_sqlite_still_double_wraps_a_parenthesised_default() -> None:
     (now())`, so the parens have to be doubled or the differ sees a change on
     every run.
     """
-    rendered = column_definition(
-        "c", {"type": "text", "default": "(datetime('now'))"}, "sqlite"
-    )
+    rendered = column_definition("c", {"type": "text", "default": "(datetime('now'))"}, "sqlite")
 
     assert rendered.count("(datetime('now'))") == 1, rendered
     sqlite3.connect(":memory:").execute(f"CREATE TABLE t ({rendered})")

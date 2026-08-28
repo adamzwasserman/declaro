@@ -101,9 +101,7 @@ def _with_check(column: Column, expression: str) -> Column:
 
 
 @helper
-def _as_declared(
-    name: str, column: Column, unique: set[str], checks: dict[str, str]
-) -> Column:
+def _as_declared(name: str, column: Column, unique: set[str], checks: dict[str, str]) -> Column:
     """One column, plus the two facts no PRAGMA reports about it.
 
     A name in neither collection comes back exactly as
@@ -162,15 +160,11 @@ async def columns_of(connection: DbapiConnection, table: str) -> dict[str, Colum
     # today -- the declared value against None, forever.
     ddl_rows = await _rows(
         connection,
-        f"SELECT sql FROM sqlite_master WHERE type='table' "
-        f"AND name='{as_literal(table)}'",
+        f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{as_literal(table)}'",
     )
     checks = _checks_of(ddl_rows)
 
-    return {
-        name: _as_declared(name, column, unique, checks)
-        for name, column in columns.items()
-    }
+    return {name: _as_declared(name, column, unique, checks) for name, column in columns.items()}
 
 
 @helper
@@ -248,8 +242,7 @@ async def constraints_of(connection: DbapiConnection, table: str) -> dict[str, d
     """
     rows = await _rows(
         connection,
-        f"SELECT sql FROM sqlite_master WHERE type='table' "
-        f"AND name='{as_literal(table)}'",
+        f"SELECT sql FROM sqlite_master WHERE type='table' AND name='{as_literal(table)}'",
     )
     # No row means no such table, and a row whose `sql` is unset says nothing
     # about constraints. Both read as none declared.
@@ -338,7 +331,7 @@ async def introspect(
     # to choose between, and `schema_name` was spelled `_schema_name`
     # here and `schema_name` in the PostgreSQL entry, so no caller
     # could pass it through the table at all.
-    _ = resolved(schema_name, 'main')
+    _ = resolved(schema_name, "main")
     include_views = resolved(include_views, False)
     try:
         # A MATERIALIZED VIEW IS A REAL TABLE HERE, and it must not be
@@ -352,9 +345,7 @@ async def introspect(
         backing = await matviews_of(connection)
         tables = await _rows(connection, _USER_TABLES)
         schema: Schema = {
-            name: await table_of(connection, name)
-            for (name,) in tables
-            if name not in backing
+            name: await table_of(connection, name) for (name,) in tables if name not in backing
         }
         return await _WITH_VIEWS[bool(include_views)](connection, schema)
     except Exception as e:
@@ -380,9 +371,7 @@ async def _schema_and_views(
 
 _WITH_VIEWS: dict[
     bool,
-    Callable[
-        [DbapiConnection, Schema], Awaitable[Schema | tuple[Schema, dict[str, View]]]
-    ],
+    Callable[[DbapiConnection, Schema], Awaitable[Schema | tuple[Schema, dict[str, View]]]],
 ] = {
     True: _schema_and_views,
     False: _schema_alone,
@@ -445,8 +434,7 @@ async def table_exists(
     # three entries would refuse.
     _ = schema_name
     cursor = await connection.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' "
-        "AND lower(name) = lower(?)",
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND lower(name) = lower(?)",
         (table,),
     )
     return bool(await cursor.fetchall())

@@ -166,6 +166,4 @@ def test_an_approval_needs_a_date_and_a_time(marker: str) -> None:
             if marker in line and not stamped.search(line):
                 bad.append(f"{path.relative_to(_SRC)}:{number}")
 
-    assert not bad, (
-        f"these approvals carry no date and time, so they approve nothing: {bad}"
-    )
+    assert not bad, f"these approvals carry no date and time, so they approve nothing: {bad}"

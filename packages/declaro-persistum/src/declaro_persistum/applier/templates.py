@@ -69,8 +69,7 @@ def _table_body(operation: Operation, dialect: Dialect) -> str:
     primary_key = details["primary_key"]
 
     column_defs = [
-        column_definition(name, definition, dialect)
-        for name, definition in columns.items()
+        column_definition(name, definition, dialect) for name, definition in columns.items()
     ]
 
     composite_key = [
@@ -98,10 +97,7 @@ def _column_clause(operation: Operation, dialect: Dialect) -> str:
 @helper
 def _quoted_columns(operation: Operation, _dialect: Dialect) -> str:
     """The columns an index covers, quoted and comma-separated."""
-    return ", ".join(
-        f'"{column}"'
-        for column in operation["details"]["definition"]["columns"]
-    )
+    return ", ".join(f'"{column}"' for column in operation["details"]["definition"]["columns"])
 
 
 @helper
@@ -112,9 +108,7 @@ def _escaped_values(operation: Operation, _dialect: Dialect) -> list[str]:
     `Literal[...]` in a models file rather than from user input, but `it's
     live` is ordinary English and would end the string literal early.
     """
-    return [
-        value.replace("'", "''") for value in operation["details"]["values"]
-    ]
+    return [value.replace("'", "''") for value in operation["details"]["values"]]
 
 
 # =============================================================================
@@ -165,10 +159,7 @@ def _sqlite_rows(dialect: Dialect) -> dict[str, Rendering]:
             "repeat": NOTHING,
         },
         "rename_column": {
-            "template": (
-                'ALTER TABLE "{table}" RENAME COLUMN "{from_column}" '
-                'TO "{to_column}"'
-            ),
+            "template": ('ALTER TABLE "{table}" RENAME COLUMN "{from_column}" TO "{to_column}"'),
             "reads": {
                 "table": the_table(),
                 "from_column": detail("from_column"),
@@ -178,16 +169,13 @@ def _sqlite_rows(dialect: Dialect) -> dict[str, Rendering]:
             "repeat": NOTHING,
         },
         "alter_column": {
-            "template": "-- Table reconstruction required for {table} "
-            "(altering a column)",
+            "template": "-- Table reconstruction required for {table} (altering a column)",
             "reads": {"table": the_table()},
             "given": frozenset(),
             "repeat": NOTHING,
         },
         "add_index": {
-            "template": (
-                'CREATE {unique}INDEX "{index}" ON "{table}" ({columns}){where}'
-            ),
+            "template": ('CREATE {unique}INDEX "{index}" ON "{table}" ({columns}){where}'),
             "reads": {
                 "index": detail("index"),
                 "table": the_table(),
@@ -205,15 +193,13 @@ def _sqlite_rows(dialect: Dialect) -> dict[str, Rendering]:
             "repeat": NOTHING,
         },
         "add_foreign_key": {
-            "template": "-- Table reconstruction required for {table} "
-            "(adding a foreign key)",
+            "template": "-- Table reconstruction required for {table} (adding a foreign key)",
             "reads": {"table": the_table()},
             "given": frozenset(),
             "repeat": NOTHING,
         },
         "drop_foreign_key": {
-            "template": "-- Table reconstruction required for {table} "
-            "(dropping a foreign key)",
+            "template": "-- Table reconstruction required for {table} (dropping a foreign key)",
             "reads": {"table": the_table()},
             "given": frozenset(),
             "repeat": NOTHING,
@@ -242,16 +228,9 @@ def _postgresql_rows(dialect: Dialect) -> dict[str, Rendering]:
         # `alter_column` is absent on purpose. PostgreSQL alters a column
         # where it stands, which is one statement per property that changed,
         # so `rendering` supervises it out of the `alter_column:*` rows below.
-        **{
-            op: row
-            for op, row in _sqlite_rows(dialect).items()
-            if op != "alter_column"
-        },
+        **{op: row for op, row in _sqlite_rows(dialect).items() if op != "alter_column"},
         "add_index": {
-            "template": (
-                'CREATE {unique}INDEX "{index}" ON "{table}"{using} '
-                "({columns}){where}"
-            ),
+            "template": ('CREATE {unique}INDEX "{index}" ON "{table}"{using} ({columns}){where}'),
             "reads": {
                 "index": detail("index"),
                 "table": the_table(),
@@ -300,9 +279,7 @@ def _foreign_key_name(operation: Operation) -> str:
     """The name we give a foreign key, so that dropping it can find it."""
     details = operation["details"]
     reference = details["references"]
-    return (
-        f"fk_{operation['table']}_{details['column']}_{reference.split('.')[0]}"
-    )
+    return f"fk_{operation['table']}_{details['column']}_{reference.split('.')[0]}"
 
 
 @helper
@@ -332,7 +309,6 @@ def _cascade(key: str, keyword: str) -> Any:
     )
 
 
-
 # =============================================================================
 # The rows a supervisor renders, rather than the operation itself
 # =============================================================================
@@ -345,97 +321,67 @@ def _cascade(key: str, keyword: str) -> Any:
 _SUPERVISED: dict[str, Rendering] = {
     "alter_column:type": {
         "template": (
-            'ALTER TABLE "{table}" ALTER COLUMN "{column}" '
-            'TYPE {type} USING "{column}"::{type}'
+            'ALTER TABLE "{table}" ALTER COLUMN "{column}" TYPE {type} USING "{column}"::{type}'
         ),
         "reads": {},
-        "given": frozenset(
-            {"table", "column", "type"}
-        ),
+        "given": frozenset({"table", "column", "type"}),
         "repeat": NOTHING,
     },
     "alter_column:not_null": {
         "template": 'ALTER TABLE "{table}" ALTER COLUMN "{column}" SET NOT NULL',
         "reads": {},
-        "given": frozenset(
-            {"table", "column"}
-        ),
+        "given": frozenset({"table", "column"}),
         "repeat": NOTHING,
     },
     "alter_column:null": {
         "template": 'ALTER TABLE "{table}" ALTER COLUMN "{column}" DROP NOT NULL',
         "reads": {},
-        "given": frozenset(
-            {"table", "column"}
-        ),
+        "given": frozenset({"table", "column"}),
         "repeat": NOTHING,
     },
     "alter_column:default": {
-        "template": (
-            'ALTER TABLE "{table}" ALTER COLUMN "{column}" SET DEFAULT {default}'
-        ),
+        "template": ('ALTER TABLE "{table}" ALTER COLUMN "{column}" SET DEFAULT {default}'),
         "reads": {},
-        "given": frozenset(
-            {"table", "column", "default"}
-        ),
+        "given": frozenset({"table", "column", "default"}),
         "repeat": NOTHING,
     },
     "alter_column:no_default": {
         "template": 'ALTER TABLE "{table}" ALTER COLUMN "{column}" DROP DEFAULT',
         "reads": {},
-        "given": frozenset(
-            {"table", "column"}
-        ),
+        "given": frozenset({"table", "column"}),
         "repeat": NOTHING,
     },
     "alter_column:unique": {
-        "template": (
-            'ALTER TABLE "{table}" ADD CONSTRAINT "{constraint}" UNIQUE ("{column}")'
-        ),
+        "template": ('ALTER TABLE "{table}" ADD CONSTRAINT "{constraint}" UNIQUE ("{column}")'),
         "reads": {},
-        "given": frozenset(
-            {"table", "column", "constraint"}
-        ),
+        "given": frozenset({"table", "column", "constraint"}),
         "repeat": NOTHING,
     },
     "alter_column:not_unique": {
         "template": 'ALTER TABLE "{table}" DROP CONSTRAINT IF EXISTS "{constraint}"',
         "reads": {},
-        "given": frozenset(
-            {"table", "column", "constraint"}
-        ),
+        "given": frozenset({"table", "column", "constraint"}),
         "repeat": NOTHING,
     },
     "add_constraint:check": {
-        "template": (
-            'ALTER TABLE "{table}" ADD CONSTRAINT "{constraint}" CHECK ({expression})'
-        ),
+        "template": ('ALTER TABLE "{table}" ADD CONSTRAINT "{constraint}" CHECK ({expression})'),
         "reads": {},
-        "given": frozenset(
-            {"table", "constraint", "expression"}
-        ),
+        "given": frozenset({"table", "constraint", "expression"}),
         "repeat": NOTHING,
     },
     "add_constraint:unique": {
-        "template": (
-            'ALTER TABLE "{table}" ADD CONSTRAINT "{constraint}" UNIQUE ({columns})'
-        ),
+        "template": ('ALTER TABLE "{table}" ADD CONSTRAINT "{constraint}" UNIQUE ({columns})'),
         "reads": {},
-        "given": frozenset(
-            {"table", "constraint", "columns"}
-        ),
+        "given": frozenset({"table", "constraint", "columns"}),
         "repeat": NOTHING,
     },
     "drop_foreign_key:one": {
         "template": 'ALTER TABLE "{table}" DROP CONSTRAINT IF EXISTS "{constraint}"',
         "reads": {},
-        "given": frozenset(
-            {"table", "constraint"}
-        ),
+        "given": frozenset({"table", "constraint"}),
         "repeat": NOTHING,
     },
 }
-
 
 
 # =============================================================================

@@ -116,7 +116,9 @@ class EnsureProgress(Protocol):
 
 
 class ReadProgress(Protocol):
-    async def __call__(self, conn: DbapiConnection | FetchingConnection, table: str) -> dict[str, Any] | None:
+    async def __call__(
+        self, conn: DbapiConnection | FetchingConnection, table: str
+    ) -> dict[str, Any] | None:
         """One table's transfer status, or None if it has none."""
         raise NotImplementedError("CODE NOT WRITTEN")
 
@@ -249,9 +251,7 @@ async def postgres_read_rows(
 # WHETHER THERE ARE ROWS TO LOAD, AS A TABLE. An empty batch is an answer —
 # nothing moved — rather than a path around the statement, so both entries
 # return a count and the shared one says zero for either engine.
-_LoadsRows = Callable[
-    [Any, str, list[str], Sequence[tuple[Any, ...]]], Awaitable[int]
-]
+_LoadsRows = Callable[[Any, str, list[str], Sequence[tuple[Any, ...]]], Awaitable[int]]
 
 
 @helper
@@ -345,8 +345,7 @@ async def postgres_write_progress(
         f"(table_name, status, rows_transferred, total_rows, started_at, error) "
         f"VALUES ($1, $2, $3, $4, $5, $6) "
         f"ON CONFLICT (table_name) DO UPDATE SET "
-        f"status = $2, rows_transferred = $3, total_rows = $4, error = $6"
-        + completed,
+        f"status = $2, rows_transferred = $3, total_rows = $4, error = $6" + completed,
         table,
         status,
         rows_transferred,
@@ -447,8 +446,7 @@ async def dbapi_ensure_progress(conn: DbapiConnection) -> None:
 async def dbapi_read_progress(conn: DbapiConnection, table: str) -> dict[str, Any] | None:
     """A cursor and a tuple, where asyncpg gives a row that is already a map."""
     cursor = await conn.execute(
-        f'SELECT {", ".join(_PROGRESS_COLUMNS)} FROM "{TRANSFER_STATE_TABLE}" '
-        f"WHERE table_name = ?",
+        f'SELECT {", ".join(_PROGRESS_COLUMNS)} FROM "{TRANSFER_STATE_TABLE}" WHERE table_name = ?',
         (table,),
     )
     row = await cursor.fetchone()
@@ -465,11 +463,7 @@ async def dbapi_write_progress(
     error: str | None,
     now: str,
 ) -> None:
-    completed = (
-        ", completed_at = excluded.started_at"
-        if status in ("completed", "failed")
-        else ""
-    )
+    completed = ", completed_at = excluded.started_at" if status in ("completed", "failed") else ""
     await conn.execute(
         f'INSERT INTO "{TRANSFER_STATE_TABLE}" '
         f"(table_name, status, rows_transferred, total_rows, started_at, error) "

@@ -140,9 +140,7 @@ def test_drift_exits_two(tmp_path: Path) -> None:
 
     result = _run(tmp_path, "diff")
 
-    assert result.returncode == 2, (
-        f"exit {result.returncode}\n{result.stdout}\n{result.stderr}"
-    )
+    assert result.returncode == 2, f"exit {result.returncode}\n{result.stdout}\n{result.stderr}"
 
 
 def test_the_drift_names_what_changed(tmp_path: Path) -> None:
@@ -167,9 +165,7 @@ def test_force_gets_past_the_drift(tmp_path: Path) -> None:
 
     result = _run(tmp_path, "diff", "--force")
 
-    assert result.returncode == 0, (
-        f"exit {result.returncode}\n{result.stdout}\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"exit {result.returncode}\n{result.stdout}\n{result.stderr}"
 
 
 def test_no_snapshot_means_no_drift_check(tmp_path: Path) -> None:
@@ -185,6 +181,4 @@ def test_no_snapshot_means_no_drift_check(tmp_path: Path) -> None:
 
     result = _run(tmp_path, "diff")
 
-    assert result.returncode == 0, (
-        f"exit {result.returncode}\n{result.stdout}\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"exit {result.returncode}\n{result.stdout}\n{result.stderr}"

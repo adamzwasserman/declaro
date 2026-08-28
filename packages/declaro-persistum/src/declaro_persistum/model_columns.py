@@ -5,7 +5,6 @@ everything they reach: which SQL type an annotation maps to, how a default is
 spelled, what each declared facet does to a column. Every name is re-exported
 from `pydantic_loader`, so the declaration API is unchanged."""
 
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -377,9 +376,7 @@ def _not_a_table(_model_cls: type, _table_name: Any) -> list[tuple[str, Table]]:
 
 
 @helper
-def _the_declared_table(
-    model_cls: type, table_name: Any
-) -> list[tuple[str, Table]]:
+def _the_declared_table(model_cls: type, table_name: Any) -> list[tuple[str, Table]]:
     """The table one decorated model declares.
 
     Use typing.get_type_hints rather than reading __annotations__ directly:
@@ -442,8 +439,7 @@ def _the_declared_table(
     constraints = getattr(meta_cls, "constraints", None)
 
     columns = {
-        name: _WHEN_THE_KEY_IS_COMPOSITE[bool(primary_key)](col)
-        for name, col in declared.items()
+        name: _WHEN_THE_KEY_IS_COMPOSITE[bool(primary_key)](col) for name, col in declared.items()
     }
     built: Table = {
         "columns": columns,
@@ -499,9 +495,7 @@ _WHEN_A_MODULE_HAS_NO_LOADER: dict[bool, Callable[[Any, Path], Any]] = {
 @helper
 def _refuse_a_missing_models_directory(models_path: Path) -> Path:
     """A directory that is not there holds no models."""
-    raise LoaderError(
-        f"Models directory not found: {models_path}", path=str(models_path)
-    )
+    raise LoaderError(f"Models directory not found: {models_path}", path=str(models_path))
 
 
 @helper
@@ -539,9 +533,7 @@ def _the_view_as_declared(obj: dict[str, Any], _unknown: list[str]) -> View:
     return obj  # type: ignore[return-value]
 
 
-_WHEN_A_VIEW_KEY_IS_UNKNOWN: dict[
-    bool, Callable[[dict[str, Any], list[str]], View]
-] = {
+_WHEN_A_VIEW_KEY_IS_UNKNOWN: dict[bool, Callable[[dict[str, Any], list[str]], View]] = {
     True: _refuse_an_unknown_view_key,
     False: _the_view_as_declared,
 }
@@ -625,8 +617,7 @@ _WHEN_A_VIEW_FIELD_IS_THE_WRONG_TYPE: dict[
 def _refuse_a_blank_view_field(described: str, blank: list[str]) -> list[str]:
     """A name or a query that carries nothing."""
     raise LoaderError(
-        f"view {described}: {blank[0]!r} is empty. A view needs a name "
-        f"and a SELECT.",
+        f"view {described}: {blank[0]!r} is empty. A view needs a name and a SELECT.",
         path=NOTHING,
     )
 
@@ -704,9 +695,7 @@ _WHEN_A_TABLE_IS_DECLARED_TWICE: dict[
 
 
 @helper
-def _refuse_a_directory_that_declares_nothing(
-    models_path: Path, _schema: Schema
-) -> Schema:
+def _refuse_a_directory_that_declares_nothing(models_path: Path, _schema: Schema) -> Schema:
     """A directory with no decorated model in it."""
     raise LoaderError(
         f"No @table decorated models found in {models_path}",

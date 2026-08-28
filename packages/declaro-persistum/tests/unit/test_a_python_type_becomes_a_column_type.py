@@ -262,6 +262,7 @@ def test_the_string_match_is_recorded_as_the_blunt_instrument_it_is() -> None:
     how the function copes with annotations it cannot compare by identity, and
     it is also why the branch order above is load-bearing rather than tidy.
     """
+
     class datetime_like:  # noqa: N801 - the name IS the test
         pass
 

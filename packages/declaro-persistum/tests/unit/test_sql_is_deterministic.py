@@ -28,16 +28,66 @@ from declaro_persistum import delete, select, update
 from declaro_persistum.types import NOTHING
 
 BUILDERS = {
-    "simple": lambda: select("id", from_table="users", where={"age": {"gt": 18}}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
+    "simple": lambda: select(
+        "id",
+        from_table="users",
+        where={"age": {"gt": 18}},
+        params=NOTHING,
+        order_by=NOTHING,
+        limit=NOTHING,
+        offset=NOTHING,
+        joins=NOTHING,
+        group_by=NOTHING,
+        having=NOTHING,
+    ),
     "compound": lambda: select(
-        "id", from_table="users", where={"age": {"gt": 18}, "status": "active"}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
-    "in_list": lambda: select("id", from_table="users", where={"id": {"in": [1, 2, 3]}}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
+        "id",
+        from_table="users",
+        where={"age": {"gt": 18}, "status": "active"},
+        params=NOTHING,
+        order_by=NOTHING,
+        limit=NOTHING,
+        offset=NOTHING,
+        joins=NOTHING,
+        group_by=NOTHING,
+        having=NOTHING,
+    ),
+    "in_list": lambda: select(
+        "id",
+        from_table="users",
+        where={"id": {"in": [1, 2, 3]}},
+        params=NOTHING,
+        order_by=NOTHING,
+        limit=NOTHING,
+        offset=NOTHING,
+        joins=NOTHING,
+        group_by=NOTHING,
+        having=NOTHING,
+    ),
     "between": lambda: select(
-        "id", from_table="users", where={"age": {"between": [18, 65]}}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
+        "id",
+        from_table="users",
+        where={"age": {"between": [18, 65]}},
+        params=NOTHING,
+        order_by=NOTHING,
+        limit=NOTHING,
+        offset=NOTHING,
+        joins=NOTHING,
+        group_by=NOTHING,
+        having=NOTHING,
+    ),
     "or_group": lambda: select(
         "id",
         from_table="users",
-        where={"or": [{"status": "active"}, {"status": "pending"}]}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
+        where={"or": [{"status": "active"}, {"status": "pending"}]},
+        params=NOTHING,
+        order_by=NOTHING,
+        limit=NOTHING,
+        offset=NOTHING,
+        joins=NOTHING,
+        group_by=NOTHING,
+        having=NOTHING,
+    ),
     "nested": lambda: select(
         "id",
         from_table="users",
@@ -46,10 +96,21 @@ BUILDERS = {
                 {"and": [{"status": "active"}, {"age": {"gt": 18}}]},
                 {"and": [{"status": "pending"}, {"age": {"lt": 65}}]},
             ]
-        }, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
+        },
+        params=NOTHING,
+        order_by=NOTHING,
+        limit=NOTHING,
+        offset=NOTHING,
+        joins=NOTHING,
+        group_by=NOTHING,
+        having=NOTHING,
+    ),
     "update": lambda: update(
-        "users", {"status": "x"}, where={"id": {"eq": 1}}, params=NOTHING, returning=NOTHING),
-    "delete": lambda: delete(from_table="users", where={"id": {"eq": 1}}, params=NOTHING, returning=NOTHING),
+        "users", {"status": "x"}, where={"id": {"eq": 1}}, params=NOTHING, returning=NOTHING
+    ),
+    "delete": lambda: delete(
+        from_table="users", where={"id": {"eq": 1}}, params=NOTHING, returning=NOTHING
+    ),
 }
 
 
@@ -100,7 +161,15 @@ class TestNamesStayUniqueWithinOneStatement:
         q = select(
             "id",
             from_table="users",
-            where={"and": [{"age": {"gt": 18}}, {"age": {"lt": 65}}]}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
+            where={"and": [{"age": {"gt": 18}}, {"age": {"lt": 65}}]},
+            params=NOTHING,
+            order_by=NOTHING,
+            limit=NOTHING,
+            offset=NOTHING,
+            joins=NOTHING,
+            group_by=NOTHING,
+            having=NOTHING,
+        )
         assert len(q["params"]) == 2, q
         assert sorted(q["params"].values()) == [18, 65]
 
@@ -111,7 +180,13 @@ class TestNamesStayUniqueWithinOneStatement:
             from_table="users",
             where={"age": {"gt": 18}},
             group_by=["status"],
-            having={"age": {"lt": 65}}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING)
+            having={"age": {"lt": 65}},
+            params=NOTHING,
+            order_by=NOTHING,
+            limit=NOTHING,
+            offset=NOTHING,
+            joins=NOTHING,
+        )
         assert len(q["params"]) == 2, q
         assert sorted(q["params"].values()) == [18, 65]
 
@@ -123,5 +198,15 @@ class TestNamesStayUniqueWithinOneStatement:
         means the caller meant it.
         """
         q = select(
-            "id", from_table="users", where="tenant = :t", params={"t": "acme"}, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
+            "id",
+            from_table="users",
+            where="tenant = :t",
+            params={"t": "acme"},
+            order_by=NOTHING,
+            limit=NOTHING,
+            offset=NOTHING,
+            joins=NOTHING,
+            group_by=NOTHING,
+            having=NOTHING,
+        )
         assert q["params"] == {"t": "acme"}

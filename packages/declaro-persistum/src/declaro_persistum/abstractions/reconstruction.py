@@ -79,9 +79,7 @@ def generate_create_table_sql(
     # naming no column. Both rebuilders now refuse the same way.
     refuse_unwritable_column_types(table_name, columns)
 
-    pk_columns = [
-        col_name for col_name, col_def in columns.items() if col_def.get("primary_key")
-    ]
+    pk_columns = [col_name for col_name, col_def in columns.items() if col_def.get("primary_key")]
 
     # A KEY OF ONE COLUMN IS WRITTEN ON THAT COLUMN; A KEY OF SEVERAL BECOMES
     # A TABLE-LEVEL CLAUSE. The test this replaces asked whether any other
@@ -103,8 +101,7 @@ def generate_create_table_sql(
     # Through the shared clause, so the two reconstruction modules and the
     # two create renderers cannot spell a constraint four different ways.
     constraint_defs = [
-        constraint_clause(name, definition)
-        for name, definition in (constraints or {}).items()
+        constraint_clause(name, definition) for name, definition in (constraints or {}).items()
     ]
 
     columns_sql = ",\n    ".join([*col_defs, *composite_key, *constraint_defs])
@@ -139,11 +136,7 @@ def _column_clause(col_name: str, col_def: Column, inline_key: bool) -> str:
             # table_info strips one layer from an expression default, so two go
             # in and one comes back, and that is what makes introspection agree
             # with the schema.
-            *[
-                sqlite_default(value)
-                for key, value in col_def.items()
-                if key == "default"
-            ],
+            *[sqlite_default(value) for key, value in col_def.items() if key == "default"],
             *[f"CHECK ({value})" for key, value in col_def.items() if key == "check"],
             *[
                 _references_clause(value, col_def)
@@ -227,10 +220,7 @@ def generate_data_copy_sql(
     """
     copied = _COLUMNS_TO_COPY[bool(common_columns)](common_columns)
     columns_sql = ", ".join(f'"{col}"' for col in copied)
-    return (
-        f'INSERT INTO "{table_to}" ({columns_sql}) '
-        f'SELECT {columns_sql} FROM "{table_from}"'
-    )
+    return f'INSERT INTO "{table_to}" ({columns_sql}) SELECT {columns_sql} FROM "{table_from}"'
 
 
 @helper
@@ -262,15 +252,11 @@ def get_reconstruction_columns(
     # so the table is read by subscript and answers only what it declares.
     op_type = operation["op"]
     written = [_OP_HANDLERS[op] for op in [op_type] if op in _OP_HANDLERS]
-    return [*written, _columns_as_they_are][0](
-        current_columns.copy(), operation["details"]
-    )
+    return [*written, _columns_as_they_are][0](current_columns.copy(), operation["details"])
 
 
 @helper
-def _columns_as_they_are(
-    columns: dict[str, Column], _details: dict[str, Any]
-) -> dict[str, Column]:
+def _columns_as_they_are(columns: dict[str, Column], _details: dict[str, Any]) -> dict[str, Column]:
     """An operation that rewrites no column, so the schema stands as it is."""
     return dict(columns)
 
@@ -285,49 +271,35 @@ _FOREIGN_KEY_KEYS = frozenset({"references", "on_delete", "on_update"})
 
 
 @helper
-def _alter_the_column(
-    columns: dict[str, Column], details: dict[str, Any]
-) -> dict[str, Column]:
+def _alter_the_column(columns: dict[str, Column], details: dict[str, Any]) -> dict[str, Column]:
     """Write the changed properties into the column the operation names."""
     column_name = details["column"]
 
     # The differ produces {"from": old, "to": new} dicts for changes.
     changes = {
-        key: changed_to(value)
-        for key, value in details["changes"].items()
-        if key in _ALTERABLE
+        key: changed_to(value) for key, value in details["changes"].items() if key in _ALTERABLE
     }
 
     # A DEFAULT CHANGED TO NOTHING IS A DEFAULT REMOVED, not a default of
     # NULL. It is dropped from the definition rather than written as None.
-    removed = {
-        key for key, value in changes.items() if key == "default" and value is None
-    }
+    removed = {key for key, value in changes.items() if key == "default" and value is None}
 
     altered: dict[str, Any] = {
-        **{
-            key: value
-            for key, value in columns[column_name].items()
-            if key not in removed
-        },
+        **{key: value for key, value in columns[column_name].items() if key not in removed},
         **{key: value for key, value in changes.items() if key not in removed},
     }
     return {**columns, column_name: altered}  # type: ignore[dict-item]
 
 
 @helper
-def _no_such_column(
-    _columns: dict[str, Column], details: dict[str, Any]
-) -> dict[str, Column]:
+def _no_such_column(_columns: dict[str, Column], details: dict[str, Any]) -> dict[str, Column]:
     """The operation names a column this table does not have."""
     raise ValueError(f"Column '{details['column']}' not found in table")
 
 
 # A rebuild drops the real table, so a column that is not there is refused
 # while the table still is.
-_COLUMN_TO_ALTER: dict[
-    bool, Callable[[dict[str, Column], dict[str, Any]], dict[str, Column]]
-] = {
+_COLUMN_TO_ALTER: dict[bool, Callable[[dict[str, Column], dict[str, Any]], dict[str, Column]]] = {
     True: _alter_the_column,
     False: _no_such_column,
 }
@@ -347,18 +319,16 @@ def _apply_drop_column(columns: dict[str, Column], details: dict[str, Any]) -> d
 
 
 @helper
-def _apply_add_foreign_key(columns: dict[str, Column], details: dict[str, Any]) -> dict[str, Column]:
+def _apply_add_foreign_key(
+    columns: dict[str, Column], details: dict[str, Any]
+) -> dict[str, Column]:
     """Add FK reference to column definition."""
     column_name = details["column"]
 
     # ON DELETE and ON UPDATE are carried only where the operation names one.
     added: dict[str, Any] = {
         "references": details["references"],
-        **{
-            key: details[key]
-            for key in ("on_delete", "on_update")
-            if details.get(key)
-        },
+        **{key: details[key] for key in ("on_delete", "on_update") if details.get(key)},
     }
     return {
         name: {**col_def, **added} if name == column_name else col_def
@@ -370,14 +340,14 @@ def _apply_add_foreign_key(columns: dict[str, Column], details: dict[str, Any]) 
 def _without_the_foreign_key(col_def: Column) -> Column:
     """The same column, with nothing left pointing at another table."""
     return {  # type: ignore[return-value]
-        key: value
-        for key, value in col_def.items()
-        if key not in _FOREIGN_KEY_KEYS
+        key: value for key, value in col_def.items() if key not in _FOREIGN_KEY_KEYS
     }
 
 
 @helper
-def _apply_drop_foreign_key(columns: dict[str, Column], details: dict[str, Any]) -> dict[str, Column]:
+def _apply_drop_foreign_key(
+    columns: dict[str, Column], details: dict[str, Any]
+) -> dict[str, Column]:
     """Remove FK reference from column definition."""
     column_name = details["column"]
     return {
@@ -445,8 +415,6 @@ _FOREIGN_KEYS_OFF: dict[bool, Callable[[Any], Awaitable[bool]]] = {
 }
 
 
-
-
 @helper
 async def _say_no_column_is_shared(
     _connection: Any,
@@ -455,9 +423,10 @@ async def _say_no_column_is_shared(
     _pairs: list[tuple[str, str]],
 ) -> int:
     """Nothing in the old table has a home in the new one."""
-    say(__name__, "warning",
-        f"No common columns between old and new schema for '{table_name}'. "
-        f"No data will be copied."
+    say(
+        __name__,
+        "warning",
+        f"No common columns between old and new schema for '{table_name}'. No data will be copied.",
     )
     return 0
 
@@ -486,9 +455,7 @@ async def _copy_the_rows(
     )
 
     pairs = columns_to_copy(current_columns, new_columns)
-    return await _WHEN_COLUMNS_ARE_SHARED[bool(pairs)](
-        connection, table_name, temp_table, pairs
-    )
+    return await _WHEN_COLUMNS_ARE_SHARED[bool(pairs)](connection, table_name, temp_table, pairs)
 
 
 @helper
@@ -509,8 +476,6 @@ _WHEN_PRESERVING_DATA: dict[
     True: _copy_the_rows,
     False: _copy_no_rows,
 }
-
-
 
 
 @helper
@@ -557,9 +522,7 @@ async def _nothing_to_restore(_connection: Any) -> Exception | Nothing:
     return NOTHING
 
 
-_RESTORE_ENFORCEMENT: dict[
-    bool, Callable[[Any], Awaitable[Exception | Nothing]]
-] = {
+_RESTORE_ENFORCEMENT: dict[bool, Callable[[Any], Awaitable[Exception | Nothing]]] = {
     True: enforcement_restored,
     False: _nothing_to_restore,
 }
@@ -641,9 +604,7 @@ async def execute_reconstruction_async(
         )
 
         table_constraints = await table_constraints_of(connection, table_name)
-        create_sql = generate_create_table_sql(
-            temp_table, new_columns, table_constraints
-        )
+        create_sql = generate_create_table_sql(temp_table, new_columns, table_constraints)
         say(__name__, "debug", f"Creating temp table: {create_sql}")
         await connection.execute(create_sql)
 
@@ -685,8 +646,7 @@ async def execute_reconstruction_async(
         # rides out on the exception where whoever catches it will see it.
         also_failed(
             original,
-            f"putting foreign key enforcement back on after the failed "
-            f"rebuild of {table_name!r}",
+            f"putting foreign key enforcement back on after the failed rebuild of {table_name!r}",
             await _RESTORE_ENFORCEMENT[managed and bool(fk_enabled)](connection),
         )
         raise
@@ -708,7 +668,6 @@ def _validate_columns(table_name: str, columns: dict[str, Column]) -> None:
     """
     refuse_unwritable_column_types(table_name, columns)
 
-
     # RENDER IT BEFORE THE DATABASE IS TOUCHED, so a column definition that
     # cannot be written is refused while the table is still intact rather than
     # halfway through a rebuild.
@@ -722,18 +681,13 @@ def _validate_columns(table_name: str, columns: dict[str, Column]) -> None:
         generate_create_table_sql(f"{table_name}_validate", columns, constraints=NOTHING)
     except (KeyError, TypeError, ValueError) as unrenderable:
         raise ValueError(
-            f"Cannot reconstruct table '{table_name}': "
-            f"invalid column definitions - {unrenderable}"
+            f"Cannot reconstruct table '{table_name}': invalid column definitions - {unrenderable}"
         ) from unrenderable
 
 
 # =============================================================================
 # Internal Helper Functions
 # =============================================================================
-
-
-
-
 
 
 @helper

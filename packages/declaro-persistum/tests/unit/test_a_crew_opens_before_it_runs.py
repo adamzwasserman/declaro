@@ -54,7 +54,9 @@ IDLE_S = 0.01
 
 
 async def _migrated(tmp_path, name="t.db"):
-    db = await open_turso(str(tmp_path / name), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
+    db = await open_turso(
+        str(tmp_path / name), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
+    )
     async with migrating(db) as conn:
         await conn.execute("CREATE TABLE t (v INTEGER)")
         await conn.commit()
@@ -80,11 +82,11 @@ async def test_connections_open_concurrently_on_a_database_nobody_prepared(
     first draft of this file could not: mutating the fix away left all seven
     passing.
     """
-    db = await open_turso(str(tmp_path / f"n{n}.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
-
-    conns = await asyncio.gather(
-        *(db["connect"](db) for _ in range(n)), return_exceptions=True
+    db = await open_turso(
+        str(tmp_path / f"n{n}.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
     )
+
+    conns = await asyncio.gather(*(db["connect"](db) for _ in range(n)), return_exceptions=True)
     failed = [c for c in conns if isinstance(c, BaseException)]
     try:
         assert not failed, f"{len(failed)} of {n} concurrent opens failed: {failed[0]}"
@@ -99,9 +101,7 @@ async def test_connections_open_concurrently_on_a_database_nobody_prepared(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("size", [2, 4, 8])
-async def test_every_drainer_has_a_connection_before_the_crew_returns(
-    tmp_path, size: int
-) -> None:
+async def test_every_drainer_has_a_connection_before_the_crew_returns(tmp_path, size: int) -> None:
     """The same property, through the door a caller actually uses."""
     db = await _migrated(tmp_path, f"t{size}.db")
     crew = await start_crew(new_room(), db, size, ON_CONTENTION, IDLE_S)
@@ -181,7 +181,9 @@ async def test_migrating_gives_the_journal_mode_back(tmp_path) -> None:
     on saying mvcc while every later connection got wal, and a crew started
     after a migration raced for the MV store bootstrap all over again.
     """
-    db = await open_turso(str(tmp_path / "restore.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
+    db = await open_turso(
+        str(tmp_path / "restore.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
+    )
     declared = db["journal_mode"]
 
     async with migrating(db) as conn:
@@ -202,7 +204,9 @@ async def test_the_declared_mode_is_the_one_the_engine_granted(tmp_path) -> None
     `_open_local` used to hard-code `journal_mode="mvcc"` whether or not the
     engine agreed. The value now records what came back.
     """
-    db = await open_turso(str(tmp_path / "granted.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
+    db = await open_turso(
+        str(tmp_path / "granted.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
+    )
     async with migrating(db) as conn:
         cursor = await conn.execute("PRAGMA journal_mode")
         assert (await cursor.fetchone())[0] == "wal"

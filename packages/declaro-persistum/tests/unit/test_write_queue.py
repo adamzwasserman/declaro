@@ -82,7 +82,7 @@ class TestArrivalOrderIsKept:
         async def execute(w):
             n = w["params"][0]
             events.append(f"start {n}")
-            await asyncio.sleep(0)          # give the loop a chance to interleave
+            await asyncio.sleep(0)  # give the loop a chance to interleave
             events.append(f"end {n}")
 
         for n in (1, 2):
@@ -144,7 +144,7 @@ class TestCollect:
 
         tickets = [deposit(room, _write(n)) for n in range(3)]
         appended = asyncio.create_task(drain(room, execute, NO_RETRY))
-        await asyncio.sleep(0)              # the caller is free in the meantime
+        await asyncio.sleep(0)  # the caller is free in the meantime
         await appended
 
         receipts = [await collect(room, t) for t in tickets]

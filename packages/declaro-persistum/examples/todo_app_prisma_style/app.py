@@ -72,7 +72,7 @@ _schema = None
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI):  # noqa: ARG001 - FastAPI passes it
     """Application lifespan - initialize DB and schema on startup."""
     global _schema
     await init_schema(get_database())
@@ -88,6 +88,7 @@ templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 # Database Selection Endpoints
 # =============================================================================
 
+
 @app.get("/db", response_class=HTMLResponse)
 async def db_settings(request: Request):
     """Show database selection page."""
@@ -97,20 +98,23 @@ async def db_settings(request: Request):
     turso_cloud_ok, turso_cloud_msg = check_driver_available("turso_cloud")
     turso_embedded_ok, turso_embedded_msg = check_driver_available("turso_embedded")
 
-    return templates.TemplateResponse("db_select.html", {
-        "request": request,
-        "current_db": current,
-        "sqlite_available": sqlite_ok,
-        "sqlite_message": sqlite_msg,
-        "sqlite_default_path": DEFAULT_SQLITE_PATH,
-        "postgres_available": pg_ok,
-        "postgres_message": pg_msg,
-        "turso_cloud_available": turso_cloud_ok,
-        "turso_cloud_message": turso_cloud_msg,
-        "turso_embedded_available": turso_embedded_ok,
-        "turso_embedded_message": turso_embedded_msg,
-        "turso_embedded_default_path": DEFAULT_TURSO_EMBEDDED_PATH,
-    })
+    return templates.TemplateResponse(
+        "db_select.html",
+        {
+            "request": request,
+            "current_db": current,
+            "sqlite_available": sqlite_ok,
+            "sqlite_message": sqlite_msg,
+            "sqlite_default_path": DEFAULT_SQLITE_PATH,
+            "postgres_available": pg_ok,
+            "postgres_message": pg_msg,
+            "turso_cloud_available": turso_cloud_ok,
+            "turso_cloud_message": turso_cloud_msg,
+            "turso_embedded_available": turso_embedded_ok,
+            "turso_embedded_message": turso_embedded_msg,
+            "turso_embedded_default_path": DEFAULT_TURSO_EMBEDDED_PATH,
+        },
+    )
 
 
 @app.post("/db/sqlite", response_class=HTMLResponse)
@@ -123,12 +127,15 @@ async def use_sqlite(request: Request, database_path: str = Form(DEFAULT_SQLITE_
         set_database(config)
         await init_schema(config)
 
-    return templates.TemplateResponse("db_status.html", {
-        "request": request,
-        "success": success,
-        "message": message if not success else "Switched to SQLite",
-        "db_name": config["display_name"],
-    })
+    return templates.TemplateResponse(
+        "db_status.html",
+        {
+            "request": request,
+            "success": success,
+            "message": message if not success else "Switched to SQLite",
+            "db_name": config["display_name"],
+        },
+    )
 
 
 @app.post("/db/postgres", response_class=HTMLResponse)
@@ -148,12 +155,15 @@ async def use_postgres(
         set_database(config)
         await init_schema(config)
 
-    return templates.TemplateResponse("db_status.html", {
-        "request": request,
-        "success": success,
-        "message": message,
-        "db_name": config["display_name"] if success else "PostgreSQL",
-    })
+    return templates.TemplateResponse(
+        "db_status.html",
+        {
+            "request": request,
+            "success": success,
+            "message": message,
+            "db_name": config["display_name"] if success else "PostgreSQL",
+        },
+    )
 
 
 @app.post("/db/turso_cloud", response_class=HTMLResponse)
@@ -164,6 +174,7 @@ async def use_turso_cloud(
 ):
     """Switch to Turso Cloud (libsql)."""
     import os
+
     if auth_token:
         os.environ["TURSO_AUTH_TOKEN"] = auth_token
 
@@ -174,16 +185,21 @@ async def use_turso_cloud(
         set_database(config)
         await init_schema(config)
 
-    return templates.TemplateResponse("db_status.html", {
-        "request": request,
-        "success": success,
-        "message": message,
-        "db_name": config["display_name"] if success else "Turso Cloud",
-    })
+    return templates.TemplateResponse(
+        "db_status.html",
+        {
+            "request": request,
+            "success": success,
+            "message": message,
+            "db_name": config["display_name"] if success else "Turso Cloud",
+        },
+    )
 
 
 @app.post("/db/turso_embedded", response_class=HTMLResponse)
-async def use_turso_embedded(request: Request, database_path: str = Form(DEFAULT_TURSO_EMBEDDED_PATH)):
+async def use_turso_embedded(
+    request: Request, database_path: str = Form(DEFAULT_TURSO_EMBEDDED_PATH)
+):
     """Switch to Turso Embedded (pyturso)."""
     config = get_turso_embedded_config(database_path)
     success, message = await test_connection(config)
@@ -192,17 +208,21 @@ async def use_turso_embedded(request: Request, database_path: str = Form(DEFAULT
         set_database(config)
         await init_schema(config)
 
-    return templates.TemplateResponse("db_status.html", {
-        "request": request,
-        "success": success,
-        "message": message if not success else "Switched to Turso Embedded",
-        "db_name": config["display_name"],
-    })
+    return templates.TemplateResponse(
+        "db_status.html",
+        {
+            "request": request,
+            "success": success,
+            "message": message if not success else "Switched to Turso Embedded",
+            "db_name": config["display_name"],
+        },
+    )
 
 
 # =============================================================================
 # Todo CRUD - SAME CODE FOR ALL DATABASES (Prisma-style)
 # =============================================================================
+
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -215,14 +235,28 @@ async def index(request: Request):
                 "completed",
                 "created_at",
                 from_table="todos",
-                order_by=["-created_at"], where=NOTHING, params=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
-            conn, row_factory=NOTHING)
+                order_by=["-created_at"],
+                where=NOTHING,
+                params=NOTHING,
+                limit=NOTHING,
+                offset=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            ),
+            conn,
+            row_factory=NOTHING,
+        )
 
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "todos": todos,
-        "current_db": get_database()["display_name"],
-    })
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "todos": todos,
+            "current_db": get_database()["display_name"],
+        },
+    )
+
 
 @app.post("/todos", response_class=HTMLResponse)
 async def create_todo(request: Request, title: str = Form(...)):
@@ -231,63 +265,146 @@ async def create_todo(request: Request, title: str = Form(...)):
 
     async with get_connection() as conn:
         await execute(
-            insert("todos", {"id": todo_id, "title": title, "completed": 0}, returning=NOTHING, on_conflict=NOTHING),
-            conn, row_factory=NOTHING)
+            insert(
+                "todos",
+                {"id": todo_id, "title": title, "completed": 0},
+                returning=NOTHING,
+                on_conflict=NOTHING,
+            ),
+            conn,
+            row_factory=NOTHING,
+        )
         await commit(conn)
 
         todo = await execute_one(
-            select("id", "title", "completed", from_table="todos",
-                   where={"id": todo_id}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
-            conn, row_factory=NOTHING)
+            select(
+                "id",
+                "title",
+                "completed",
+                from_table="todos",
+                where={"id": todo_id},
+                params=NOTHING,
+                order_by=NOTHING,
+                limit=NOTHING,
+                offset=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            ),
+            conn,
+            row_factory=NOTHING,
+        )
 
-    return templates.TemplateResponse("partials/todo_item.html", {
-        "request": request,
-        "todo": todo,
-    })
+    return templates.TemplateResponse(
+        "partials/todo_item.html",
+        {
+            "request": request,
+            "todo": todo,
+        },
+    )
+
 
 @app.put("/todos/{todo_id}/toggle", response_class=HTMLResponse)
 async def toggle_todo(request: Request, todo_id: str):
     """Toggle todo completion status."""
     async with get_connection() as conn:
         current = await execute_one(
-            select("completed", from_table="todos", where={"id": todo_id}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
-            conn, row_factory=NOTHING)
+            select(
+                "completed",
+                from_table="todos",
+                where={"id": todo_id},
+                params=NOTHING,
+                order_by=NOTHING,
+                limit=NOTHING,
+                offset=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            ),
+            conn,
+            row_factory=NOTHING,
+        )
         new_completed = 0 if current["completed"] else 1
 
         await execute(
-            update("todos", {"completed": new_completed}, where={"id": todo_id}, params=NOTHING, returning=NOTHING),
-            conn, row_factory=NOTHING)
+            update(
+                "todos",
+                {"completed": new_completed},
+                where={"id": todo_id},
+                params=NOTHING,
+                returning=NOTHING,
+            ),
+            conn,
+            row_factory=NOTHING,
+        )
         await commit(conn)
 
         todo = await execute_one(
-            select("id", "title", "completed", from_table="todos",
-                   where={"id": todo_id}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
-            conn, row_factory=NOTHING)
+            select(
+                "id",
+                "title",
+                "completed",
+                from_table="todos",
+                where={"id": todo_id},
+                params=NOTHING,
+                order_by=NOTHING,
+                limit=NOTHING,
+                offset=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            ),
+            conn,
+            row_factory=NOTHING,
+        )
 
-    return templates.TemplateResponse("partials/todo_item.html", {
-        "request": request,
-        "todo": todo,
-    })
+    return templates.TemplateResponse(
+        "partials/todo_item.html",
+        {
+            "request": request,
+            "todo": todo,
+        },
+    )
+
 
 @app.delete("/todos/{todo_id}", response_class=HTMLResponse)
 async def delete_todo(todo_id: str):
     """Delete a todo."""
     async with get_connection() as conn:
-        await execute(delete("todos", where={"id": todo_id}, params=NOTHING, returning=NOTHING), conn, row_factory=NOTHING)
+        await execute(
+            delete("todos", where={"id": todo_id}, params=NOTHING, returning=NOTHING),
+            conn,
+            row_factory=NOTHING,
+        )
         await commit(conn)
 
     return ""
+
 
 @app.get("/todos/count", response_class=HTMLResponse)
 async def get_count(request: Request):
     """Get todo counts for the footer."""
     async with get_connection() as conn:
         active_count = await execute_scalar(
-            select("COUNT(*) AS c", from_table="todos", where={"completed": 0}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
+            select(
+                "COUNT(*) AS c",
+                from_table="todos",
+                where={"completed": 0},
+                params=NOTHING,
+                order_by=NOTHING,
+                limit=NOTHING,
+                offset=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            ),
             conn,
         )
 
-    return templates.TemplateResponse("partials/todo_count.html", {
-        "request": request,
-        "active_count": active_count,
-    })
+    return templates.TemplateResponse(
+        "partials/todo_count.html",
+        {
+            "request": request,
+            "active_count": active_count,
+        },
+    )

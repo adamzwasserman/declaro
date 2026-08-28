@@ -104,9 +104,9 @@ def test_the_insert_is_ordered_after_the_table_it_fills() -> None:
     positions = {}
     for rank, index in enumerate(plan["execution_order"]):
         op = ops[index]
-        if op["op"] in ("create_table", "insert_enum_values") and op[
-            "table"
-        ].startswith("_dp_enum_"):
+        if op["op"] in ("create_table", "insert_enum_values") and op["table"].startswith(
+            "_dp_enum_"
+        ):
             positions[op["op"]] = rank
 
     assert positions["create_table"] < positions["insert_enum_values"], positions
@@ -116,9 +116,7 @@ async def test_the_lookup_table_holds_the_declared_values(tmp_path) -> None:
     """Executed. The rows have to be in the database, not in the plan."""
     conn = await _migrated(tmp_path / "enum.db")
     try:
-        cursor = await conn.execute(
-            'SELECT value FROM "_dp_enum_posts_status" ORDER BY value'
-        )
+        cursor = await conn.execute('SELECT value FROM "_dp_enum_posts_status" ORDER BY value')
         assert await cursor.fetchall() == [("draft",), ("live",)]
     finally:
         await conn.close()
@@ -152,9 +150,7 @@ async def test_a_value_that_was_not_declared_is_still_rejected(tmp_path) -> None
     try:
         await conn.execute("PRAGMA foreign_keys = ON")
         with pytest.raises(aiosqlite.IntegrityError):
-            await conn.execute(
-                "INSERT INTO posts (id, status) VALUES ('2', 'pending')"
-            )
+            await conn.execute("INSERT INTO posts (id, status) VALUES ('2', 'pending')")
     finally:
         await conn.close()
 
@@ -175,9 +171,7 @@ async def test_a_value_with_a_quote_in_it_survives(tmp_path) -> None:
     conn = await aiosqlite.connect(str(tmp_path / "quote.db"))
     try:
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False)
-        cursor = await conn.execute(
-            'SELECT value FROM "_dp_enum_posts_status" ORDER BY value'
-        )
+        cursor = await conn.execute('SELECT value FROM "_dp_enum_posts_status" ORDER BY value')
         assert await cursor.fetchall() == [("done",), ("it's live",)]
     finally:
         await conn.close()
@@ -288,9 +282,7 @@ def test_every_dialect_holds_the_same_operation_vocabulary() -> None:
     # operation. The supervisor picks between them; the differ never emits one.
     def operations(dialect: str) -> set[str]:
         return {
-            name
-            for name in set(TEMPLATES[dialect]) | set(COMPOSERS[dialect])
-            if ":" not in name
+            name for name in set(TEMPLATES[dialect]) | set(COMPOSERS[dialect]) if ":" not in name
         }
 
     disagreements = {
@@ -299,6 +291,4 @@ def test_every_dialect_holds_the_same_operation_vocabulary() -> None:
         if operations(dialect) != operations("sqlite")
     }
 
-    assert not disagreements, (
-        f"the engines do not answer for the same operations: {disagreements}"
-    )
+    assert not disagreements, f"the engines do not answer for the same operations: {disagreements}"

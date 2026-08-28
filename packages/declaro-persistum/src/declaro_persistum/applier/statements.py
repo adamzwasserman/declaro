@@ -111,9 +111,7 @@ def clause(outer: str, key: str, keyword: str) -> Reader:
     out by hand beside every optional clause in every generator.
     """
     return lambda operation: "".join(
-        f"{keyword}{value}"
-        for value in [operation["details"][outer].get(key)]
-        if value
+        f"{keyword}{value}" for value in [operation["details"][outer].get(key)] if value
     )
 
 
@@ -155,9 +153,7 @@ def _refuse_undeclared_names(
 
 
 @helper
-def _the_checked_names(
-    _op_type: str, _declared: set[str], given: dict[str, Any]
-) -> dict[str, Any]:
+def _the_checked_names(_op_type: str, _declared: set[str], given: dict[str, Any]) -> dict[str, Any]:
     """The names given are exactly the ones declared, so they are the answer.
 
     BOTH ENTRIES RETURN THE VALUES. This used to return `None` and be called
@@ -168,9 +164,7 @@ def _the_checked_names(
     return given
 
 
-_WHEN_NAMES_MATCH: dict[
-    bool, Callable[[str, set[str], dict[str, Any]], dict[str, Any]]
-] = {
+_WHEN_NAMES_MATCH: dict[bool, Callable[[str, set[str], dict[str, Any]], dict[str, Any]]] = {
     True: _the_checked_names,
     False: _refuse_undeclared_names,
 }
@@ -207,10 +201,7 @@ def _rendered_per_item(rendering: Rendering, named: dict[str, Any]) -> list[str]
     semicolon means.
     """
     over = str(rendering["repeat"])
-    return [
-        rendering["template"].format(**{**named, over: item})
-        for item in named[over]
-    ]
+    return [rendering["template"].format(**{**named, over: item}) for item in named[over]]
 
 
 _REPEATED: dict[bool, Callable[[Rendering, dict[str, Any]], list[str]]] = {

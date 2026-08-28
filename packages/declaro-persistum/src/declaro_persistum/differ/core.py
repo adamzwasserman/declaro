@@ -495,9 +495,7 @@ def _diff_table(
     # diff would otherwise write a second drop for the same index and the
     # engine would refuse it as missing.
     already_dropped = {
-        operation["details"]["index"]
-        for operation in column_ops
-        if operation["op"] == "drop_index"
+        operation["details"]["index"] for operation in column_ops if operation["op"] == "drop_index"
     }
     index_ops = _diff_indexes(table_name, current, target, already_dropped)
     operations.extend(index_ops)
@@ -507,29 +505,6 @@ def _diff_table(
     operations.extend(constraint_ops)
 
     return operations
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 @helper
@@ -550,9 +525,7 @@ def _same_index(current: Index, target: Index) -> bool:
 @helper
 def _same_predicate(current: Any, target: Any) -> bool:
     """Do these two WHERE clauses restrict the index to the same rows?"""
-    return _WHEN_A_PREDICATE_IS_ABSENT[current is None or target is None](
-        current, target
-    )
+    return _WHEN_A_PREDICATE_IS_ABSENT[current is None or target is None](current, target)
 
 
 @helper
@@ -621,9 +594,7 @@ def _diff_indexes(
     replaced: list[Operation] = [
         operation
         for idx_name in redefined
-        for operation in _replaced_index(
-            table_name, idx_name, target_indexes[idx_name]
-        )
+        for operation in _replaced_index(table_name, idx_name, target_indexes[idx_name])
     ]
     return [*dropped, *added, *replaced]
 

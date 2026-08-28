@@ -9,7 +9,6 @@ Every name from `migration_sql` is re-exported here, so nothing that imports
 from `migrations` had to change.
 """
 
-
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, cast
@@ -313,9 +312,7 @@ async def _read_the_schema_file(
 
 _WHEN_THE_SCHEMA_FILE_IS_THERE: dict[
     bool,
-    Callable[
-        [Database, Dialect, Path, bool, bool], Awaitable[_Migration]
-    ],
+    Callable[[Database, Dialect, Path, bool, bool], Awaitable[_Migration]],
 ] = {
     True: _read_the_schema_file,
     False: _no_schema_file,
@@ -363,9 +360,7 @@ async def _nothing_has_changed(
 
 _WHEN_THE_DATABASE_IS_CURRENT: dict[
     bool,
-    Callable[
-        [Database, Dialect, Path, bool, str], Awaitable[_Migration]
-    ],
+    Callable[[Database, Dialect, Path, bool, str], Awaitable[_Migration]],
 ] = {
     True: _nothing_has_changed,
     False: _migrate_whatever_the_stamp_says,
@@ -390,9 +385,7 @@ async def _consult_the_stamp(
 
 _WHEN_THE_STAMP_IS_WORTH_READING: dict[
     bool,
-    Callable[
-        [Database, Dialect, Path, bool, str], Awaitable[_Migration]
-    ],
+    Callable[[Database, Dialect, Path, bool, str], Awaitable[_Migration]],
 ] = {
     True: _consult_the_stamp,
     False: _migrate_whatever_the_stamp_says,
@@ -490,8 +483,10 @@ async def _stamp_an_empty_schema(
 def _expand_the_enums(target_schema: Schema) -> dict[str, Any]:
     """Every Literal column becomes a lookup table and an FK to it."""
     expanded = expand_schema_enums(target_schema)
-    say(__name__, "info",
-        f"Expanded schema to {len(expanded)} tables (including enum lookup tables)"
+    say(
+        __name__,
+        "info",
+        f"Expanded schema to {len(expanded)} tables (including enum lookup tables)",
     )
     return expanded
 
@@ -669,9 +664,11 @@ async def _report_everything_deferred(
     skipped_operations: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Every pending operation needs reconstruction, so none of them run."""
-    say(__name__, "info",
+    say(
+        __name__,
+        "info",
         "All pending operations require reconstruction — "
-        "skipping auto-migration. Use 'declaro migrate-remote'."
+        "skipping auto-migration. Use 'declaro migrate-remote'.",
     )
     return {
         "success": True,
@@ -738,10 +735,12 @@ async def _defer_what_cannot_replicate(
         diff_result["operations"], diff_result["execution_order"]
     )
     [
-        say(__name__, "warning",
+        say(
+            __name__,
+            "warning",
             f"Skipping {skipped['op']} on {skipped.get('table', 'N/A')} — "
             f"reconstruction is unsafe on embedded replicas. "
-            f"Run 'declaro migrate-remote' to apply this change to cloud."
+            f"Run 'declaro migrate-remote' to apply this change to cloud.",
         )
         for skipped in skipped_operations
     ]
@@ -805,9 +804,9 @@ async def _consider_what_changed(
         say(__name__, "info", f"  - {op['op']} on table {op.get('table', 'N/A')}")
         for op in diff_result["operations"]
     ]
-    return await _WHEN_THE_CHANGES_ARE_AMBIGUOUS[
-        bool(diff_result.get("ambiguities"))
-    ](plan, target_schema, current_schema, diff_result)
+    return await _WHEN_THE_CHANGES_ARE_AMBIGUOUS[bool(diff_result.get("ambiguities"))](
+        plan, target_schema, current_schema, diff_result
+    )
 
 
 _WHEN_THERE_IS_WORK: dict[
@@ -837,21 +836,18 @@ async def _migrate_the_tables(
     # is what made views unreachable: the inspectors, the differ and the
     # appliers all handled views, and the apply path never carried one.
     async with reading(plan["db"]) as conn:
-        current_schema, current_views = await introspect_with_views(
-            conn, plan["dialect"]
-        )
+        current_schema, current_views = await introspect_with_views(conn, plan["dialect"])
 
-    say(__name__, "info",
-        f"Introspected {len(current_schema)} tables and "
-        f"{len(current_views)} views from database"
+    say(
+        __name__,
+        "info",
+        f"Introspected {len(current_schema)} tables and {len(current_views)} views from database",
     )
 
     # Compute diff. Tables and views are diffed by different functions because
     # they are different things: a table is reconciled column by column, a view
     # is replaced whole when its query changes.
-    diff_result = diff(
-        current_schema, expanded, dialect=plan["dialect"], decisions=NOTHING
-    )
+    diff_result = diff(current_schema, expanded, dialect=plan["dialect"], decisions=NOTHING)
 
     # VIEWS GO LAST, AND THEIR INDICES GO INTO THE ORDER OR NOTHING RUNS THEM.
     # `execution_order` is the differ's topological sort over the TABLE
@@ -997,6 +993,6 @@ async def apply_migrations_async(
     target_schema, target_views = next(iter(loaded), ({}, {}))
     validation = next(iter(validated), _NOTHING_TO_VALIDATE)
 
-    return await _NEXT_STEP[
-        _how_the_migration_stands(plan["answer"], validation["errors"])
-    ](plan, target_schema, target_views, validation["errors"])
+    return await _NEXT_STEP[_how_the_migration_stands(plan["answer"], validation["errors"])](
+        plan, target_schema, target_views, validation["errors"]
+    )

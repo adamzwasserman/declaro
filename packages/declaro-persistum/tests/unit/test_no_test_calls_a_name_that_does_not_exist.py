@@ -54,20 +54,15 @@ def _ruff(*args: str) -> str:
 def test_every_test_file_can_actually_be_parsed() -> None:
     """A file the linter cannot read is a file the gate below cannot check."""
     unreadable = [
-        line for line in _ruff("--select", "F821").splitlines()
-        if "invalid-syntax" in line
+        line for line in _ruff("--select", "F821").splitlines() if "invalid-syntax" in line
     ]
     assert not unreadable, (
-        "ruff cannot parse these, so nothing below has checked them:\n  "
-        + "\n  ".join(unreadable)
+        "ruff cannot parse these, so nothing below has checked them:\n  " + "\n  ".join(unreadable)
     )
 
 
 def test_no_test_references_a_name_that_does_not_exist() -> None:
-    undefined = [
-        line for line in _ruff("--select", "F821").splitlines()
-        if " F821 " in line
-    ]
+    undefined = [line for line in _ruff("--select", "F821").splitlines() if " F821 " in line]
     assert not undefined, (
         "these reference names that do not exist, so the line raises "
         "NameError the moment it runs:\n  " + "\n  ".join(undefined)

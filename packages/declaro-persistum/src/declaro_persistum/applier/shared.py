@@ -82,23 +82,7 @@ from declaro_persistum.types import (
 # =============================================================================
 
 
-
-
-
-
-
-
 # WHAT EACH CONSTRAINT TYPE IS WRITTEN AS. Two entries, read by subscript.
-
-
-
-
-
-
-
-
-
-
 
 
 # AN UNDERSCORE MEANS "THE TABLE REQUIRES IT, THIS ONE DOES NOT READ IT".
@@ -114,22 +98,6 @@ from declaro_persistum.types import (
 # condition renderer, read by nothing, and carrying the literal "sql" from
 # `builder.py` for as long as it existed. The convention is already used by
 # `_render_order_by(term, _dialect, _path)` in query/expressions.py.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 # THE APPLIER RECONSTRUCTS THESE THREE AND THE RENDERER RAISED ON THEM, SO
@@ -151,29 +119,11 @@ from declaro_persistum.types import (
 # handed operations and nothing else.
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 # =============================================================================
 # Operation dispatch
 # =============================================================================
 
 # Maps operation type to pure SQL generator function
-
-
-
-
-
-
 
 
 @helper
@@ -238,9 +188,7 @@ _PREVIEW_LINE: dict[bool, Callable[[Operation], str]] = {
 
 
 @helper
-def dry_run_preview(
-    operations: list[Operation], execution_order: list[int]
-) -> ApplyResult:
+def dry_run_preview(operations: list[Operation], execution_order: list[int]) -> ApplyResult:
     """Generate dry-run preview of operations."""
     sql_statements = [
         _PREVIEW_LINE[requires_reconstruction(operations[op_idx])](operations[op_idx])
@@ -256,8 +204,6 @@ def dry_run_preview(
     }
 
 
-
-
 # Properties a declaration can simply stop mentioning. Everything else the
 # differ compares can only change value, never be removed.
 REMOVABLE_PROPERTIES = frozenset(("default", "unique", "check"))
@@ -268,9 +214,7 @@ def _refuse_absent_column(
     _columns: dict[str, Column], column: str, operation: Operation
 ) -> dict[str, Column]:
     """The table has no such column, so the operation names one nobody declared."""
-    raise ValueError(
-        f"Column '{column}' not found in table '{operation['table']}'"
-    )
+    raise ValueError(f"Column '{column}' not found in table '{operation['table']}'")
 
 
 @helper
@@ -281,9 +225,7 @@ def _the_named_column(
     return columns
 
 
-_WHEN_ABSENT: dict[
-    bool, Callable[[dict[str, Column], str, Operation], dict[str, Column]]
-] = {
+_WHEN_ABSENT: dict[bool, Callable[[dict[str, Column], str, Operation], dict[str, Column]]] = {
     True: _refuse_absent_column,
     False: _the_named_column,
 }
@@ -427,9 +369,7 @@ def single_change_property(operation: Operation) -> tuple[str, Any] | None:
     does not carry it.
     """
     changes = [
-        operation["details"]["changes"]
-        for _ in [operation]
-        if operation["op"] == "alter_column"
+        operation["details"]["changes"] for _ in [operation] if operation["op"] == "alter_column"
     ]
     single = [
         (key, changed_to(value))
@@ -465,9 +405,7 @@ _TYPE_SPELLINGS = frozenset({str})
 
 
 @helper
-def _refuse_unwritable_types(
-    table_name: str, wrong: dict[str, str]
-) -> dict[str, str]:
+def _refuse_unwritable_types(table_name: str, wrong: dict[str, str]) -> dict[str, str]:
     """Columns whose declared type is not text, named so the author finds them.
 
     A dict here is the differ's `{"from": old, "to": new}` record reaching the
@@ -538,10 +476,7 @@ async def copy_the_shared_columns(
     """Move the rows across, reading old names and writing new ones."""
     read_sql = ", ".join(f'"{old}"' for old, _ in pairs)
     write_sql = ", ".join(f'"{new}"' for _, new in pairs)
-    copy_sql = (
-        f'INSERT INTO "{temp_table}" ({write_sql}) '
-        f'SELECT {read_sql} FROM "{table_name}"'
-    )
+    copy_sql = f'INSERT INTO "{temp_table}" ({write_sql}) SELECT {read_sql} FROM "{table_name}"'
     say(__name__, "debug", f"Copying data: {copy_sql}")
     await connection.execute(copy_sql)
     return len(pairs)
@@ -550,6 +485,4 @@ async def copy_the_shared_columns(
 @helper
 def refuse_the_violations(violations: list[Any]) -> list[Any]:
     """The rebuilt table breaks a foreign key, so the caller is told."""
-    raise ValueError(
-        f"Foreign key constraint violations after reconstruction: {violations}"
-    )
+    raise ValueError(f"Foreign key constraint violations after reconstruction: {violations}")

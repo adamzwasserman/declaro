@@ -51,7 +51,7 @@ from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.precommit]
 
-MODELS = '''
+MODELS = """
 from pydantic import BaseModel
 from declaro_persistum import table, field
 
@@ -66,7 +66,7 @@ class Widget(BaseModel):
     hidden: bool = False
     blank: str = ""
     note: str | None = None
-'''
+"""
 
 EXPECTED = {
     "name": "'unnamed'",
@@ -141,9 +141,7 @@ async def test_the_defaults_survive_a_round_trip(dialect: str) -> None:
     if dialect == "turso":
         import turso.aio
 
-        connection = await turso.aio.connect(
-            os.path.join(tempfile.mkdtemp(), "d.db")
-        )
+        connection = await turso.aio.connect(os.path.join(tempfile.mkdtemp(), "d.db"))
     else:
         import aiosqlite
 
@@ -161,7 +159,11 @@ async def test_the_defaults_survive_a_round_trip(dialect: str) -> None:
 
         actual = await introspect(connection, dialect)
         remaining = diff(
-            {n: actual[n] for n in declared if n in actual}, declared, dialect=dialect, decisions=NOTHING)["operations"]
+            {n: actual[n] for n in declared if n in actual},
+            declared,
+            dialect=dialect,
+            decisions=NOTHING,
+        )["operations"]
 
         assert remaining == [], (
             f"the declared defaults migrate on every deploy: "
@@ -185,9 +187,7 @@ async def test_the_defaults_actually_apply_to_a_row(dialect: str) -> None:
     if dialect == "turso":
         import turso.aio
 
-        connection = await turso.aio.connect(
-            os.path.join(tempfile.mkdtemp(), "r.db")
-        )
+        connection = await turso.aio.connect(os.path.join(tempfile.mkdtemp(), "r.db"))
     else:
         import aiosqlite
 

@@ -191,9 +191,7 @@ def _when_create(ctx):
     ctx["triggers"] = [
         statement
         for source in sources
-        for statement in generate_refresh_trigger_sql(
-            view["name"], source, view["query"], NOTHING
-        )
+        for statement in generate_refresh_trigger_sql(view["name"], source, view["query"], NOTHING)
     ]
     _run(ctx, ctx["triggers"])
 
@@ -203,9 +201,7 @@ def _then_metadata_table(ctx, table):
     """The table exists in the database, not merely in the text."""
     assert table == MATVIEW_METADATA_TABLE
     assert generate_metadata_table_schema(), "no metadata table schema is generated"
-    found = _rows(
-        ctx, f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'"
-    )
+    found = _rows(ctx, f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
     assert found, f"{table} was not created: {_joined(ctx)}"
 
 
@@ -217,9 +213,7 @@ def _then_backing_table(ctx, name):
     the emulation is a cache, and a cache nobody filled is a view that reports
     nothing until the first refresh.
     """
-    found = _rows(
-        ctx, f"SELECT name FROM sqlite_master WHERE type='table' AND name='{name}'"
-    )
+    found = _rows(ctx, f"SELECT name FROM sqlite_master WHERE type='table' AND name='{name}'")
     assert found, f"{name} was not created: {_joined(ctx)}"
 
     cached = _rows(ctx, f'SELECT * FROM "{name}" ORDER BY 1')
@@ -227,11 +221,7 @@ def _then_backing_table(ctx, name):
     assert cached == live, f"the backing table does not hold the query's rows: {cached}"
 
 
-@then(
-    parsers.parse(
-        'it should register the view in metadata with refresh_strategy="{strategy}"'
-    )
-)
+@then(parsers.parse('it should register the view in metadata with refresh_strategy="{strategy}"'))
 def _then_registered(ctx, strategy):
     rows = _rows(
         ctx,
@@ -246,8 +236,7 @@ def _then_registered(ctx, strategy):
 def _then_depends_json(ctx, arr):
     rows = _rows(
         ctx,
-        f"SELECT depends_on FROM {MATVIEW_METADATA_TABLE} "
-        f"WHERE name = '{ctx['view']['name']}'",
+        f"SELECT depends_on FROM {MATVIEW_METADATA_TABLE} WHERE name = '{ctx['view']['name']}'",
     )
     assert rows, "the view was not registered"
     assert json.loads(rows[0][0]) == json.loads(arr), (
@@ -274,9 +263,7 @@ def _given_existing(ctx, name):
 
 
 @given(
-    parsers.parse(
-        'an existing emulated materialized view "{name}" with trigger_sources=[{items}]'
-    )
+    parsers.parse('an existing emulated materialized view "{name}" with trigger_sources=[{items}]')
 )
 def _given_existing_with_triggers(ctx, name, items):
     ctx["view"] = {**ctx["view"], "name": name, "trigger_sources": _list(items)}
@@ -338,9 +325,7 @@ def _then_refresh_stamped(ctx):
         f"SELECT last_refreshed_at FROM {MATVIEW_METADATA_TABLE} "
         f"WHERE name = '{ctx['view']['name']}'",
     )
-    assert rows and rows[0][0] is not None, (
-        f"last_refreshed_at was not stamped: {rows}"
-    )
+    assert rows and rows[0][0] is not None, f"last_refreshed_at was not stamped: {rows}"
 
 
 @then(parsers.parse('it should generate DROP TABLE "{name}"'))
@@ -354,8 +339,7 @@ def _then_nonatomic_drops(ctx, name):
 def _then_nonatomic_recreates(ctx, name):
     """Rebuilt, and holding the query's rows once it is."""
     assert any(
-        "CREATE TABLE" in s.upper() and "AS" in s.upper() and name in s
-        for s in ctx["sql"]
+        "CREATE TABLE" in s.upper() and "AS" in s.upper() and name in s for s in ctx["sql"]
     ), f"a non-atomic refresh must rebuild the table: {_joined(ctx)}"
 
     cached = _rows(ctx, f'SELECT * FROM "{name}" ORDER BY 1')
@@ -382,13 +366,13 @@ def _given_trigger_sql(ctx, name, source):
     _run(
         ctx,
         create_matview_sql(
-            name=name, query=ctx["view"]["query"],
-            refresh_strategy="trigger", depends_on=None,
+            name=name,
+            query=ctx["view"]["query"],
+            refresh_strategy="trigger",
+            depends_on=None,
         ),
     )
-    ctx["triggers"] = generate_refresh_trigger_sql(
-        name, source, ctx["view"]["query"], NOTHING
-    )
+    ctx["triggers"] = generate_refresh_trigger_sql(name, source, ctx["view"]["query"], NOTHING)
     _run(ctx, ctx["triggers"])
 
 
@@ -420,9 +404,7 @@ def _then_trigger_refreshes(ctx):
     ctx["db"].commit()
     after = _rows(ctx, f'SELECT * FROM "{ctx["view"]["name"]}" ORDER BY 1')
 
-    assert after != before, (
-        f"the source changed and the view did not: {before} then {after}"
-    )
+    assert after != before, f"the source changed and the view did not: {before} then {after}"
     assert after == _rows(ctx, ctx["view"]["query"]), (
         f"the trigger left the view disagreeing with its own query: {after}"
     )
@@ -450,9 +432,9 @@ def _when_drop_with_triggers(ctx):
 @then(parsers.parse('it should generate DROP TABLE IF EXISTS "{name}"'))
 def _then_dropped(ctx, name):
     """The table is gone from the database, not merely named in a string."""
-    assert not _rows(
-        ctx, f"SELECT name FROM sqlite_master WHERE type='table' AND name='{name}'"
-    ), f"{name} survived the drop"
+    assert not _rows(ctx, f"SELECT name FROM sqlite_master WHERE type='table' AND name='{name}'"), (
+        f"{name} survived the drop"
+    )
 
 
 @then(
@@ -464,9 +446,9 @@ def _then_dropped(ctx, name):
 def _then_metadata_row_gone(ctx, name):
     """A registry row outliving its table is a schema reporting a view that
     does not exist."""
-    assert not _rows(
-        ctx, f"SELECT name FROM {MATVIEW_METADATA_TABLE} WHERE name='{name}'"
-    ), f"the metadata row for {name} survived the drop"
+    assert not _rows(ctx, f"SELECT name FROM {MATVIEW_METADATA_TABLE} WHERE name='{name}'"), (
+        f"the metadata row for {name} survived the drop"
+    )
 
 
 @then(parsers.parse("it should generate DROP TRIGGER for {event} trigger"))
@@ -488,8 +470,10 @@ def _given_registered(ctx, name):
     _run(
         ctx,
         create_matview_sql(
-            name=name, query=ctx["view"]["query"],
-            refresh_strategy="manual", depends_on=None,
+            name=name,
+            query=ctx["view"]["query"],
+            refresh_strategy="manual",
+            depends_on=None,
         ),
     )
 
@@ -500,8 +484,10 @@ def _given_registered_strategy(ctx, name, strategy):
     _run(
         ctx,
         create_matview_sql(
-            name=name, query=ctx["view"]["query"],
-            refresh_strategy=strategy, depends_on=None,
+            name=name,
+            query=ctx["view"]["query"],
+            refresh_strategy=strategy,
+            depends_on=None,
         ),
     )
 
@@ -512,8 +498,10 @@ def _given_registered_depends(ctx, name, arr):
     _run(
         ctx,
         create_matview_sql(
-            name=name, query=ctx["view"]["query"],
-            refresh_strategy="manual", depends_on=json.loads(arr),
+            name=name,
+            query=ctx["view"]["query"],
+            refresh_strategy="manual",
+            depends_on=json.loads(arr),
         ),
     )
 
@@ -588,8 +576,7 @@ def _then_only_regular(ctx):
 @then("it should not raise an error")
 def _then_no_error(ctx):
     assert ctx.get("error") is None, (
-        f"a missing metadata table must be an absence, not a failure: "
-        f"{ctx.get('error')}"
+        f"a missing metadata table must be an absence, not a failure: {ctx.get('error')}"
     )
 
 
@@ -618,12 +605,8 @@ def _then_raises(ctx, message):
     assert ctx["error"] is not None, f"{message!r} was not raised"
 
     raised = str(ctx["error"])
-    missing = [
-        word for word in message.replace('"', "").split() if word not in raised
-    ]
-    assert not missing, (
-        f"raised {raised!r}, which does not say {missing}"
-    )
+    missing = [word for word in message.replace('"', "").split() if word not in raised]
+    assert not missing, f"raised {raised!r}, which does not say {missing}"
 
 
 # --------------------------------------------------------- dialect agreement

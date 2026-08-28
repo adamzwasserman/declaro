@@ -90,8 +90,7 @@ def test_the_list_still_matches_what_reaches_an_applier() -> None:
 
     package = pathlib.Path(declaro_persistum.__file__).parent
     calls = sum(
-        source.count("await apply_operations(")
-        + source.count("await apply_migrations_async(")
+        source.count("await apply_operations(") + source.count("await apply_migrations_async(")
         for module in sorted(package.rglob("*.py"))
         for source in [module.read_text()]
     )

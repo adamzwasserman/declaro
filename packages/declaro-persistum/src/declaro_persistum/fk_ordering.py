@@ -42,9 +42,7 @@ def _build_fk_graph(schema: Schema) -> dict[str, set[str]]:
             ref.split(".")[0]
             for col_def in table_def.get("columns", {}).values()
             for ref in [col_def.get("references") or ""]
-            if "." in ref
-            and ref.split(".")[0] in schema
-            and ref.split(".")[0] != table_name
+            if "." in ref and ref.split(".")[0] in schema and ref.split(".")[0] != table_name
         }
         for table_name, table_def in schema.items()
     }

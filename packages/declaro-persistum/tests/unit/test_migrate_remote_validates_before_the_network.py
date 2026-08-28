@@ -27,7 +27,7 @@ import pytest
 
 pytestmark = [pytest.mark.precommit]
 
-CLEAN = '''
+CLEAN = """
 from pydantic import BaseModel
 from declaro_persistum import table, field
 
@@ -36,9 +36,9 @@ from declaro_persistum import table, field
 class User(BaseModel):
     id: int = field(primary_key=True)
     name: str
-'''
+"""
 
-DANGLING = '''
+DANGLING = """
 from pydantic import BaseModel
 from declaro_persistum import table, field
 
@@ -47,7 +47,7 @@ from declaro_persistum import table, field
 class Post(BaseModel):
     id: int = field(primary_key=True)
     author_id: int = field(references="authors.id")
-'''
+"""
 
 # A URL that resolves to nothing. Reaching it is the failure this test is
 # looking for, not the failure it is asserting.

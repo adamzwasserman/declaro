@@ -51,14 +51,25 @@ async def _seeded(path):
 
 def _real_ops():
     """From the differ, which is the only thing that builds these correctly."""
-    actual = {"child": {"columns": {
-        "id": {"type": "INTEGER", "primary_key": True},
-        "note": {"type": "TEXT", "nullable": True}}}}
-    target = {"child": {"columns": {
-        "id": {"type": "INTEGER", "primary_key": True},
-        "note": {"type": "TEXT", "nullable": False}}}}
+    actual = {
+        "child": {
+            "columns": {
+                "id": {"type": "INTEGER", "primary_key": True},
+                "note": {"type": "TEXT", "nullable": True},
+            }
+        }
+    }
+    target = {
+        "child": {
+            "columns": {
+                "id": {"type": "INTEGER", "primary_key": True},
+                "note": {"type": "TEXT", "nullable": False},
+            }
+        }
+    }
     return [
-        o for o in diff(actual, target, dialect="sqlite", decisions={})["operations"]
+        o
+        for o in diff(actual, target, dialect="sqlite", decisions={})["operations"]
         if o["op"] == "alter_column"
     ]
 
@@ -68,9 +79,7 @@ async def test_a_real_operation_still_applies(tmp_path) -> None:
     conn = await _seeded(tmp_path / "ok.db")
     try:
         ops = _real_ops()
-        result = await apply_operations(
-            conn, ops, list(range(len(ops))), "sqlite", dry_run=False
-        )
+        result = await apply_operations(conn, ops, list(range(len(ops))), "sqlite", dry_run=False)
         assert result["success"] is True, result.get("error")
     finally:
         await conn.close()

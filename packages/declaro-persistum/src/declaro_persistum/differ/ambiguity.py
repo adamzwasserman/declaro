@@ -101,9 +101,7 @@ def _detect_table_rename_ambiguities(
     entry is the answer when they gave it at the prompt. Absent both, ask.
     """
     resolved = frozenset(t for t in dropped if f"table_{t}" in decisions)
-    declared = frozenset(
-        target[a]["renamed_from"] for a in added if target[a].get("renamed_from")
-    )
+    declared = frozenset(target[a]["renamed_from"] for a in added if target[a].get("renamed_from"))
     named = frozenset(a for a in added if not target[a].get("renamed_from"))
 
     return [
@@ -151,8 +149,7 @@ def _detect_column_ambiguities(
     hinted = {
         added_col
         for added_col in added_cols
-        if target_columns[added_col].get("renamed_from")
-        or target_columns[added_col].get("is_new")
+        if target_columns[added_col].get("renamed_from") or target_columns[added_col].get("is_new")
     }
     spoken_for = {
         target_columns[added_col]["renamed_from"]
@@ -200,9 +197,7 @@ def _detect_column_rename_ambiguities(
     """
     resolved = frozenset(c for c in dropped if f"{table_name}_{c}" in decisions)
     declared = frozenset(
-        target_columns[a]["renamed_from"]
-        for a in added
-        if target_columns[a].get("renamed_from")
+        target_columns[a]["renamed_from"] for a in added if target_columns[a].get("renamed_from")
     )
     named = frozenset(a for a in added if not target_columns[a].get("renamed_from"))
 

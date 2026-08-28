@@ -57,10 +57,16 @@ async def test_a_column_whose_case_matches_exactly_is_copied(tmp_path) -> None:
         (1, "keep me"),
     )
     try:
-        await reconstruct_table(conn, "t", {
-            "id": {"type": "INTEGER", "primary_key": True},
-            "note": {"type": "TEXT", "nullable": True},
-        }, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+        await reconstruct_table(
+            conn,
+            "t",
+            {
+                "id": {"type": "INTEGER", "primary_key": True},
+                "note": {"type": "TEXT", "nullable": True},
+            },
+            preserve_data=NOTHING,
+            manage_foreign_keys=NOTHING,
+        )
         await conn.commit()
 
         cursor = await conn.execute("SELECT id, note FROM t")
@@ -87,10 +93,16 @@ async def test_a_column_that_differs_only_in_case_is_still_copied(
         (1, "keep me"),
     )
     try:
-        await reconstruct_table(conn, "t", {
-            "id": {"type": "INTEGER", "primary_key": True},
-            declared: {"type": "TEXT", "nullable": True},
-        }, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+        await reconstruct_table(
+            conn,
+            "t",
+            {
+                "id": {"type": "INTEGER", "primary_key": True},
+                declared: {"type": "TEXT", "nullable": True},
+            },
+            preserve_data=NOTHING,
+            manage_foreign_keys=NOTHING,
+        )
         await conn.commit()
 
         cursor = await conn.execute(f'SELECT id, "{declared}" FROM t')
@@ -110,10 +122,16 @@ async def test_a_column_the_new_schema_drops_is_still_dropped(tmp_path) -> None:
         (1, "keep me", "remove me"),
     )
     try:
-        await reconstruct_table(conn, "t", {
-            "id": {"type": "INTEGER", "primary_key": True},
-            "note": {"type": "TEXT", "nullable": True},
-        }, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+        await reconstruct_table(
+            conn,
+            "t",
+            {
+                "id": {"type": "INTEGER", "primary_key": True},
+                "note": {"type": "TEXT", "nullable": True},
+            },
+            preserve_data=NOTHING,
+            manage_foreign_keys=NOTHING,
+        )
         await conn.commit()
 
         cursor = await conn.execute("PRAGMA table_info(t)")
@@ -133,11 +151,17 @@ async def test_a_new_column_is_added_empty(tmp_path) -> None:
         (1, "keep me"),
     )
     try:
-        await reconstruct_table(conn, "t", {
-            "id": {"type": "INTEGER", "primary_key": True},
-            "note": {"type": "TEXT", "nullable": True},
-            "added": {"type": "TEXT", "nullable": True},
-        }, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+        await reconstruct_table(
+            conn,
+            "t",
+            {
+                "id": {"type": "INTEGER", "primary_key": True},
+                "note": {"type": "TEXT", "nullable": True},
+                "added": {"type": "TEXT", "nullable": True},
+            },
+            preserve_data=NOTHING,
+            manage_foreign_keys=NOTHING,
+        )
         await conn.commit()
 
         cursor = await conn.execute("SELECT id, note, added FROM t")
@@ -156,10 +180,16 @@ async def test_a_rebuild_with_no_shared_columns_still_copies_nothing(
         (1, "keep me"),
     )
     try:
-        await reconstruct_table(conn, "t", {
-            "new_id": {"type": "INTEGER", "primary_key": True},
-            "new_note": {"type": "TEXT", "nullable": True},
-        }, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+        await reconstruct_table(
+            conn,
+            "t",
+            {
+                "new_id": {"type": "INTEGER", "primary_key": True},
+                "new_note": {"type": "TEXT", "nullable": True},
+            },
+            preserve_data=NOTHING,
+            manage_foreign_keys=NOTHING,
+        )
         await conn.commit()
 
         cursor = await conn.execute("SELECT COUNT(*) FROM t")

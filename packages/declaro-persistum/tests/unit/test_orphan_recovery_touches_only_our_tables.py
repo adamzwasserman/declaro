@@ -53,12 +53,7 @@ class _Conn:
         self._c.commit()
 
     def tables(self) -> set[str]:
-        return {
-            r[0]
-            for r in self._c.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )
-        }
+        return {r[0] for r in self._c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 
 
 async def _write_one(conn, sql, params):
@@ -84,7 +79,6 @@ def _database(conn: _Conn):
 
     async def connect(_db):
         return conn
-
 
     return Database(
         path=":memory:",
@@ -158,9 +152,7 @@ async def test_a_user_table_ending_in_new_is_not_dropped(tmp_path):
 async def test_our_own_orphan_is_still_recovered(tmp_path):
     """The behaviour that must survive: a real orphan goes back."""
     conn = _Conn(str(tmp_path / "c.db"))
-    await conn.execute(
-        "CREATE TABLE _declaro_tmp_orders_a1b2c3d4 (id INTEGER PRIMARY KEY)"
-    )
+    await conn.execute("CREATE TABLE _declaro_tmp_orders_a1b2c3d4 (id INTEGER PRIMARY KEY)")
     await conn.commit()
 
     recovered = await _recover(conn)

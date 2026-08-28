@@ -1,6 +1,5 @@
 """Tests for schema loading."""
 
-
 import pytest
 
 from declaro_persistum.exceptions import LoaderError
@@ -33,17 +32,17 @@ class TestLoadSchema:
     def test_load_multiple_tables(self, temp_schema_dir):
         """Load schema with multiple table files."""
         # Create users.toml
-        (temp_schema_dir / "tables" / "users.toml").write_text('''
+        (temp_schema_dir / "tables" / "users.toml").write_text("""
 [users]
 [users.columns.id]
 type = "uuid"
-''')
+""")
         # Create orders.toml
-        (temp_schema_dir / "tables" / "orders.toml").write_text('''
+        (temp_schema_dir / "tables" / "orders.toml").write_text("""
 [orders]
 [orders.columns.id]
 type = "uuid"
-''')
+""")
 
         schema = load_schema(temp_schema_dir)
 
@@ -52,11 +51,11 @@ type = "uuid"
 
     def test_load_from_root_schema_file(self, temp_schema_dir):
         """Load from schema.toml in root directory."""
-        (temp_schema_dir / "schema.toml").write_text('''
+        (temp_schema_dir / "schema.toml").write_text("""
 [users]
 [users.columns.id]
 type = "uuid"
-''')
+""")
 
         schema = load_schema(temp_schema_dir)
 
@@ -64,7 +63,7 @@ type = "uuid"
 
     def test_load_with_all_column_options(self, temp_schema_dir):
         """Load column with all options."""
-        (temp_schema_dir / "tables" / "full.toml").write_text('''
+        (temp_schema_dir / "tables" / "full.toml").write_text("""
 [full_table]
 [full_table.columns.id]
 type = "uuid"
@@ -73,7 +72,7 @@ default = "gen_random_uuid()"
 primary_key = true
 unique = true
 check = "length(id) > 0"
-''')
+""")
 
         schema = load_schema(temp_schema_dir)
 
@@ -87,14 +86,14 @@ check = "length(id) > 0"
 
     def test_load_with_foreign_key(self, temp_schema_dir):
         """Load column with foreign key reference."""
-        (temp_schema_dir / "tables" / "orders.toml").write_text('''
+        (temp_schema_dir / "tables" / "orders.toml").write_text("""
 [orders]
 [orders.columns.user_id]
 type = "uuid"
 references = "users.id"
 on_delete = "cascade"
 on_update = "restrict"
-''')
+""")
 
         schema = load_schema(temp_schema_dir)
 
@@ -105,7 +104,7 @@ on_update = "restrict"
 
     def test_load_with_indexes(self, temp_schema_dir):
         """Load table with indexes."""
-        (temp_schema_dir / "tables" / "users.toml").write_text('''
+        (temp_schema_dir / "tables" / "users.toml").write_text("""
 [users]
 [users.columns.email]
 type = "text"
@@ -113,7 +112,7 @@ type = "text"
 [users.indexes.email_idx]
 columns = ["email"]
 unique = true
-''')
+""")
 
         schema = load_schema(temp_schema_dir)
 
@@ -123,7 +122,7 @@ unique = true
 
     def test_load_with_composite_primary_key(self, temp_schema_dir):
         """Load table with composite primary key."""
-        (temp_schema_dir / "tables" / "mapping.toml").write_text('''
+        (temp_schema_dir / "tables" / "mapping.toml").write_text("""
 [user_roles]
 primary_key = ["user_id", "role_id"]
 
@@ -132,7 +131,7 @@ type = "uuid"
 
 [user_roles.columns.role_id]
 type = "uuid"
-''')
+""")
 
         schema = load_schema(temp_schema_dir)
 

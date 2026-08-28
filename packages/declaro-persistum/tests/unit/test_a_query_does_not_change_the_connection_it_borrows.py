@@ -44,9 +44,7 @@ async def _a_connection_with_rows():
     path = str(Path(tempfile.mkdtemp()) / "t.db")
     connection = await aiosqlite.connect(path)
     await connection.execute("CREATE TABLE t (id INTEGER, name TEXT)")
-    await connection.executemany(
-        "INSERT INTO t VALUES (?, ?)", [(i, f"n{i}") for i in range(20)]
-    )
+    await connection.executemany("INSERT INTO t VALUES (?, ?)", [(i, f"n{i}") for i in range(20)])
     await connection.commit()
     return connection
 
@@ -74,9 +72,7 @@ async def test_the_caller_still_gets_what_the_driver_gives() -> None:
     """The consequence, stated as the caller sees it."""
     connection = await _a_connection_with_rows()
     try:
-        await asyncio.gather(
-            *[execute(_ROWS, connection, row_factory=NOTHING) for _ in range(4)]
-        )
+        await asyncio.gather(*[execute(_ROWS, connection, row_factory=NOTHING) for _ in range(4)])
 
         cursor = await connection.execute("SELECT id FROM t LIMIT 1")
         row = await cursor.fetchone()

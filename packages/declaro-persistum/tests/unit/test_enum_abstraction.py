@@ -45,9 +45,7 @@ class TestNaming:
         assert not is_enum_table(f"orders{ENUM_TABLE_PREFIX}status")
 
     def test_the_fk_reference_points_at_the_value_column(self):
-        assert get_enum_fk_reference("orders", "status") == (
-            "_dp_enum_orders_status.value"
-        )
+        assert get_enum_fk_reference("orders", "status") == ("_dp_enum_orders_status.value")
 
 
 class TestEscaping:
@@ -89,8 +87,7 @@ class TestSqlGeneration:
         assert len(stmts) == 2
         assert stmts[0].startswith('CREATE TABLE "_dp_enum_orders_status"')
         assert stmts[1] == (
-            'INSERT INTO "_dp_enum_orders_status" (value) '
-            "VALUES ('pending'), ('shipped')"
+            "INSERT INTO \"_dp_enum_orders_status\" (value) VALUES ('pending'), ('shipped')"
         )
 
     def test_an_enum_with_no_values_emits_only_the_table(self):
@@ -106,12 +103,12 @@ class TestSqlGeneration:
 
     def test_adding_a_value_inserts_one_row(self):
         assert add_enum_value_sql("orders", "status", "returned") == [
-            'INSERT INTO "_dp_enum_orders_status" (value) VALUES (\'returned\')'
+            "INSERT INTO \"_dp_enum_orders_status\" (value) VALUES ('returned')"
         ]
 
     def test_removing_a_value_deletes_by_value(self):
         assert remove_enum_value_sql("orders", "status", "returned") == [
-            'DELETE FROM "_dp_enum_orders_status" WHERE value = \'returned\''
+            "DELETE FROM \"_dp_enum_orders_status\" WHERE value = 'returned'"
         ]
 
 
@@ -135,9 +132,7 @@ class TestTransformColumn:
         assert out == {"type": "text"}
 
     def test_an_empty_literal_list_is_not_treated_as_an_enum(self):
-        out = transform_column_for_enum(
-            {"type": "text", "literal_values": []}, "o", "s"
-        )
+        out = transform_column_for_enum({"type": "text", "literal_values": []}, "o", "s")
         assert "references" not in out
         assert "literal_values" not in out, "the marker is stripped either way"
 
@@ -166,9 +161,7 @@ class TestExpandSchemaEnums:
     def test_the_column_is_rewritten_to_reference_the_lookup(self):
         schema = {"orders": {"columns": {"status": {"literal_values": ["a"]}}}}
         out = expand_schema_enums(schema)
-        assert out["orders"]["columns"]["status"]["references"] == (
-            "_dp_enum_orders_status.value"
-        )
+        assert out["orders"]["columns"]["status"]["references"] == ("_dp_enum_orders_status.value")
 
     def test_lookup_tables_are_ordered_before_the_tables_that_reference_them(self):
         """A FK cannot be created before its parent exists."""

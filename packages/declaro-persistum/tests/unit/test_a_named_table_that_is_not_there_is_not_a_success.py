@@ -78,7 +78,17 @@ async def test_naming_tables_that_exist_transfers_them(tmp_path) -> None:
     source, target, models = await _pair(tmp_path)
     try:
         result = await bulk_transfer(
-            source, target, "sqlite", "sqlite", str(models), tables=["users", "orders"], on_progress=NOTHING, batch_size=NOTHING, expand_enums=NOTHING, resume=NOTHING)
+            source,
+            target,
+            "sqlite",
+            "sqlite",
+            str(models),
+            tables=["users", "orders"],
+            on_progress=NOTHING,
+            batch_size=NOTHING,
+            expand_enums=NOTHING,
+            resume=NOTHING,
+        )
         assert result["success"] is True, result
         assert result["tables_transferred"] == 2
     finally:
@@ -91,7 +101,17 @@ async def test_naming_a_subset_still_works(tmp_path) -> None:
     source, target, models = await _pair(tmp_path)
     try:
         result = await bulk_transfer(
-            source, target, "sqlite", "sqlite", str(models), tables=["users"], on_progress=NOTHING, batch_size=NOTHING, expand_enums=NOTHING, resume=NOTHING)
+            source,
+            target,
+            "sqlite",
+            "sqlite",
+            str(models),
+            tables=["users"],
+            on_progress=NOTHING,
+            batch_size=NOTHING,
+            expand_enums=NOTHING,
+            resume=NOTHING,
+        )
         assert result["success"] is True
         assert result["tables_transferred"] == 1
 
@@ -114,7 +134,12 @@ async def test_naming_a_table_that_is_not_there_raises(tmp_path) -> None:
                 "sqlite",
                 "sqlite",
                 str(models),
-                tables=["users", "orders_typo"], on_progress=NOTHING, batch_size=NOTHING, expand_enums=NOTHING, resume=NOTHING)
+                tables=["users", "orders_typo"],
+                on_progress=NOTHING,
+                batch_size=NOTHING,
+                expand_enums=NOTHING,
+                resume=NOTHING,
+            )
 
         assert "orders_typo" in str(caught.value), (
             f"the error does not name the table that is missing: {caught.value}"
@@ -137,7 +162,12 @@ async def test_the_error_names_every_missing_table_not_just_the_first(
                 "sqlite",
                 "sqlite",
                 str(models),
-                tables=["users", "gone_one", "gone_two"], on_progress=NOTHING, batch_size=NOTHING, expand_enums=NOTHING, resume=NOTHING)
+                tables=["users", "gone_one", "gone_two"],
+                on_progress=NOTHING,
+                batch_size=NOTHING,
+                expand_enums=NOTHING,
+                resume=NOTHING,
+            )
 
         message = str(caught.value)
         assert "gone_one" in message and "gone_two" in message, message
@@ -156,14 +186,21 @@ async def test_nothing_is_transferred_when_a_name_is_wrong(tmp_path) -> None:
     try:
         with pytest.raises(TransferError):
             await bulk_transfer(
-                source, target, "sqlite", "sqlite", str(models),
-                tables=["users", "orders_typo"], on_progress=NOTHING, batch_size=NOTHING, expand_enums=NOTHING, resume=NOTHING)
+                source,
+                target,
+                "sqlite",
+                "sqlite",
+                str(models),
+                tables=["users", "orders_typo"],
+                on_progress=NOTHING,
+                batch_size=NOTHING,
+                expand_enums=NOTHING,
+                resume=NOTHING,
+            )
 
         async with writing(target) as conn:
             cursor = await conn.execute('SELECT COUNT(*) FROM "users"')
-            assert (await cursor.fetchone())[0] == 0, (
-                "rows moved before the bad name was noticed"
-            )
+            assert (await cursor.fetchone())[0] == 0, "rows moved before the bad name was noticed"
     finally:
         await close(source)
         await close(target)
@@ -176,7 +213,17 @@ async def test_asking_for_everything_is_not_a_claim_about_any_table(
     source, target, models = await _pair(tmp_path)
     try:
         result = await bulk_transfer(
-            source, target, "sqlite", "sqlite", str(models), tables=None, on_progress=NOTHING, batch_size=NOTHING, expand_enums=NOTHING, resume=NOTHING)
+            source,
+            target,
+            "sqlite",
+            "sqlite",
+            str(models),
+            tables=None,
+            on_progress=NOTHING,
+            batch_size=NOTHING,
+            expand_enums=NOTHING,
+            resume=NOTHING,
+        )
         assert result["success"] is True
         assert result["tables_transferred"] == 2
     finally:

@@ -156,9 +156,7 @@ def _when_stands(ctx, policy, opener):
         ctx["refusal"] = refused
 
 
-@when(
-    parsers.parse('_refuse_replicating_nowhere is asked about "{policy}" from "{opener}"')
-)
+@when(parsers.parse('_refuse_replicating_nowhere is asked about "{policy}" from "{opener}"'))
 def _when_refuse(ctx, policy, opener):
     try:
         ctx["answer"] = _refuse_replicating_nowhere(policy, opener)

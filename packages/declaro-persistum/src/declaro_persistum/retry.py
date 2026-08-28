@@ -222,11 +222,8 @@ def is_contention(error: BaseException) -> bool:
     """
     # Our own bug is never contention, however its message reads, so the type
     # is asked before the text. A KeyError('busy') was retried forever.
-    return not any(
-        written_as(kind, error) for kind in A_BUG_IN_THIS_PACKAGE
-    ) and any(
-        word in str(error).lower()
-        for word in ("busy", "sqlite_busy", "conflict")
+    return not any(written_as(kind, error) for kind in A_BUG_IN_THIS_PACKAGE) and any(
+        word in str(error).lower() for word in ("busy", "sqlite_busy", "conflict")
     )
 
 

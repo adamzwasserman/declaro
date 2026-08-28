@@ -186,23 +186,17 @@ def test_the_differ_hands_the_sort_what_the_edge_needs() -> None:
     plan = diff(current, target, dialect="sqlite", decisions=NOTHING)
     operations = plan["operations"]
 
-    dropped_index = next(
-        i for i, op in enumerate(operations) if op["op"] == "drop_index"
-    )
-    dropped_column = next(
-        i for i, op in enumerate(operations) if op["op"] == "drop_column"
-    )
+    dropped_index = next(i for i, op in enumerate(operations) if op["op"] == "drop_index")
+    dropped_column = next(i for i, op in enumerate(operations) if op["op"] == "drop_column")
 
     dependencies = build_dependency_graph(operations)
     assert dropped_index in dependencies[dropped_column], (
-        f"dropping the column does not wait for the index that covers it: "
-        f"{dependencies}"
+        f"dropping the column does not wait for the index that covers it: {dependencies}"
     )
 
     order = plan["execution_order"]
     assert order.index(dropped_index) < order.index(dropped_column), (
-        f"the index is dropped after the column it covers: "
-        f"{[operations[i]['op'] for i in order]}"
+        f"the index is dropped after the column it covers: {[operations[i]['op'] for i in order]}"
     )
 
 

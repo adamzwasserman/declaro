@@ -54,10 +54,10 @@ def given_empty_todos_table(bdd_context):
     bdd_context["schema"] = schema
 
     async def _setup():
-        async with bdd_context["backend"]['connect']() as conn:
+        async with bdd_context["backend"]["connect"]() as conn:
             # Drop and recreate table
-            await apply_step(bdd_context["backend"]['teardown'], conn, schema)
-            await apply_step(bdd_context["backend"]['setup'], conn, schema)
+            await apply_step(bdd_context["backend"]["teardown"], conn, schema)
+            await apply_step(bdd_context["backend"]["setup"], conn, schema)
             bdd_context["connection"] = conn
 
     asyncio.run(_setup())
@@ -97,7 +97,9 @@ async def _seed_postgresql(conn, rows: list[dict]) -> None:
     for row in rows:
         await conn.execute(
             "INSERT INTO todos (id, title, completed) VALUES ($1, $2, $3)",
-            row["id"], row["title"], row["completed"],
+            row["id"],
+            row["title"],
+            row["completed"],
         )
 
 
@@ -127,12 +129,12 @@ def given_todos_with_rows(bdd_context, count: int, todo_factory):
     """Create the todos table and seed it with `count` generated rows."""
     schema = simple_todos_schema()
     bdd_context["schema"] = schema
-    rows = todo_factory(count)   # the fixture IS the builder now
+    rows = todo_factory(count)  # the fixture IS the builder now
 
     async def _setup():
-        async with bdd_context["backend"]['connect']() as conn:
-            await apply_step(bdd_context["backend"]['teardown'], conn, schema)
-            await apply_step(bdd_context["backend"]['setup'], conn, schema)
+        async with bdd_context["backend"]["connect"]() as conn:
+            await apply_step(bdd_context["backend"]["teardown"], conn, schema)
+            await apply_step(bdd_context["backend"]["setup"], conn, schema)
             seed = for_dialect(SEEDERS, bdd_context["dialect"], "Seeders")
             await seed(conn, rows)
 
@@ -148,26 +150,27 @@ def given_todos_with_rows(bdd_context, count: int, todo_factory):
 def when_insert_todo(bdd_context, title: str):
     """Insert a todo into the database."""
     import uuid
+
     todo_id = str(uuid.uuid4())
 
     async def _insert():
-        async with bdd_context["backend"]['connect']() as conn:
+        async with bdd_context["backend"]["connect"]() as conn:
             if bdd_context["dialect"] == "sqlite":
                 await conn.execute(
-                    "INSERT INTO todos (id, title, completed) VALUES (?, ?, ?)",
-                    (todo_id, title, 0)
+                    "INSERT INTO todos (id, title, completed) VALUES (?, ?, ?)", (todo_id, title, 0)
                 )
                 await conn.commit()
             elif bdd_context["dialect"] == "postgresql":
                 await conn.execute(
                     "INSERT INTO todos (id, title, completed) VALUES ($1, $2, $3)",
-                    todo_id, title, False
+                    todo_id,
+                    title,
+                    False,
                 )
             elif bdd_context["dialect"] == "turso":
                 # Turso uses sync pyturso API with ? placeholders
                 conn.execute(
-                    "INSERT INTO todos (id, title, completed) VALUES (?, ?, ?)",
-                    (todo_id, title, 0)
+                    "INSERT INTO todos (id, title, completed) VALUES (?, ?, ?)", (todo_id, title, 0)
                 )
                 conn.commit()
 
@@ -181,23 +184,14 @@ def when_update_todo_completed(bdd_context):
     todo_id = bdd_context["last_inserted_id"]
 
     async def _update():
-        async with bdd_context["backend"]['connect']() as conn:
+        async with bdd_context["backend"]["connect"]() as conn:
             if bdd_context["dialect"] == "sqlite":
-                await conn.execute(
-                    "UPDATE todos SET completed = ? WHERE id = ?",
-                    (1, todo_id)
-                )
+                await conn.execute("UPDATE todos SET completed = ? WHERE id = ?", (1, todo_id))
                 await conn.commit()
             elif bdd_context["dialect"] == "postgresql":
-                await conn.execute(
-                    "UPDATE todos SET completed = $1 WHERE id = $2",
-                    True, todo_id
-                )
+                await conn.execute("UPDATE todos SET completed = $1 WHERE id = $2", True, todo_id)
             elif bdd_context["dialect"] == "turso":
-                conn.execute(
-                    "UPDATE todos SET completed = ? WHERE id = ?",
-                    (1, todo_id)
-                )
+                conn.execute("UPDATE todos SET completed = ? WHERE id = ?", (1, todo_id))
                 conn.commit()
 
     asyncio.run(_update())
@@ -206,26 +200,18 @@ def when_update_todo_completed(bdd_context):
 @when("I query for completed todos")
 def when_query_completed(bdd_context):
     """Query for completed todos."""
+
     async def _query():
-        async with bdd_context["backend"]['connect']() as conn:
+        async with bdd_context["backend"]["connect"]() as conn:
             if bdd_context["dialect"] == "sqlite":
-                cursor = await conn.execute(
-                    "SELECT * FROM todos WHERE completed = ?",
-                    (1,)
-                )
+                cursor = await conn.execute("SELECT * FROM todos WHERE completed = ?", (1,))
                 rows = await cursor.fetchall()
                 bdd_context["results"] = [dict(row) for row in rows]
             elif bdd_context["dialect"] == "postgresql":
-                rows = await conn.fetch(
-                    "SELECT * FROM todos WHERE completed = $1",
-                    True
-                )
+                rows = await conn.fetch("SELECT * FROM todos WHERE completed = $1", True)
                 bdd_context["results"] = [dict(row) for row in rows]
             elif bdd_context["dialect"] == "turso":
-                cursor = conn.execute(
-                    "SELECT * FROM todos WHERE completed = ?",
-                    (1,)
-                )
+                cursor = conn.execute("SELECT * FROM todos WHERE completed = ?", (1,))
                 rows = cursor.fetchall()
                 # Turso returns tuples, so the names come from the cursor.
                 # They used to be the literal ["id", "title", "completed"],
@@ -234,9 +220,7 @@ def when_query_completed(bdd_context):
                 # dropped `created_at` from every row in silence. Two sources
                 # of truth for one list, and the wrong one was in the test.
                 columns = [d[0] for d in cursor.description]
-                bdd_context["results"] = [
-                    dict(zip(columns, row, strict=True)) for row in rows
-                ]
+                bdd_context["results"] = [dict(zip(columns, row, strict=True)) for row in rows]
 
     asyncio.run(_query())
 
@@ -247,23 +231,14 @@ def when_delete_todo(bdd_context):
     todo_id = bdd_context["last_inserted_id"]
 
     async def _delete():
-        async with bdd_context["backend"]['connect']() as conn:
+        async with bdd_context["backend"]["connect"]() as conn:
             if bdd_context["dialect"] == "sqlite":
-                await conn.execute(
-                    "DELETE FROM todos WHERE id = ?",
-                    (todo_id,)
-                )
+                await conn.execute("DELETE FROM todos WHERE id = ?", (todo_id,))
                 await conn.commit()
             elif bdd_context["dialect"] == "postgresql":
-                await conn.execute(
-                    "DELETE FROM todos WHERE id = $1",
-                    todo_id
-                )
+                await conn.execute("DELETE FROM todos WHERE id = $1", todo_id)
             elif bdd_context["dialect"] == "turso":
-                conn.execute(
-                    "DELETE FROM todos WHERE id = ?",
-                    (todo_id,)
-                )
+                conn.execute("DELETE FROM todos WHERE id = ?", (todo_id,))
                 conn.commit()
 
     asyncio.run(_delete())
@@ -272,8 +247,9 @@ def when_delete_todo(bdd_context):
 @when(parsers.parse('I execute "{sql}"'))
 def when_execute_sql(bdd_context, sql: str):
     """Execute raw SQL query."""
+
     async def _execute():
-        async with bdd_context["backend"]['connect']() as conn:
+        async with bdd_context["backend"]["connect"]() as conn:
             if bdd_context["dialect"] == "sqlite":
                 cursor = await conn.execute(sql)
                 if sql.strip().upper().startswith("SELECT"):
@@ -309,7 +285,9 @@ def when_execute_sql(bdd_context, sql: str):
 @then(parsers.parse("I should find {count:d} completed todos"))
 def then_completed_count(bdd_context, count: int):
     """Verify completed todo count."""
-    assert len(bdd_context["results"]) == count, f"Expected {count} completed todos, got {len(bdd_context['results'])}"
+    assert len(bdd_context["results"]) == count, (
+        f"Expected {count} completed todos, got {len(bdd_context['results'])}"
+    )
 
 
 @then("the results match the expected data")

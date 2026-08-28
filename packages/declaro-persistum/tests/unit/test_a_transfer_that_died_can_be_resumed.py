@@ -52,7 +52,7 @@ from declaro_persistum.transfer import TRANSFER_STATE_TABLE, bulk_transfer
 
 pytestmark = [pytest.mark.precommit, pytest.mark.sqlite]
 
-MODELS = '''
+MODELS = """
 from pydantic import BaseModel
 from declaro_persistum import table
 
@@ -61,7 +61,7 @@ from declaro_persistum import table
 class Widget(BaseModel):
     id: int
     name: str
-'''
+"""
 
 ROWS = [(1, "first"), (2, "second"), (3, "third")]
 
@@ -85,15 +85,11 @@ async def _seeded_pair() -> tuple[Any, Any]:
     source, target = await _database("s.db"), await _database("t.db")
     for database in (source, target):
         async with writing(database) as connection:
-            await connection.execute(
-                'CREATE TABLE "widgets" (id INTEGER PRIMARY KEY, name TEXT)'
-            )
+            await connection.execute('CREATE TABLE "widgets" (id INTEGER PRIMARY KEY, name TEXT)')
             await connection.commit()
     async with writing(source) as connection:
         for row in ROWS:
-            await connection.execute(
-                'INSERT INTO "widgets" (id, name) VALUES (?, ?)', row
-            )
+            await connection.execute('INSERT INTO "widgets" (id, name) VALUES (?, ?)', row)
         await connection.commit()
     return source, target
 
@@ -117,9 +113,7 @@ async def _transfer(
 
 async def _rows(database: Any) -> list[tuple]:
     async with writing(database) as connection:
-        cursor = await connection.execute(
-            'SELECT id, name FROM "widgets" ORDER BY id'
-        )
+        cursor = await connection.execute('SELECT id, name FROM "widgets" ORDER BY id')
         return [tuple(r) for r in await cursor.fetchall()]
 
 
@@ -142,9 +136,7 @@ async def test_a_completed_table_is_skipped_on_the_second_run(
     try:
         await _transfer(source, target, schema_path, resume=False, on_progress=None)
 
-        again = await _transfer(
-            source, target, schema_path, resume=True, on_progress=None
-        )
+        again = await _transfer(source, target, schema_path, resume=True, on_progress=None)
 
         assert again["tables_skipped"] == 1, again
         assert again["tables_transferred"] == 0, again
@@ -174,12 +166,8 @@ async def test_a_skipped_table_still_counts_its_rows(schema_path: str) -> None:
     """
     source, target = await _seeded_pair()
     try:
-        first = await _transfer(
-            source, target, schema_path, resume=False, on_progress=None
-        )
-        again = await _transfer(
-            source, target, schema_path, resume=True, on_progress=None
-        )
+        first = await _transfer(source, target, schema_path, resume=False, on_progress=None)
+        again = await _transfer(source, target, schema_path, resume=True, on_progress=None)
 
         assert again["total_rows"] == first["total_rows"] == len(ROWS), (first, again)
     finally:
@@ -199,13 +187,10 @@ async def test_a_table_left_in_progress_is_restarted_not_appended(
         await _transfer(source, target, schema_path, resume=False, on_progress=None)
         await _mark(target, "in_progress", 2)
 
-        again = await _transfer(
-            source, target, schema_path, resume=True, on_progress=None
-        )
+        again = await _transfer(source, target, schema_path, resume=True, on_progress=None)
 
         assert await _rows(target) == ROWS, (
-            f"the table was appended to rather than restarted: "
-            f"{await _rows(target)}"
+            f"the table was appended to rather than restarted: {await _rows(target)}"
         )
         assert again["tables_transferred"] == 1, again
     finally:
@@ -221,9 +206,7 @@ async def _failed_once(schema_path: str) -> tuple[Any, Any]:
     """
     source, target = await _seeded_pair()
     async with writing(target) as connection:
-        await connection.execute(
-            'INSERT INTO "widgets" (id, name) VALUES (?, ?)', (3, "squatter")
-        )
+        await connection.execute('INSERT INTO "widgets" (id, name) VALUES (?, ?)', (3, "squatter"))
         await connection.commit()
 
     result = await bulk_transfer(
@@ -252,13 +235,9 @@ async def test_a_transfer_that_failed_once_can_still_succeed(
     """The measured defect. The cause was removed and the retry failed anyway."""
     source, target = await _failed_once(schema_path)
     try:
-        again = await _transfer(
-            source, target, schema_path, resume=True, on_progress=None
-        )
+        again = await _transfer(source, target, schema_path, resume=True, on_progress=None)
 
-        assert again["success"], (
-            f"a transfer that failed once can never succeed: {again['errors']}"
-        )
+        assert again["success"], f"a transfer that failed once can never succeed: {again['errors']}"
     finally:
         await close(source)
         await close(target)
@@ -289,9 +268,7 @@ async def test_a_completed_table_is_skipped_with_its_rows_intact(
     source, target = await _seeded_pair()
     try:
         await _transfer(source, target, schema_path, resume=False, on_progress=None)
-        again = await _transfer(
-            source, target, schema_path, resume=True, on_progress=None
-        )
+        again = await _transfer(source, target, schema_path, resume=True, on_progress=None)
 
         assert again["tables_skipped"] == 1 and await _rows(target) == ROWS
     finally:
@@ -310,9 +287,7 @@ async def test_progress_is_reported_while_the_transfer_runs(
     seen: list[dict] = []
     source, target = await _seeded_pair()
     try:
-        await _transfer(
-            source, target, schema_path, resume=False, on_progress=seen.append
-        )
+        await _transfer(source, target, schema_path, resume=False, on_progress=seen.append)
 
         assert seen, "the callback was never called"
         assert {p["table"] for p in seen} == {"widgets"}, seen
@@ -334,9 +309,7 @@ async def test_progress_is_reported_for_a_skipped_table(
         await _transfer(source, target, schema_path, resume=False, on_progress=None)
 
         seen: list[dict] = []
-        await _transfer(
-            source, target, schema_path, resume=True, on_progress=seen.append
-        )
+        await _transfer(source, target, schema_path, resume=True, on_progress=seen.append)
 
         assert [p["table"] for p in seen] == ["widgets"], seen
         assert seen[-1]["rows_transferred"] == len(ROWS), seen[-1]
@@ -436,9 +409,7 @@ async def test_the_batches_before_a_failure_are_already_durable(
         finally:
             await reader.close()
 
-        assert landed == [1, 2], (
-            f"the batches before the failure were not committed: {landed}"
-        )
+        assert landed == [1, 2], f"the batches before the failure were not committed: {landed}"
     finally:
         await close(source)
         await close(target)

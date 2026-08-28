@@ -75,9 +75,7 @@ def _declared(**fk: str) -> dict:
     ["", " ON DELETE NO ACTION"],
     ids=["no clause at all", "an explicit ON DELETE NO ACTION"],
 )
-async def test_declaring_no_action_migrates_nothing(
-    tmp_path: pathlib.Path, clause: str
-) -> None:
+async def test_declaring_no_action_migrates_nothing(tmp_path: pathlib.Path, clause: str) -> None:
     """Both spellings in the database are the same constraint the model names.
 
     The parametrisation is the point. SQLite cannot tell the two apart, so a
@@ -86,8 +84,11 @@ async def test_declaring_no_action_migrates_nothing(
     """
     live = await _live_schema(
         tmp_path,
-        (_AUTHOR, f'CREATE TABLE "post" ("id" INTEGER PRIMARY KEY, '
-                  f'"author_id" INTEGER REFERENCES "author"("id"){clause})'),
+        (
+            _AUTHOR,
+            f'CREATE TABLE "post" ("id" INTEGER PRIMARY KEY, '
+            f'"author_id" INTEGER REFERENCES "author"("id"){clause})',
+        ),
     )
 
     result = diff(live, _declared(on_delete="no action"), dialect="sqlite", decisions=NOTHING)
@@ -106,8 +107,11 @@ async def test_declaring_nothing_against_the_same_database_migrates_nothing(
     """
     live = await _live_schema(
         tmp_path,
-        (_AUTHOR, 'CREATE TABLE "post" ("id" INTEGER PRIMARY KEY, '
-                  '"author_id" INTEGER REFERENCES "author"("id"))'),
+        (
+            _AUTHOR,
+            'CREATE TABLE "post" ("id" INTEGER PRIMARY KEY, '
+            '"author_id" INTEGER REFERENCES "author"("id"))',
+        ),
     )
 
     result = diff(live, _declared(), dialect="sqlite", decisions=NOTHING)
@@ -126,8 +130,11 @@ async def test_a_real_cascade_is_still_seen_as_a_change(
     """
     live = await _live_schema(
         tmp_path,
-        (_AUTHOR, 'CREATE TABLE "post" ("id" INTEGER PRIMARY KEY, '
-                  '"author_id" INTEGER REFERENCES "author"("id"))'),
+        (
+            _AUTHOR,
+            'CREATE TABLE "post" ("id" INTEGER PRIMARY KEY, '
+            '"author_id" INTEGER REFERENCES "author"("id"))',
+        ),
     )
 
     result = diff(live, _declared(on_delete="cascade"), dialect="sqlite", decisions=NOTHING)

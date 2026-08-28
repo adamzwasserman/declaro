@@ -107,13 +107,10 @@ def test_snapshot_does_not_die_on_a_closed_stdin(project) -> None:
         project,
     )
 
-    result = _run(
-        ["-c", _url(project), "-s", str(project / "schema"), "snapshot"], project
-    )
+    result = _run(["-c", _url(project), "-s", str(project / "schema"), "snapshot"], project)
 
     assert "EOF when reading a line" not in result.stderr, (
-        f"the command tried to prompt with no terminal attached:\n"
-        f"{result.stderr[-800:]}"
+        f"the command tried to prompt with no terminal attached:\n{result.stderr[-800:]}"
     )
 
 
@@ -124,13 +121,9 @@ def test_snapshot_says_how_to_proceed_when_it_will_not_ask(project) -> None:
         project,
     )
 
-    result = _run(
-        ["-c", _url(project), "-s", str(project / "schema"), "snapshot"], project
-    )
+    result = _run(["-c", _url(project), "-s", str(project / "schema"), "snapshot"], project)
 
-    assert result.returncode != 0, (
-        "it overwrote a snapshot without being asked and without --force"
-    )
+    assert result.returncode != 0, "it overwrote a snapshot without being asked and without --force"
     assert "--force" in result.stderr or "--force" in result.stdout, (
         f"the reader is refused and not told what to pass:\n{result.stderr[-800:]}"
     )
@@ -192,13 +185,9 @@ def test_a_primary_key_declared_nullable_is_still_a_contradiction() -> None:
     """
     from declaro_persistum.validator import validate_schema
 
-    schema = {
-        "t": {"columns": {"id": {"type": "text", "primary_key": True, "nullable": True}}}
-    }
+    schema = {"t": {"columns": {"id": {"type": "text", "primary_key": True, "nullable": True}}}}
 
-    assert validate_schema(schema)["warnings"], (
-        "a nullable primary key was accepted in silence"
-    )
+    assert validate_schema(schema)["warnings"], "a nullable primary key was accepted in silence"
 
 
 def test_the_question_is_asked_in_one_place() -> None:

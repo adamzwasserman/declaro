@@ -174,9 +174,7 @@ def test_no_dialect_module_still_takes_an_untyped_connection() -> None:
             if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 continue
             arguments = node.args
-            for parameter in (
-                arguments.posonlyargs + arguments.args + arguments.kwonlyargs
-            ):
+            for parameter in arguments.posonlyargs + arguments.args + arguments.kwonlyargs:
                 annotated = parameter.annotation
                 if (
                     "conn" in parameter.arg

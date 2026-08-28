@@ -105,9 +105,7 @@ class WriteOne(Protocol):
 
 
 @boundary
-async def turso_write_one(
-    conn: DbApiConnection, sql: str, params: Sequence[object]
-) -> None:
+async def turso_write_one(conn: DbApiConnection, sql: str, params: Sequence[object]) -> None:
     """BEGIN CONCURRENT is what lets a crew write in parallel on Turso.
 
     A write-write conflict here means "not now" rather than "no", which is why
@@ -119,9 +117,7 @@ async def turso_write_one(
 
 
 @boundary
-async def sqlite_write_one(
-    conn: DbApiConnection, sql: str, params: Sequence[object]
-) -> None:
+async def sqlite_write_one(conn: DbApiConnection, sql: str, params: Sequence[object]) -> None:
     """BEGIN IMMEDIATE takes the write lock up front.
 
     SQLite has no BEGIN CONCURRENT. A deferred transaction takes the write lock
@@ -134,9 +130,7 @@ async def sqlite_write_one(
 
 
 @boundary
-async def postgres_write_one(
-    conn: AsyncpgConnection, sql: str, params: Sequence[object]
-) -> None:
+async def postgres_write_one(conn: AsyncpgConnection, sql: str, params: Sequence[object]) -> None:
     """asyncpg owns the transaction and takes positional parameters.
 
     There is no `commit()` to call: the context manager commits on exit and

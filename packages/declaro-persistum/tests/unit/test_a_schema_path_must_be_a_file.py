@@ -47,9 +47,7 @@ def test_the_version_changes_the_hash(tmp_path: pathlib.Path) -> None:
     models = tmp_path / "models.py"
     models.write_text("x = 1\n")
 
-    assert _compute_schema_hash(models, "0.3.1") != _compute_schema_hash(
-        models, "0.3.2"
-    )
+    assert _compute_schema_hash(models, "0.3.1") != _compute_schema_hash(models, "0.3.2")
 
 
 def test_the_content_changes_the_hash(tmp_path: pathlib.Path) -> None:

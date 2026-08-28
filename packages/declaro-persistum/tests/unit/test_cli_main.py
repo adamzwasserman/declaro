@@ -66,9 +66,7 @@ class TestGetConnectionString:
 
     def test_the_environment_is_the_fallback(self, monkeypatch):
         monkeypatch.setenv("DECLARO_DATABASE_URL", "sqlite:///env.db")
-        assert get_connection_string(argparse.Namespace(connection=None)) == (
-            "sqlite:///env.db"
-        )
+        assert get_connection_string(argparse.Namespace(connection=None)) == ("sqlite:///env.db")
 
     def test_neither_gives_none(self, monkeypatch):
         monkeypatch.delenv("DECLARO_DATABASE_URL", raising=False)
@@ -79,9 +77,7 @@ class TestCreateParser:
     def test_the_parser_is_built(self):
         assert isinstance(create_parser(), argparse.ArgumentParser)
 
-    @pytest.mark.parametrize(
-        "command", ["diff", "apply", "snapshot", "validate", "generate"]
-    )
+    @pytest.mark.parametrize("command", ["diff", "apply", "snapshot", "validate", "generate"])
     def test_each_documented_command_parses(self, command):
         assert create_parser().parse_args([command]).command == command
 
@@ -98,23 +94,11 @@ class TestMainDispatch:
         assert main([]) == 1
         assert "usage" in capsys.readouterr().out.lower()
 
-    def test_a_command_needing_a_database_without_one_exits_one(
-        self, monkeypatch, capsys
-    ):
+    def test_a_command_needing_a_database_without_one_exits_one(self, monkeypatch, capsys):
         monkeypatch.delenv("DECLARO_DATABASE_URL", raising=False)
         assert main(["diff"]) == 1
         assert "Database connection required" in capsys.readouterr().err
 
-
     def test_an_undetectable_dialect_exits_one(self, capsys):
         assert main(["-c", "mysql://host/db", "diff"]) == 1
         assert "Cannot detect dialect" in capsys.readouterr().err
-
-
-
-
-
-
-
-
-

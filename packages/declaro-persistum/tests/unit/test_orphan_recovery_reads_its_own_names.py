@@ -81,7 +81,7 @@ def test_the_generated_suffix_is_the_width_the_rule_strips() -> None:
     the test that says so instead of the next migration creating an empty table.
     """
     generated = temp_table_name("t")
-    suffix = generated[len("_declaro_tmp_t"):]
+    suffix = generated[len("_declaro_tmp_t") :]
 
     assert len(suffix) == 9, f"the suffix is {len(suffix)} characters: {suffix!r}"
     assert suffix[0] == "_", suffix
@@ -192,9 +192,7 @@ def test_a_generated_name_is_a_legal_identifier() -> None:
         conn.execute(f'CREATE TABLE "{name}" (id INT)')
         conn.execute(f'INSERT INTO "{name}" VALUES (1)')
 
-    count = conn.execute(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'"
-    ).fetchone()[0]
+    count = conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'").fetchone()[0]
     assert count == len(TABLE_NAMES)
 
 
@@ -208,6 +206,4 @@ def test_a_uuid_is_never_mistaken_for_part_of_the_table(table: str) -> None:
     for _ in range(20):
         recovered = original_table_name(temp_table_name(table))
         assert recovered == table, f"{recovered!r} is not {table!r}"
-        assert not any(
-            recovered.endswith(h) for h in (uuid.uuid4().hex[:8],)
-        ), recovered
+        assert not any(recovered.endswith(h) for h in (uuid.uuid4().hex[:8],)), recovered

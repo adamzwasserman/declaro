@@ -49,6 +49,7 @@ from declaro_persistum.write_queue import (
     drain,
     new_room,
 )
+
 # TursoCloudManager — four classes, now deleted. `database.py` replaces them
 # The query API. This package was UNREACHABLE from here after the query
 # rewrite — the reachability ratchet caught it, which is what it exists for.
@@ -70,6 +71,7 @@ from declaro_persistum.query import (
     subquery,
     update,
 )
+
 # `table` is NOT re-exported from query. The root name is the schema decorator,
 # which is what the documentation has meant since c1e6ce2 and what every doc
 # example imports. The query-side lookup is `table(name, schema)` and is

@@ -105,12 +105,8 @@ async def test_version_skew_does_not_collide(meta) -> None:
     await _store_hash(meta, "models.py", "hash-under-0.1.8")
     await _store_hash(meta, "models.py", "hash-under-0.1.14")
 
-    assert await _get_stored_hash(meta, "models.py", "hash-under-0.1.8") == (
-        "hash-under-0.1.8"
-    )
-    assert await _get_stored_hash(meta, "models.py", "hash-under-0.1.14") == (
-        "hash-under-0.1.14"
-    )
+    assert await _get_stored_hash(meta, "models.py", "hash-under-0.1.8") == ("hash-under-0.1.8")
+    assert await _get_stored_hash(meta, "models.py", "hash-under-0.1.14") == ("hash-under-0.1.14")
 
 
 async def test_unknown_hash_reads_as_absent(meta) -> None:

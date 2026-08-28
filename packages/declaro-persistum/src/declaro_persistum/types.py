@@ -134,8 +134,7 @@ class ReplicaConnection(Protocol):
 # deliberately absent. `expand_schema_enums` puts the enum lookup tables into
 # the TARGET schema, so they are on both sides of a diff and migrate like any
 # other table; claiming them here would stop them being created at all.
-_OUR_PREFIXES = ("_declaro_meta", "_declaro_tmp_", "_dp_materialized_views",
-                 "_dp_transfer_state")
+_OUR_PREFIXES = ("_declaro_meta", "_declaro_tmp_", "_dp_materialized_views", "_dp_transfer_state")
 
 
 def is_our_table(name: str) -> bool:
@@ -307,7 +306,9 @@ def changed_to(value: Any) -> Any:
     A dict without a `to` is some other dict. An index definition is a dict
     too, and returning its contents would put the wrong thing in a column.
     """
-    return value["to"] if isinstance(value, dict) and "to" in value else value  # honest: ignore HC-P005: the one place that reads a change record
+    return (
+        value["to"] if isinstance(value, dict) and "to" in value else value
+    )  # honest: ignore HC-P005: the one place that reads a change record
 
 
 class Enum(TypedDict, total=False):
@@ -722,8 +723,7 @@ def _the_entry(table: dict[str, V], dialect: str, _what: str) -> V:
 def _refuse_unknown_dialect(table: dict[str, V], dialect: str, what: str) -> V:
     """No entry, named alongside the ones that exist."""
     raise ValueError(
-        f"Unsupported dialect: {dialect}. "
-        f"{what} exist for: {', '.join(sorted(table))}"
+        f"Unsupported dialect: {dialect}. {what} exist for: {', '.join(sorted(table))}"
     )
 
 
@@ -732,4 +732,3 @@ _WHEN_NO_ENTRY: dict[bool, Callable[[dict[str, Any], str, str], Any]] = {
     True: _the_entry,
     False: _refuse_unknown_dialect,
 }
-

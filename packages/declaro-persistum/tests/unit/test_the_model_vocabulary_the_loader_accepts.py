@@ -57,7 +57,7 @@ def _models(**files: str) -> str:
 def test_a_uuid_field_becomes_a_uuid_column() -> None:
     schema = load_schema_from_models(
         _models(
-            m='''
+            m="""
 from uuid import UUID
 from pydantic import BaseModel
 from declaro_persistum import table, field
@@ -66,7 +66,7 @@ from declaro_persistum import table, field
 @table("widgets")
 class Widget(BaseModel):
     id: UUID = field(primary_key=True)
-'''
+"""
         )
     )
 
@@ -76,7 +76,7 @@ class Widget(BaseModel):
 def test_a_decimal_field_becomes_numeric() -> None:
     schema = load_schema_from_models(
         _models(
-            m='''
+            m="""
 from decimal import Decimal
 from pydantic import BaseModel
 from declaro_persistum import table, field
@@ -86,7 +86,7 @@ from declaro_persistum import table, field
 class Price(BaseModel):
     id: int = field(primary_key=True)
     amount: Decimal
-'''
+"""
         )
     )
 
@@ -97,7 +97,7 @@ def test_an_on_update_action_is_read() -> None:
     """The half of a foreign key that nothing had declared through a model."""
     schema = load_schema_from_models(
         _models(
-            m='''
+            m="""
 from pydantic import BaseModel
 from declaro_persistum import table, field
 
@@ -111,7 +111,7 @@ class Parent(BaseModel):
 class Child(BaseModel):
     id: int = field(primary_key=True)
     pid: int = field(references="parents.id", on_update="cascade")
-'''
+"""
         )
     )
 
@@ -122,7 +122,7 @@ def test_an_is_new_hint_is_read() -> None:
     """How an author says a column really is new rather than renamed."""
     schema = load_schema_from_models(
         _models(
-            m='''
+            m="""
 from pydantic import BaseModel
 from declaro_persistum import table, field
 
@@ -131,7 +131,7 @@ from declaro_persistum import table, field
 class Widget(BaseModel):
     id: int = field(primary_key=True)
     note: str = field(is_new=True)
-'''
+"""
         )
     )
 
@@ -142,7 +142,7 @@ def test_constraints_declared_in_meta_are_read() -> None:
     """The model spelling of what four modules were fixed for yesterday."""
     schema = load_schema_from_models(
         _models(
-            m='''
+            m="""
 from pydantic import BaseModel
 from declaro_persistum import table, field
 
@@ -157,7 +157,7 @@ class Range(BaseModel):
         constraints = {
             "ck_order": {"type": "check", "expression": "lo < hi"}
         }
-'''
+"""
         )
     )
 
@@ -168,7 +168,7 @@ def test_a_class_without_the_decorator_is_not_a_table() -> None:
     """A models file holds base classes and value objects beside the tables."""
     schema = load_schema_from_models(
         _models(
-            m='''
+            m="""
 from pydantic import BaseModel
 from declaro_persistum import table, field
 
@@ -180,7 +180,7 @@ class NotATable(BaseModel):
 @table("widgets")
 class Widget(BaseModel):
     id: int = field(primary_key=True)
-'''
+"""
         )
     )
 
@@ -190,7 +190,7 @@ class Widget(BaseModel):
 def test_a_field_with_a_leading_underscore_is_not_a_column() -> None:
     schema = load_schema_from_models(
         _models(
-            m='''
+            m="""
 from typing import ClassVar
 from pydantic import BaseModel
 from declaro_persistum import table, field
@@ -200,7 +200,7 @@ from declaro_persistum import table, field
 class Widget(BaseModel):
     _internal: ClassVar[str] = "not a column"
     id: int = field(primary_key=True)
-'''
+"""
         )
     )
 
@@ -212,7 +212,7 @@ def test_a_literal_of_non_strings_is_refused() -> None:
     with pytest.raises(LoaderError) as caught:
         load_schema_from_models(
             _models(
-                m='''
+                m="""
 from typing import Literal
 from pydantic import BaseModel
 from declaro_persistum import table, field
@@ -222,7 +222,7 @@ from declaro_persistum import table, field
 class Widget(BaseModel):
     id: int = field(primary_key=True)
     level: Literal[1, 2, 3] = 1
-'''
+"""
             )
         )
 
@@ -248,7 +248,7 @@ def test_a_helper_file_is_skipped_by_name() -> None:
     schema = load_schema_from_models(
         _models(
             _helper="this file is not valid python at all (((",
-            m='''
+            m="""
 from pydantic import BaseModel
 from declaro_persistum import table, field
 
@@ -256,7 +256,7 @@ from declaro_persistum import table, field
 @table("widgets")
 class Widget(BaseModel):
     id: int = field(primary_key=True)
-''',
+""",
         )
     )
 
@@ -267,7 +267,7 @@ def test_a_test_file_is_skipped_by_name() -> None:
     schema = load_schema_from_models(
         _models(
             test_widgets="this file is not valid python at all (((",
-            m='''
+            m="""
 from pydantic import BaseModel
 from declaro_persistum import table, field
 
@@ -275,7 +275,7 @@ from declaro_persistum import table, field
 @table("widgets")
 class Widget(BaseModel):
     id: int = field(primary_key=True)
-''',
+""",
         )
     )
 
@@ -287,13 +287,13 @@ def test_a_directory_declaring_no_tables_is_refused() -> None:
     with pytest.raises(LoaderError):
         load_schema_from_models(
             _models(
-                m='''
+                m="""
 from pydantic import BaseModel
 
 
 class NotATable(BaseModel):
     id: int
-'''
+"""
             )
         )
 
@@ -307,7 +307,7 @@ def test_the_same_table_declared_twice_is_refused() -> None:
     with pytest.raises(LoaderError) as caught:
         load_schema_from_models(
             _models(
-                a='''
+                a="""
 from pydantic import BaseModel
 from declaro_persistum import table, field
 
@@ -315,8 +315,8 @@ from declaro_persistum import table, field
 @table("widgets")
 class Widget(BaseModel):
     id: int = field(primary_key=True)
-''',
-                b='''
+""",
+                b="""
 from pydantic import BaseModel
 from declaro_persistum import table, field
 
@@ -325,7 +325,7 @@ from declaro_persistum import table, field
 class WidgetAgain(BaseModel):
     id: int = field(primary_key=True)
     other: str
-''',
+""",
             )
         )
 

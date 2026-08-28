@@ -109,9 +109,11 @@ async def begin_cutover(
         on_progress=the_on_progress,
         resume=resume,
     )
-    say(__name__, "info",
+    say(
+        __name__,
+        "info",
         f"Phase 1 complete: {result['tables_transferred']} tables, "
-        f"{result['total_rows']} rows in {result['duration_seconds']:.1f}s"
+        f"{result['total_rows']} rows in {result['duration_seconds']:.1f}s",
     )
 
     # Phase 2: dual-write verification. A mirror is DATA — two databases and

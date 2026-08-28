@@ -5,7 +5,6 @@ Tests portable materialized view patterns using tables for SQLite/Turso.
 These tests should FAIL initially (RED) until implementation is complete.
 """
 
-
 import pytest
 
 from declaro_persistum.types import NOTHING
@@ -20,7 +19,10 @@ class TestCreateMatviewSQL:
 
         statements = create_matview_sql(
             name="monthly_stats",
-            query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id", refresh_strategy=NOTHING, depends_on=NOTHING)
+            query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id",
+            refresh_strategy=NOTHING,
+            depends_on=NOTHING,
+        )
 
         # First statement should create metadata table
         assert any("_dp_materialized_views" in s for s in statements)
@@ -32,7 +34,10 @@ class TestCreateMatviewSQL:
 
         statements = create_matview_sql(
             name="monthly_stats",
-            query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id", refresh_strategy=NOTHING, depends_on=NOTHING)
+            query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id",
+            refresh_strategy=NOTHING,
+            depends_on=NOTHING,
+        )
 
         # Should have CREATE TABLE ... AS SELECT
         assert any('CREATE TABLE "monthly_stats" AS' in s for s in statements)
@@ -44,7 +49,9 @@ class TestCreateMatviewSQL:
         statements = create_matview_sql(
             name="monthly_stats",
             query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id",
-            refresh_strategy="manual", depends_on=NOTHING)
+            refresh_strategy="manual",
+            depends_on=NOTHING,
+        )
 
         # Should INSERT into metadata
         assert any("INSERT INTO _dp_materialized_views" in s for s in statements)
@@ -58,7 +65,9 @@ class TestCreateMatviewSQL:
         statements = create_matview_sql(
             name="monthly_stats",
             query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id",
-            depends_on=["orders"], refresh_strategy=NOTHING)
+            depends_on=["orders"],
+            refresh_strategy=NOTHING,
+        )
 
         # Should include JSON array in INSERT
         joined = " ".join(statements)
@@ -69,8 +78,8 @@ class TestCreateMatviewSQL:
         from declaro_persistum.abstractions.materialized_views import create_matview_sql
 
         statements = create_matview_sql(
-            name="test_view",
-            query="SELECT 1", refresh_strategy=NOTHING, depends_on=NOTHING)
+            name="test_view", query="SELECT 1", refresh_strategy=NOTHING, depends_on=NOTHING
+        )
 
         joined = " ".join(statements)
         assert "'manual'" in joined
@@ -131,7 +140,9 @@ class TestTriggerGeneration:
         statements = generate_refresh_trigger_sql(
             matview_name="monthly_stats",
             source_table="orders",
-            query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id", events=NOTHING)
+            query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id",
+            events=NOTHING,
+        )
 
         joined = " ".join(statements)
         assert "AFTER INSERT ON" in joined
@@ -144,9 +155,8 @@ class TestTriggerGeneration:
         )
 
         statements = generate_refresh_trigger_sql(
-            matview_name="monthly_stats",
-            source_table="orders",
-            query="SELECT 1", events=NOTHING)
+            matview_name="monthly_stats", source_table="orders", query="SELECT 1", events=NOTHING
+        )
 
         joined = " ".join(statements)
         assert "AFTER UPDATE ON" in joined
@@ -158,9 +168,8 @@ class TestTriggerGeneration:
         )
 
         statements = generate_refresh_trigger_sql(
-            matview_name="monthly_stats",
-            source_table="orders",
-            query="SELECT 1", events=NOTHING)
+            matview_name="monthly_stats", source_table="orders", query="SELECT 1", events=NOTHING
+        )
 
         joined = " ".join(statements)
         assert "AFTER DELETE ON" in joined
@@ -174,7 +183,9 @@ class TestTriggerGeneration:
         statements = generate_refresh_trigger_sql(
             matview_name="monthly_stats",
             source_table="orders",
-            query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id", events=NOTHING)
+            query="SELECT user_id, COUNT(*) FROM orders GROUP BY user_id",
+            events=NOTHING,
+        )
 
         joined = " ".join(statements)
         # Trigger should DELETE and INSERT
@@ -188,9 +199,8 @@ class TestTriggerGeneration:
         )
 
         statements = generate_refresh_trigger_sql(
-            matview_name="monthly_stats",
-            source_table="orders",
-            query="SELECT 1", events=NOTHING)
+            matview_name="monthly_stats", source_table="orders", query="SELECT 1", events=NOTHING
+        )
 
         joined = " ".join(statements)
         assert "_dp_refresh_monthly_stats_on_orders_insert" in joined
@@ -348,9 +358,7 @@ class TestSQLiteApplierIntegration:
             warnings.simplefilter("always")
             generate_create_view(view)
             # Should NOT have warning about materialized views not supported
-            matview_warnings = [
-                x for x in w if "materialized" in str(x.message).lower()
-            ]
+            matview_warnings = [x for x in w if "materialized" in str(x.message).lower()]
             assert len(matview_warnings) == 0
 
 

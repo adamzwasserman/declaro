@@ -35,12 +35,8 @@ from declaro_persistum.validator import validate_schema
 
 pytestmark = pytest.mark.precommit
 
-NULLABLE_KEY = {
-    "t": {"columns": {"id": {"type": "text", "primary_key": True, "nullable": True}}}
-}
-BROKEN_REFERENCE = {
-    "t": {"columns": {"user_id": {"type": "text", "references": "nowhere.id"}}}
-}
+NULLABLE_KEY = {"t": {"columns": {"id": {"type": "text", "primary_key": True, "nullable": True}}}}
+BROKEN_REFERENCE = {"t": {"columns": {"user_id": {"type": "text", "references": "nowhere.id"}}}}
 CLEAN = {"t": {"columns": {"id": {"type": "text", "primary_key": True}}}}
 
 
@@ -81,8 +77,8 @@ def test_the_annotation_says_which_is_which() -> None:
         "validate_schema still returns a bare tuple, so a caller has to guess "
         "the order and a swap does not raise"
     )
-    assert set(typing.get_type_hints(returned)) == {"warnings", "errors"}, (
-        typing.get_type_hints(returned)
+    assert set(typing.get_type_hints(returned)) == {"warnings", "errors"}, typing.get_type_hints(
+        returned
     )
 
 
@@ -97,9 +93,7 @@ def test_every_producer_of_the_pair_returns_the_same_shape() -> None:
     for name in ("validate_schema", "_validate_column"):
         fn = getattr(validator, name)
         returned = typing.get_type_hints(fn)["return"]
-        assert typing.get_origin(returned) is not tuple, (
-            f"{name} still returns a bare tuple"
-        )
+        assert typing.get_origin(returned) is not tuple, f"{name} still returns a bare tuple"
 
 
 def test_no_caller_unpacks_it_positionally() -> None:
@@ -114,9 +108,7 @@ def test_no_caller_unpacks_it_positionally() -> None:
     root = pathlib.Path(inspect.getfile(validate_schema)).parent
     offenders: list[str] = []
 
-    for path in list(root.rglob("*.py")) + list(
-        (root.parents[1] / "tests").rglob("*.py")
-    ):
+    for path in list(root.rglob("*.py")) + list((root.parents[1] / "tests").rglob("*.py")):
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
             if not isinstance(node, ast.Assign) or len(node.targets) != 1:
@@ -128,9 +120,7 @@ def test_no_caller_unpacks_it_positionally() -> None:
             if name in ("validate_schema", "_validate_column", "_validate_table"):
                 offenders.append(f"{path.name}:{node.lineno}")
 
-    assert not offenders, (
-        f"these still unpack the validator's answer by position: {offenders}"
-    )
+    assert not offenders, f"these still unpack the validator's answer by position: {offenders}"
 
 
 def test_strict_validation_still_raises_on_an_error() -> None:

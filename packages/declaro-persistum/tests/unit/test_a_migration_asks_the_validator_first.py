@@ -53,7 +53,7 @@ from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.precommit, pytest.mark.sqlite]
 
-CLEAN = '''
+CLEAN = """
 from pydantic import BaseModel
 from declaro_persistum import table, field
 
@@ -62,11 +62,11 @@ from declaro_persistum import table, field
 class User(BaseModel):
     id: int = field(primary_key=True)
     name: str
-'''
+"""
 
 # A name the appliers cannot write. The engine answers with a syntax error
 # naming a fragment; the validator names the table and the character.
-UNRENDERABLE = '''
+UNRENDERABLE = """
 from pydantic import BaseModel
 from declaro_persistum import table, field
 
@@ -74,12 +74,12 @@ from declaro_persistum import table, field
 @table("quo\\"ted")
 class Quoted(BaseModel):
     id: int = field(primary_key=True)
-'''
+"""
 
 # A reference to a table nobody declared. SQLite accepts this DDL: it does
 # not check a reference at creation time, so nothing fails and the column
 # points at nothing.
-DANGLING_REFERENCE = '''
+DANGLING_REFERENCE = """
 from pydantic import BaseModel
 from declaro_persistum import table, field
 
@@ -88,7 +88,7 @@ from declaro_persistum import table, field
 class Post(BaseModel):
     id: int = field(primary_key=True)
     author_id: int = field(references="authors.id")
-'''
+"""
 
 
 def _models(body: str) -> str:
@@ -122,7 +122,9 @@ async def test_a_clean_schema_still_migrates() -> None:
     """
     database = await _database()
     try:
-        result = await apply_migrations_async(database, "sqlite", _models(CLEAN), expand_enums=NOTHING, force=NOTHING)
+        result = await apply_migrations_async(
+            database, "sqlite", _models(CLEAN), expand_enums=NOTHING, force=NOTHING
+        )
 
         assert result["success"] is True, result
         assert await _tables(database) == ["users"]
@@ -138,7 +140,8 @@ async def test_a_dangling_reference_is_refused() -> None:
     database = await _database()
     try:
         result = await apply_migrations_async(
-            database, "sqlite", _models(DANGLING_REFERENCE), expand_enums=NOTHING, force=NOTHING)
+            database, "sqlite", _models(DANGLING_REFERENCE), expand_enums=NOTHING, force=NOTHING
+        )
 
         assert result["success"] is False, result
     finally:
@@ -150,7 +153,8 @@ async def test_nothing_is_created_when_the_schema_is_refused() -> None:
     database = await _database()
     try:
         await apply_migrations_async(
-            database, "sqlite", _models(DANGLING_REFERENCE), expand_enums=NOTHING, force=NOTHING)
+            database, "sqlite", _models(DANGLING_REFERENCE), expand_enums=NOTHING, force=NOTHING
+        )
 
         assert await _tables(database) == [], await _tables(database)
     finally:
@@ -162,7 +166,8 @@ async def test_the_refusal_carries_the_validator_s_words() -> None:
     database = await _database()
     try:
         result = await apply_migrations_async(
-            database, "sqlite", _models(DANGLING_REFERENCE), expand_enums=NOTHING, force=NOTHING)
+            database, "sqlite", _models(DANGLING_REFERENCE), expand_enums=NOTHING, force=NOTHING
+        )
 
         assert "authors" in result["error"], result["error"]
     finally:
@@ -174,7 +179,8 @@ async def test_an_unrenderable_name_is_refused_before_the_engine_sees_it() -> No
     database = await _database()
     try:
         result = await apply_migrations_async(
-            database, "sqlite", _models(UNRENDERABLE), expand_enums=NOTHING, force=NOTHING)
+            database, "sqlite", _models(UNRENDERABLE), expand_enums=NOTHING, force=NOTHING
+        )
 
         assert result["success"] is False, result
         assert "Rename it" in result["error"], result["error"]
@@ -185,7 +191,7 @@ async def test_an_unrenderable_name_is_refused_before_the_engine_sees_it() -> No
 # Schemas the validator warns about and does not refuse. An unknown type may
 # be a custom type or an enum; a circular reference may want deferrable
 # constraints. Both migrate.
-WARNS_UNKNOWN_TYPE = '''
+WARNS_UNKNOWN_TYPE = """
 from typing import Any
 from pydantic import BaseModel
 from declaro_persistum import table, field
@@ -195,7 +201,7 @@ from declaro_persistum import table, field
 class Shape(BaseModel):
     id: int = field(primary_key=True)
     area: Any = field(db_type="geography")
-'''
+"""
 
 
 async def test_a_schema_the_validator_only_warns_about_still_migrates() -> None:
@@ -215,7 +221,9 @@ async def test_a_schema_the_validator_only_warns_about_still_migrates() -> None:
 
     database = await _database()
     try:
-        result = await apply_migrations_async(database, "sqlite", models, expand_enums=NOTHING, force=NOTHING)
+        result = await apply_migrations_async(
+            database, "sqlite", models, expand_enums=NOTHING, force=NOTHING
+        )
 
         assert result["success"] is True, result
         assert await _tables(database) == ["shapes"], await _tables(database)

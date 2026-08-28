@@ -71,11 +71,7 @@ class TestAgainstARealSqliteDatabase:
 
         async with aiosqlite.connect(tmp_path / "t.db") as conn:
             await conn.execute(
-                "CREATE TABLE users ("
-                "  id INTEGER PRIMARY KEY,"
-                "  email TEXT NOT NULL,"
-                "  age INTEGER"
-                ")"
+                "CREATE TABLE users (  id INTEGER PRIMARY KEY,  email TEXT NOT NULL,  age INTEGER)"
             )
             await conn.commit()
 

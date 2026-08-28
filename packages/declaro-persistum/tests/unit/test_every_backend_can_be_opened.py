@@ -36,7 +36,9 @@ async def test_a_sqlite_database_reads_back_what_it_wrote(tmp_path) -> None:
     from declaro_persistum import open_sqlite
     from declaro_persistum.database import close, reading, writing
 
-    db = await open_sqlite(str(tmp_path / "app.db"), shutdown="exit_immediately", busy_timeout_s=5.0)
+    db = await open_sqlite(
+        str(tmp_path / "app.db"), shutdown="exit_immediately", busy_timeout_s=5.0
+    )
     assert db["dialect"] == "sqlite"
 
     async with writing(db) as conn:
@@ -58,7 +60,9 @@ async def test_a_sqlite_database_holds_no_connection_between_blocks(
     """Rule 12. The resource lives in the block, not on the value."""
     from declaro_persistum import open_sqlite
 
-    db = await open_sqlite(str(tmp_path / "app.db"), shutdown="exit_immediately", busy_timeout_s=5.0)
+    db = await open_sqlite(
+        str(tmp_path / "app.db"), shutdown="exit_immediately", busy_timeout_s=5.0
+    )
 
     for key, value in db.items():
         assert not hasattr(value, "execute"), (
@@ -76,6 +80,4 @@ def test_the_openers_take_no_dialect_argument() -> None:
         "open_sqlite takes a dialect, so a caller can ask for a sqlite "
         "database that claims to be something else"
     )
-    assert params["shutdown"].default is inspect.Parameter.empty, (
-        "shutdown has a default"
-    )
+    assert params["shutdown"].default is inspect.Parameter.empty, "shutdown has a default"

@@ -137,9 +137,9 @@ class Receipt(TypedDict):
     channel, and no other failure arrives this way — `collect` raises those.
     """
 
-    id: str      # the ticket returned by deposit
-    ok: bool     # False means contention outlasted the budget, nothing else
-    error: str   # empty when ok
+    id: str  # the ticket returned by deposit
+    ok: bool  # False means contention outlasted the budget, nothing else
+    error: str  # empty when ok
 
 
 class Drained(TypedDict):
@@ -293,9 +293,7 @@ def _hand_the_failure_over(waiter: Any, exc: BaseException) -> list[BaseExceptio
 
 
 @helper
-def _nobody_holds_the_ticket(
-    _waiter: Any, exc: BaseException
-) -> list[BaseException]:
+def _nobody_holds_the_ticket(_waiter: Any, exc: BaseException) -> list[BaseException]:
     """No caller left, so the failure leaves as data for `drain` to return."""
     return [exc]
 
@@ -314,9 +312,7 @@ def _a_receipt_nobody_collected(_waiter: Any, receipt: Receipt) -> Receipt:
 
 
 # Whether the depositor of this write is still waiting on its ticket.
-_WITH_A_FAILURE: dict[
-    bool, Callable[[Any, BaseException], list[BaseException]]
-] = {
+_WITH_A_FAILURE: dict[bool, Callable[[Any, BaseException], list[BaseException]]] = {
     True: _hand_the_failure_over,
     False: _nobody_holds_the_ticket,
 }
@@ -455,9 +451,7 @@ async def _append_one(
     written down, so a reader sees every answer this function can give
     without tracing a loop.
     """
-    return await _WITH_AN_ATTEMPT[retry["attempts"] >= 1](
-        ticket, write, execute, retry, 1
-    )
+    return await _WITH_AN_ATTEMPT[retry["attempts"] >= 1](ticket, write, execute, retry, 1)
 
 
 @boundary
@@ -483,9 +477,9 @@ async def _one_attempt(
         await execute(write)
         return {"id": ticket, "ok": True, "error": ""}
     except Exception as exc:
-        return await _AFTER_A_REFUSAL[
-            (is_contention(exc), attempt == retry["attempts"])
-        ](ticket, write, execute, retry, attempt, exc)
+        return await _AFTER_A_REFUSAL[(is_contention(exc), attempt == retry["attempts"])](
+            ticket, write, execute, retry, attempt, exc
+        )
 
 
 @helper
@@ -559,10 +553,7 @@ async def _the_budget_is_spent(
     return {
         "id": ticket,
         "ok": False,
-        "error": (
-            f"the engine stayed busy for all {retry['attempts']} "
-            f"attempts: {exc}"
-        ),
+        "error": (f"the engine stayed busy for all {retry['attempts']} attempts: {exc}"),
     }
 
 

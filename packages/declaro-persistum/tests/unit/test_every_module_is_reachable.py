@@ -72,8 +72,7 @@ PKG = "declaro_persistum"
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 SRC = ROOT / "src" / PKG
 
-KNOWN_ORPHANS: dict[str, str] = {
-}
+KNOWN_ORPHANS: dict[str, str] = {}
 """One entry, and the aim is to get back to none.
 
 All four original entries were DELETED rather than listed — 1450 LOC of source
@@ -92,8 +91,7 @@ def _all_modules() -> dict[str, pathlib.Path]:
     return {_module_name(p): p for p in SRC.rglob("*.py")}
 
 
-def _absolute(module: str | None, level: int, current: str,
-              mods: dict[str, pathlib.Path]) -> str:
+def _absolute(module: str | None, level: int, current: str, mods: dict[str, pathlib.Path]) -> str:
     """Resolve a possibly-relative import to an absolute module name."""
     if not level:
         return module or ""
@@ -197,8 +195,13 @@ def test_the_cli_is_not_mistaken_for_dead_code():
     """
     mods = _all_modules()
     reachable = _reachable(mods, _import_graph(mods))
-    for name in (f"{PKG}.cli.main", f"{PKG}.cli.commands", f"{PKG}.loader",
-                 f"{PKG}.validator", f"{PKG}.fk_ordering"):
+    for name in (
+        f"{PKG}.cli.main",
+        f"{PKG}.cli.commands",
+        f"{PKG}.loader",
+        f"{PKG}.validator",
+        f"{PKG}.fk_ordering",
+    ):
         assert name in reachable, (
             f"{name} is reported unreachable, but the `declaro` console script "
             f"reaches it. The entry-point roots are wrong, not the module."

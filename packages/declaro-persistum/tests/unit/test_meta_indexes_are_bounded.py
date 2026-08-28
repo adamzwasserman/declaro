@@ -59,15 +59,11 @@ def test_a_documented_index_arrives_intact() -> None:
     from declaro_persistum.pydantic_loader import pydantic_model_to_table
 
     result = pydantic_model_to_table(
-        _model_with_indexes(
-            [{"name": "idx_email", "columns": ["email"], "unique": True}]
-        )
+        _model_with_indexes([{"name": "idx_email", "columns": ["email"], "unique": True}])
     )
     assert result is not None
     _name, table = result
-    assert table["indexes"] == {
-        "idx_email": {"columns": ["email"], "unique": True}
-    }
+    assert table["indexes"] == {"idx_email": {"columns": ["email"], "unique": True}}
 
 
 def test_the_name_does_not_survive_into_the_value() -> None:
@@ -112,9 +108,7 @@ def test_an_unknown_key_is_named_and_refused() -> None:
 
     with pytest.raises(ValueError) as e:
         pydantic_model_to_table(
-            _model_with_indexes(
-                [{"name": "idx_email", "columns": ["email"], "uniqe": True}]
-            )
+            _model_with_indexes([{"name": "idx_email", "columns": ["email"], "uniqe": True}])
         )
     assert "uniqe" in str(e.value), "the failure must name the offending key"
     assert "idx_email" in str(e.value), "and the index it was written on"

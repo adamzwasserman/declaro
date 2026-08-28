@@ -120,9 +120,7 @@ async def test_a_bug_is_attempted_once_and_raised() -> None:
     with pytest.raises(KeyError):
         await _append_one("t1", {"sql": "x", "params": ()}, always_our_bug, ON_CONTENTION)
 
-    assert attempts == 1, (
-        f"a deterministic bug was run {attempts} times before being reported"
-    )
+    assert attempts == 1, f"a deterministic bug was run {attempts} times before being reported"
 
 
 @pytest.mark.asyncio
@@ -143,9 +141,10 @@ async def test_real_contention_is_still_retried_to_the_budget() -> None:
         raise RuntimeError("database is busy")
 
     receipt = await _append_one(
-        "t1", {"sql": "x", "params": ()}, always_busy, {**ON_CONTENTION, "attempts": 3,
-                                                        "base_delay_s": 0.0,
-                                                        "max_delay_s": 0.0}
+        "t1",
+        {"sql": "x", "params": ()},
+        always_busy,
+        {**ON_CONTENTION, "attempts": 3, "base_delay_s": 0.0, "max_delay_s": 0.0},
     )
 
     assert attempts == 3, attempts

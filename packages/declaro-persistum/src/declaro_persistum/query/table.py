@@ -78,9 +78,7 @@ class SQLFunction(TypedDict):
 @helper
 def _refuse_unknown_table(name: str, schema: Schema) -> Table:
     """A name the schema does not hold, named beside the ones it does."""
-    raise ValueError(
-        f"Table {name!r} not found in schema. Available: {sorted(schema)}"
-    )
+    raise ValueError(f"Table {name!r} not found in schema. Available: {sorted(schema)}")
 
 
 @helper
@@ -194,28 +192,21 @@ def subquery(query: Any) -> SubqueryExpr:
     return {"kind": "subquery", "query": query}
 
 
-
 @helper
-def _render_case_argument(
-    arg: Any, path: str, _dialect: Dialect
-) -> tuple[str, dict[str, Any]]:
+def _render_case_argument(arg: Any, path: str, _dialect: Dialect) -> tuple[str, dict[str, Any]]:
     """A CASE used as a function argument carries no alias of its own."""
     return render_case(arg, path, with_alias=False)
 
 
 @helper
-def _render_subquery_argument(
-    arg: Any, _path: str, dialect: Dialect
-) -> tuple[str, dict[str, Any]]:
+def _render_subquery_argument(arg: Any, _path: str, dialect: Dialect) -> tuple[str, dict[str, Any]]:
     """A subquery argument is wrapped, because it is one value here."""
     sql, params = render_subquery(arg, dialect)
     return f"({sql})", params
 
 
 @helper
-def _render_literal(
-    arg: Any, _path: str, _dialect: Dialect
-) -> tuple[str, dict[str, Any]]:
+def _render_literal(arg: Any, _path: str, _dialect: Dialect) -> tuple[str, dict[str, Any]]:
     """Anything carrying no tag is written as it stands."""
     return str(arg), {}
 
@@ -266,9 +257,7 @@ _WHEN_UNKNOWN_KIND: dict[bool, Any] = {
 
 
 @helper
-def render_function(
-    fn: SQLFunction, dialect: Dialect, path: str
-) -> tuple[str, dict[str, Any]]:
+def render_function(fn: SQLFunction, dialect: Dialect, path: str) -> tuple[str, dict[str, Any]]:
     """Render a function call, and any expression nested inside it.
 
     A nested argument gets its own sub-path, so a CASE inside an aggregate

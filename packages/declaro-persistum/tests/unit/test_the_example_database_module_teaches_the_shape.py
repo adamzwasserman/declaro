@@ -81,8 +81,7 @@ def test_the_configuration_is_data(path: pathlib.Path) -> None:
     classes = [
         n.name
         for n in ast.walk(_tree(path))
-        if isinstance(n, ast.ClassDef)
-        and not any("TypedDict" in ast.unparse(b) for b in n.bases)
+        if isinstance(n, ast.ClassDef) and not any("TypedDict" in ast.unparse(b) for b in n.bases)
     ]
 
     assert classes == [], f"{path.parent.name}/db.py declares {classes}"
@@ -97,8 +96,7 @@ def test_nothing_defaults_a_path_the_caller_did_not_give(
         f"{n.name}({p.arg}=)"
         for n in ast.walk(_tree(path))
         if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef)
-        for p in (n.args.args[len(n.args.args) - len(n.args.defaults):]
-                  if n.args.defaults else [])
+        for p in (n.args.args[len(n.args.args) - len(n.args.defaults) :] if n.args.defaults else [])
     ]
 
     assert defaults == [], f"{path.parent.name}/db.py: {defaults}"
@@ -115,14 +113,14 @@ def test_a_failure_is_not_flattened_into_a_string(path: pathlib.Path) -> None:
         n.lineno
         for n in ast.walk(_tree(path))
         if isinstance(n, ast.ExceptHandler)
-        and (n.type is None or (isinstance(n.type, ast.Name)
-                                and n.type.id in ("Exception", "BaseException")))
+        and (
+            n.type is None
+            or (isinstance(n.type, ast.Name) and n.type.id in ("Exception", "BaseException"))
+        )
         and not any(isinstance(x, ast.Raise) for x in ast.walk(n))
     ]
 
-    assert swallows == [], (
-        f"{path.parent.name}/db.py absorbs every failure at lines {swallows}"
-    )
+    assert swallows == [], f"{path.parent.name}/db.py absorbs every failure at lines {swallows}"
 
 
 @pytest.mark.parametrize("path", DB_FILES, ids=lambda p: p.parent.name)
@@ -135,8 +133,7 @@ def test_it_does_not_reach_for_libsql(path: pathlib.Path) -> None:
     reaching = [
         n.lineno
         for n in ast.walk(_tree(path))
-        if isinstance(n, ast.Import)
-        and any(a.name.startswith("libsql") for a in n.names)
+        if isinstance(n, ast.Import) and any(a.name.startswith("libsql") for a in n.names)
     ]
 
     assert reaching == [], (
@@ -262,7 +259,7 @@ def test_every_write_route_still_commits(app: pathlib.Path) -> None:
 # tell a shape from a working example.
 
 
-def _load_example_db(tmp_path: pathlib.Path):
+def _load_example_db():
     """Import `examples/todo_app_native/db.py` as a module, as the app does."""
     import importlib.util
 
@@ -273,9 +270,9 @@ def _load_example_db(tmp_path: pathlib.Path):
     return module
 
 
-def test_the_module_imports(tmp_path: pathlib.Path) -> None:
+def test_the_module_imports() -> None:
     """The floor. A syntax error or a bad import fails here, not on a route."""
-    db = _load_example_db(tmp_path)
+    db = _load_example_db()
 
     assert set(db.CONNECTORS) == {
         "sqlite",
@@ -285,14 +282,14 @@ def test_the_module_imports(tmp_path: pathlib.Path) -> None:
     }
 
 
-def test_every_table_covers_every_engine(tmp_path: pathlib.Path) -> None:
+def test_every_table_covers_every_engine() -> None:
     """A table with a missing row is a chain with a missing branch.
 
     The ladders this replaced had exactly that defect: PostgreSQL was in none
     of the nine commit chains. A row per engine per table is the property that
     makes the table an improvement rather than a rearrangement.
     """
-    db = _load_example_db(tmp_path)
+    db = _load_example_db()
 
     engines = set(db.CONNECTORS)
     for name in ("DRIVERS", "TIMESTAMP_TYPES", "AWAITS_EXECUTE", "NEEDS_COMMIT"):
@@ -304,9 +301,9 @@ def test_every_table_covers_every_engine(tmp_path: pathlib.Path) -> None:
         )
 
 
-def test_an_engine_nobody_thought_about_raises(tmp_path: pathlib.Path) -> None:
+def test_an_engine_nobody_thought_about_raises() -> None:
     """The chain's silence, replaced by a sentence naming what exists."""
-    db = _load_example_db(tmp_path)
+    db = _load_example_db()
 
     with pytest.raises(ValueError) as caught:
         db._for_dialect(db.CONNECTORS, "mysql", "Connectors")
@@ -327,7 +324,7 @@ async def test_a_write_through_the_example_lands(tmp_path: pathlib.Path) -> None
     a real SQLite file. Every static check above passes on a module that
     commits nothing.
     """
-    db = _load_example_db(tmp_path)
+    db = _load_example_db()
     config = db.get_sqlite_config(str(tmp_path / "todos.db"))
 
     await db.init_schema(config)
@@ -352,7 +349,7 @@ async def test_a_write_through_the_example_lands(tmp_path: pathlib.Path) -> None
 @pytest.mark.asyncio
 async def test_the_schema_can_be_created_twice(tmp_path: pathlib.Path) -> None:
     """The app calls `init_schema` on every start, and a restart is normal."""
-    db = _load_example_db(tmp_path)
+    db = _load_example_db()
     config = db.get_sqlite_config(str(tmp_path / "todos.db"))
 
     await db.init_schema(config)
@@ -360,18 +357,14 @@ async def test_the_schema_can_be_created_twice(tmp_path: pathlib.Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_reaching_a_database_that_is_not_there_says_so(
-    tmp_path: pathlib.Path,
-) -> None:
+async def test_reaching_a_database_that_is_not_there_says_so() -> None:
     """`test_connection` reports a failure without inventing a cause.
 
     It used to catch `Exception` and return `(False, f"Connection failed: {e}")`
     for everything, so a missing driver and a wrong password read the same.
     """
-    db = _load_example_db(tmp_path)
-    config = db.get_postgres_config(
-        host="127.0.0.1", port=1, user="u", password="p", database="d"
-    )
+    db = _load_example_db()
+    config = db.get_postgres_config(host="127.0.0.1", port=1, user="u", password="p", database="d")
 
     ok, message = await db.test_connection(config)
 
@@ -389,14 +382,12 @@ async def test_a_failed_probe_leaves_the_current_database_alone(
     Without the restore, clicking a backend that is down leaves every later
     query pointed at the database that just failed.
     """
-    db = _load_example_db(tmp_path)
+    db = _load_example_db()
     working = db.get_sqlite_config(str(tmp_path / "todos.db"))
     db.set_database(working)
 
     await db.test_connection(
-        db.get_postgres_config(
-            host="127.0.0.1", port=1, user="u", password="p", database="d"
-        )
+        db.get_postgres_config(host="127.0.0.1", port=1, user="u", password="p", database="d")
     )
 
     assert db.get_database() == working, (
@@ -404,18 +395,16 @@ async def test_a_failed_probe_leaves_the_current_database_alone(
     )
 
 
-def test_a_driver_check_does_not_import_the_driver(tmp_path: pathlib.Path) -> None:
+def test_a_driver_check_does_not_import_the_driver() -> None:
     """It asks whether the module is findable, and says which package to install.
 
     The old version ran the import inside a `try`, so a driver that imports but
     raises on import reported itself as absent.
     """
-    db = _load_example_db(tmp_path)
+    db = _load_example_db()
 
     ok, message = db.check_driver_available("sqlite")
     assert ok is True and "aiosqlite" in message
 
     ok, message = db.check_driver_available("turso_embedded")
-    assert "pyturso" in message, (
-        f"the reader is told to install the wrong thing: {message}"
-    )
+    assert "pyturso" in message, f"the reader is told to install the wrong thing: {message}"

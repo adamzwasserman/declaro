@@ -51,9 +51,8 @@ from declaro_persistum.write_queue import collect, deposit, new_room
 
 pytestmark = pytest.mark.turso
 
-CREW = 1   # machinery, not concurrency — see the module docstring
+CREW = 1  # machinery, not concurrency — see the module docstring
 WRITES = 12
-
 
 
 async def _write_one(conn, sql, params):
@@ -62,7 +61,9 @@ async def _write_one(conn, sql, params):
 
 
 async def _database_with_table(tmp_path):
-    db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
+    db = await open_turso(
+        str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
+    )
     async with migrating(db) as conn:
         await conn.execute("CREATE TABLE t (v INTEGER)")
         await conn.commit()
@@ -83,8 +84,7 @@ async def test_every_deposited_write_lands(tmp_path):
     crew = await start_crew(room, db, size=CREW, retry=ON_CONTENTION, idle_s=0.01)
 
     tickets = [
-        deposit(room, {"sql": "INSERT INTO t VALUES (?)", "params": (i,)})
-        for i in range(WRITES)
+        deposit(room, {"sql": "INSERT INTO t VALUES (?)", "params": (i,)}) for i in range(WRITES)
     ]
     receipts = await asyncio.gather(*(collect(room, t) for t in tickets))
     await stop_crew(crew)
@@ -160,6 +160,4 @@ async def test_a_crew_refuses_a_replicated_database(tmp_path):
     )
 
     with pytest.raises(ValueError, match="local databases only"):
-        await start_crew(
-            new_room(), replicated, size=2, retry=ON_CONTENTION, idle_s=0.01
-        )
+        await start_crew(new_room(), replicated, size=2, retry=ON_CONTENTION, idle_s=0.01)

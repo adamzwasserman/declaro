@@ -97,7 +97,10 @@ class TestPureFunctions:
         """Test INSERT...SELECT SQL generation."""
         sql = generate_data_copy_sql("users", "users_new", ["id", "name", "email"])
 
-        assert sql == 'INSERT INTO "users_new" ("id", "name", "email") SELECT "id", "name", "email" FROM "users"'
+        assert (
+            sql
+            == 'INSERT INTO "users_new" ("id", "name", "email") SELECT "id", "name", "email" FROM "users"'
+        )
 
     def test_generate_data_copy_sql_empty_columns(self):
         """Test data copy with empty column list raises ValueError."""
@@ -300,9 +303,7 @@ class TestReconstructionAsync:
         """Test that reconstruction preserves existing data."""
         async with aiosqlite.connect(":memory:") as conn:
             # Create initial table
-            await conn.execute(
-                "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)"
-            )
+            await conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)")
             await conn.execute("INSERT INTO users (id, email) VALUES (1, 'alice@example.com')")
             await conn.execute("INSERT INTO users (id, email) VALUES (2, 'bob@example.com')")
             await conn.commit()
@@ -313,7 +314,9 @@ class TestReconstructionAsync:
                 "email": {"type": "TEXT", "nullable": False},
             }
 
-            await execute_reconstruction_async(conn, "users", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+            await execute_reconstruction_async(
+                conn, "users", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING
+            )
 
             # Verify data preserved
             cursor = await conn.execute("SELECT id, email FROM users ORDER BY id")
@@ -327,10 +330,8 @@ class TestReconstructionAsync:
         """Test that reconstruction recreates user-defined indexes."""
         async with aiosqlite.connect(":memory:") as conn:
             # Create table with index
-            await conn.execute(
-                "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)"
-            )
-            await conn.execute('CREATE INDEX idx_email ON users(email)')
+            await conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)")
+            await conn.execute("CREATE INDEX idx_email ON users(email)")
             await conn.commit()
 
             # Reconstruct
@@ -339,7 +340,9 @@ class TestReconstructionAsync:
                 "email": {"type": "TEXT", "nullable": False},
             }
 
-            await execute_reconstruction_async(conn, "users", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+            await execute_reconstruction_async(
+                conn, "users", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING
+            )
 
             # Verify index exists
             cursor = await conn.execute(
@@ -357,11 +360,9 @@ class TestReconstructionAsync:
             await conn.execute("PRAGMA foreign_keys = ON")
 
             # Create parent and child tables
+            await conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
             await conn.execute(
-                "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"
-            )
-            await conn.execute(
-                'CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id))'
+                "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id))"
             )
             await conn.execute("INSERT INTO users (id, name) VALUES (1, 'Alice')")
             await conn.execute("INSERT INTO posts (id, user_id) VALUES (1, 1)")
@@ -374,7 +375,9 @@ class TestReconstructionAsync:
                 "title": {"type": "TEXT"},  # Added column
             }
 
-            await execute_reconstruction_async(conn, "posts", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+            await execute_reconstruction_async(
+                conn, "posts", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING
+            )
 
             # Verify data preserved
             cursor = await conn.execute("SELECT id, user_id FROM posts")
@@ -390,9 +393,7 @@ class TestReconstructionAsync:
     async def test_execute_reconstruction_async_empty_table(self):
         """Test reconstruction of empty table."""
         async with aiosqlite.connect(":memory:") as conn:
-            await conn.execute(
-                "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)"
-            )
+            await conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)")
             await conn.commit()
 
             new_columns: dict[str, Column] = {
@@ -400,7 +401,9 @@ class TestReconstructionAsync:
                 "email": {"type": "TEXT", "nullable": False},
             }
 
-            await execute_reconstruction_async(conn, "users", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+            await execute_reconstruction_async(
+                conn, "users", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING
+            )
 
             # Verify table exists with new schema
             cursor = await conn.execute("PRAGMA table_info(users)")
@@ -413,9 +416,7 @@ class TestReconstructionAsync:
     async def test_execute_reconstruction_async_no_common_columns(self):
         """Test reconstruction when old and new schemas have no overlap."""
         async with aiosqlite.connect(":memory:") as conn:
-            await conn.execute(
-                "CREATE TABLE old_table (old_col1 TEXT, old_col2 TEXT)"
-            )
+            await conn.execute("CREATE TABLE old_table (old_col1 TEXT, old_col2 TEXT)")
             await conn.execute("INSERT INTO old_table VALUES ('a', 'b')")
             await conn.commit()
 
@@ -425,7 +426,9 @@ class TestReconstructionAsync:
                 "new_col2": {"type": "TEXT"},
             }
 
-            await execute_reconstruction_async(conn, "old_table", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+            await execute_reconstruction_async(
+                conn, "old_table", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING
+            )
 
             # Verify table exists but is empty
             cursor = await conn.execute("SELECT * FROM old_table")
@@ -455,7 +458,9 @@ class TestReconstructionAsync:
                 "assigned_at": {"type": "TEXT", "nullable": False},
             }
 
-            await execute_reconstruction_async(conn, "user_roles", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+            await execute_reconstruction_async(
+                conn, "user_roles", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING
+            )
 
             # Verify data preserved
             cursor = await conn.execute("SELECT * FROM user_roles")
@@ -496,7 +501,9 @@ class TestReconstructionAsync:
                 "title": {"type": "TEXT"},  # New column
             }
 
-            await execute_reconstruction_async(conn, "posts", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+            await execute_reconstruction_async(
+                conn, "posts", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING
+            )
 
             # Verify data preserved
             cursor = await conn.execute("SELECT id, user_id, category_id FROM posts")
@@ -532,7 +539,9 @@ class TestReconstructionAsync:
                 "bio": {"type": "TEXT"},  # New column
             }
 
-            await execute_reconstruction_async(conn, "profiles", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+            await execute_reconstruction_async(
+                conn, "profiles", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING
+            )
 
             # Verify schema. This fetched the columns and asserted nothing --
             # the comment promised a check the test did not make, and ruff
@@ -556,9 +565,7 @@ class TestReconstructionAsync:
             await conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY)")
 
             # Create posts without FK constraint
-            await conn.execute(
-                "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER)"
-            )
+            await conn.execute("CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER)")
             # Insert data that violates FK
             await conn.execute("INSERT INTO posts VALUES (1, 999)")  # Non-existent user
             await conn.commit()
@@ -570,14 +577,14 @@ class TestReconstructionAsync:
             }
 
             with pytest.raises(ValueError, match="Foreign key constraint violations"):
-                await execute_reconstruction_async(conn, "posts", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING)
+                await execute_reconstruction_async(
+                    conn, "posts", new_columns, preserve_data=NOTHING, manage_foreign_keys=NOTHING
+                )
 
     async def test_execute_reconstruction_async_no_data_preservation(self):
         """Test reconstruction with preserve_data=False."""
         async with aiosqlite.connect(":memory:") as conn:
-            await conn.execute(
-                "CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)"
-            )
+            await conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT)")
             await conn.execute("INSERT INTO users VALUES (1, 'alice@example.com')")
             await conn.commit()
 
@@ -587,7 +594,8 @@ class TestReconstructionAsync:
             }
 
             await execute_reconstruction_async(
-                conn, "users", new_columns, preserve_data=False, manage_foreign_keys=NOTHING)
+                conn, "users", new_columns, preserve_data=False, manage_foreign_keys=NOTHING
+            )
 
             # Verify table is empty
             cursor = await conn.execute("SELECT * FROM users")

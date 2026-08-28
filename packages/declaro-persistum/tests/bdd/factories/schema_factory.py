@@ -2,12 +2,12 @@
 Schema factories for generating test schemas.
 """
 
-
 from declaro_persistum.types import Schema
 
 # =============================================================================
 # Pre-built Schemas
 # =============================================================================
+
 
 def simple_todos_schema() -> Schema:
     """Simple todos schema for basic testing."""
@@ -112,10 +112,10 @@ def complex_ecommerce_schema() -> Schema:
 # =============================================================================
 
 
-
 # =============================================================================
 # Schema Variations for Edge Case Testing
 # =============================================================================
+
 
 def schema_with_all_types() -> Schema:
     """Schema with all supported column types for comprehensive testing."""

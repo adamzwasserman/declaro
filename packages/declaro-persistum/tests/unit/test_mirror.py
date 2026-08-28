@@ -29,8 +29,12 @@ pytestmark = pytest.mark.turso
 
 
 async def _pair(tmp_path):
-    a = await open_turso(str(tmp_path / "a.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
-    b = await open_turso(str(tmp_path / "b.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
+    a = await open_turso(
+        str(tmp_path / "a.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
+    )
+    b = await open_turso(
+        str(tmp_path / "b.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
+    )
     for db in (a, b):
         async with migrating(db) as conn:
             await conn.execute("CREATE TABLE t (v INTEGER)")

@@ -223,14 +223,9 @@ def _parents_named_by(table_def: Table) -> list[str]:
     under `references_table`. Both are read, and the caller decides which of
     the names are in the transfer set.
     """
-    referenced = [
-        col_def.get("references")
-        for col_def in table_def.get("columns", {}).values()
-    ]
+    referenced = [col_def.get("references") for col_def in table_def.get("columns", {}).values()]
     from_columns = [ref.split(".")[0] for ref in referenced if ref and "." in ref]
-    from_keys = [
-        fk.get("references_table", "") for fk in table_def.get("foreign_keys", [])
-    ]
+    from_keys = [fk.get("references_table", "") for fk in table_def.get("foreign_keys", [])]
     return from_columns + from_keys
 
 
@@ -281,7 +276,6 @@ def _toposort_tables(
 # ---------------------------------------------------------------------------
 
 
-
 @helper
 async def _ensure_progress_table(conn: Any, loader: BulkLoader) -> None:
     """Create the transfer progress table if it is not there.
@@ -303,9 +297,7 @@ async def _ensure_progress_table(conn: Any, loader: BulkLoader) -> None:
 
 
 @helper
-async def _transfer_one_table(
-    run: _Run, source_schema: Schema, table: str
-) -> _TableOutcome:
+async def _transfer_one_table(run: _Run, source_schema: Schema, table: str) -> _TableOutcome:
     """Everything one table goes through, from its columns to its rows."""
     columns = list(source_schema.get(table, {}).get("columns", {}).keys())
     return await _WHEN_THE_TABLE_HAS_COLUMNS[bool(columns)](run, table, columns)
@@ -355,9 +347,7 @@ def _nothing_to_carry(unenforced: Exception | Nothing) -> Exception | Nothing:
 # Between them the two questions have four answers and each is written out,
 # because the pair decides whether the failure is carried out on another
 # exception, raised as its own, or absent.
-_UNENFORCED: dict[
-    tuple[bool, bool], Callable[[Exception | Nothing], Exception | Nothing]
-] = {
+_UNENFORCED: dict[tuple[bool, bool], Callable[[Exception | Nothing], Exception | Nothing]] = {
     (True, True): _rides_out_on_the_failure,
     (True, False): _nothing_to_carry,
     (False, True): _goes_in_the_result,
@@ -375,9 +365,7 @@ def _left_unenforced(unenforced: Exception | Nothing) -> Exception | Nothing:
     catching output or an exception. This way the answer is a value: what was
     left unenforced, or NOTHING.
     """
-    return _UNENFORCED[(sys.exception() is not None, not is_nothing(unenforced))](
-        unenforced
-    )
+    return _UNENFORCED[(sys.exception() is not None, not is_nothing(unenforced))](unenforced)
 
 
 @helper
@@ -466,10 +454,13 @@ async def bulk_transfer(
     # Step 1: Schema migration on target
     say(__name__, "info", "Applying schema migrations to target database")
     migration_result = await apply_migrations_async(
-        target, target_dialect, schema_path, expand_enums=expand_enums, force=NOTHING)
+        target, target_dialect, schema_path, expand_enums=expand_enums, force=NOTHING
+    )
     _WHEN_THE_TARGET_MIGRATED[migration_result["success"]](migration_result)
-    say(__name__, "info",
-        f"Schema migration complete: {migration_result['operations_applied']} operations applied"
+    say(
+        __name__,
+        "info",
+        f"Schema migration complete: {migration_result['operations_applied']} operations applied",
     )
 
     # Step 2: Introspect source
@@ -480,11 +471,13 @@ async def bulk_transfer(
     say(__name__, "info", f"Source has {len(all_tables)} tables")
 
     # Step 3: Filter
-    transfer_tables = _WHICH_TABLES[the_tables is not None](
-        the_tables, all_tables, source_schema
-    )
+    transfer_tables = _WHICH_TABLES[the_tables is not None](the_tables, all_tables, source_schema)
 
-    say(__name__, "info", f"Transferring {len(transfer_tables)} tables (filtered from {len(all_tables)})")
+    say(
+        __name__,
+        "info",
+        f"Transferring {len(transfer_tables)} tables (filtered from {len(all_tables)})",
+    )
 
     # Step 4: FK toposort
     sorted_tables, circular_refs = _toposort_tables(source_schema, transfer_tables)
@@ -523,8 +516,7 @@ async def bulk_transfer(
 
         try:
             outcomes = [
-                await _transfer_one_table(run, source_schema, table)
-                for table in transfer_order
+                await _transfer_one_table(run, source_schema, table) for table in transfer_order
             ]
         finally:
             # Re-enable FK checks. A failure DOING that leaves the target
@@ -532,9 +524,7 @@ async def bulk_transfer(
             # is never dropped: it rides out on whatever is already
             # travelling, and becomes the failure when nothing else is.
             unenforced = _left_unenforced(
-                await _WHEN_THE_CHECKS_WERE_TURNED_OFF[bool(turned_off)](
-                    target_loader, target_conn
-                )
+                await _WHEN_THE_CHECKS_WERE_TURNED_OFF[bool(turned_off)](target_loader, target_conn)
             )
 
     duration = (datetime.now(UTC) - start).total_seconds()
@@ -560,10 +550,12 @@ async def bulk_transfer(
         "duration_seconds": duration,
     }
 
-    say(__name__, "info",
+    say(
+        __name__,
+        "info",
         f"Transfer complete: {len(transferred)} transferred, "
         f"{len(skipped)} skipped, {len(failed)} failed, "
-        f"{result['total_rows']} total rows in {duration:.1f}s"
+        f"{result['total_rows']} total rows in {duration:.1f}s",
     )
 
     return result

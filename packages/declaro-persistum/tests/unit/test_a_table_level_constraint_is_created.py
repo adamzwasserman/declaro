@@ -54,6 +54,7 @@ import pytest
 from declaro_persistum.applier import apply
 from declaro_persistum.applier.shared import statements_for
 from declaro_persistum.differ.core import diff
+from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE
 from declaro_persistum.types import NOTHING
 from tests.conftest import probe_url, refuse_without_postgresql
 
@@ -204,9 +205,20 @@ async def test_the_constraint_is_enforced(dialect: str) -> None:
         await cursor.execute('INSERT INTO "t" (a, lo, hi) VALUES (1, 1, 2)')
         await connection.commit()
 
-        with pytest.raises(Exception):
+        # NOT `pytest.raises(Exception)` ALONE. That passes on a bug of ours
+        # as readily as on the engine refusing, which is the misattribution
+        # `A_BUG_IN_THIS_PACKAGE` exists to name. The type cannot be pinned
+        # to one class here because three engines each raise their own, so
+        # the claim is the one that matters: something refused, and it was
+        # not us.
+        with pytest.raises(Exception) as refused:  # noqa: B017 - checked below
             await cursor.execute('INSERT INTO "t" (a, lo, hi) VALUES (2, 9, 3)')
             await connection.commit()
+
+        assert not isinstance(refused.value, A_BUG_IN_THIS_PACKAGE), (
+            f"the engine was supposed to refuse this; instead a bug of ours "
+            f"raised {type(refused.value).__name__}: {refused.value}"
+        )
     finally:
         await connection.close()
 
@@ -366,8 +378,19 @@ async def test_postgresql_creates_the_constraint_too() -> None:
         actual = await introspect(connection, "postgresql")
         assert actual["t"].get("constraints"), actual["t"]
 
-        with pytest.raises(Exception):
+        # NOT `pytest.raises(Exception)` ALONE. That passes on a bug of ours
+        # as readily as on the engine refusing, which is the misattribution
+        # `A_BUG_IN_THIS_PACKAGE` exists to name. The type cannot be pinned
+        # to one class here because three engines each raise their own, so
+        # the claim is the one that matters: something refused, and it was
+        # not us.
+        with pytest.raises(Exception) as refused:  # noqa: B017 - checked below
             await connection.execute('INSERT INTO "t" (a, lo, hi) VALUES (1, 9, 3)')
+
+        assert not isinstance(refused.value, A_BUG_IN_THIS_PACKAGE), (
+            f"the engine was supposed to refuse this; instead a bug of ours "
+            f"raised {type(refused.value).__name__}: {refused.value}"
+        )
     finally:
         await connection.execute('DROP TABLE IF EXISTS "t" CASCADE')
         await connection.close()

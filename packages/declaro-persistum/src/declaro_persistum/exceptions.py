@@ -112,9 +112,7 @@ class AmbiguityError(SchemaError):
 
     def __init__(self, ambiguities: list[Ambiguity]) -> None:
         self.ambiguities = ambiguities
-        ambiguity_list = "\n".join(
-            [f"  - {amb['table']}: {amb['message']}" for amb in ambiguities]
-        )
+        ambiguity_list = "\n".join([f"  - {amb['table']}: {amb['message']}" for amb in ambiguities])
         super().__init__(
             f"Unresolved ambiguities detected ({len(ambiguities)} total):\n\n"
             f"{ambiguity_list}\n\n"
@@ -257,7 +255,9 @@ class MigrationError(DeclaroError):
 
         details = _given(
             (
-                f"  Operation: {the_operation['op']} on {the_operation['table']}" if the_operation else "",
+                f"  Operation: {the_operation['op']} on {the_operation['table']}"
+                if the_operation
+                else "",
                 f"  SQL: {_shortened(the_sql)}" if the_sql else "",
                 f"  Original error: {type(the_original_error).__name__}: {the_original_error}"  # honest: ignore HC-P005: the class name IS the message
                 if the_original_error
@@ -522,21 +522,16 @@ wording.
 
 
 @helper
-def _note_the_teardown(
-    going_out: BaseException, doing: str, failure: Any
-) -> BaseException:
+def _note_the_teardown(going_out: BaseException, doing: str, failure: Any) -> BaseException:
     """The teardown failed too, so the exception on its way out carries it."""
     going_out.add_note(
-        f"{doing} ALSO failed: {type(failure).__name__}: {failure}. "
-        f"That work was NOT done."
+        f"{doing} ALSO failed: {type(failure).__name__}: {failure}. That work was NOT done."
     )
     return going_out
 
 
 @helper
-def _teardown_did_its_work(
-    going_out: BaseException, _doing: str, _failure: Any
-) -> BaseException:
+def _teardown_did_its_work(going_out: BaseException, _doing: str, _failure: Any) -> BaseException:
     """The teardown succeeded, so the exception goes out as it arrived."""
     return going_out
 

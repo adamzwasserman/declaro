@@ -63,18 +63,24 @@ def _written_at_runtime(module: object) -> set[str]:
         target.id
         for node in tree.body
         if isinstance(node, ast.Assign | ast.AnnAssign)
-        for target in (
-            node.targets if isinstance(node, ast.Assign) else [node.target]
-        )
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
         if isinstance(target, ast.Name)
     }
-    mutating = {"append", "extend", "insert", "add", "update", "pop",
-                "popitem", "remove", "discard", "clear", "setdefault", "sort"}
-    written = {
-        held
-        for node in ast.walk(tree)
-        for held in _name_written_by(node, mutating)
+    mutating = {
+        "append",
+        "extend",
+        "insert",
+        "add",
+        "update",
+        "pop",
+        "popitem",
+        "remove",
+        "discard",
+        "clear",
+        "setdefault",
+        "sort",
     }
+    written = {held for node in ast.walk(tree) for held in _name_written_by(node, mutating)}
     return names & written
 
 
@@ -82,9 +88,7 @@ def _name_written_by(node: ast.AST, mutating: set[str]) -> list[str]:
     """The module-level name this node writes to, if it writes to one."""
     subscripts = [
         target.value.id
-        for target in (
-            node.targets if isinstance(node, ast.Assign) else []
-        )
+        for target in (node.targets if isinstance(node, ast.Assign) else [])
         if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
     ]
     deleted = [
@@ -131,16 +135,24 @@ def _written_names(tree: ast.Module) -> set[str]:
         target.id
         for node in tree.body
         if isinstance(node, ast.Assign | ast.AnnAssign)
-        for target in (
-            node.targets if isinstance(node, ast.Assign) else [node.target]
-        )
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
         if isinstance(target, ast.Name)
     }
-    mutating = {"append", "extend", "insert", "add", "update", "pop",
-                "popitem", "remove", "discard", "clear", "setdefault", "sort"}
-    written = {
-        held for node in ast.walk(tree) for held in _name_written_by(node, mutating)
+    mutating = {
+        "append",
+        "extend",
+        "insert",
+        "add",
+        "update",
+        "pop",
+        "popitem",
+        "remove",
+        "discard",
+        "clear",
+        "setdefault",
+        "sort",
     }
+    written = {held for node in ast.walk(tree) for held in _name_written_by(node, mutating)}
     return names & written
 
 
@@ -155,9 +167,7 @@ def test_the_unsupported_error_retains_nothing():
 
     err = NotSupportedError("no stored procedures on SQLite", ["use a function"])
 
-    assert not hasattr(err, "alternatives"), (
-        "the exception still retains its alternatives list"
-    )
+    assert not hasattr(err, "alternatives"), "the exception still retains its alternatives list"
     assert "use a function" in str(err), (
         "the alternatives were dropped instead of being folded into the message"
     )

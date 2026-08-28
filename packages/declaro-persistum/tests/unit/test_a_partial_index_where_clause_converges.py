@@ -42,14 +42,8 @@ from declaro_persistum.differ.core import diff
 from declaro_persistum.inspector import INSPECTORS
 from declaro_persistum.types import NOTHING
 
-_TABLE = (
-    'CREATE TABLE "pw_users" ("id" INTEGER PRIMARY KEY, "email" TEXT, '
-    '"deleted_at" TEXT)'
-)
-_INDEX = (
-    'CREATE UNIQUE INDEX "ix_live" ON "pw_users"("email") '
-    'WHERE "deleted_at" IS NULL'
-)
+_TABLE = 'CREATE TABLE "pw_users" ("id" INTEGER PRIMARY KEY, "email" TEXT, "deleted_at" TEXT)'
+_INDEX = 'CREATE UNIQUE INDEX "ix_live" ON "pw_users"("email") WHERE "deleted_at" IS NULL'
 
 
 async def _live(tmp_path: pathlib.Path) -> dict:
@@ -71,9 +65,7 @@ def _declaring(where: str, live: dict) -> dict:
     return {
         "pw_users": {
             "columns": dict(live["pw_users"]["columns"]),
-            "indexes": {
-                "ix_live": {"columns": ["email"], "unique": True, "where": where}
-            },
+            "indexes": {"ix_live": {"columns": ["email"], "unique": True, "where": where}},
         }
     }
 
@@ -81,10 +73,10 @@ def _declaring(where: str, live: dict) -> dict:
 @pytest.mark.parametrize(
     "rendered",
     [
-        '(deleted_at IS NULL)',
-        'deleted_at IS NULL',
-        '( deleted_at IS NULL )',
-        'deleted_at   IS   NULL',
+        "(deleted_at IS NULL)",
+        "deleted_at IS NULL",
+        "( deleted_at IS NULL )",
+        "deleted_at   IS   NULL",
         '"deleted_at" IS NULL',
     ],
     ids=[
@@ -108,7 +100,9 @@ async def test_the_engines_rendering_is_the_declared_clause(
     live = await _live(tmp_path)
     live["pw_users"]["indexes"]["ix_live"]["where"] = rendered
 
-    result = diff(live, _declaring('"deleted_at" IS NULL', live), dialect="postgresql", decisions=NOTHING)
+    result = diff(
+        live, _declaring('"deleted_at" IS NULL', live), dialect="postgresql", decisions=NOTHING
+    )
 
     assert result["operations"] == []
 
@@ -120,7 +114,8 @@ async def test_a_genuinely_different_clause_still_migrates(
     live = await _live(tmp_path)
 
     result = diff(
-        live, _declaring('"deleted_at" IS NOT NULL', live), dialect="postgresql", decisions=NOTHING)
+        live, _declaring('"deleted_at" IS NOT NULL', live), dialect="postgresql", decisions=NOTHING
+    )
 
     assert [op["op"] for op in result["operations"]] == ["drop_index", "add_index"]
 
@@ -139,7 +134,8 @@ async def test_a_quoted_name_that_needs_its_quotes_is_not_folded(
     live["pw_users"]["indexes"]["ix_live"]["where"] = "deleted_at IS NULL"
 
     result = diff(
-        live, _declaring('"Deleted_At" IS NULL', live), dialect="postgresql", decisions=NOTHING)
+        live, _declaring('"Deleted_At" IS NULL', live), dialect="postgresql", decisions=NOTHING
+    )
 
     assert [op["op"] for op in result["operations"]] == ["drop_index", "add_index"]
 
@@ -160,6 +156,8 @@ async def test_a_mixed_case_name_is_not_the_lower_case_one(
     live = await _live(tmp_path)
     live["pw_users"]["indexes"]["ix_live"]["where"] = '"Deleted_At" IS NULL'
 
-    result = diff(live, _declaring("Deleted_At IS NULL", live), dialect="postgresql", decisions=NOTHING)
+    result = diff(
+        live, _declaring("Deleted_At IS NULL", live), dialect="postgresql", decisions=NOTHING
+    )
 
     assert [op["op"] for op in result["operations"]] == ["drop_index", "add_index"]

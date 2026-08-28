@@ -82,7 +82,7 @@ _SAFE = str.maketrans({".": "_", "-": "_", " ": "_", '"': "", "'": ""})
 def _name(path: str, column: str, suffix: str | Nothing) -> str:
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
-    suffix = resolved(suffix, '')
+    suffix = resolved(suffix, "")
     return f"{path}_{column.translate(_SAFE)}{suffix}"
 
 
@@ -137,9 +137,7 @@ def _in(negated: bool) -> Renderer:
         # strict: `names` is built from `len(values)` two lines up, so a length
         # mismatch is impossible unless that changes -- at which point this
         # raises instead of silently dropping the tail of the IN list.
-        return f"{column} {keyword} ({placeholders})", dict(
-            zip(names, values, strict=True)
-        )
+        return f"{column} {keyword} ({placeholders})", dict(zip(names, values, strict=True))
 
     _WHEN_VALUES: dict[bool, Callable[[str, list[Any], str], Rendered]] = {
         True: _some_values,
@@ -196,9 +194,7 @@ the last branch happened to be (Rule 1)."""
 COMBINATORS: dict[str, str] = {"and": " AND ", "or": " OR "}
 
 
-def _render_group(
-    key: str, members: list[dict], path: str
-) -> tuple[str, dict[str, Any]]:
+def _render_group(key: str, members: list[dict], path: str) -> tuple[str, dict[str, Any]]:
     # A MEMBER THAT RENDERS TO NOTHING CONTRIBUTES NOTHING: neither an empty
     # pair of parentheses nor its parameters. An empty condition dict is the
     # member that does this.
@@ -209,11 +205,7 @@ def _render_group(
         if rendered[0]
     ]
     parts = [f"({sql})" for sql, _ in written]
-    params = {
-        name: value
-        for _, member_params in written
-        for name, value in member_params.items()
-    }
+    params = {name: value for _, member_params in written for name, value in member_params.items()}
     return COMBINATORS[key].join(parts), params
 
 
@@ -274,9 +266,7 @@ _RENDER_ENTRY: dict[bool, Callable[[str, Any, str], list[Rendered]]] = {
 }
 
 
-def render(
-    condition: dict[str, Any], path: str
-) -> tuple[str, dict[str, Any]]:
+def render(condition: dict[str, Any], path: str) -> tuple[str, dict[str, Any]]:
     """Render a condition to (sql, params). Pure.
 
     `path` is required and identifies this node's position in the statement.
@@ -291,9 +281,5 @@ def render(
         for pair in _RENDER_ENTRY[key in COMBINATORS](key, value, f"{path}_{i}")
     ]
     parts = [sql for sql, _ in rendered]
-    params = {
-        name: value
-        for _, part_params in rendered
-        for name, value in part_params.items()
-    }
+    params = {name: value for _, part_params in rendered for name, value in part_params.items()}
     return " AND ".join(parts), params

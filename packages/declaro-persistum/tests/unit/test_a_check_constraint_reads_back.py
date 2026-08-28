@@ -41,9 +41,7 @@ def _ddl(statement: str) -> str:
     """The CREATE TABLE text SQLite stores, not the one I typed."""
     conn = sqlite3.connect(":memory:")
     conn.execute(statement)
-    return conn.execute(
-        "SELECT sql FROM sqlite_master WHERE type='table'"
-    ).fetchone()[0]
+    return conn.execute("SELECT sql FROM sqlite_master WHERE type='table'").fetchone()[0]
 
 
 @pytest.mark.parametrize(
@@ -73,9 +71,7 @@ def test_a_column_check_is_read_off_the_ddl(statement, column, expected) -> None
 def test_two_columns_each_keep_their_own_check() -> None:
     from declaro_persistum.inspector.shared import checks_from_ddl
 
-    ddl = _ddl(
-        "CREATE TABLE t (id TEXT, n INTEGER CHECK(n > 0), m INTEGER CHECK (m < 100))"
-    )
+    ddl = _ddl("CREATE TABLE t (id TEXT, n INTEGER CHECK(n > 0), m INTEGER CHECK (m < 100))")
 
     assert checks_from_ddl(ddl) == {"n": "n > 0", "m": "m < 100"}
 
@@ -327,8 +323,6 @@ def test_a_comma_inside_a_check_expression_does_not_split_the_clause() -> None:
     """`substr(s, 1, 2)` has two commas and is one clause."""
     from declaro_persistum.inspector.shared import checks_from_ddl
 
-    ddl = _ddl(
-        "CREATE TABLE t (id TEXT, s TEXT CHECK (substr(s, 1, 2) <> 'xx'))"
-    )
+    ddl = _ddl("CREATE TABLE t (id TEXT, s TEXT CHECK (substr(s, 1, 2) <> 'xx'))")
 
     assert checks_from_ddl(ddl) == {"s": "substr(s, 1, 2) <> 'xx'"}

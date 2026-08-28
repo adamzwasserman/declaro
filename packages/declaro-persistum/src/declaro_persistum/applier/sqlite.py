@@ -49,7 +49,6 @@ def get_transaction_mode() -> Literal["all_or_nothing", "per_operation"]:
     return "all_or_nothing"
 
 
-
 @boundary
 async def _restore_enforcement(connection: DbapiConnection, enforced: int) -> None:
     """Put `PRAGMA foreign_keys` back to what the caller had.
@@ -98,18 +97,14 @@ async def _preview(
 
 
 @helper
-async def _run_reconstruction(
-    connection: DbapiConnection, operation: Operation
-) -> list[str]:
+async def _run_reconstruction(connection: DbapiConnection, operation: Operation) -> list[str]:
     """An operation SQLite cannot express as an ALTER, so the table is rebuilt."""
     await _execute_with_reconstruction(connection, operation)
     return [f"Table reconstruction for {operation['table']}"]
 
 
 @boundary
-async def _run_statements(
-    connection: DbapiConnection, operation: Operation
-) -> list[str]:
+async def _run_statements(connection: DbapiConnection, operation: Operation) -> list[str]:
     """An operation SQLite runs directly, one statement at a time.
 
     THE LIST IS EXECUTED AS IT WAS BUILT. This took a joined string and cut it
@@ -127,23 +122,17 @@ async def _run_statements(
 
 # WHETHER THE TABLE IS REBUILT OR THE STATEMENTS ARE RUN. Both entries return
 # the executed_sql entries the operation produced.
-_HOW_TO_RUN: dict[
-    bool, Callable[[DbapiConnection, Operation], Awaitable[list[str]]]
-] = {
+_HOW_TO_RUN: dict[bool, Callable[[DbapiConnection, Operation], Awaitable[list[str]]]] = {
     True: _run_reconstruction,
     False: _run_statements,
 }
 
 
 @boundary
-async def _execute_operation(
-    connection: DbapiConnection, operation: Operation
-) -> list[str]:
+async def _execute_operation(connection: DbapiConnection, operation: Operation) -> list[str]:
     """Run one operation, rolling the batch back if it fails."""
     try:
-        return await _HOW_TO_RUN[requires_reconstruction(operation)](
-            connection, operation
-        )
+        return await _HOW_TO_RUN[requires_reconstruction(operation)](connection, operation)
     except A_BUG_IN_THIS_PACKAGE:
         # OURS, AND THE ENGINE WAS NEVER ASKED. A KeyError here means
         # the operation does not match what the differ emits, so the
@@ -162,9 +151,8 @@ async def _execute_operation(
     except Exception as e:
         await connection.rollback()
         raise MigrationError(
-            "Failed to execute operation",
-            operation=operation,
-            original_error=e, sql=NOTHING) from e
+            "Failed to execute operation", operation=operation, original_error=e, sql=NOTHING
+        ) from e
 
 
 @boundary
@@ -266,15 +254,13 @@ async def _run_batch(
         await connection.rollback()
         await _restore_enforcement(connection, entry_enforcement)
         raise MigrationError(
-            f"Migration failed: {e}",
-            original_error=e, operation=NOTHING, sql=NOTHING) from e
+            f"Migration failed: {e}", original_error=e, operation=NOTHING, sql=NOTHING
+        ) from e
 
 
 _WHEN_DRY_RUN: dict[
     bool,
-    Callable[
-        [DbapiConnection, list[Operation], list[int]], Awaitable[ApplyResult]
-    ],
+    Callable[[DbapiConnection, list[Operation], list[int]], Awaitable[ApplyResult]],
 ] = {
     True: _preview,
     False: _run_batch,
@@ -282,9 +268,7 @@ _WHEN_DRY_RUN: dict[
 
 
 @helper
-async def _execute_with_reconstruction(
-    connection: DbapiConnection, operation: Operation
-) -> None:
+async def _execute_with_reconstruction(connection: DbapiConnection, operation: Operation) -> None:
     """
     Execute an operation using table reconstruction (async).
 
@@ -306,9 +290,7 @@ async def _execute_with_reconstruction(
 
     # Use specialized functions for single-property alter_column changes
     single = single_change_property(operation)
-    await _WHEN_ONE_PROPERTY[single is not None](
-        connection, table, columns, operation, single
-    )
+    await _WHEN_ONE_PROPERTY[single is not None](connection, table, columns, operation, single)
 
 
 @helper
@@ -336,9 +318,7 @@ async def _alter_one_property(
     # declaration from a column with no default.
     change_key, value = single  # type: ignore[misc]
     column = operation["details"]["column"]
-    await _ALTER_ONE_PROPERTY[change_key == "default"](
-        connection, table, column, change_key, value
-    )
+    await _ALTER_ONE_PROPERTY[change_key == "default"](connection, table, column, change_key, value)
 
 
 @helper
@@ -404,10 +384,6 @@ _WHEN_ONE_PROPERTY: dict[
     True: _alter_one_property,
     False: _rebuild_the_table,
 }
-
-
-
-
 
 
 # =============================================================================

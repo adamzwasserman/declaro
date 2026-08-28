@@ -36,8 +36,7 @@ from declaro_persistum.query.table import (
 )
 
 SCHEMA = {
-    "users": {"columns": {"id": {"type": "int"}, "name": {"type": "text"},
-                          "age": {"type": "int"}}},
+    "users": {"columns": {"id": {"type": "int"}, "name": {"type": "text"}, "age": {"type": "int"}}},
     "roles": {"columns": {"user_id": {"type": "int"}, "name": {"type": "text"}}},
 }
 
@@ -56,7 +55,3 @@ def test_it_is_a_typed_dict_with_a_kind_tag(cls, fields):
 
 def _users():
     return table("users", schema=SCHEMA)
-
-
-
-

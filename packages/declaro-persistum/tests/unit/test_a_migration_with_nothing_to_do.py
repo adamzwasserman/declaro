@@ -49,7 +49,7 @@ class NotATable(BaseModel):
     id: int
 '''
 
-ONE_TABLE = '''
+ONE_TABLE = """
 from pydantic import BaseModel
 from declaro_persistum import table, field
 
@@ -57,7 +57,7 @@ from declaro_persistum import table, field
 @table("users")
 class User(BaseModel):
     id: int = field(primary_key=True)
-'''
+"""
 
 
 def _models(body: str) -> str:
@@ -88,7 +88,12 @@ async def test_a_missing_schema_file_is_not_a_successful_migration() -> None:
     database = await _database()
     try:
         result = await apply_migrations_async(
-            database, "sqlite", str(Path(tempfile.mkdtemp()) / "not_here.py"), expand_enums=NOTHING, force=NOTHING)
+            database,
+            "sqlite",
+            str(Path(tempfile.mkdtemp()) / "not_here.py"),
+            expand_enums=NOTHING,
+            force=NOTHING,
+        )
 
         assert result["success"] is False, result
         assert result["operations_applied"] == 0, result
@@ -100,7 +105,12 @@ async def test_a_missing_schema_file_creates_nothing() -> None:
     database = await _database()
     try:
         await apply_migrations_async(
-            database, "sqlite", str(Path(tempfile.mkdtemp()) / "not_here.py"), expand_enums=NOTHING, force=NOTHING)
+            database,
+            "sqlite",
+            str(Path(tempfile.mkdtemp()) / "not_here.py"),
+            expand_enums=NOTHING,
+            force=NOTHING,
+        )
 
         assert await _tables(database) == []
     finally:
@@ -116,9 +126,18 @@ async def test_every_return_carries_the_same_keys() -> None:
     database = await _database()
     try:
         missing = await apply_migrations_async(
-            database, "sqlite", str(Path(tempfile.mkdtemp()) / "not_here.py"), expand_enums=NOTHING, force=NOTHING)
-        empty = await apply_migrations_async(database, "sqlite", _models(NO_TABLES), expand_enums=NOTHING, force=NOTHING)
-        real = await apply_migrations_async(database, "sqlite", _models(ONE_TABLE), expand_enums=NOTHING, force=NOTHING)
+            database,
+            "sqlite",
+            str(Path(tempfile.mkdtemp()) / "not_here.py"),
+            expand_enums=NOTHING,
+            force=NOTHING,
+        )
+        empty = await apply_migrations_async(
+            database, "sqlite", _models(NO_TABLES), expand_enums=NOTHING, force=NOTHING
+        )
+        real = await apply_migrations_async(
+            database, "sqlite", _models(ONE_TABLE), expand_enums=NOTHING, force=NOTHING
+        )
 
         common = {
             "success",
@@ -138,7 +157,9 @@ async def test_a_file_with_no_tables_is_a_successful_no_op() -> None:
     """Nothing declared is a real answer, and applying nothing is the right one."""
     database = await _database()
     try:
-        result = await apply_migrations_async(database, "sqlite", _models(NO_TABLES), expand_enums=NOTHING, force=NOTHING)
+        result = await apply_migrations_async(
+            database, "sqlite", _models(NO_TABLES), expand_enums=NOTHING, force=NOTHING
+        )
 
         assert result["success"] is True, result
         assert result["operations_applied"] == 0, result
@@ -155,9 +176,13 @@ async def test_a_file_with_no_tables_is_stamped_and_skipped_next_time() -> None:
     database = await _database()
     models = _models(NO_TABLES)
     try:
-        await apply_migrations_async(database, "sqlite", models, expand_enums=NOTHING, force=NOTHING)
+        await apply_migrations_async(
+            database, "sqlite", models, expand_enums=NOTHING, force=NOTHING
+        )
 
-        again = await apply_migrations_async(database, "sqlite", models, expand_enums=NOTHING, force=NOTHING)
+        again = await apply_migrations_async(
+            database, "sqlite", models, expand_enums=NOTHING, force=NOTHING
+        )
 
         assert again["skipped"] is True, again
     finally:
@@ -168,7 +193,9 @@ async def test_a_real_schema_is_not_confused_with_an_empty_one() -> None:
     """The control. A function returning early always would pass the rest."""
     database = await _database()
     try:
-        result = await apply_migrations_async(database, "sqlite", _models(ONE_TABLE), expand_enums=NOTHING, force=NOTHING)
+        result = await apply_migrations_async(
+            database, "sqlite", _models(ONE_TABLE), expand_enums=NOTHING, force=NOTHING
+        )
 
         assert result["success"] is True, result
         assert result["operations_applied"] > 0, result

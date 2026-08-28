@@ -21,13 +21,13 @@ from declaro_persistum.types import Nothing, resolved
 class LatencyRecord(TypedDict):
     """One timing record per execute() call."""
 
-    ts: str           # ISO 8601 timestamp
-    tier: str         # Caller-supplied label (e.g. "central", "project")
-    op: str           # Classified from SQL: select|insert|update|delete|create|alter|other
+    ts: str  # ISO 8601 timestamp
+    tier: str  # Caller-supplied label (e.g. "central", "project")
+    op: str  # Classified from SQL: select|insert|update|delete|create|alter|other
     duration_ms: float
     success: bool
-    sql: str          # First 120 chars of SQL
-    error: str        # First 200 chars of exception string, or ""
+    sql: str  # First 120 chars of SQL
+    error: str  # First 200 chars of exception string, or ""
 
 
 _SQL_OP_MAP: dict[str, str] = {
@@ -141,7 +141,7 @@ def _after_the_cte(sql: str) -> str:
     A word never terminated by punctuation is returned as it stands, which is
     what the loop's final `return token.lower()` did.
     """
-    body = sql[len("with"):]
+    body = sql[len("with") :]
     deltas = [(char == "(") - (char == ")") for char in body]
     depth = [0, *accumulate(deltas)][:-1]
     visible = "".join(
@@ -149,9 +149,7 @@ def _after_the_cte(sql: str) -> str:
         for char, delta, outside in zip(body, deltas, depth, strict=True)
         if delta == 0 and outside == 0
     )
-    words = [
-        "".join(run) for alpha, run in groupby(visible, str.isalpha) if alpha
-    ]
+    words = ["".join(run) for alpha, run in groupby(visible, str.isalpha) if alpha]
     named = [
         lowered
         for word in words
@@ -199,7 +197,7 @@ def build_record(
     """Build a LatencyRecord from execution metadata."""
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
-    error = resolved(error, '')
+    error = resolved(error, "")
     return {
         "ts": datetime.now(UTC).isoformat(),
         "tier": tier,
@@ -219,12 +217,6 @@ def format_jsonl(record: LatencyRecord) -> str:
     return json.dumps(record)
 
 
-
-
-
-
-
-
 @boundary
 def emit_record(logger: logging.Logger, record: LatencyRecord) -> None:
     """Write a LatencyRecord to the logger the caller chose.
@@ -241,5 +233,3 @@ def emit_record(logger: logging.Logger, record: LatencyRecord) -> None:
     module's logger instead of the one the caller passed.
     """
     logger.info(format_jsonl(record))
-
-

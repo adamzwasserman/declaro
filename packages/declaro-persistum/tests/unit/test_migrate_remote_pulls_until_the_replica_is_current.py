@@ -36,9 +36,7 @@ import pytest
 
 pytestmark = pytest.mark.precommit
 
-turso_sync = pytest.importorskip(
-    "turso.aio.sync", reason="pyturso is not installed"
-)
+turso_sync = pytest.importorskip("turso.aio.sync", reason="pyturso is not installed")
 
 
 def test_the_driver_has_no_sync_method() -> None:
@@ -76,9 +74,7 @@ def test_migrate_remote_does_not_call_sync() -> None:
     import ast
     import pathlib
 
-    source = pathlib.Path(
-        "src/declaro_persistum/cli/commands.py"
-    ).read_text()
+    source = pathlib.Path("src/declaro_persistum/cli/commands.py").read_text()
 
     calls = [
         node.lineno
@@ -105,9 +101,7 @@ def test_migrate_remote_pulls_until_the_replica_is_level() -> None:
     import ast
     import pathlib
 
-    source = pathlib.Path(
-        "src/declaro_persistum/cli/commands.py"
-    ).read_text()
+    source = pathlib.Path("src/declaro_persistum/cli/commands.py").read_text()
     tree = ast.parse(source)
 
     bare_pulls = [

@@ -107,9 +107,7 @@ class TestToposortTables:
         assert sorted_tables.index("users") < sorted_tables.index("posts")
 
     def test_a_chain_is_ordered_end_to_end(self):
-        sorted_tables, circular = _toposort_tables(
-            CHAIN, ["comments", "posts", "users"]
-        )
+        sorted_tables, circular = _toposort_tables(CHAIN, ["comments", "posts", "users"])
         assert sorted_tables == ["users", "posts", "comments"]
         assert circular == []
 

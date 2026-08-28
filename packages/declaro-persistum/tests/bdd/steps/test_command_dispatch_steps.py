@@ -143,11 +143,7 @@ def _then_same_commands(ctx):
     )
 
 
-@when(
-    parsers.parse(
-        '_run_command is asked whether "{typed}" can run with no connection'
-    )
-)
+@when(parsers.parse('_run_command is asked whether "{typed}" can run with no connection'))
 def _when_needs_connection(ctx, typed):
     from declaro_persistum.cli.main import COMMANDS_NEEDING_CONNECTION
 

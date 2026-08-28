@@ -34,9 +34,7 @@ async def _open():
     import asyncpg
 
     try:
-        return await open_postgresql(
-            DSN, shutdown="exit_immediately", busy_timeout_s=10.0
-        )
+        return await open_postgresql(DSN, shutdown="exit_immediately", busy_timeout_s=10.0)
     except (OSError, asyncpg.PostgresError) as exc:
         refuse_without_postgresql(DSN, exc)
 
@@ -129,8 +127,6 @@ async def test_a_replicating_shutdown_is_refused() -> None:
     decision the caller states, and PostgreSQL accepts only one answer.
     """
     with pytest.raises(ValueError) as caught:
-        await open_postgresql(
-            DSN, shutdown="replicate_then_exit", busy_timeout_s=10.0
-        )
+        await open_postgresql(DSN, shutdown="replicate_then_exit", busy_timeout_s=10.0)
 
     assert "exit_immediately" in str(caught.value), caught.value

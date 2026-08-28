@@ -98,14 +98,15 @@ async def test_a_migration_creates_the_table_it_planned() -> None:
         plan = diff({}, WIDGETS, dialect="postgresql", decisions=NOTHING)
 
         result = await apply(
-            conn, plan["operations"], plan["execution_order"], "postgresql",
+            conn,
+            plan["operations"],
+            plan["execution_order"],
+            "postgresql",
             dry_run=False,
         )
 
         assert result["success"] is True, result
-        assert await conn.fetchval(
-            "SELECT to_regclass('widgets') IS NOT NULL"
-        ) is True
+        assert await conn.fetchval("SELECT to_regclass('widgets') IS NOT NULL") is True
     finally:
         await _clean(conn, "widgets")
         await conn.close()
@@ -118,7 +119,10 @@ async def test_introspection_reads_back_what_was_written() -> None:
         await _clean(conn, "widgets")
         plan = diff({}, WIDGETS, dialect="postgresql", decisions=NOTHING)
         await apply(
-            conn, plan["operations"], plan["execution_order"], "postgresql",
+            conn,
+            plan["operations"],
+            plan["execution_order"],
+            "postgresql",
             dry_run=False,
         )
 
@@ -142,7 +146,10 @@ async def test_migrating_twice_is_a_no_op() -> None:
         await _clean(conn, "widgets")
         plan = diff({}, WIDGETS, dialect="postgresql", decisions=NOTHING)
         await apply(
-            conn, plan["operations"], plan["execution_order"], "postgresql",
+            conn,
+            plan["operations"],
+            plan["execution_order"],
+            "postgresql",
             dry_run=False,
         )
 
@@ -152,11 +159,12 @@ async def test_migrating_twice_is_a_no_op() -> None:
         # against a one-table schema reports every OTHER table as a drop, and
         # `declaro_probe` carries leftovers from earlier runs. The first
         # version of this reported ten operations, eight of which were mine.
-        second = diff({"widgets": actual["widgets"]}, WIDGETS, dialect="postgresql", decisions=NOTHING)
+        second = diff(
+            {"widgets": actual["widgets"]}, WIDGETS, dialect="postgresql", decisions=NOTHING
+        )
 
         assert second["operations"] == [], (
-            f"an unchanged schema still migrates: "
-            f"{[o['op'] for o in second['operations']]}"
+            f"an unchanged schema still migrates: {[o['op'] for o in second['operations']]}"
         )
     finally:
         await _clean(conn, "widgets")
@@ -171,7 +179,10 @@ async def test_a_dry_run_changes_nothing() -> None:
         plan = diff({}, WIDGETS, dialect="postgresql", decisions=NOTHING)
 
         result = await apply(
-            conn, plan["operations"], plan["execution_order"], "postgresql",
+            conn,
+            plan["operations"],
+            plan["execution_order"],
+            "postgresql",
             dry_run=True,
         )
 
@@ -204,13 +215,14 @@ async def test_a_declared_enum_value_can_be_stored() -> None:
         expanded = expand_schema_enums(POSTS)
         plan = diff({}, expanded, dialect="postgresql", decisions=NOTHING)
         await apply(
-            conn, plan["operations"], plan["execution_order"], "postgresql",
+            conn,
+            plan["operations"],
+            plan["execution_order"],
+            "postgresql",
             dry_run=False,
         )
 
-        rows = await conn.fetch(
-            'SELECT value FROM "_dp_enum_posts_status" ORDER BY value'
-        )
+        rows = await conn.fetch('SELECT value FROM "_dp_enum_posts_status" ORDER BY value')
         assert [r[0] for r in rows] == ["draft", "live"]
 
         await conn.execute("INSERT INTO posts (id, status) VALUES ('1', 'draft')")
@@ -229,14 +241,15 @@ async def test_an_undeclared_enum_value_is_refused() -> None:
         await _clean(conn, "posts", "_dp_enum_posts_status")
         plan = diff({}, expand_schema_enums(POSTS), dialect="postgresql", decisions=NOTHING)
         await apply(
-            conn, plan["operations"], plan["execution_order"], "postgresql",
+            conn,
+            plan["operations"],
+            plan["execution_order"],
+            "postgresql",
             dry_run=False,
         )
 
         with pytest.raises(asyncpg.exceptions.ForeignKeyViolationError):
-            await conn.execute(
-                "INSERT INTO posts (id, status) VALUES ('2', 'pending')"
-            )
+            await conn.execute("INSERT INTO posts (id, status) VALUES ('2', 'pending')")
     finally:
         await _clean(conn, "posts", "_dp_enum_posts_status")
         await conn.close()
@@ -260,13 +273,14 @@ async def test_an_enum_value_containing_an_apostrophe_survives() -> None:
         }
         plan = diff({}, expand_schema_enums(schema), dialect="postgresql", decisions=NOTHING)
         await apply(
-            conn, plan["operations"], plan["execution_order"], "postgresql",
+            conn,
+            plan["operations"],
+            plan["execution_order"],
+            "postgresql",
             dry_run=False,
         )
 
-        rows = await conn.fetch(
-            'SELECT value FROM "_dp_enum_posts_status" ORDER BY value'
-        )
+        rows = await conn.fetch('SELECT value FROM "_dp_enum_posts_status" ORDER BY value')
         assert [r[0] for r in rows] == ["done", "it's live"]
     finally:
         await _clean(conn, "posts", "_dp_enum_posts_status")
@@ -298,7 +312,10 @@ async def test_postgresql_keeps_its_own_expression_defaults() -> None:
         }
         plan = diff({}, schema, dialect="postgresql", decisions=NOTHING)
         await apply(
-            conn, plan["operations"], plan["execution_order"], "postgresql",
+            conn,
+            plan["operations"],
+            plan["execution_order"],
+            "postgresql",
             dry_run=False,
         )
 
@@ -316,9 +333,7 @@ async def test_generated_sql_is_sql_this_server_accepts() -> None:
         await _clean(conn, "widgets")
         plan = diff({}, WIDGETS, dialect="postgresql", decisions=NOTHING)
 
-        statements = generate_sql(
-            plan["operations"], plan["execution_order"], "postgresql"
-        )
+        statements = generate_sql(plan["operations"], plan["execution_order"], "postgresql")
 
         assert statements
         for statement in statements:
@@ -338,8 +353,12 @@ async def test_a_failed_operation_rolls_the_whole_migration_back() -> None:
     conn = await _connect()
     try:
         await _clean(conn, "good", "bad")
-        plan = diff({}, {"good": {"columns": {"id": {"type": "text"}}}},
-                    dialect="postgresql", decisions=NOTHING)
+        plan = diff(
+            {},
+            {"good": {"columns": {"id": {"type": "text"}}}},
+            dialect="postgresql",
+            decisions=NOTHING,
+        )
         broken = list(plan["operations"]) + [
             {
                 "op": "create_table",
@@ -360,9 +379,9 @@ async def test_a_failed_operation_rolls_the_whole_migration_back() -> None:
         with pytest.raises(MigrationError):
             await apply(conn, broken, [0, 1], "postgresql", dry_run=False)
 
-        assert await conn.fetchval(
-            "SELECT to_regclass('good') IS NULL"
-        ) is True, "the first table survived a failed migration"
+        assert await conn.fetchval("SELECT to_regclass('good') IS NULL") is True, (
+            "the first table survived a failed migration"
+        )
     finally:
         await _clean(conn, "good", "bad")
         await conn.close()

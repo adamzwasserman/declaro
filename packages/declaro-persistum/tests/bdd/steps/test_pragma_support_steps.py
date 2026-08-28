@@ -42,10 +42,6 @@ def ctx() -> Ctx:
     return {}
 
 
-
-
-
-
 @given("a real SQLite database with a table, an index and a foreign key")
 def _given_real_db(ctx, tmp_path):
     conn = sqlite3.connect(tmp_path / "t.db")
@@ -171,13 +167,11 @@ def _when_index_pair(ctx):
 @then("the index named by the first is described by the second")
 def _then_index_pair_agrees(ctx):
     assert ctx["rows"], (
-        f"index_info returned nothing for {ctx['index_name']}, which "
-        f"index_list had just reported"
+        f"index_info returned nothing for {ctx['index_name']}, which index_list had just reported"
     )
     covered = {r[2] for r in ctx["rows"]}
     assert "parent_id" in covered, (
-        f"index_info says {ctx['index_name']} covers {covered}, but it was "
-        f"created on parent_id"
+        f"index_info says {ctx['index_name']} covers {covered}, but it was created on parent_id"
     )
 
 

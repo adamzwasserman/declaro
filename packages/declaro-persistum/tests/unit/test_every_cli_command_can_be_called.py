@@ -76,9 +76,7 @@ def test_the_gate_can_see_the_call_sites_at_all() -> None:
     assert len(sites) >= 6, [s[0] for s in sites]
 
 
-@pytest.mark.parametrize(
-    "site", _call_sites(), ids=lambda s: f"{s[0]}:{s[2]}"
-)
+@pytest.mark.parametrize("site", _call_sites(), ids=lambda s: f"{s[0]}:{s[2]}")
 def test_a_command_accepts_what_main_passes_it(site) -> None:
     """The measured defect, as a rule rather than as a name."""
     name, passed, lineno = site
@@ -93,9 +91,7 @@ def test_a_command_accepts_what_main_passes_it(site) -> None:
     )
 
 
-@pytest.mark.parametrize(
-    "site", _call_sites(), ids=lambda s: f"{s[0]}:{s[2]}"
-)
+@pytest.mark.parametrize("site", _call_sites(), ids=lambda s: f"{s[0]}:{s[2]}")
 def test_a_command_is_given_everything_it_requires(site) -> None:
     """The other half. A missing required argument raises the same TypeError."""
     name, passed, lineno = site
@@ -109,8 +105,7 @@ def test_a_command_is_given_everything_it_requires(site) -> None:
     }
     missing = required - passed
     assert not missing, (
-        f"main.py:{lineno} calls {name} without {sorted(missing)}, which the "
-        f"signature requires"
+        f"main.py:{lineno} calls {name} without {sorted(missing)}, which the signature requires"
     )
 
 
@@ -166,9 +161,7 @@ def test_no_source_file_still_reaches_for_the_factories() -> None:
     for path in root.rglob("*.py"):
         tree = ast.parse(path.read_text())
         for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and any(
-                a.name in gone for a in node.names
-            ):
+            if isinstance(node, ast.ImportFrom) and any(a.name in gone for a in node.names):
                 offenders.append(f"{path.relative_to(root)}:{node.lineno} import")
             elif isinstance(node, ast.Name) and node.id in gone:
                 offenders.append(f"{path.relative_to(root)}:{node.lineno} call")
@@ -200,7 +193,9 @@ def test_the_one_door_renders_sql_for_every_dialect(dialect: str) -> None:
                 }
             }
         },
-        dialect=dialect, decisions=NOTHING)
+        dialect=dialect,
+        decisions=NOTHING,
+    )
 
     statements = generate_sql(plan["operations"], plan["execution_order"], dialect)
 
@@ -266,8 +261,7 @@ def test_generate_emits_sql_against_a_real_database(tmp_path: pathlib.Path) -> N
     )
 
     assert result.returncode == 0, (
-        f"declaro generate exited {result.returncode}\n"
-        f"stderr: {result.stderr[-2000:]}"
+        f"declaro generate exited {result.returncode}\nstderr: {result.stderr[-2000:]}"
     )
     assert "CREATE TABLE" in result.stdout.upper(), (
         f"the command succeeded and emitted no DDL for a table that does not "
@@ -294,8 +288,7 @@ def test_generate_emits_sql_against_a_real_database(tmp_path: pathlib.Path) -> N
         probe.executescript(result.stdout)
     except sqlite3.Error as exc:
         raise AssertionError(
-            f"declaro generate -d sqlite emitted SQL that SQLite refuses: "
-            f"{exc}\n\n{result.stdout}"
+            f"declaro generate -d sqlite emitted SQL that SQLite refuses: {exc}\n\n{result.stdout}"
         ) from exc
 
 
@@ -364,9 +357,7 @@ def test_the_prefix_is_stripped_and_not_replaced() -> None:
     """`.replace` eats the sequence wherever it occurs, including mid-path."""
     from declaro_persistum.cli.commands import sqlite_path
 
-    assert sqlite_path("sqlite:////data/sqlite:///odd.db") == (
-        "/data/sqlite:///odd.db"
-    )
+    assert sqlite_path("sqlite:////data/sqlite:///odd.db") == ("/data/sqlite:///odd.db")
 
 
 def test_the_detector_and_the_connector_accept_the_same_urls() -> None:

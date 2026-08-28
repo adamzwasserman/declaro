@@ -69,9 +69,7 @@ def test_a_declared_action_is_accepted(action_key: str, value: str) -> None:
 
 
 @pytest.mark.parametrize("action_key", ["on_delete", "on_update"])
-@pytest.mark.parametrize(
-    "value", ["set_null", "CASCADE", "nonsense", "", "SET NULL"]
-)
+@pytest.mark.parametrize("value", ["set_null", "CASCADE", "nonsense", "", "SET NULL"])
 def test_anything_else_is_refused(action_key: str, value: str) -> None:
     """`set_null` and `CASCADE` are the two that look right and are not."""
     errors = validate_schema(_schema(action_key, value))["errors"]

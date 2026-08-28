@@ -47,7 +47,9 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.precommit, pytest.mark.turso]
 
 async def _seeded():
     directory = pathlib.Path(tempfile.mkdtemp())
-    db = await open_turso(str(directory / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
+    db = await open_turso(
+        str(directory / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
+    )
     async with writing(db) as conn:
         await conn.execute("CREATE TABLE child (id INTEGER PRIMARY KEY, note TEXT)")
         await conn.execute("INSERT INTO child VALUES (1, 'x')")
@@ -81,14 +83,25 @@ async def test_a_clean_migration_reports_success() -> None:
 
     db = await _seeded()
     try:
-        actual = {"child": {"columns": {
-            "id": {"type": "INTEGER", "primary_key": True},
-            "note": {"type": "TEXT", "nullable": True}}}}
-        target = {"child": {"columns": {
-            "id": {"type": "INTEGER", "primary_key": True},
-            "note": {"type": "TEXT", "nullable": False}}}}
+        actual = {
+            "child": {
+                "columns": {
+                    "id": {"type": "INTEGER", "primary_key": True},
+                    "note": {"type": "TEXT", "nullable": True},
+                }
+            }
+        }
+        target = {
+            "child": {
+                "columns": {
+                    "id": {"type": "INTEGER", "primary_key": True},
+                    "note": {"type": "TEXT", "nullable": False},
+                }
+            }
+        }
         ops = [
-            o for o in diff(actual, target, dialect="turso", decisions={})["operations"]
+            o
+            for o in diff(actual, target, dialect="turso", decisions={})["operations"]
             if o["op"] == "alter_column"
         ]
         async with writing(db) as conn:

@@ -45,36 +45,128 @@ class TestQuoteColumn:
 
 class TestSelect:
     def test_no_columns_selects_everything(self):
-        assert select(from_table="users", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)["sql"] == 'SELECT * FROM "users"'
+        assert (
+            select(
+                from_table="users",
+                where=NOTHING,
+                params=NOTHING,
+                order_by=NOTHING,
+                limit=NOTHING,
+                offset=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            )["sql"]
+            == 'SELECT * FROM "users"'
+        )
 
     def test_an_explicit_star_selects_everything(self):
-        assert select("*", from_table="users", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)["sql"] == 'SELECT * FROM "users"'
+        assert (
+            select(
+                "*",
+                from_table="users",
+                where=NOTHING,
+                params=NOTHING,
+                order_by=NOTHING,
+                limit=NOTHING,
+                offset=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            )["sql"]
+            == 'SELECT * FROM "users"'
+        )
 
     def test_named_columns_are_quoted_and_comma_joined(self):
-        q = select("id", "email", from_table="users", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
+        q = select(
+            "id",
+            "email",
+            from_table="users",
+            where=NOTHING,
+            params=NOTHING,
+            order_by=NOTHING,
+            limit=NOTHING,
+            offset=NOTHING,
+            joins=NOTHING,
+            group_by=NOTHING,
+            having=NOTHING,
+        )
         assert q["sql"] == 'SELECT "id", "email" FROM "users"'
 
     def test_a_star_among_other_columns_is_not_treated_as_select_all(self):
         """Only a lone '*' is the shortcut; mixed lists go through quoting."""
-        q = select("id", "*", from_table="users", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
+        q = select(
+            "id",
+            "*",
+            from_table="users",
+            where=NOTHING,
+            params=NOTHING,
+            order_by=NOTHING,
+            limit=NOTHING,
+            offset=NOTHING,
+            joins=NOTHING,
+            group_by=NOTHING,
+            having=NOTHING,
+        )
         assert q["sql"] == 'SELECT "id", * FROM "users"'
 
     def test_a_where_clause_is_appended_and_params_carried(self):
-        q = select(from_table="users", where="id = :id", params={"id": 1}, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
+        q = select(
+            from_table="users",
+            where="id = :id",
+            params={"id": 1},
+            order_by=NOTHING,
+            limit=NOTHING,
+            offset=NOTHING,
+            joins=NOTHING,
+            group_by=NOTHING,
+            having=NOTHING,
+        )
         assert q["sql"] == 'SELECT * FROM "users" WHERE id = :id'
         assert q["params"] == {"id": 1}
 
     def test_params_default_to_an_empty_dict_not_none(self):
-        assert select(from_table="users", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)["params"] == {}
+        assert (
+            select(
+                from_table="users",
+                where=NOTHING,
+                params=NOTHING,
+                order_by=NOTHING,
+                limit=NOTHING,
+                offset=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            )["params"]
+            == {}
+        )
 
     def test_a_join_defaults_to_inner(self):
-        q = select(from_table="a", joins=[{"table": "b", "on": "a.id = b.a_id"}], where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, group_by=NOTHING, having=NOTHING)
+        q = select(
+            from_table="a",
+            joins=[{"table": "b", "on": "a.id = b.a_id"}],
+            where=NOTHING,
+            params=NOTHING,
+            order_by=NOTHING,
+            limit=NOTHING,
+            offset=NOTHING,
+            group_by=NOTHING,
+            having=NOTHING,
+        )
         assert 'INNER JOIN "b" ON a.id = b.a_id' in q["sql"]
 
     def test_an_explicit_join_type_is_used(self):
         q = select(
             from_table="a",
-            joins=[{"type": "LEFT", "table": "b", "on": "a.id = b.a_id"}], where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, group_by=NOTHING, having=NOTHING)
+            joins=[{"type": "LEFT", "table": "b", "on": "a.id = b.a_id"}],
+            where=NOTHING,
+            params=NOTHING,
+            order_by=NOTHING,
+            limit=NOTHING,
+            offset=NOTHING,
+            group_by=NOTHING,
+            having=NOTHING,
+        )
         assert 'LEFT JOIN "b" ON a.id = b.a_id' in q["sql"]
 
     def test_several_joins_appear_in_order(self):
@@ -83,39 +175,134 @@ class TestSelect:
             joins=[
                 {"table": "b", "on": "1=1"},
                 {"type": "LEFT", "table": "c", "on": "2=2"},
-            ], where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, group_by=NOTHING, having=NOTHING)
+            ],
+            where=NOTHING,
+            params=NOTHING,
+            order_by=NOTHING,
+            limit=NOTHING,
+            offset=NOTHING,
+            group_by=NOTHING,
+            having=NOTHING,
+        )
         assert q["sql"].index('"b"') < q["sql"].index('"c"')
 
     def test_group_by_columns_are_quoted(self):
-        q = select("dept", from_table="staff", group_by=["dept"], where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, having=NOTHING)
+        q = select(
+            "dept",
+            from_table="staff",
+            group_by=["dept"],
+            where=NOTHING,
+            params=NOTHING,
+            order_by=NOTHING,
+            limit=NOTHING,
+            offset=NOTHING,
+            joins=NOTHING,
+            having=NOTHING,
+        )
         assert 'GROUP BY "dept"' in q["sql"]
 
     def test_having_is_appended_after_group_by(self):
-        q = select(from_table="s", group_by=["d"], having="COUNT(*) > 1", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING)
+        q = select(
+            from_table="s",
+            group_by=["d"],
+            having="COUNT(*) > 1",
+            where=NOTHING,
+            params=NOTHING,
+            order_by=NOTHING,
+            limit=NOTHING,
+            offset=NOTHING,
+            joins=NOTHING,
+        )
         assert q["sql"].index("GROUP BY") < q["sql"].index("HAVING COUNT(*) > 1")
 
     def test_order_by_defaults_to_ascending(self):
-        q = select(from_table="users", order_by=["name"], where=NOTHING, params=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
+        q = select(
+            from_table="users",
+            order_by=["name"],
+            where=NOTHING,
+            params=NOTHING,
+            limit=NOTHING,
+            offset=NOTHING,
+            joins=NOTHING,
+            group_by=NOTHING,
+            having=NOTHING,
+        )
         assert 'ORDER BY "name" ASC' in q["sql"]
 
     def test_a_leading_minus_means_descending(self):
-        q = select(from_table="users", order_by=["-created_at"], where=NOTHING, params=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
+        q = select(
+            from_table="users",
+            order_by=["-created_at"],
+            where=NOTHING,
+            params=NOTHING,
+            limit=NOTHING,
+            offset=NOTHING,
+            joins=NOTHING,
+            group_by=NOTHING,
+            having=NOTHING,
+        )
         assert 'ORDER BY "created_at" DESC' in q["sql"]
 
     def test_mixed_directions_are_kept_in_order(self):
-        q = select(from_table="u", order_by=["-a", "b"], where=NOTHING, params=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
+        q = select(
+            from_table="u",
+            order_by=["-a", "b"],
+            where=NOTHING,
+            params=NOTHING,
+            limit=NOTHING,
+            offset=NOTHING,
+            joins=NOTHING,
+            group_by=NOTHING,
+            having=NOTHING,
+        )
         assert 'ORDER BY "a" DESC, "b" ASC' in q["sql"]
 
     def test_limit_and_offset_are_appended_in_that_order(self):
-        q = select(from_table="users", limit=10, offset=20, where=NOTHING, params=NOTHING, order_by=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
+        q = select(
+            from_table="users",
+            limit=10,
+            offset=20,
+            where=NOTHING,
+            params=NOTHING,
+            order_by=NOTHING,
+            joins=NOTHING,
+            group_by=NOTHING,
+            having=NOTHING,
+        )
         assert q["sql"].endswith("LIMIT 10 OFFSET 20")
 
     def test_a_zero_limit_is_emitted_not_dropped(self):
         """`if limit is not None` rather than `if limit` — 0 is a real limit."""
-        assert "LIMIT 0" in select(from_table="u", limit=0, where=NOTHING, params=NOTHING, order_by=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)["sql"]
+        assert (
+            "LIMIT 0"
+            in select(
+                from_table="u",
+                limit=0,
+                where=NOTHING,
+                params=NOTHING,
+                order_by=NOTHING,
+                offset=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            )["sql"]
+        )
 
     def test_a_zero_offset_is_emitted_not_dropped(self):
-        assert "OFFSET 0" in select(from_table="u", offset=0, where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)["sql"]
+        assert (
+            "OFFSET 0"
+            in select(
+                from_table="u",
+                offset=0,
+                where=NOTHING,
+                params=NOTHING,
+                order_by=NOTHING,
+                limit=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            )["sql"]
+        )
 
     def test_clauses_appear_in_sql_order(self):
         q = select(
@@ -127,29 +314,58 @@ class TestSelect:
             having="COUNT(*) > 0",
             order_by=["a"],
             limit=5,
-            offset=1, params=NOTHING)
+            offset=1,
+            params=NOTHING,
+        )
         sql = q["sql"]
         positions = [
             sql.index(k)
-            for k in ("SELECT", "FROM", "JOIN", "WHERE", "GROUP BY",
-                      "HAVING", "ORDER BY", "LIMIT", "OFFSET")
+            for k in (
+                "SELECT",
+                "FROM",
+                "JOIN",
+                "WHERE",
+                "GROUP BY",
+                "HAVING",
+                "ORDER BY",
+                "LIMIT",
+                "OFFSET",
+            )
         ]
         assert positions == sorted(positions)
 
     def test_the_dialect_is_left_unset(self):
-        assert select(from_table="users", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)["dialect"] is None
+        assert (
+            select(
+                from_table="users",
+                where=NOTHING,
+                params=NOTHING,
+                order_by=NOTHING,
+                limit=NOTHING,
+                offset=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            )["dialect"]
+            is None
+        )
 
 
 class TestInsert:
     def test_a_single_row_uses_named_parameters(self):
-        q = insert("users", {"email": "a@b.c", "name": "Ada"}, returning=NOTHING, on_conflict=NOTHING)
-        assert q["sql"] == (
-            'INSERT INTO "users" ("email", "name") VALUES (:email, :name)'
+        q = insert(
+            "users", {"email": "a@b.c", "name": "Ada"}, returning=NOTHING, on_conflict=NOTHING
         )
+        assert q["sql"] == ('INSERT INTO "users" ("email", "name") VALUES (:email, :name)')
         assert q["params"] == {"email": "a@b.c", "name": "Ada"}
 
     def test_values_are_never_interpolated_into_the_sql(self):
-        q = insert("users", {"name": "Robert'); DROP TABLE users;--"}, returning=NOTHING, on_conflict=NOTHING)
+        q = insert(
+            "users",
+            {"name": "Robert'); DROP TABLE users;--"},
+            returning=NOTHING,
+            on_conflict=NOTHING,
+        )
         assert "DROP TABLE" not in q["sql"]
         assert q["params"]["name"] == "Robert'); DROP TABLE users;--"
 
@@ -159,7 +375,9 @@ class TestInsert:
         assert q["params"] == {"id_0": 1, "id_1": 2}
 
     def test_a_one_row_list_still_takes_the_named_path(self):
-        assert insert("t", [{"id": 1}], returning=NOTHING, on_conflict=NOTHING)["params"] == {"id": 1}
+        assert insert("t", [{"id": 1}], returning=NOTHING, on_conflict=NOTHING)["params"] == {
+            "id": 1
+        }
 
     def test_columns_come_from_the_first_row(self):
         q = insert("t", [{"a": 1}, {"a": 2, "b": 3}], returning=NOTHING, on_conflict=NOTHING)
@@ -207,7 +425,9 @@ class TestUpdate:
             update("users", {}, where="", params=NOTHING, returning=NOTHING)
 
     def test_an_explicit_all_rows_where_is_allowed(self):
-        assert update("users", {"a": 1}, where="1=1", params=NOTHING, returning=NOTHING)["sql"].endswith("WHERE 1=1")
+        assert update("users", {"a": 1}, where="1=1", params=NOTHING, returning=NOTHING)[
+            "sql"
+        ].endswith("WHERE 1=1")
 
     def test_several_set_columns_are_comma_joined(self):
         q = update("t", {"a": 1, "b": 2}, where="1=1", params=NOTHING, returning=NOTHING)
@@ -218,7 +438,9 @@ class TestUpdate:
         assert q["sql"].endswith('RETURNING "a"')
 
     def test_no_params_leaves_only_the_set_bindings(self):
-        assert update("t", {"a": 1}, where="1=1", params=NOTHING, returning=NOTHING)["params"] == {"set_a": 1}
+        assert update("t", {"a": 1}, where="1=1", params=NOTHING, returning=NOTHING)["params"] == {
+            "set_a": 1
+        }
 
 
 class TestDelete:
@@ -255,7 +477,20 @@ class TestComposition:
         assert with_limit(raw("SELECT 1", params=NOTHING), 5)["sql"] == "SELECT 1 LIMIT 5"
 
     def test_with_limit_replaces_an_existing_limit(self):
-        q = with_limit(select(from_table="t", limit=10, where=NOTHING, params=NOTHING, order_by=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), 5)
+        q = with_limit(
+            select(
+                from_table="t",
+                limit=10,
+                where=NOTHING,
+                params=NOTHING,
+                order_by=NOTHING,
+                offset=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            ),
+            5,
+        )
         assert q["sql"].endswith("LIMIT 5")
         assert "LIMIT 10" not in q["sql"]
 
@@ -263,7 +498,20 @@ class TestComposition:
         assert with_offset(raw("SELECT 1", params=NOTHING), 5)["sql"] == "SELECT 1 OFFSET 5"
 
     def test_with_offset_replaces_an_existing_offset(self):
-        q = with_offset(select(from_table="t", offset=10, where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), 5)
+        q = with_offset(
+            select(
+                from_table="t",
+                offset=10,
+                where=NOTHING,
+                params=NOTHING,
+                order_by=NOTHING,
+                limit=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            ),
+            5,
+        )
         assert q["sql"].endswith("OFFSET 5")
         assert "OFFSET 10" not in q["sql"]
 
@@ -271,7 +519,20 @@ class TestComposition:
         """Documented behaviour worth pinning: LIMIT splits on ' LIMIT ' only,
         so applying it to a query already carrying OFFSET keeps the OFFSET
         text ahead of the new LIMIT and produces invalid SQL ordering."""
-        q = with_limit(select(from_table="t", limit=1, offset=2, where=NOTHING, params=NOTHING, order_by=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), 5)
+        q = with_limit(
+            select(
+                from_table="t",
+                limit=1,
+                offset=2,
+                where=NOTHING,
+                params=NOTHING,
+                order_by=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            ),
+            5,
+        )
         assert q["sql"] == 'SELECT * FROM "t" LIMIT 5'
 
     def test_composition_preserves_params_and_dialect(self):

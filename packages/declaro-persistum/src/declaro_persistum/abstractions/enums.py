@@ -91,11 +91,7 @@ def create_enum_table_sql(
     statements: list[str] = []
 
     # Create the lookup table
-    statements.append(
-        f'CREATE TABLE "{lookup_name}" (\n'
-        f"    value TEXT PRIMARY KEY\n"
-        f")"
-    )
+    statements.append(f'CREATE TABLE "{lookup_name}" (\n    value TEXT PRIMARY KEY\n)')
 
     # An enum with no values needs no INSERT, so the comprehension over the
     # nought-or-one case is the whole of it.
@@ -135,9 +131,7 @@ def add_enum_value_sql(table: str, column: str, value: str) -> list[str]:
         List of SQL statements
     """
     lookup_name = enum_table_name(table, column)
-    return [
-        f"INSERT INTO \"{lookup_name}\" (value) VALUES ('{_escape_sql(value)}')"
-    ]
+    return [f"INSERT INTO \"{lookup_name}\" (value) VALUES ('{_escape_sql(value)}')"]
 
 
 def remove_enum_value_sql(table: str, column: str, value: str) -> list[str]:
@@ -154,9 +148,7 @@ def remove_enum_value_sql(table: str, column: str, value: str) -> list[str]:
         List of SQL statements
     """
     lookup_name = enum_table_name(table, column)
-    return [
-        f"DELETE FROM \"{lookup_name}\" WHERE value = '{_escape_sql(value)}'"
-    ]
+    return [f"DELETE FROM \"{lookup_name}\" WHERE value = '{_escape_sql(value)}'"]
 
 
 def get_enum_fk_reference(table: str, column: str) -> str:
@@ -197,9 +189,7 @@ def transform_column_for_enum(
     return _AS_ENUM_COLUMN[bool(literal_values)](new_def, table, column)
 
 
-def _pointing_at_the_lookup(
-    column_def: dict[str, Any], table: str, column: str
-) -> dict[str, Any]:
+def _pointing_at_the_lookup(column_def: dict[str, Any], table: str, column: str) -> dict[str, Any]:
     """The FK replaces the CHECK, so any CHECK that was there comes off."""
     return {
         **{k: v for k, v in column_def.items() if k != "check"},
@@ -207,9 +197,7 @@ def _pointing_at_the_lookup(
     }
 
 
-def _as_declared(
-    column_def: dict[str, Any], _table: str, _column: str
-) -> dict[str, Any]:
+def _as_declared(column_def: dict[str, Any], _table: str, _column: str) -> dict[str, Any]:
     """No Literal values, so nothing about this column changes."""
     return column_def
 
@@ -235,12 +223,8 @@ def expand_schema_enums(schema: Schema) -> dict[str, Any]:
     # A table this loader already made is carried through untouched; every
     # other table has each of its Literal columns turned into a foreign key
     # and gains a lookup table to point at.
-    ours = {
-        name: table for name, table in schema.items() if is_enum_table(name)
-    }
-    theirs = {
-        name: table for name, table in schema.items() if not is_enum_table(name)
-    }
+    ours = {name: table for name, table in schema.items() if is_enum_table(name)}
+    theirs = {name: table for name, table in schema.items() if not is_enum_table(name)}
 
     # The filter has to sit above the call, because a comprehension evaluates
     # its clauses in order and `generate_enum_table_schema` would otherwise

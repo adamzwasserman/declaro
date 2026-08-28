@@ -51,10 +51,7 @@ def _reaches_a_remote(path: pathlib.Path) -> bool:
         if getattr(node.func, "attr", None) not in ("get", "environ"):
             continue
         for argument in node.args:
-            if (
-                isinstance(argument, ast.Constant)
-                and argument.value in REMOTE_VARIABLES
-            ):
+            if isinstance(argument, ast.Constant) and argument.value in REMOTE_VARIABLES:
                 return True
     return False
 
@@ -83,11 +80,7 @@ def _test_files() -> list[pathlib.Path]:
     # This file names the marker throughout and reads no credential, so it
     # would report itself. A gate that cannot see past its own text is the
     # third detector today to count prose as code.
-    return [
-        p
-        for p in sorted(TESTS.rglob("test_*.py"))
-        if p != pathlib.Path(__file__).resolve()
-    ]
+    return [p for p in sorted(TESTS.rglob("test_*.py")) if p != pathlib.Path(__file__).resolve()]
 
 
 def test_the_gate_can_see_the_files_at_all() -> None:
@@ -171,9 +164,7 @@ def _remote_steps() -> set[str]:
                 if not isinstance(decorator, ast.Call):
                     continue
                 for argument in decorator.args:
-                    if isinstance(argument, ast.Constant) and isinstance(
-                        argument.value, str
-                    ):
+                    if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
                         found.add(argument.value)
     return found
 
@@ -221,5 +212,5 @@ def test_every_scenario_that_opens_a_remote_is_tagged() -> None:
 
     assert not untagged, (
         f"these scenarios open against a live remote and carry no @network "
-        f"tag, so `-m \"not network\"` still runs them: {untagged}"
+        f'tag, so `-m "not network"` still runs them: {untagged}'
     )

@@ -148,7 +148,6 @@ def check_shutdown(policy: str, *, can_replicate: bool, opener: str) -> None:
     _CAN_HONOUR_POLICY[can_replicate or policy != "replicate"](policy, opener)
 
 
-
 # THE INJECTED BOUNDARY, NAMED. Every one of these was `Callable[..., Any]`,
 # which declares that a value can be called and nothing else — not the arity,
 # not the argument, not the return. A caller could hand `replicate_once` a
@@ -600,7 +599,9 @@ async def _nothing_to_deliver(_db: Database, _now: Callable[[], float]) -> int:
 async def _deliver_before_exit(db: Database, now: Callable[[], float]) -> int:
     """Retry until the primary has everything, saying so on every attempt."""
     started = now()
-    say(__name__, "info",
+    say(
+        __name__,
+        "info",
         "Shutdown: replicating %s to its primary before exit. The process will "
         "not exit until this completes.",
         db["path"],
@@ -608,16 +609,24 @@ async def _deliver_before_exit(db: Database, now: Callable[[], float]) -> int:
     attempt = 0
     while not await db["replicate_once"](db):
         attempt += 1
-        say(__name__, "warning",
+        say(
+            __name__,
+            "warning",
             "Shutdown: replicating %s — attempt %d failed after %.1fs. "
             "Not yet delivered to the primary.",
-            db["path"], attempt, now() - started,
+            db["path"],
+            attempt,
+            now() - started,
         )
         await db["sleep"](db["retry_delay_s"])
     await db["refresh_once"](db)
-    say(__name__, "info",
+    say(
+        __name__,
+        "info",
         "Shutdown: %s is in conformity with its primary after %.1fs (%d retries).",
-        db["path"], now() - started, attempt,
+        db["path"],
+        now() - started,
+        attempt,
     )
     return 1
 

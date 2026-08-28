@@ -56,9 +56,9 @@ CALL = re.compile(r"^(?:\w[\w\.]*\s*=\s*)?(?:await\s+)?(\w+)\((.*)\)\s*$")
 def _callables() -> dict[str, object]:
     found: dict[str, object] = {}
     for path in ROOT.rglob("*.py"):
-        module = ".".join(
-            path.relative_to(ROOT.parent).with_suffix("").parts
-        ).removesuffix(".__init__")
+        module = ".".join(path.relative_to(ROOT.parent).with_suffix("").parts).removesuffix(
+            ".__init__"
+        )
         try:
             loaded = importlib.import_module(module)
         except Exception:
@@ -104,14 +104,12 @@ def test_the_gate_can_see_the_samples_at_all() -> None:
 def test_no_docstring_sample_calls_a_function_the_wrong_way() -> None:
     """The three measured samples, as a rule over all of them."""
     wrong: list[str] = []
-    for path, line, name, fn in _samples():
+    for path, line, _name, fn in _samples():
         try:
             tree = ast.parse(line.removeprefix("await "))
         except SyntaxError:
             continue
-        call = next(
-            (n for n in ast.walk(tree) if isinstance(n, ast.Call)), None
-        )
+        call = next((n for n in ast.walk(tree) if isinstance(n, ast.Call)), None)
         if call is None:
             continue
         try:
@@ -125,8 +123,7 @@ def test_no_docstring_sample_calls_a_function_the_wrong_way() -> None:
         required = {
             n
             for n, p in params.items()
-            if p.default is p.empty
-            and p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
+            if p.default is p.empty and p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)
         }
         missing = required - given - set(list(params)[: len(call.args)])
         if unknown or missing:

@@ -128,12 +128,7 @@ def _conn() -> sqlite3.Connection:
 def _index_inputs(conn, table: str):
     rows = conn.execute(f"PRAGMA index_list({table})").fetchall()
     info = {r[1]: conn.execute(f"PRAGMA index_info({r[1]})").fetchall() for r in rows}
-    sql = {
-        name: statement
-        for name, statement in conn.execute(
-            "SELECT name, sql FROM sqlite_master WHERE type='index'"
-        )
-    }
+    sql = dict(conn.execute("SELECT name, sql FROM sqlite_master WHERE type='index'"))
     return rows, info, sql
 
 
@@ -207,9 +202,7 @@ def test_a_table_with_nothing_extra_carries_nothing_extra() -> None:
 
 def test_a_view_is_read_with_its_query() -> None:
     conn = _conn()
-    rows = conn.execute(
-        "SELECT name, sql FROM sqlite_master WHERE type='view'"
-    ).fetchall()
+    rows = conn.execute("SELECT name, sql FROM sqlite_master WHERE type='view'").fetchall()
 
     views = views_from_rows(rows, {})
 
@@ -221,8 +214,6 @@ def test_a_view_is_read_with_its_query() -> None:
 def test_a_materialized_view_is_marked_as_one() -> None:
     """The distinction is why the function takes two arguments: a plain view
     is recreated freely and a materialized one holds data."""
-    views = views_from_rows(
-        [], {"stats": ("SELECT count(*) FROM users", "manual", ["users"])}
-    )
+    views = views_from_rows([], {"stats": ("SELECT count(*) FROM users", "manual", ["users"])})
 
     assert views["stats"]["materialized"] is True

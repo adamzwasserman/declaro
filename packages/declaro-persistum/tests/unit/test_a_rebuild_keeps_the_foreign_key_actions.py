@@ -48,6 +48,7 @@ import pytest
 
 from declaro_persistum.applier import apply
 from declaro_persistum.differ.core import diff
+from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE
 from declaro_persistum.inspector import introspect
 from declaro_persistum.types import NOTHING
 
@@ -62,16 +63,14 @@ def _schema(note_type: str, **fk: Any) -> dict[str, Any]:
             # constraint kind this rebuild dropped, after the unique and the
             # foreign key, and for the same reason: the rebuild is handed
             # columns and a table-level constraint is not on a column.
-            "constraints": {
-                "ck_age": {"type": "check", "expression": "age > 0"}
-            },
+            "constraints": {"ck_age": {"type": "check", "expression": "age > 0"}},
             "columns": {
                 "id": {"type": "integer", "primary_key": True},
                 "pid": {"type": "integer", "references": "parents.id", **fk},
                 "email": {"type": "text", "unique": True},
                 "age": {"type": "integer", "check": "age > 0"},
                 "note": {"type": note_type},
-            }
+            },
         },
     }
 
@@ -108,15 +107,15 @@ ENGINES = {"sqlite": _sqlite, "turso": _turso}
 
 async def _apply(connection: Any, dialect: str, current: dict, target: dict) -> None:
     plan = diff(current, target, dialect=dialect, decisions=NOTHING)
-    await apply(
-        connection, plan["operations"], plan["execution_order"], dialect, dry_run=False
-    )
+    await apply(connection, plan["operations"], plan["execution_order"], dialect, dry_run=False)
 
 
 @pytest.mark.parametrize("label,fk", ACTIONS, ids=[a[0].replace(" ", "_") for a in ACTIONS])
 @pytest.mark.parametrize("dialect", sorted(ENGINES))
 async def test_the_actions_survive_a_rebuild(
-    dialect: str, label: str, fk: dict
+    dialect: str,
+    label: str,  # noqa: ARG001 - parametrize unpacks it; it names the case
+    fk: dict,
 ) -> None:
     """The rebuild is triggered by a column the foreign key has nothing to do
     with, which is what makes it a rebuild rather than a change to the key."""
@@ -151,7 +150,9 @@ async def test_the_rebuild_converges(dialect: str) -> None:
         remaining = diff(
             {n: rebuilt[n] for n in declared if n in rebuilt},
             declared,
-            dialect=dialect, decisions=NOTHING)["operations"]
+            dialect=dialect,
+            decisions=NOTHING,
+        )["operations"]
 
         assert remaining == [], [(o["op"], o["table"]) for o in remaining]
     finally:
@@ -176,9 +177,7 @@ async def test_the_cascade_is_still_enforced_after_a_rebuild() -> None:
 
         await connection.execute("PRAGMA foreign_keys = ON")
         await connection.execute('INSERT INTO "parents" (id) VALUES (1)')
-        await connection.execute(
-            'INSERT INTO "children" (id, pid, note) VALUES (1, 1, 0)'
-        )
+        await connection.execute('INSERT INTO "children" (id, pid, note) VALUES (1, 1, 0)')
         await connection.commit()
 
         await connection.execute('DELETE FROM "parents" WHERE id = 1')
@@ -186,8 +185,7 @@ async def test_the_cascade_is_still_enforced_after_a_rebuild() -> None:
 
         cursor = await connection.execute('SELECT count(*) FROM "children"')
         assert (await cursor.fetchone())[0] == 0, (
-            "the parent was deleted and the child stayed: the cascade is "
-            "declared but not enforced"
+            "the parent was deleted and the child stayed: the cascade is declared but not enforced"
         )
     finally:
         await connection.close()
@@ -204,9 +202,9 @@ async def test_a_unique_survives_a_rebuild(dialect: str) -> None:
 
         rebuilt = await introspect(connection, dialect)
 
-        assert rebuilt["children"]["columns"]["email"].get("unique") is True, (
-            rebuilt["children"]["columns"]["email"]
-        )
+        assert rebuilt["children"]["columns"]["email"].get("unique") is True, rebuilt["children"][
+            "columns"
+        ]["email"]
     finally:
         await connection.close()
 
@@ -222,9 +220,9 @@ async def test_a_check_survives_a_rebuild(dialect: str) -> None:
 
         rebuilt = await introspect(connection, dialect)
 
-        assert rebuilt["children"]["columns"]["age"].get("check"), (
-            rebuilt["children"]["columns"]["age"]
-        )
+        assert rebuilt["children"]["columns"]["age"].get("check"), rebuilt["children"]["columns"][
+            "age"
+        ]
     finally:
         await connection.close()
 
@@ -266,9 +264,7 @@ async def test_a_table_level_constraint_survives_a_rebuild(dialect: str) -> None
 
         rebuilt = await introspect(connection, dialect)
 
-        assert rebuilt["children"].get("constraints", {}).get("ck_age"), (
-            rebuilt["children"]
-        )
+        assert rebuilt["children"].get("constraints", {}).get("ck_age"), rebuilt["children"]
     finally:
         await connection.close()
 
@@ -283,11 +279,22 @@ async def test_the_table_level_constraint_is_still_enforced(dialect: str) -> Non
         await _apply(connection, dialect, actual, _schema("integer", on_delete="cascade"))
 
         cursor = connection.cursor() if dialect == "turso" else connection
-        with pytest.raises(Exception):
+        # NOT `pytest.raises(Exception)` ALONE. That passes on a bug of ours
+        # as readily as on the engine refusing, which is the misattribution
+        # `A_BUG_IN_THIS_PACKAGE` exists to name. The type cannot be pinned
+        # to one class here because three engines each raise their own, so
+        # the claim is the one that matters: something refused, and it was
+        # not us.
+        with pytest.raises(Exception) as refused:  # noqa: B017 - checked below
             await cursor.execute(
                 'INSERT INTO "children" (id, pid, email, age, note) '
                 "VALUES (1, NULL, 'a@b.c', -5, 0)"
             )
             await connection.commit()
+
+        assert not isinstance(refused.value, A_BUG_IN_THIS_PACKAGE), (
+            f"the engine was supposed to refuse this; instead a bug of ours "
+            f"raised {type(refused.value).__name__}: {refused.value}"
+        )
     finally:
         await connection.close()

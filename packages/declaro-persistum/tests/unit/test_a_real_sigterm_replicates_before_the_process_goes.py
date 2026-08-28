@@ -46,9 +46,7 @@ from declaro_persistum.shutdown import trap_shutdown
 pytestmark = pytest.mark.precommit
 
 
-def _a_database_that_records_its_replication(
-    replicated: list[str], slept: list[float]
-) -> Any:
+def _a_database_that_records_its_replication(replicated: list[str], slept: list[float]) -> Any:
     """A Database whose replicate step says it ran, and nothing else.
 
     The keys are the ones `replicate_on_shutdown` reads, taken from
@@ -90,9 +88,7 @@ def test_a_signal_with_no_running_loop_replicates() -> None:
     """The deployment case: a synchronous process taking SIGTERM."""
     replicated: list[str] = []
     slept: list[float] = []
-    restore = trap_shutdown(
-        _a_database_that_records_its_replication(replicated, slept)
-    )["untrap"]
+    restore = trap_shutdown(_a_database_that_records_its_replication(replicated, slept))["untrap"]
     try:
         signal.raise_signal(signal.SIGTERM)
     finally:
@@ -112,9 +108,9 @@ def test_a_signal_inside_a_running_loop_replicates() -> None:
     slept: list[float] = []
 
     async def _take_the_signal() -> None:
-        restore = trap_shutdown(
-            _a_database_that_records_its_replication(replicated, slept)
-        )["untrap"]
+        restore = trap_shutdown(_a_database_that_records_its_replication(replicated, slept))[
+            "untrap"
+        ]
         try:
             signal.raise_signal(signal.SIGTERM)
             # The handler hands the work to the running loop as a task, so it
@@ -145,9 +141,9 @@ def test_a_closed_loop_is_not_mistaken_for_a_stopped_one() -> None:
     try:
         replicated: list[str] = []
         slept: list[float] = []
-        restore = trap_shutdown(
-            _a_database_that_records_its_replication(replicated, slept)
-        )["untrap"]
+        restore = trap_shutdown(_a_database_that_records_its_replication(replicated, slept))[
+            "untrap"
+        ]
         try:
             signal.raise_signal(signal.SIGTERM)
         finally:
@@ -182,8 +178,13 @@ async def test_closing_stops_the_listening_it_started() -> None:
     replicated: list[str] = []
     slept: list[float] = []
     db = _a_database_that_records_its_replication(replicated, slept)
-    db = {**db, "flush": _did_nothing, "release": _did_nothing,
-          "closed": False, "untrap": nothing_was_trapped}
+    db = {
+        **db,
+        "flush": _did_nothing,
+        "release": _did_nothing,
+        "closed": False,
+        "untrap": nothing_was_trapped,
+    }
 
     # A HARMLESS CATCHER STANDS IN FOR THE HOST'S OWN HANDLER, and it has to
     # be installed BEFORE the trap. The signal raised below arrives after the
@@ -210,12 +211,8 @@ async def test_closing_stops_the_listening_it_started() -> None:
 
         replicated.clear()
         signal.raise_signal(signal.SIGTERM)
-        assert replicated == [], (
-            "a SIGTERM after close replicated a database that was released"
-        )
-        assert caught == ["host"], (
-            "the host's own handler did not run, so the signal went nowhere"
-        )
+        assert replicated == [], "a SIGTERM after close replicated a database that was released"
+        assert caught == ["host"], "the host's own handler did not run, so the signal went nowhere"
     finally:
         signal.signal(signal.SIGTERM, original)
 

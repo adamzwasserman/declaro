@@ -152,20 +152,13 @@ def _when_unrenderable(ctx, dialect):
 # --------------------------------------------------- translating between engines
 
 
-@when(
-    parsers.parse(
-        '_translate_default is given "{value}" for "{dialect}" on column "{column}"'
-    )
-)
+@when(parsers.parse('_translate_default is given "{value}" for "{dialect}" on column "{column}"'))
 def _when_translate_default(ctx, value, dialect, column):
     _call(ctx, "_translate_default", value, dialect, column)
 
 
 @when(
-    parsers.parse(
-        '_translate_text_default is given "{value}" for "{dialect}" '
-        'on column "{column}"'
-    )
+    parsers.parse('_translate_text_default is given "{value}" for "{dialect}" on column "{column}"')
 )
 def _when_translate_text(ctx, value, dialect, column):
     _call(ctx, "_translate_text_default", value, dialect, column)
@@ -173,8 +166,7 @@ def _when_translate_text(ctx, value, dialect, column):
 
 @when(
     parsers.parse(
-        "_untranslated_default is given the number {value:d} for "
-        '"{dialect}" on column "{column}"'
+        '_untranslated_default is given the number {value:d} for "{dialect}" on column "{column}"'
     )
 )
 def _when_untranslated(ctx, value, dialect, column):
@@ -183,8 +175,7 @@ def _when_untranslated(ctx, value, dialect, column):
 
 @when(
     parsers.parse(
-        '_the_spellable_expression is given "{value}" for "{dialect}" '
-        'on column "{column}"'
+        '_the_spellable_expression is given "{value}" for "{dialect}" on column "{column}"'
     )
 )
 def _when_spellable_expression(ctx, value, dialect, column):
@@ -193,8 +184,7 @@ def _when_spellable_expression(ctx, value, dialect, column):
 
 @when(
     parsers.parse(
-        '_refuse_unspellable_expression is given "{value}" for "{dialect}" '
-        'on column "{column}"'
+        '_refuse_unspellable_expression is given "{value}" for "{dialect}" on column "{column}"'
     )
 )
 def _when_unspellable_expression(ctx, value, dialect, column):
@@ -245,7 +235,10 @@ def _when_unique_clause(ctx, name, column):
 @when(parsers.parse('_write_constraint is given a check "{name}" on "{expression}"'))
 def _when_write_constraint(ctx, name, expression):
     _call(
-        ctx, "_write_constraint", name, "check",
+        ctx,
+        "_write_constraint",
+        name,
+        "check",
         {"type": "check", "expression": expression},
     )
 

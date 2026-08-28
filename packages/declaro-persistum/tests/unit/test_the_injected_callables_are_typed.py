@@ -103,8 +103,7 @@ def test_the_writers_need_no_escape_hatch() -> None:
     offenders = [
         token.string
         for token in tokenize.generate_tokens(io.StringIO(source).readline)
-        if token.type == tokenize.COMMENT
-        and token.string.startswith("# type: ignore")
+        if token.type == tokenize.COMMENT and token.string.startswith("# type: ignore")
     ]
     assert not offenders, (
         f"{len(offenders)} type escapes in writers.py: {offenders}. Each one "

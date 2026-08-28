@@ -224,10 +224,7 @@ def test_asyncpg_numbers_every_placeholder_it_emits(case) -> None:
 # -------------------------------------------------- against the real drivers
 
 
-_STATEMENT = (
-    "SELECT id FROM b WHERE id = :id AND tag = :id_2 "
-    "AND note = 'has :id inside'"
-)
+_STATEMENT = "SELECT id FROM b WHERE id = :id AND tag = :id_2 AND note = 'has :id inside'"
 _PARAMS = {"id": 1, "id_2": "x"}
 
 
@@ -254,9 +251,7 @@ async def test_asyncpg_accepts_and_answers_the_converted_statement() -> None:
     try:
         await conn.execute("DROP TABLE IF EXISTS b CASCADE")
         await conn.execute("CREATE TABLE b (id INTEGER, tag TEXT, note TEXT)")
-        await conn.execute(
-            "INSERT INTO b VALUES (1,'x','has :id inside'),(2,'y','other')"
-        )
+        await conn.execute("INSERT INTO b VALUES (1,'x','has :id inside'),(2,'y','other')")
 
         sql, values = _convert_to_asyncpg(_STATEMENT, _PARAMS)
         rows = await conn.fetch(sql, *values)

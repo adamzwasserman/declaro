@@ -50,10 +50,7 @@ from tests.conftest import probe_url, refuse_without_postgresql
 
 pytestmark = [pytest.mark.precommit]
 
-INLINE_MULTI = (
-    'CREATE TABLE "t" ("a" INTEGER PRIMARY KEY, "c" TEXT, "d" TEXT, '
-    'UNIQUE ("c","d"))'
-)
+INLINE_MULTI = 'CREATE TABLE "t" ("a" INTEGER PRIMARY KEY, "c" TEXT, "d" TEXT, UNIQUE ("c","d"))'
 INLINE_SINGLE = 'CREATE TABLE "t" ("a" INTEGER PRIMARY KEY, "email" TEXT UNIQUE)'
 NAMED_INDEX = [
     'CREATE TABLE "t" ("a" INTEGER PRIMARY KEY, "c" TEXT, "d" TEXT)',
@@ -137,9 +134,7 @@ async def test_a_single_column_unique_is_still_folded_onto_the_column(
 
         assert actual["t"]["columns"]["email"].get("unique") is True
         indexes = actual["t"].get("indexes") or {}
-        assert not any(
-            index.get("columns") == ["email"] for index in indexes.values()
-        ), indexes
+        assert not any(index.get("columns") == ["email"] for index in indexes.values()), indexes
     finally:
         await connection.close()
 
@@ -220,7 +215,9 @@ async def test_a_declared_multi_column_unique_converges(dialect: str) -> None:
         remaining = diff(
             {n: actual[n] for n in DECLARED if n in actual},
             DECLARED,
-            dialect=dialect, decisions=NOTHING)["operations"]
+            dialect=dialect,
+            decisions=NOTHING,
+        )["operations"]
 
         assert actual["t"]["indexes"]["ix_cd"]["columns"] == ["c", "d"]
         assert remaining == [], [(o["op"], o["table"]) for o in remaining]

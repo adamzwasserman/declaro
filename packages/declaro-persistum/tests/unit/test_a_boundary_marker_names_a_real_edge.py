@@ -114,9 +114,7 @@ BASELINE_BUILD = "92066fd, built 2026-08-27 12:57"
 # markers that exist for another checker beats thirteen places doing I/O.
 INTERIOR_IO_BASELINE = 2
 
-_AUDIT = shutil.which("slop-audit-l1") or str(
-    pathlib.Path.home() / ".local/bin/slop-audit-l1"
-)
+_AUDIT = shutil.which("slop-audit-l1") or str(pathlib.Path.home() / ".local/bin/slop-audit-l1")
 
 
 def _clause_four() -> list[str]:
@@ -134,9 +132,7 @@ def _clause_four() -> list[str]:
 
 def _decorations_that_state_an_edge_that_is_not_there() -> list[str]:
     """Every `@boundary` the analyzer says obtains nothing outside the process."""
-    return [
-        line for line in _clause_four() if "declares itself a boundary" in line
-    ]
+    return [line for line in _clause_four() if "declares itself a boundary" in line]
 
 
 def _io_in_the_interior() -> list[str]:

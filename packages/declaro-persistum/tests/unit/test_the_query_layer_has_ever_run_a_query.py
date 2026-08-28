@@ -99,9 +99,7 @@ async def _seeded(dialect: str) -> Any:
                 'INSERT INTO "people" (id, name, age) VALUES ($1, $2, $3)', *row
             )
         else:
-            await connection.execute(
-                'INSERT INTO "people" (id, name, age) VALUES (?, ?, ?)', row
-            )
+            await connection.execute('INSERT INTO "people" (id, name, age) VALUES (?, ?, ?)', row)
     if dialect != "postgresql":
         await connection.commit()
     return connection
@@ -117,7 +115,22 @@ async def _done(connection: Any, dialect: str) -> None:
 async def test_select_returns_every_row(dialect: str) -> None:
     connection = await _seeded(dialect)
     try:
-        rows = await execute(select("*", from_table="people", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), connection, row_factory=NOTHING)
+        rows = await execute(
+            select(
+                "*",
+                from_table="people",
+                where=NOTHING,
+                params=NOTHING,
+                order_by=NOTHING,
+                limit=NOTHING,
+                offset=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            ),
+            connection,
+            row_factory=NOTHING,
+        )
 
         assert len(rows) == len(ROWS), rows
         assert {r["name"] for r in rows} == {"alice", "bob", "carol"}
@@ -135,8 +148,17 @@ async def test_a_named_parameter_binds_on_every_driver(dialect: str) -> None:
                 "*",
                 from_table="people",
                 where="age > :floor",
-                params={"floor": 28}, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
-            connection, row_factory=NOTHING)
+                params={"floor": 28},
+                order_by=NOTHING,
+                limit=NOTHING,
+                offset=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            ),
+            connection,
+            row_factory=NOTHING,
+        )
 
         assert {r["name"] for r in rows} == {"alice", "carol"}, rows
     finally:
@@ -164,8 +186,17 @@ async def test_the_same_parameter_used_twice_binds_once(dialect: str) -> None:
                 "*",
                 from_table="people",
                 where="age > :n AND age < :n + 100",
-                params={"n": 28}, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
-            connection, row_factory=NOTHING)
+                params={"n": 28},
+                order_by=NOTHING,
+                limit=NOTHING,
+                offset=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            ),
+            connection,
+            row_factory=NOTHING,
+        )
 
         assert {r["name"] for r in rows} == {"alice", "carol"}, rows
     finally:
@@ -178,8 +209,20 @@ async def test_execute_one_returns_a_single_row(dialect: str) -> None:
     try:
         row = await execute_one(
             select(
-                "*", from_table="people", where="name = :n", params={"n": "bob"}, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
-            connection, row_factory=NOTHING)
+                "*",
+                from_table="people",
+                where="name = :n",
+                params={"n": "bob"},
+                order_by=NOTHING,
+                limit=NOTHING,
+                offset=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            ),
+            connection,
+            row_factory=NOTHING,
+        )
 
         assert row is not None and row["age"] == 25, row
     finally:
@@ -195,8 +238,20 @@ async def test_execute_one_returns_none_when_nothing_matches(
     try:
         row = await execute_one(
             select(
-                "*", from_table="people", where="name = :n", params={"n": "nobody"}, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
-            connection, row_factory=NOTHING)
+                "*",
+                from_table="people",
+                where="name = :n",
+                params={"n": "nobody"},
+                order_by=NOTHING,
+                limit=NOTHING,
+                offset=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            ),
+            connection,
+            row_factory=NOTHING,
+        )
 
         assert row is None, row
     finally:
@@ -209,7 +264,19 @@ async def test_a_scalar_comes_back_as_a_value(dialect: str) -> None:
     connection = await _seeded(dialect)
     try:
         total = await execute_scalar(
-            select("COUNT(*)", from_table="people", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), connection
+            select(
+                "COUNT(*)",
+                from_table="people",
+                where=NOTHING,
+                params=NOTHING,
+                order_by=NOTHING,
+                limit=NOTHING,
+                offset=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            ),
+            connection,
         )
 
         assert total == len(ROWS), repr(total)
@@ -222,14 +289,33 @@ async def test_an_insert_lands_and_is_counted(dialect: str) -> None:
     connection = await _seeded(dialect)
     try:
         affected = await execute_many(
-            insert("people", {"id": 4, "name": "dave", "age": 40}, returning=NOTHING, on_conflict=NOTHING),
+            insert(
+                "people",
+                {"id": 4, "name": "dave", "age": 40},
+                returning=NOTHING,
+                on_conflict=NOTHING,
+            ),
             connection,
             [{}],
         )
 
         assert affected == 1, affected
         assert (
-            await execute_scalar(select("COUNT(*)", from_table="people", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), connection)
+            await execute_scalar(
+                select(
+                    "COUNT(*)",
+                    from_table="people",
+                    where=NOTHING,
+                    params=NOTHING,
+                    order_by=NOTHING,
+                    limit=NOTHING,
+                    offset=NOTHING,
+                    joins=NOTHING,
+                    group_by=NOTHING,
+                    having=NOTHING,
+                ),
+                connection,
+            )
             == len(ROWS) + 1
         )
     finally:
@@ -242,12 +328,29 @@ async def test_an_update_changes_only_the_matching_rows(dialect: str) -> None:
     connection = await _seeded(dialect)
     try:
         await execute_many(
-            update("people", {"age": 99}, where="name = :n", params={"n": "bob"}, returning=NOTHING),
+            update(
+                "people", {"age": 99}, where="name = :n", params={"n": "bob"}, returning=NOTHING
+            ),
             connection,
             [{}],
         )
 
-        rows = await execute(select("*", from_table="people", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), connection, row_factory=NOTHING)
+        rows = await execute(
+            select(
+                "*",
+                from_table="people",
+                where=NOTHING,
+                params=NOTHING,
+                order_by=NOTHING,
+                limit=NOTHING,
+                offset=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            ),
+            connection,
+            row_factory=NOTHING,
+        )
         by_name = {r["name"]: r["age"] for r in rows}
 
         assert by_name == {"alice": 30, "bob": 99, "carol": 35}, by_name
@@ -265,7 +368,22 @@ async def test_a_delete_removes_only_the_matching_rows(dialect: str) -> None:
             [{}],
         )
 
-        rows = await execute(select("*", from_table="people", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING), connection, row_factory=NOTHING)
+        rows = await execute(
+            select(
+                "*",
+                from_table="people",
+                where=NOTHING,
+                params=NOTHING,
+                order_by=NOTHING,
+                limit=NOTHING,
+                offset=NOTHING,
+                joins=NOTHING,
+                group_by=NOTHING,
+                having=NOTHING,
+            ),
+            connection,
+            row_factory=NOTHING,
+        )
 
         assert {r["name"] for r in rows} == {"alice", "carol"}, rows
     finally:
@@ -277,7 +395,10 @@ async def test_raw_sql_carries_its_parameters(dialect: str) -> None:
     connection = await _seeded(dialect)
     try:
         rows = await execute(
-            raw('SELECT name FROM "people" WHERE age = :a', {"a": 25}), connection, row_factory=NOTHING)
+            raw('SELECT name FROM "people" WHERE age = :a', {"a": 25}),
+            connection,
+            row_factory=NOTHING,
+        )
 
         assert [r["name"] for r in rows] == ["bob"], rows
     finally:

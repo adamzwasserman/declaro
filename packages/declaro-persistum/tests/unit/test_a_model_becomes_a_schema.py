@@ -52,9 +52,7 @@ def test_an_index_is_keyed_by_its_name_and_does_not_carry_it() -> None:
     Keeping it inside as well makes the differ see a field introspection never
     reports, and therefore a mismatch on every run.
     """
-    name, index = index_from_meta(
-        {"name": "idx_users_email", "columns": ["email"], "unique": True}
-    )
+    name, index = index_from_meta({"name": "idx_users_email", "columns": ["email"], "unique": True})
 
     assert name == "idx_users_email"
     assert index == {"columns": ["email"], "unique": True}
@@ -115,7 +113,7 @@ def test_the_columns_are_copied_not_shared() -> None:
 # Through a real models file
 # ---------------------------------------------------------------------------
 
-MODEL = '''
+MODEL = """
 from pydantic import BaseModel
 from declaro_persistum import table, field
 
@@ -130,7 +128,7 @@ class User(BaseModel):
             {"name": "idx_users_email", "columns": ["email"], "unique": True},
             {"name": "idx_users_status", "columns": ["status"]},
         ]
-'''
+"""
 
 
 def test_a_declared_index_reaches_the_schema(tmp_path: pathlib.Path) -> None:
@@ -238,9 +236,7 @@ def test_a_typo_in_a_models_file_names_the_typo(tmp_path: pathlib.Path) -> None:
         load_schema_from_models(tmp_path)
 
     message = str(caught.value)
-    assert "uniqe" in message, (
-        f"the author is not told which key is wrong: {message}"
-    )
+    assert "uniqe" in message, f"the author is not told which key is wrong: {message}"
     assert "m.py" in message, f"the author is not told which file: {message}"
 
 

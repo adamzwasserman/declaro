@@ -66,9 +66,7 @@ async def database(tmp_path):
 
 async def _migrate(conn, schema) -> None:
     plan = diff({}, schema, dialect="sqlite", decisions=NOTHING)
-    await apply(
-        conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False
-    )
+    await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False)
 
 
 # ---------------------------------------------------------------------------
@@ -130,9 +128,12 @@ async def test_the_schema_survives_closing_and_reopening(database) -> None:
     reopened = await aiosqlite.connect(path)
     try:
         actual = await introspect(reopened, "sqlite")
-        assert diff({"widgets": actual["widgets"]}, WIDGETS, dialect="sqlite", decisions=NOTHING)[
-            "operations"
-        ] == []
+        assert (
+            diff({"widgets": actual["widgets"]}, WIDGETS, dialect="sqlite", decisions=NOTHING)[
+                "operations"
+            ]
+            == []
+        )
     finally:
         await reopened.close()
 
@@ -141,9 +142,7 @@ async def test_a_dry_run_changes_nothing(database) -> None:
     _path, conn = database
     plan = diff({}, WIDGETS, dialect="sqlite", decisions=NOTHING)
 
-    result = await apply(
-        conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=True
-    )
+    result = await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=True)
 
     assert result["executed_sql"], result
     cursor = await conn.execute(
@@ -183,10 +182,7 @@ async def test_a_default_sqlite_cannot_spell_is_refused_not_emitted(
     _path, conn = database
     schema = {
         "t": {
-            "columns": {
-                "id": {"type": "uuid", "primary_key": True,
-                       "default": "gen_random_uuid()"}
-            }
+            "columns": {"id": {"type": "uuid", "primary_key": True, "default": "gen_random_uuid()"}}
         }
     }
 
@@ -279,7 +275,9 @@ async def test_a_failed_operation_leaves_no_half_migrated_table(database) -> Non
         OperationalError: table "bad" has more than one primary key
     """
     _path, conn = database
-    plan = diff({}, {"good": {"columns": {"id": {"type": "text"}}}}, dialect="sqlite", decisions=NOTHING)
+    plan = diff(
+        {}, {"good": {"columns": {"id": {"type": "text"}}}}, dialect="sqlite", decisions=NOTHING
+    )
     broken = list(plan["operations"]) + [
         {
             "op": "create_table",
@@ -299,9 +297,5 @@ async def test_a_failed_operation_leaves_no_half_migrated_table(database) -> Non
     with pytest.raises(MigrationError):
         await apply(conn, broken, [0, 1], "sqlite", dry_run=False)
 
-    cursor = await conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='good'"
-    )
-    assert await cursor.fetchone() is None, (
-        "the first table survived a failed migration"
-    )
+    cursor = await conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='good'")
+    assert await cursor.fetchone() is None, "the first table survived a failed migration"

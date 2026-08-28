@@ -137,9 +137,7 @@ def _compared_properties() -> set[str]:
     for node in ast.walk(ast.parse(source.lstrip())):
         if not isinstance(node, ast.Assign):
             continue
-        if not any(
-            isinstance(t, ast.Name) and t.id == "compared" for t in node.targets
-        ):
+        if not any(isinstance(t, ast.Name) and t.id == "compared" for t in node.targets):
             continue
         for element in ast.walk(node.value):
             if (
@@ -257,9 +255,7 @@ def test_every_compared_property_has_values_to_try() -> None:
 
 async def _converges(connection, dialect: str, declared: dict) -> list:
     plan = diff({}, declared, dialect=dialect, decisions=NOTHING)
-    await apply(
-        connection, plan["operations"], plan["execution_order"], dialect, dry_run=False
-    )
+    await apply(connection, plan["operations"], plan["execution_order"], dialect, dry_run=False)
     actual = await introspect(connection, dialect)
     return diff({"t": actual["t"]}, declared, dialect=dialect, decisions=NOTHING)["operations"]
 
@@ -333,9 +329,7 @@ async def _object_converges(connection, dialect: str, declared: dict) -> list:
     the migration got wrong.
     """
     plan = diff({}, declared, dialect=dialect, decisions=NOTHING)
-    await apply(
-        connection, plan["operations"], plan["execution_order"], dialect, dry_run=False
-    )
+    await apply(connection, plan["operations"], plan["execution_order"], dialect, dry_run=False)
     actual = await introspect(connection, dialect)
     current = {name: actual[name] for name in declared if name in actual}
     return diff(current, declared, dialect=dialect, decisions=NOTHING)["operations"]
@@ -376,14 +370,14 @@ async def test_it_round_trips_on_postgresql(prop, value) -> None:
 
     declared = _declaration(prop, value)
     try:
-        await conn.execute('DROP TABLE IF EXISTS t CASCADE')
+        await conn.execute("DROP TABLE IF EXISTS t CASCADE")
         operations = await _converges(conn, "postgresql", declared)
         assert operations == [], (
             f"{prop}={value!r} migrates on every deploy: "
             f"{[(o['op'], o['details']) for o in operations]}"
         )
     finally:
-        await conn.execute('DROP TABLE IF EXISTS t CASCADE')
+        await conn.execute("DROP TABLE IF EXISTS t CASCADE")
         await conn.close()
 
 

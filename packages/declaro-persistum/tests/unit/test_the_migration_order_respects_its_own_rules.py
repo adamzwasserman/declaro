@@ -127,9 +127,7 @@ def test_an_index_is_created_after_the_column_it_covers() -> None:
 
     ordered = _ordered(_plan(current, target))
 
-    assert _position(ordered, "add_column", "widgets") < _position(
-        ordered, "add_index", "widgets"
-    )
+    assert _position(ordered, "add_column", "widgets") < _position(ordered, "add_index", "widgets")
 
 
 def test_an_index_is_dropped_before_the_column_it_covers() -> None:
@@ -197,20 +195,14 @@ def test_a_referencing_table_is_dropped_before_the_table_it_points_at() -> None:
     operations = _plan(current, {})
 
     graph = build_dependency_graph(operations)
-    parent = next(
-        i for i, o in enumerate(operations) if o["table"] == "parents"
-    )
-    child = next(
-        i for i, o in enumerate(operations) if o["table"] == "children"
-    )
+    parent = next(i for i, o in enumerate(operations) if o["table"] == "parents")
+    child = next(i for i, o in enumerate(operations) if o["table"] == "children")
 
     # THE EDGE, NOT THE ORDER. Asserting the emitted order cannot see this
     # defect: with no edge the sort returns whichever drop came first, and
     # that happened to be right when this file ran alone. Both mutations that
     # remove the fix survived an order assertion and neither survives this.
-    assert child in graph[parent], (
-        f"dropping parents does not wait for children: {graph}"
-    )
+    assert child in graph[parent], f"dropping parents does not wait for children: {graph}"
 
 
 # ---------------------------------------------------------------------------

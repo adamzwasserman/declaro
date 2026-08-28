@@ -59,7 +59,6 @@ def get_transaction_mode() -> Literal["all_or_nothing", "per_operation"]:
     return "per_operation"
 
 
-
 @boundary
 async def _restore_enforcement(connection: DbapiConnection, enforced: int) -> int:
     """Put `PRAGMA foreign_keys` back to what the caller had.
@@ -72,7 +71,6 @@ async def _restore_enforcement(connection: DbapiConnection, enforced: int) -> in
     """
     await connection.execute(f"PRAGMA foreign_keys = {'ON' if enforced else 'OFF'}")
     return enforced
-
 
 
 @helper
@@ -147,9 +145,7 @@ async def _preview(
 
 
 @helper
-def _leads_its_group(
-    position: int, operation: Operation, ordered: list[Operation]
-) -> bool:
+def _leads_its_group(position: int, operation: Operation, ordered: list[Operation]) -> bool:
     """Whether this operation is the one its unit is placed at.
 
     A rebuild that a table has already had earlier in the batch belongs to
@@ -281,10 +277,7 @@ async def _enforcement_restored(
     checking, and that was reported only to a log no caller can read.
     """
     try:
-        _restored = [
-            await _restore_enforcement(connection, value)
-            for value in entry_enforcement
-        ]
+        _restored = [await _restore_enforcement(connection, value) for value in entry_enforcement]
         return NOTHING
     except Exception as fk_exc:
         return fk_exc
@@ -354,7 +347,8 @@ async def _run_rebuild(
                     f"Table reconstruction failed for {table}. "
                     f"Check for orphaned _declaro_tmp tables.",
                     operation=ops[0],
-                    original_error=e, sql=NOTHING,
+                    original_error=e,
+                    sql=NOTHING,
                 ),
                 f"rolling back after {op_desc!r} failed",
                 _open_transaction,
@@ -371,9 +365,7 @@ def _the_refusal_alone(op_desc: str, refused: Exception, _rollback: Any) -> str:
 
 
 @helper
-def _the_refusal_and_an_open_transaction(
-    op_desc: str, refused: Exception, rollback: Any
-) -> str:
+def _the_refusal_and_an_open_transaction(op_desc: str, refused: Exception, rollback: Any) -> str:
     """The rollback failed too, so the connection is still mid-transaction."""
     return (
         f"{op_desc}: {refused}. Rolling back ALSO failed: "
@@ -428,9 +420,7 @@ async def _run_directly(
         # exception to note it on, and the skip message is what the caller
         # reads. A connection still holding an open transaction belongs in it.
         open_transaction = await _rolled_back(connection)
-        skip_msg = _SKIP_MESSAGE[not is_nothing(open_transaction)](
-            op_desc, e, open_transaction
-        )
+        skip_msg = _SKIP_MESSAGE[not is_nothing(open_transaction)](op_desc, e, open_transaction)
         say(__name__, "warning", f"Skipped unsupported operation: {skip_msg}")
         return ([], [skip_msg])
 
@@ -500,9 +490,7 @@ async def _run_batch(
         await _RUN_UNIT[is_reconstruction](
             connection, table, ops, _DESCRIBED[is_reconstruction](table, ops)
         )
-        for table, is_reconstruction, ops in coalesced_operations(
-            operations, execution_order
-        )
+        for table, is_reconstruction, ops in coalesced_operations(operations, execution_order)
     ]
 
     executed = [entry for done, _ in outcomes for entry in done]
@@ -521,9 +509,7 @@ async def _run_batch(
 
 _WHEN_DRY_RUN: dict[
     bool,
-    Callable[
-        [DbapiConnection, list[Operation], list[int]], Awaitable[ApplyResult]
-    ],
+    Callable[[DbapiConnection, list[Operation], list[int]], Awaitable[ApplyResult]],
 ] = {
     True: _preview,
     False: _run_batch,
@@ -571,12 +557,8 @@ async def _execute_coalesced_reconstruction(
     )
 
     await execute_reconstruction_async(
-        connection, table, columns, manage_foreign_keys=False, preserve_data=NOTHING)
-
-
-
-
-
+        connection, table, columns, manage_foreign_keys=False, preserve_data=NOTHING
+    )
 
 
 # "TursoApplier" was listed here long after the class was deleted, so a star

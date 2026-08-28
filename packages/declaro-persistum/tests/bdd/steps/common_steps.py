@@ -30,11 +30,13 @@ def given_ecommerce_schema(bdd_context):
 # =============================================================================
 
 
-@then(parsers.parse('I should find exactly {count:d} result'))
-@then(parsers.parse('I should find exactly {count:d} results'))
+@then(parsers.parse("I should find exactly {count:d} result"))
+@then(parsers.parse("I should find exactly {count:d} results"))
 def then_result_count(bdd_context, count: int):
     """Verify result count."""
-    assert len(bdd_context["results"]) == count, f"Expected {count} results, got {len(bdd_context['results'])}"
+    assert len(bdd_context["results"]) == count, (
+        f"Expected {count} results, got {len(bdd_context['results'])}"
+    )
 
 
 @then("the query should execute successfully")
@@ -83,7 +85,9 @@ def then_table_empty(bdd_context):
 def then_error_with_message(bdd_context, message: str):
     """Verify error was raised with message."""
     assert bdd_context["error"] is not None, "Expected an error to be raised"
-    assert message in str(bdd_context["error"]), f"Expected '{message}' in error: {bdd_context['error']}"
+    assert message in str(bdd_context["error"]), (
+        f"Expected '{message}' in error: {bdd_context['error']}"
+    )
 
 
 @then("no error should be raised")
@@ -124,6 +128,4 @@ def then_count_is(bdd_context, expected: int):
         f"it `AS count` and the Turso branch maps its tuple to that key, so a "
         f"missing one means an engine's result shape has drifted."
     )
-    assert row["count"] == expected, (
-        f"the table holds {row['count']} rows, not {expected}"
-    )
+    assert row["count"] == expected, f"the table holds {row['count']} rows, not {expected}"

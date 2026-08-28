@@ -38,16 +38,12 @@ def _no_clause(_where: Any, given: dict[str, Any], _path: str) -> tuple[str, dic
     return "", given
 
 
-def _written_clause(
-    where: Any, given: dict[str, Any], _path: str
-) -> tuple[str, dict[str, Any]]:
+def _written_clause(where: Any, given: dict[str, Any], _path: str) -> tuple[str, dict[str, Any]]:
     """Raw SQL with `:name` placeholders. It brings no parameters of its own."""
     return str(where), given
 
 
-def _built_clause(
-    where: Any, given: dict[str, Any], path: str
-) -> tuple[str, dict[str, Any]]:
+def _built_clause(where: Any, given: dict[str, Any], path: str) -> tuple[str, dict[str, Any]]:
     """The condition language, rendered into SQL and the params it names.
 
     The caller's params win. A dict-built name is derived from the path and
@@ -60,9 +56,7 @@ def _built_clause(
     return sql, {**built, **given}
 
 
-def _refuse_a_clause(
-    where: Any, _given: dict[str, Any], _path: str
-) -> tuple[str, dict[str, Any]]:
+def _refuse_a_clause(where: Any, _given: dict[str, Any], _path: str) -> tuple[str, dict[str, Any]]:
     """Anything else. A WHERE is text or a mapping and nothing third."""
     raise TypeError(
         f"a WHERE clause is raw SQL text or a condition mapping, and "
@@ -74,9 +68,7 @@ def _refuse_a_clause(
 # `object` is the entry every other type reaches along its own class hierarchy.
 # A subclass of either -- and a library can hand back one -- finds its parent
 # before it finds `object`.
-_CLAUSE_SHAPES: dict[
-    type, Callable[[Any, dict[str, Any], str], tuple[str, dict[str, Any]]]
-] = {
+_CLAUSE_SHAPES: dict[type, Callable[[Any, dict[str, Any], str], tuple[str, dict[str, Any]]]] = {
     NoneType: _no_clause,
     str: _written_clause,
     dict: _built_clause,
@@ -105,11 +97,7 @@ def _clause(
     caller's, and merging is done here so no caller has to remember which.
     """
     given = dict(params or {})
-    reader = [
-        _CLAUSE_SHAPES[kind]
-        for kind in type_of(where).__mro__
-        if kind in _CLAUSE_SHAPES
-    ]
+    reader = [_CLAUSE_SHAPES[kind] for kind in type_of(where).__mro__ if kind in _CLAUSE_SHAPES]
     return reader[0](where, given, path)
 
 
@@ -143,11 +131,7 @@ def _join_sql(join: dict[str, str]) -> str:
 
 def _returning(columns: list[str] | None) -> list[str]:
     """The RETURNING clause, or no clause when no columns were asked for."""
-    return [
-        "RETURNING " + ", ".join(f'"{c}"' for c in cols)
-        for cols in [columns]
-        if cols
-    ]
+    return ["RETURNING " + ", ".join(f'"{c}"' for c in cols) for cols in [columns] if cols]
 
 
 def select(
@@ -210,9 +194,7 @@ def select(
     having_sql, the_params = _clause(the_having, the_params, "h")
 
     group_sql = ", ".join(_quote_column(c) for c in (the_group_by or []))
-    order_sql = ", ".join(
-        _order_term(c) for c in (the_order_by or [])
-    )
+    order_sql = ", ".join(_order_term(c) for c in (the_order_by or []))
 
     # THE STATEMENT IS THE CLAUSES THAT ARE PRESENT, joined. A clause a caller
     # did not ask for contributes nothing rather than being skipped by a
@@ -273,37 +255,26 @@ _WHEN_NO_ROWS: dict[bool, Callable[[list[Any]], list[Any]]] = {
 }
 
 
-def _named_binding(
-    columns: list[str], values_list: list[Any]
-) -> tuple[str, dict[str, Any]]:
+def _named_binding(columns: list[str], values_list: list[Any]) -> tuple[str, dict[str, Any]]:
     """One row binds by column name, so the SQL reads as the row does."""
     placeholders = ", ".join(f":{c}" for c in columns)
     return f"({placeholders})", values_list[0]
 
 
-def _numbered_binding(
-    columns: list[str], values_list: list[Any]
-) -> tuple[str, dict[str, Any]]:
+def _numbered_binding(columns: list[str], values_list: list[Any]) -> tuple[str, dict[str, Any]]:
     """Several rows need a name per column per row, so the row number joins it.
 
     A row that omits a column binds NULL for it. The columns come from the
     first row, so a later row carrying an extra key contributes nothing.
     """
     groups = ", ".join(
-        "(" + ", ".join(f":{c}_{i}" for c in columns) + ")"
-        for i, _row in enumerate(values_list)
+        "(" + ", ".join(f":{c}_{i}" for c in columns) + ")" for i, _row in enumerate(values_list)
     )
-    params = {
-        f"{c}_{i}": row.get(c)
-        for i, row in enumerate(values_list)
-        for c in columns
-    }
+    params = {f"{c}_{i}": row.get(c) for i, row in enumerate(values_list) for c in columns}
     return groups, params
 
 
-_BINDING: dict[
-    bool, Callable[[list[str], list[Any]], tuple[str, dict[str, Any]]]
-] = {
+_BINDING: dict[bool, Callable[[list[str], list[Any]], tuple[str, dict[str, Any]]]] = {
     True: _named_binding,
     False: _numbered_binding,
 }
@@ -381,9 +352,7 @@ _WHEN_NOTHING_TO_SET: dict[bool, Callable[[dict[str, Any]], dict[str, Any]]] = {
 def _refuse_a_missing_where(statement: str, _where: Any) -> Any:
     """Required on purpose: a statement with no WHERE touches every row, and
     a caller who means that should have to say so."""
-    raise ValueError(
-        f"where clause is required for {statement} (use '1=1' for all rows)"
-    )
+    raise ValueError(f"where clause is required for {statement} (use '1=1' for all rows)")
 
 
 def _the_where(_statement: str, where: Any) -> Any:
@@ -434,9 +403,7 @@ def update(
     # `set_` namespaces the bindings so a SET column and a WHERE parameter can
     # both be called `id`.
     set_sql = ", ".join(f'"{col}" = :set_{col}' for col in set_values)
-    all_params: dict[str, Any] = {
-        f"set_{col}": val for col, val in set_values.items()
-    }
+    all_params: dict[str, Any] = {f"set_{col}": val for col, val in set_values.items()}
     all_params.update(the_params or {})
 
     # THE MERGED PARAMS, NOT A LOCAL NOBODY READS. This said

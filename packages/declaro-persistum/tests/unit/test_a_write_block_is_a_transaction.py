@@ -36,9 +36,7 @@ pytestmark = pytest.mark.turso
 
 
 async def _sqlite(tmp_path, name):
-    db = await open_sqlite(
-        str(tmp_path / name), shutdown="exit_immediately", busy_timeout_s=5.0
-    )
+    db = await open_sqlite(str(tmp_path / name), shutdown="exit_immediately", busy_timeout_s=5.0)
     async with writing(db) as conn:
         await conn.execute("CREATE TABLE t (v INT)")
     return db
@@ -52,9 +50,7 @@ async def _count(db) -> int:
 
 @pytest.mark.parametrize("serialised", [False, True])
 @pytest.mark.asyncio
-async def test_a_clean_block_commits_on_both_paths(
-    tmp_path, serialised: bool
-) -> None:
+async def test_a_clean_block_commits_on_both_paths(tmp_path, serialised: bool) -> None:
     """No explicit commit, and the write is still there."""
     db = await _sqlite(tmp_path, f"c{serialised}.db")
     if serialised:
@@ -63,16 +59,12 @@ async def test_a_clean_block_commits_on_both_paths(
     async with writing(db) as conn:
         await conn.execute("INSERT INTO t VALUES (1)")
 
-    assert await _count(db) == 1, (
-        "the block ended cleanly and its write was discarded"
-    )
+    assert await _count(db) == 1, "the block ended cleanly and its write was discarded"
 
 
 @pytest.mark.parametrize("serialised", [False, True])
 @pytest.mark.asyncio
-async def test_a_block_that_raises_rolls_back_on_both_paths(
-    tmp_path, serialised: bool
-) -> None:
+async def test_a_block_that_raises_rolls_back_on_both_paths(tmp_path, serialised: bool) -> None:
     db = await _sqlite(tmp_path, f"r{serialised}.db")
     if serialised:
         db["serialise"] = new_write_lock(asyncio.Lock())
@@ -122,7 +114,9 @@ async def test_the_serialise_lock_is_released_after_a_failed_block(
 @pytest.mark.asyncio
 async def test_turso_commits_too(tmp_path) -> None:
     """The other DB-API engine, on the path it actually takes."""
-    db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
+    db = await open_turso(
+        str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
+    )
     async with migrating(db) as conn:
         await conn.execute("CREATE TABLE t (v INT)")
         await conn.commit()
@@ -155,8 +149,7 @@ def test_both_paths_finish_a_block_the_same_way() -> None:
     stray = [
         f"{key}: {entry.__name__}"
         for key, entry in database._WRITE_PATH.items()
-        if entry is not shared
-        and "_write_connection(db)" not in inspect.getsource(entry)
+        if entry is not shared and "_write_connection(db)" not in inspect.getsource(entry)
     ]
 
     assert not stray, (

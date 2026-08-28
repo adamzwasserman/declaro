@@ -127,7 +127,7 @@ async def introspect(
     """
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
-    schema_name = resolved(schema_name, 'public')
+    schema_name = resolved(schema_name, "public")
     include_views = resolved(include_views, False)
     try:
         # Get all tables in schema
@@ -144,15 +144,11 @@ async def introspect(
         )
 
         schema: Schema = {
-            row["table_name"]: await _introspect_table(
-                connection, row["table_name"], schema_name
-            )
+            row["table_name"]: await _introspect_table(connection, row["table_name"], schema_name)
             for row in tables
         }
 
-        return await _WHEN_VIEWS_ARE_WANTED[bool(include_views)](
-            connection, schema, schema_name
-        )
+        return await _WHEN_VIEWS_ARE_WANTED[bool(include_views)](connection, schema, schema_name)
 
     except Exception as e:
         return _WHEN_THE_CONNECTION_IS_NAMED["connection" in str(e).lower()](e)
@@ -217,9 +213,7 @@ async def _introspect_table(
 
 
 @helper
-def _with_foreign_key(
-    columns: dict[str, Column], fk: dict[str, str]
-) -> dict[str, Column]:
+def _with_foreign_key(columns: dict[str, Column], fk: dict[str, str]) -> dict[str, Column]:
     """The columns, with one key folded onto the column it leaves from.
 
     A FOLD RATHER THAN A COMPREHENSION, because two keys can leave the same
@@ -228,11 +222,7 @@ def _with_foreign_key(
     would let the second key drop the first key's action.
     """
     name = fk["column_name"]
-    merged = [
-        (name, _pointing_at(columns[name], fk))
-        for present in [name]
-        if present in columns
-    ]
+    merged = [(name, _pointing_at(columns[name], fk)) for present in [name] if present in columns]
     return {**columns, **dict(merged)}
 
 
@@ -287,9 +277,7 @@ async def _get_columns(
         table_name,
     )
 
-    columns: dict[str, Column] = {
-        row["column_name"]: _column_from_row(row) for row in rows
-    }
+    columns: dict[str, Column] = {row["column_name"]: _column_from_row(row) for row in rows}
 
     # A SINGLE-COLUMN PRIMARY KEY IS A FACT ABOUT THE COLUMN. Two or more
     # belong to the table, and `_introspect_table` writes them there.
@@ -307,11 +295,7 @@ async def _get_columns(
     unique_cols = await _get_unique_columns(connection, table_name, schema_name)
     return {
         **marked_pk,
-        **{
-            name: {**marked_pk[name], "unique": True}
-            for name in unique_cols
-            if name in marked_pk
-        },
+        **{name: {**marked_pk[name], "unique": True} for name in unique_cols if name in marked_pk},
     }
 
 
@@ -335,11 +319,7 @@ def _column_from_row(row: dict[str, Any]) -> Column:
     """
     facts: list[tuple[str, Any]] = [
         ("type", _normalize_type(row)),
-        *[
-            ("nullable", False)
-            for nullable in [row["is_nullable"]]
-            if nullable == "NO"
-        ],
+        *[("nullable", False) for nullable in [row["is_nullable"]] if nullable == "NO"],
         *[
             ("default", _cleaned_default(default))
             for default in [row["column_default"]]
@@ -402,11 +382,7 @@ def _base_type(data_type: str, udt_name: str) -> str:
     """
     return [
         *[_TYPE_MAP[key] for key in [data_type] if key in _TYPE_MAP],
-        *[
-            _FROM_THE_UDT_NAME[key](udt_name)
-            for key in [data_type]
-            if key in _FROM_THE_UDT_NAME
-        ],
+        *[_FROM_THE_UDT_NAME[key](udt_name) for key in [data_type] if key in _FROM_THE_UDT_NAME],
         data_type,
     ][0]
 
@@ -582,16 +558,8 @@ def _index_from_row(row: dict[str, Any]) -> Index:
     facts: list[tuple[str, Any]] = [
         ("columns", row["columns"]),
         *[("unique", True) for distinct in [row["is_unique"]] if distinct],
-        *[
-            ("where", predicate)
-            for predicate in [row["predicate"]]
-            if predicate
-        ],
-        *[
-            ("using", method)
-            for method in [row["index_method"]]
-            if method != "btree"
-        ],
+        *[("where", predicate) for predicate in [row["predicate"]] if predicate],
+        *[("using", method) for method in [row["index_method"]] if method != "btree"],
     ]
     return dict(facts)  # type: ignore[return-value]
 
@@ -674,7 +642,7 @@ async def table_exists(
     """Check if a table exists."""
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
-    schema_name = resolved(schema_name, 'public')
+    schema_name = resolved(schema_name, "public")
     result = await connection.fetchval(
         """
         SELECT EXISTS (
@@ -689,8 +657,6 @@ async def table_exists(
         table_name,
     )
     return bool(result)
-
-
 
 
 @helper
@@ -723,9 +689,7 @@ async def _get_column_checks(
         table_name,
         schema_name,
     )
-    return {
-        row["column_name"]: normalize_check(row["definition"]) for row in rows
-    }
+    return {row["column_name"]: normalize_check(row["definition"]) for row in rows}
 
 
 @helper
@@ -787,7 +751,7 @@ async def introspect_views(
     """
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
-    schema_name = resolved(schema_name, 'public')
+    schema_name = resolved(schema_name, "public")
 
     # Regular views
     plain = await connection.fetch(
@@ -826,7 +790,3 @@ def _view_from_row(row: dict[str, Any], materialized: bool) -> View:
         "query": _normalize_view_query(row["query"]),
         "materialized": materialized,
     }
-
-
-
-

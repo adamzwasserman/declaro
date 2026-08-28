@@ -57,7 +57,9 @@ def test_a_column_written_as_its_type_is_read(tmp_path: pathlib.Path) -> None:
     ids=["a number", "a flag", "a list"],
 )
 def test_a_column_written_any_other_way_is_refused(
-    tmp_path: pathlib.Path, written: str, shape: str
+    tmp_path: pathlib.Path,
+    written: str,
+    shape: str,  # noqa: ARG001 - parametrize unpacks it; it names the case
 ) -> None:
     """Refused by name, rather than dropped.
 

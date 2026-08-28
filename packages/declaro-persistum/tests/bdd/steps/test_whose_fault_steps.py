@@ -143,8 +143,7 @@ def _when_recorded(ctx, table, tmp_path):
 @then(parsers.parse("{ours} reaches the caller"))
 def _then_reaches(ctx, ours):
     assert ctx["raised"] is not None, (
-        f"a bug of ours was swallowed and reported as a table failure: "
-        f"{ctx['outcome']}"
+        f"a bug of ours was swallowed and reported as a table failure: {ctx['outcome']}"
     )
     assert type(ctx["raised"]) is _OUR_BUGS[ours], type(ctx["raised"])
 

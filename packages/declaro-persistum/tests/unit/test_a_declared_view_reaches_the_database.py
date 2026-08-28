@@ -36,7 +36,7 @@ from declaro_persistum.types import NOTHING
 
 pytestmark = pytest.mark.precommit
 
-MODELS = '''
+MODELS = """
 from uuid import UUID
 from pydantic import BaseModel
 from declaro_persistum import table, field
@@ -52,7 +52,7 @@ active_users: View = {
     "query": "SELECT id FROM users WHERE status = 'active'",
     "materialized": False,
 }
-'''
+"""
 
 
 def _models(tmp_path, body=MODELS, name="models.py"):
@@ -69,18 +69,16 @@ async def test_a_declared_view_exists_after_a_migration(tmp_path) -> None:
     A result dict is not evidence that a thing happened.
     """
     path = _models(tmp_path)
-    db = await open_sqlite(
-        str(tmp_path / "a.db"), shutdown="exit_immediately", busy_timeout_s=5.0
+    db = await open_sqlite(str(tmp_path / "a.db"), shutdown="exit_immediately", busy_timeout_s=5.0)
+    result = await apply_migrations_async(
+        db, dialect="sqlite", schema_path=str(path), expand_enums=NOTHING, force=NOTHING
     )
-    result = await apply_migrations_async(db, dialect="sqlite", schema_path=str(path), expand_enums=NOTHING, force=NOTHING)
     assert result["success"]
 
     from declaro_persistum import reading
 
     async with reading(db) as conn:
-        cursor = await conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='view'"
-        )
+        cursor = await conn.execute("SELECT name FROM sqlite_master WHERE type='view'")
         names = [row[0] for row in await cursor.fetchall()]
         assert names == ["active_users"], (
             f"the migration reported {result['operations_applied']} operations "
@@ -98,13 +96,12 @@ async def test_the_view_operations_are_in_the_execution_order(tmp_path) -> None:
     never reaches is indistinguishable from an operation nobody generated.
     """
     path = _models(tmp_path)
-    db = await open_sqlite(
-        str(tmp_path / "b.db"), shutdown="exit_immediately", busy_timeout_s=5.0
+    db = await open_sqlite(str(tmp_path / "b.db"), shutdown="exit_immediately", busy_timeout_s=5.0)
+    result = await apply_migrations_async(
+        db, dialect="sqlite", schema_path=str(path), expand_enums=NOTHING, force=NOTHING
     )
-    result = await apply_migrations_async(db, dialect="sqlite", schema_path=str(path), expand_enums=NOTHING, force=NOTHING)
     assert result["operations_applied"] == 2, (
-        "one table and one view were declared; "
-        f"{result['operations_applied']} operation(s) ran"
+        f"one table and one view were declared; {result['operations_applied']} operation(s) ran"
     )
 
 
@@ -181,8 +178,7 @@ def test_every_operation_the_differ_emits_can_be_applied() -> None:
 
     handled = set(TEMPLATES["sqlite"]) | set(COMPOSERS["sqlite"])
     assert emitted <= handled, (
-        f"the differ emits {sorted(emitted - handled)}, which no applier can "
-        f"execute"
+        f"the differ emits {sorted(emitted - handled)}, which no applier can execute"
     )
 
 
@@ -207,15 +203,17 @@ async def test_migrating_twice_changes_nothing_the_second_time(tmp_path) -> None
     db = await open_sqlite(
         str(tmp_path / "twice.db"), shutdown="exit_immediately", busy_timeout_s=5.0
     )
-    first = await apply_migrations_async(db, dialect="sqlite", schema_path=str(path), expand_enums=NOTHING, force=NOTHING)
+    first = await apply_migrations_async(
+        db, dialect="sqlite", schema_path=str(path), expand_enums=NOTHING, force=NOTHING
+    )
     assert first["success"] and first["operations_applied"] > 0
 
     again = await apply_migrations_async(
-        db, dialect="sqlite", schema_path=str(path), force=True, expand_enums=NOTHING)
+        db, dialect="sqlite", schema_path=str(path), force=True, expand_enums=NOTHING
+    )
     assert again["success"], again["error"]
     assert again["operations_applied"] == 0, (
-        f"nothing changed and the engine proposed "
-        f"{again['operations_applied']} operation(s)"
+        f"nothing changed and the engine proposed {again['operations_applied']} operation(s)"
     )
 
 
@@ -228,17 +226,19 @@ async def test_a_changed_view_query_reaches_the_database(tmp_path) -> None:
     db = await open_sqlite(
         str(tmp_path / "chg.db"), shutdown="exit_immediately", busy_timeout_s=5.0
     )
-    await apply_migrations_async(db, dialect="sqlite", schema_path=str(path), expand_enums=NOTHING, force=NOTHING)
+    await apply_migrations_async(
+        db, dialect="sqlite", schema_path=str(path), expand_enums=NOTHING, force=NOTHING
+    )
     path.write_text(path.read_text().replace("'active'", "'archived'"))
-    result = await apply_migrations_async(db, dialect="sqlite", schema_path=str(path), expand_enums=NOTHING, force=NOTHING)
+    result = await apply_migrations_async(
+        db, dialect="sqlite", schema_path=str(path), expand_enums=NOTHING, force=NOTHING
+    )
     assert result["success"], result["error"]
 
     from declaro_persistum import reading
 
     async with reading(db) as conn:
-        cursor = await conn.execute(
-            "SELECT sql FROM sqlite_master WHERE name='active_users'"
-        )
+        cursor = await conn.execute("SELECT sql FROM sqlite_master WHERE name='active_users'")
         sql = (await cursor.fetchone())[0]
     assert "archived" in sql, f"the database still serves the old view: {sql}"
 
@@ -249,9 +249,7 @@ def test_the_type_comparison_needs_a_dialect() -> None:
 
     from declaro_persistum.differ import diff
 
-    assert inspect.signature(diff).parameters["dialect"].default is (
-        inspect.Parameter.empty
-    )
+    assert inspect.signature(diff).parameters["dialect"].default is (inspect.Parameter.empty)
 
 
 def test_a_real_type_change_still_trips_on_postgresql() -> None:

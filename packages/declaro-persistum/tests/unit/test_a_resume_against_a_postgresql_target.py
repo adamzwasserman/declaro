@@ -43,7 +43,7 @@ pytestmark = [pytest.mark.precommit, pytest.mark.postgresql, pytest.mark.integra
 
 PROBE_URL = probe_url()
 
-MODELS = '''
+MODELS = """
 from pydantic import BaseModel
 from declaro_persistum import table, field
 
@@ -52,7 +52,7 @@ from declaro_persistum import table, field
 class Widget(BaseModel):
     id: int = field(primary_key=True)
     name: str
-'''
+"""
 
 ROWS = [(1, "first"), (2, "second"), (3, "third")]
 
@@ -81,24 +81,16 @@ async def _pair() -> tuple[Any, Any]:
         shutdown="exit_immediately",
         busy_timeout_s=5.0,
     )
-    target = await open_postgresql(
-        PROBE_URL, shutdown="exit_immediately", busy_timeout_s=5.0
-    )
+    target = await open_postgresql(PROBE_URL, shutdown="exit_immediately", busy_timeout_s=5.0)
 
     async with writing(source) as connection:
-        await connection.execute(
-            'CREATE TABLE "widgets" (id INTEGER PRIMARY KEY, name TEXT)'
-        )
+        await connection.execute('CREATE TABLE "widgets" (id INTEGER PRIMARY KEY, name TEXT)')
         for row in ROWS:
-            await connection.execute(
-                'INSERT INTO "widgets" (id, name) VALUES (?, ?)', row
-            )
+            await connection.execute('INSERT INTO "widgets" (id, name) VALUES (?, ?)', row)
         await connection.commit()
 
     async with writing(target) as connection:
-        await connection.execute(
-            'CREATE TABLE "widgets" (id INTEGER PRIMARY KEY, name TEXT)'
-        )
+        await connection.execute('CREATE TABLE "widgets" (id INTEGER PRIMARY KEY, name TEXT)')
     return source, target
 
 
@@ -170,17 +162,13 @@ async def test_a_failed_table_is_emptied_before_the_retry(
     source, target = await _pair()
     try:
         async with writing(target) as connection:
-            await connection.execute(
-                'INSERT INTO "widgets" (id, name) VALUES (3, $1)', "squatter"
-            )
+            await connection.execute('INSERT INTO "widgets" (id, name) VALUES (3, $1)', "squatter")
 
         first = await _transfer(source, target, schema_path, resume=True)
         assert not first["success"], "the setup was meant to fail and did not"
 
         async with writing(target) as connection:
-            await connection.execute(
-                'DELETE FROM "widgets" WHERE name = $1', "squatter"
-            )
+            await connection.execute('DELETE FROM "widgets" WHERE name = $1', "squatter")
 
         again = await _transfer(source, target, schema_path, resume=True)
 
@@ -197,20 +185,14 @@ async def test_the_rows_are_each_there_once(schema_path: str) -> None:
     source, target = await _pair()
     try:
         async with writing(target) as connection:
-            await connection.execute(
-                'INSERT INTO "widgets" (id, name) VALUES (3, $1)', "squatter"
-            )
+            await connection.execute('INSERT INTO "widgets" (id, name) VALUES (3, $1)', "squatter")
         await _transfer(source, target, schema_path, resume=True)
         async with writing(target) as connection:
-            await connection.execute(
-                'DELETE FROM "widgets" WHERE name = $1', "squatter"
-            )
+            await connection.execute('DELETE FROM "widgets" WHERE name = $1', "squatter")
         await _transfer(source, target, schema_path, resume=True)
 
         async with writing(target) as connection:
-            rows = await connection.fetch(
-                'SELECT id, name FROM "widgets" ORDER BY id'
-            )
+            rows = await connection.fetch('SELECT id, name FROM "widgets" ORDER BY id')
 
         assert [tuple(r) for r in rows] == ROWS, rows
     finally:

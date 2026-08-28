@@ -58,8 +58,7 @@ def test_the_gate_still_finds_a_collision() -> None:
     """A scanner matching nothing is indistinguishable from a clean tree."""
     sample = pathlib.Path(__file__).parent / "_collision_sample.py"
     sample.write_text(
-        "def test_one():\n    pass\n\n\ndef test_one():\n    pass\n\n\n"
-        "def test_two():\n    pass\n"
+        "def test_one():\n    pass\n\n\ndef test_one():\n    pass\n\n\ndef test_two():\n    pass\n"
     )
     try:
         assert _duplicates_in(sample) == ["test_one"]

@@ -99,6 +99,7 @@ async def pragma_foreign_key_list(conn: Any, table: str) -> list[tuple]:
 #
 # They live here because this is where the pragmas they read live.
 
+
 @helper
 async def table_column_names(connection: Any, table_name: str) -> list[str]:
     """Get list of column names for a table ."""
@@ -125,8 +126,7 @@ async def create_index_statements(connection: Any, table_name: str) -> list[str]
             (
                 await _maybe_await(
                     connection.execute(
-                        "SELECT sql FROM sqlite_master "
-                        "WHERE type = 'index' AND name = ?",
+                        "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?",
                         (name,),
                     )
                 )

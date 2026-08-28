@@ -29,10 +29,7 @@ import pathlib
 import pytest
 
 _MODULE = (
-    pathlib.Path(__file__).resolve().parents[2]
-    / "src"
-    / "declaro_persistum"
-    / "bulk_loader.py"
+    pathlib.Path(__file__).resolve().parents[2] / "src" / "declaro_persistum" / "bulk_loader.py"
 )
 
 
@@ -104,14 +101,10 @@ def test_no_connection_anywhere_is_still_any() -> None:
     offenders: list[str] = []
     for name, node in _functions().items():
         arguments = node.args
-        for parameter in (
-            arguments.posonlyargs + arguments.args + arguments.kwonlyargs
-        ):
+        for parameter in arguments.posonlyargs + arguments.args + arguments.kwonlyargs:
             if "conn" not in parameter.arg:
                 continue
-            declared = (
-                ast.unparse(parameter.annotation) if parameter.annotation else "UNTYPED"
-            )
+            declared = ast.unparse(parameter.annotation) if parameter.annotation else "UNTYPED"
             if declared.startswith("Any") or declared == "UNTYPED":
                 offenders.append(f"{name}({parameter.arg}: {declared})")
 
@@ -136,9 +129,7 @@ def test_reading_a_page_of_rows_takes_no_implicit_default() -> None:
             )
         } | {
             parameter.arg
-            for parameter, default in zip(
-                arguments.kwonlyargs, arguments.kw_defaults, strict=False
-            )
+            for parameter, default in zip(arguments.kwonlyargs, arguments.kw_defaults, strict=False)
             if default is not None
         }
         offenders += [f"{name}({p})" for p in sorted(defaulted & {"offset", "limit"})]

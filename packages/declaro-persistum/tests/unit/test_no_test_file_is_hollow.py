@@ -224,7 +224,9 @@ def _holds_a_test(path: pathlib.Path) -> bool:
     unknown number of feature scenarios but never zero.
     """
     for node in ast.walk(ast.parse(path.read_text())):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name.startswith("test_"):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name.startswith(
+            "test_"
+        ):
             return True
         if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "scenarios":
             return True
@@ -238,9 +240,7 @@ def test_the_gate_can_see_the_test_files_at_all() -> None:
 
 
 def test_no_new_test_file_is_hollow() -> None:
-    scanned = list(UNIT.glob("test_*.py")) + list(
-        (TESTS / "integration").glob("test_*.py")
-    )
+    scanned = list(UNIT.glob("test_*.py")) + list((TESTS / "integration").glob("test_*.py"))
     hollow = {p.name for p in scanned if not _holds_a_test(p)}
 
     appeared = hollow - KNOWN_HOLLOW

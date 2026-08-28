@@ -87,9 +87,7 @@ TABLE_COLUMNS: dict[str, Any] = {
 
 
 @helper
-async def get_table_columns(
-    connection: Any, dialect: Dialect, table: str
-) -> dict[str, Any]:
+async def get_table_columns(connection: Any, dialect: Dialect, table: str) -> dict[str, Any]:
     """One table's columns, or a refusal naming the table."""
     reader = for_dialect(TABLE_COLUMNS, dialect, "Table-column readers")
     return cast(dict[str, Any], await reader(connection, table))

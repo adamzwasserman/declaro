@@ -34,7 +34,7 @@ from declaro_persistum.pydantic_loader import load_views_from_models
 pytestmark = pytest.mark.precommit
 
 GOOD = (
-    'from declaro_persistum.types import View\n'
+    "from declaro_persistum.types import View\n"
     'active: View = {"name": "active_users", '
     '"query": "SELECT id FROM users WHERE status = \'active\'"}\n'
 )

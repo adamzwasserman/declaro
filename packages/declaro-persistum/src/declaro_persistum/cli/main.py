@@ -301,7 +301,9 @@ COMMANDS_NEEDING_CONNECTION = frozenset({"diff", "apply", "snapshot", "generate"
 
 
 @helper
-def _run_diff(args: argparse.Namespace, connection_string: str | None, dialect: Dialect | None) -> int:
+def _run_diff(
+    args: argparse.Namespace, connection_string: str | None, dialect: Dialect | None
+) -> int:
     assert connection_string is not None
     assert dialect is not None
     return asyncio.run(
@@ -318,7 +320,9 @@ def _run_diff(args: argparse.Namespace, connection_string: str | None, dialect: 
 
 
 @helper
-def _run_apply(args: argparse.Namespace, connection_string: str | None, dialect: Dialect | None) -> int:
+def _run_apply(
+    args: argparse.Namespace, connection_string: str | None, dialect: Dialect | None
+) -> int:
     assert connection_string is not None
     assert dialect is not None
     return asyncio.run(
@@ -336,7 +340,9 @@ def _run_apply(args: argparse.Namespace, connection_string: str | None, dialect:
 
 
 @helper
-def _run_snapshot(args: argparse.Namespace, connection_string: str | None, dialect: Dialect | None) -> int:
+def _run_snapshot(
+    args: argparse.Namespace, connection_string: str | None, dialect: Dialect | None
+) -> int:
     assert connection_string is not None
     assert dialect is not None
     return asyncio.run(
@@ -383,7 +389,9 @@ def _run_validate(
 
 
 @helper
-def _run_generate(args: argparse.Namespace, connection_string: str | None, dialect: Dialect | None) -> int:
+def _run_generate(
+    args: argparse.Namespace, connection_string: str | None, dialect: Dialect | None
+) -> int:
     assert connection_string is not None
     assert dialect is not None
     return asyncio.run(
@@ -496,9 +504,7 @@ def _with_connection(args: argparse.Namespace, connection_string: str | None) ->
 
 
 @boundary
-def _refuse_missing_connection(
-    _args: argparse.Namespace, _connection_string: str | None
-) -> int:
+def _refuse_missing_connection(_args: argparse.Namespace, _connection_string: str | None) -> int:
     print(
         "Error: Database connection required. "
         "Use -c/--connection or set DECLARO_DATABASE_URL environment variable.",

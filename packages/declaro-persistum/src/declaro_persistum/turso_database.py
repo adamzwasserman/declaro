@@ -122,9 +122,7 @@ async def _pull_until_level(conn: ReplicaConnection) -> bool:
 
 
 @helper
-async def _pull_batches(
-    conn: ReplicaConnection, budget: int, fetched_any: bool
-) -> bool:
+async def _pull_batches(conn: ReplicaConnection, budget: int, fetched_any: bool) -> bool:
     """Pull one more batch while the budget allows, and report what happened.
 
     `budget` counts the batches still allowed. It reaches zero only when the
@@ -139,22 +137,18 @@ async def _pull_batches(
 
 
 @helper
-async def _pull_one_more(
-    conn: ReplicaConnection, budget: int, fetched_any: bool
-) -> bool:
+async def _pull_one_more(conn: ReplicaConnection, budget: int, fetched_any: bool) -> bool:
     """Fetch one batch. Anything fetched means ask again; nothing means level."""
     fetched = await conn.pull()
-    return (
-        await _pull_batches(conn, budget - 1, fetched_any=True)
-        if fetched
-        else fetched_any
-    )
+    return await _pull_batches(conn, budget - 1, fetched_any=True) if fetched else fetched_any
 
 
 @helper
 def _out_of_batches(fetched_any: bool) -> bool:
     """The bound was reached, so say the copy may not be converging."""
-    say(__name__, "warning",
+    say(
+        __name__,
+        "warning",
         "Pulled %d batches and the primary still reports more; the local copy "
         "may not be converging",
         _MAX_PULL_BATCHES,
@@ -185,9 +179,7 @@ async def replicate_path(path: str, *, primary: str, token: str | None) -> None:
 
     import turso.aio.sync
 
-    conn = await turso.aio.sync.connect(
-        _the_folder_for(path), remote_url=primary, auth_token=token
-    )
+    conn = await turso.aio.sync.connect(_the_folder_for(path), remote_url=primary, auth_token=token)
     try:
         await conn.push()
         await _pull_until_level(conn)
@@ -197,6 +189,7 @@ async def replicate_path(path: str, *, primary: str, token: str | None) -> None:
         # suppressed because raising here would replace the push or pull
         # failure the caller is waiting for. The note does not replace it.
         _left_open(await _closed(conn))
+
 
 @boundary
 def _the_folder_for(path: str) -> str:
@@ -261,9 +254,7 @@ def _nothing_to_carry(unclosed: Exception | Nothing) -> Exception | Nothing:
 
 
 # WHETHER SOMETHING IS ALREADY TRAVELLING, AND WHETHER THE CLOSE FAILED.
-_LEFT_OPEN: dict[
-    tuple[bool, bool], Callable[[Exception | Nothing], Exception | Nothing]
-] = {
+_LEFT_OPEN: dict[tuple[bool, bool], Callable[[Exception | Nothing], Exception | Nothing]] = {
     (True, True): _rides_out_on_the_failure,
     (True, False): _nothing_to_carry,
     (False, True): _is_the_failure,
@@ -411,8 +402,6 @@ async def migrating(db: Database) -> AsyncIterator[Any]:
         await negotiate_journal_mode(db["path"], db["journal_mode"])
 
 
-
-
 @helper
 async def _close_connection(conn: DbapiConnection) -> int:
     await conn.close()
@@ -495,7 +484,6 @@ async def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
     None someone has to check for.
     """
 
-
     # ONCE, HERE, SERIALLY. See `negotiate_journal_mode`: this is the whole of
     # the fix for the crew race, and the recorded mode is what the engine
     # granted rather than what was asked for.
@@ -544,9 +532,7 @@ async def _open_replicated(
     """
     import turso.aio.sync
 
-    held = await turso.aio.sync.connect(
-        _the_folder_for(path), remote_url=primary, auth_token=token
-    )
+    held = await turso.aio.sync.connect(_the_folder_for(path), remote_url=primary, auth_token=token)
     await _set_journal_mode(held, "wal")
 
     @helper
@@ -588,7 +574,9 @@ async def _open_replicated(
             # logs "attempt 1247 failed after 3021s" without ever being able
             # to say why, because by then the only thing that knew was gone.
             # `exc_info=True` keeps the type and the traceback.
-            say(__name__, "warning",
+            say(
+                __name__,
+                "warning",
                 "Push to the primary for %s failed. Returning False so the "
                 "caller's retry loop decides what to do next.",
                 path,

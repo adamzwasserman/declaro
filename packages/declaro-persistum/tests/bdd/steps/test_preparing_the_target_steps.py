@@ -156,8 +156,7 @@ def _then_nothing(ctx):
 @then("the refusal came back")
 def _then_refusal_returned(ctx):
     assert ctx["refusal"] is None, (
-        "the restore step raised; it runs in a finally and must return "
-        f"instead: {ctx['refusal']}"
+        f"the restore step raised; it runs in a finally and must return instead: {ctx['refusal']}"
     )
     assert isinstance(ctx["answer"], RuntimeError), ctx["answer"]
 

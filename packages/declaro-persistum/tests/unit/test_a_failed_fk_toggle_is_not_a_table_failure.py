@@ -63,10 +63,8 @@ async def _pair(directory: pathlib.Path):
     # reason: `_toposort_tables` reported `circular=[]` and `disable_fk_checks`
     # was called zero times.
     ddl = (
-        'CREATE TABLE "books" (id TEXT PRIMARY KEY, author_id TEXT '
-        'REFERENCES "authors"(id))',
-        'CREATE TABLE "authors" (id TEXT PRIMARY KEY, favourite_book TEXT '
-        'REFERENCES "books"(id))',
+        'CREATE TABLE "books" (id TEXT PRIMARY KEY, author_id TEXT REFERENCES "authors"(id))',
+        'CREATE TABLE "authors" (id TEXT PRIMARY KEY, favourite_book TEXT REFERENCES "books"(id))',
     )
     for db in (source, target):
         async with writing(db) as conn:
@@ -85,16 +83,22 @@ async def test_a_circular_schema_transfers(tmp_path) -> None:
     source, target, models = await _pair(tmp_path)
     try:
         result = await bulk_transfer(
-            source, target, "sqlite", "sqlite", str(models), tables=NOTHING, on_progress=NOTHING, batch_size=NOTHING, expand_enums=NOTHING, resume=NOTHING)
+            source,
+            target,
+            "sqlite",
+            "sqlite",
+            str(models),
+            tables=NOTHING,
+            on_progress=NOTHING,
+            batch_size=NOTHING,
+            expand_enums=NOTHING,
+            resume=NOTHING,
+        )
         assert result["success"] is True, result
         assert result["tables_transferred"] == 2, result
     finally:
         await close(source)
         await close(target)
-
-
-
-
 
 
 async def test_a_failed_re_enable_is_reported_loudly_but_does_not_mask(
@@ -117,7 +121,17 @@ async def test_a_failed_re_enable_is_reported_loudly_but_does_not_mask(
 
     try:
         result = await bulk_transfer(
-            source, target, "sqlite", "sqlite", str(models), tables=NOTHING, on_progress=NOTHING, batch_size=NOTHING, expand_enums=NOTHING, resume=NOTHING)
+            source,
+            target,
+            "sqlite",
+            "sqlite",
+            str(models),
+            tables=NOTHING,
+            on_progress=NOTHING,
+            batch_size=NOTHING,
+            expand_enums=NOTHING,
+            resume=NOTHING,
+        )
         assert result["success"] is True, (
             "a teardown failure changed the outcome of a transfer that worked"
         )
@@ -130,11 +144,10 @@ async def test_a_failed_re_enable_is_reported_loudly_but_does_not_mask(
             "the target was left with foreign key checks off and the result "
             f"does not say so: {result['errors']}"
         )
-        assert "NOT checked against its constraints" in (
-            result["errors"]["_restore_fk_checks"]
-        )
-        assert "the target refused to re-enable foreign key checks" in (
-            result["errors"]["_restore_fk_checks"]
+        assert "NOT checked against its constraints" in (result["errors"]["_restore_fk_checks"])
+        assert (
+            "the target refused to re-enable foreign key checks"
+            in (result["errors"]["_restore_fk_checks"])
         ), "the result names the failure but not what caused it"
     finally:
         await close(source)

@@ -5,7 +5,6 @@ SQL or reads the database; none of them decides whether a migration
 should run. That decision lives in `migrations`.
 """
 
-
 import hashlib
 import logging
 import uuid
@@ -162,9 +161,7 @@ def partition_replica_operations(
     from declaro_persistum.applier.shared import requires_reconstruction
 
     safe_order = [
-        op_idx
-        for op_idx in execution_order
-        if not requires_reconstruction(operations[op_idx])
+        op_idx for op_idx in execution_order if not requires_reconstruction(operations[op_idx])
     ]
     skipped = [
         {"op": operations[op_idx]["op"], "table": operations[op_idx].get("table")}
@@ -172,7 +169,6 @@ def partition_replica_operations(
         if requires_reconstruction(operations[op_idx])
     ]
     return safe_order, skipped
-
 
 
 # =============================================================================
@@ -322,9 +318,7 @@ async def _run_on_dbapi(conn: Any, sql: str, params: tuple[Any, ...]) -> None:
     await conn.commit()
 
 
-_WRITERS: dict[
-    str, Callable[[Any, str, tuple[Any, ...]], Awaitable[None]]
-] = {
+_WRITERS: dict[str, Callable[[Any, str, tuple[Any, ...]], Awaitable[None]]] = {
     "postgresql": _run_on_postgres,
     "sqlite": _run_on_dbapi,
 }
@@ -376,9 +370,7 @@ async def _read_stamp_from_dbapi(conn: Any, sql: str, key: str) -> str | None:
     return row[0] if row else None
 
 
-_STAMP_READERS: dict[
-    str, Callable[[Any, str, str], Awaitable[str | None]]
-] = {
+_STAMP_READERS: dict[str, Callable[[Any, str, str], Awaitable[str | None]]] = {
     "postgresql": _read_stamp_from_postgres,
     "sqlite": _read_stamp_from_dbapi,
 }
@@ -408,9 +400,7 @@ async def _store_hash(conn: Any, schema_name: str, schema_hash: str) -> None:
 
 
 @helper
-async def _schema_is_clean(
-    conn: Any, schema_path: Path, schema_hash: str
-) -> bool:
+async def _schema_is_clean(conn: Any, schema_path: Path, schema_hash: str) -> bool:
     """Check if schema file hash matches the stored hash (skip-if-clean).
 
     A hash match alone is not sufficient: if the cloud DB was destroyed and
@@ -480,9 +470,7 @@ def _the_database_is_empty(schema_path: Path) -> bool:
     return len(load_models_from_module(schema_path)) == 0
 
 
-_WHEN_THE_STAMP_MATCHES: dict[
-    bool, Callable[[Any, Path], Awaitable[bool]]
-] = {
+_WHEN_THE_STAMP_MATCHES: dict[bool, Callable[[Any, Path], Awaitable[bool]]] = {
     True: _the_stamp_agrees,
     False: _the_stamp_disagrees,
 }
@@ -518,7 +506,6 @@ async def _has_user_tables(conn: Any) -> bool:
     dialect = _dialect_of(conn)
     count = for_dialect(_TABLE_COUNTERS, dialect, "Table counters")
     return cast(bool, await count(conn, user_tables_sql(dialect)))
-
 
 
 # The prefix persistum owns. ONE definition, read by the generator and by the
@@ -575,7 +562,7 @@ def _refuse_a_foreign_name(tmp_name: str) -> str:
 @helper
 def _without_our_prefix(tmp_name: str) -> str:
     """Our name, with the prefix taken off, leaving `{table}_{8 hex}`."""
-    return tmp_name[len(TMP_PREFIX):]
+    return tmp_name[len(TMP_PREFIX) :]
 
 
 @helper
@@ -675,14 +662,14 @@ async def _rename_into_place(conn: Any, tmp_name: str, original_name: str) -> in
             f"{tmp_name!r}. Migrating now would create "
             f"{original_name!r} empty beside them.",
             sql=statement,
-            original_error=exc, operation=NOTHING) from exc
+            original_error=exc,
+            operation=NOTHING,
+        ) from exc
     say(__name__, "warning", "Recovered orphaned table: %s -> %s", tmp_name, original_name)
     return 1
 
 
-_WHEN_THE_ORIGINAL_SURVIVED: dict[
-    bool, Callable[[Any, str, str], Awaitable[int]]
-] = {
+_WHEN_THE_ORIGINAL_SURVIVED: dict[bool, Callable[[Any, str, str], Awaitable[int]]] = {
     True: _drop_the_leftover,
     False: _rename_into_place,
 }
@@ -703,9 +690,7 @@ async def _recover_one(conn: Any, tmp_name: str) -> int:
     )
     original_exists = await check.fetchone()
 
-    return await _WHEN_THE_ORIGINAL_SURVIVED[bool(original_exists)](
-        conn, tmp_name, original_name
-    )
+    return await _WHEN_THE_ORIGINAL_SURVIVED[bool(original_exists)](conn, tmp_name, original_name)
 
 
 @helper
@@ -731,25 +716,24 @@ async def _clear_the_stamp(conn: Any, recovered: int) -> int:
             ("schema_hash:%",),
         )
         await conn.commit()
-        say(__name__, "info",
-            f"Cleared schema hash after recovering {recovered} orphaned table(s)"
-        )
+        say(__name__, "info", f"Cleared schema hash after recovering {recovered} orphaned table(s)")
     except Exception as exc:
         # A stale schema hash that survived means the next start will believe
         # the schema is current when it is not -- worth seeing rather than
         # hiding.
-        say(__name__, "warning",
+        say(
+            __name__,
+            "warning",
             "Could not clear the schema hash after recovering %d "
             "orphaned table(s): %s. If the meta table exists, the next "
             "start may skip a migration it should have run.",
-            recovered, exc,
+            recovered,
+            exc,
         )
     return recovered
 
 
-_WHEN_ANYTHING_WAS_RECOVERED: dict[
-    bool, Callable[[Any, int], Awaitable[int]]
-] = {
+_WHEN_ANYTHING_WAS_RECOVERED: dict[bool, Callable[[Any, int], Awaitable[int]]] = {
     True: _clear_the_stamp,
     False: _leave_the_stamp,
 }

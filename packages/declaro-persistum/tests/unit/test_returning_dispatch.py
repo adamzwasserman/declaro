@@ -25,14 +25,10 @@ class TestHasReturningClauseTrue:
     """SQL with a RETURNING clause is detected."""
 
     def test_basic_returning_star(self):
-        assert has_returning_clause(
-            "INSERT INTO t (a) VALUES (1) RETURNING *"
-        )
+        assert has_returning_clause("INSERT INTO t (a) VALUES (1) RETURNING *")
 
     def test_returning_with_column_list(self):
-        assert has_returning_clause(
-            "UPDATE t SET a = 1 WHERE b = 2 RETURNING id, a"
-        )
+        assert has_returning_clause("UPDATE t SET a = 1 WHERE b = 2 RETURNING id, a")
 
     def test_delete_returning(self):
         assert has_returning_clause("DELETE FROM t WHERE id = 1 RETURNING id")
@@ -69,15 +65,11 @@ class TestHasReturningClauseFalsePositives:
 
     def test_column_name_containing_returning(self):
         """A column called ``returning_user`` is not a RETURNING clause."""
-        assert not has_returning_clause(
-            "UPDATE t SET returning_user = 'alice' WHERE id = 1"
-        )
+        assert not has_returning_clause("UPDATE t SET returning_user = 'alice' WHERE id = 1")
 
     def test_column_name_returning_suffix(self):
         """A column called ``user_returning`` is not a RETURNING clause."""
-        assert not has_returning_clause(
-            "INSERT INTO t (user_returning) VALUES ('x')"
-        )
+        assert not has_returning_clause("INSERT INTO t (user_returning) VALUES ('x')")
 
     def test_table_name_containing_returning(self):
         """A table named ``returning_log`` is not a RETURNING clause.
@@ -85,6 +77,4 @@ class TestHasReturningClauseFalsePositives:
         Note: a column or table containing the substring 'returning_' is
         distinct from the keyword. Word boundaries differentiate them.
         """
-        assert not has_returning_clause(
-            "SELECT * FROM returning_log WHERE id = 1"
-        )
+        assert not has_returning_clause("SELECT * FROM returning_log WHERE id = 1")

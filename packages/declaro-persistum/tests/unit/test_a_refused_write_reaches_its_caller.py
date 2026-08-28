@@ -86,7 +86,7 @@ async def test_contention_exhaustion_is_still_a_receipt() -> None:
 
 @pytest.mark.asyncio
 async def test_a_refusal_is_not_retried() -> None:
-    """"No" fails identically next time, so spending the budget on it is waste."""
+    """ "No" fails identically next time, so spending the budget on it is waste."""
     room = new_room()
     attempts = 0
 
@@ -119,8 +119,7 @@ async def test_one_refused_write_does_not_stop_the_queue() -> None:
             raise TheRowAlreadyExists("row 2 is a duplicate")
 
     tickets = [
-        deposit(room, {"sql": "INSERT INTO t VALUES (?)", "params": (i,)})
-        for i in (1, 2, 3)
+        deposit(room, {"sql": "INSERT INTO t VALUES (?)", "params": (i,)}) for i in (1, 2, 3)
     ]
     drained = await drain(room, execute, NO_RETRY)
 
@@ -221,13 +220,10 @@ async def test_the_failure_goes_only_to_the_ticket_that_owns_it() -> None:
             raise TheRowAlreadyExists("row 7 is a duplicate")
 
     tickets = [
-        deposit(room, {"sql": "INSERT INTO t VALUES (?)", "params": (i,)})
-        for i in range(10)
+        deposit(room, {"sql": "INSERT INTO t VALUES (?)", "params": (i,)}) for i in range(10)
     ]
     await drain(room, execute, NO_RETRY)
 
-    settled = await asyncio.gather(
-        *(collect(room, t) for t in tickets), return_exceptions=True
-    )
+    settled = await asyncio.gather(*(collect(room, t) for t in tickets), return_exceptions=True)
     failed = [i for i, r in enumerate(settled) if isinstance(r, Exception)]
     assert failed == [7], f"exactly one ticket carries the failure, got {failed}"

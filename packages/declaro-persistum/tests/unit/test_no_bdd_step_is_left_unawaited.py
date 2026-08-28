@@ -39,8 +39,7 @@ def _decorator_names(node: ast.AsyncFunctionDef) -> list[str]:
         else decorator.id
         if isinstance(decorator, ast.Name)
         else decorator.func.attr
-        if isinstance(decorator, ast.Call)
-        and isinstance(decorator.func, ast.Attribute)
+        if isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Attribute)
         else ""
         for decorator in node.decorator_list
     ]
@@ -51,16 +50,13 @@ def _async_steps(path: pathlib.Path) -> list[str]:
     return [
         f"{path.name}:{node.lineno} {node.name}"
         for node in ast.walk(ast.parse(path.read_text()))
-        if isinstance(node, ast.AsyncFunctionDef)
-        and _STEP_DECORATORS & set(_decorator_names(node))
+        if isinstance(node, ast.AsyncFunctionDef) and _STEP_DECORATORS & set(_decorator_names(node))
     ]
 
 
 def test_no_step_is_declared_async() -> None:
     offenders = [
-        offender
-        for path in sorted(STEPS.rglob("*.py"))
-        for offender in _async_steps(path)
+        offender for path in sorted(STEPS.rglob("*.py")) for offender in _async_steps(path)
     ]
 
     assert offenders == [], (

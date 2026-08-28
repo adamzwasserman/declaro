@@ -61,41 +61,92 @@ pytestmark = pytest.mark.precommit
 # property is identical for every one of them, and fifteen near-identical test
 # functions would hide that.
 CASES = [
-    (SchemaError, ("bad schema",), {"file": "models.py", "line": 42},
-     ["bad schema", "models.py", "42"]),
-    (DeclaroConnectionError, ("unreachable",), {"dialect": "postgresql"},
-     ["unreachable", "postgresql"]),
-    (MigrationError, ("apply failed",),
-     {"operation": NOTHING, "sql": "CREATE TABLE t (v INT)",
-      "original_error": ValueError("nope")},
-     ["apply failed", "CREATE TABLE t", "ValueError", "nope"]),
-    (RollbackError, ("rollback failed",),
-     {"operation": NOTHING, "sql": "DROP TABLE t", "original_error": NOTHING,
-      "rollback_error": RuntimeError("stuck")},
-     ["rollback failed", "DROP TABLE t", "stuck"]),
-    (ValidationError, ("bad column",),
-     {"table": "users", "column": "email", "reference": "accounts.id"},
-     ["bad column", "users", "email", "accounts.id"]),
-    (LoaderError, ("cannot load",), {"path": "/models/user.py"},
-     ["cannot load", "/models/user.py"]),
-    (TransferError, ("transfer failed",),
-     {"phase": "copy", "table": "orders", "original_error": OSError("disk")},
-     ["transfer failed", "copy", "orders", "disk"]),
+    (
+        SchemaError,
+        ("bad schema",),
+        {"file": "models.py", "line": 42},
+        ["bad schema", "models.py", "42"],
+    ),
+    (
+        DeclaroConnectionError,
+        ("unreachable",),
+        {"dialect": "postgresql"},
+        ["unreachable", "postgresql"],
+    ),
+    (
+        MigrationError,
+        ("apply failed",),
+        {
+            "operation": NOTHING,
+            "sql": "CREATE TABLE t (v INT)",
+            "original_error": ValueError("nope"),
+        },
+        ["apply failed", "CREATE TABLE t", "ValueError", "nope"],
+    ),
+    (
+        RollbackError,
+        ("rollback failed",),
+        {
+            "operation": NOTHING,
+            "sql": "DROP TABLE t",
+            "original_error": NOTHING,
+            "rollback_error": RuntimeError("stuck"),
+        },
+        ["rollback failed", "DROP TABLE t", "stuck"],
+    ),
+    (
+        ValidationError,
+        ("bad column",),
+        {"table": "users", "column": "email", "reference": "accounts.id"},
+        ["bad column", "users", "email", "accounts.id"],
+    ),
+    (
+        LoaderError,
+        ("cannot load",),
+        {"path": "/models/user.py"},
+        ["cannot load", "/models/user.py"],
+    ),
+    (
+        TransferError,
+        ("transfer failed",),
+        {"phase": "copy", "table": "orders", "original_error": OSError("disk")},
+        ["transfer failed", "copy", "orders", "disk"],
+    ),
     (CycleError, (["a", "b", "a"], {"a", "b"}), {}, ["a", "b"]),
-    (NotSupportedError, ("no arrays here", ["use a junction table"]), {},
-     ["no arrays here", "use a junction table"]),
-    (AmbiguityError, ([{"type": "possible_rename", "table": "users",
-                        "from_column": "name", "to_column": "full_name",
-                        "column": None, "confidence": 0.9,
-                        "message": "rename or drop?"}],), {},
-     ["rename or drop?"]),
+    (
+        NotSupportedError,
+        ("no arrays here", ["use a junction table"]),
+        {},
+        ["no arrays here", "use a junction table"],
+    ),
+    (
+        AmbiguityError,
+        (
+            [
+                {
+                    "type": "possible_rename",
+                    "table": "users",
+                    "from_column": "name",
+                    "to_column": "full_name",
+                    "column": None,
+                    "confidence": 0.9,
+                    "message": "rename or drop?",
+                }
+            ],
+        ),
+        {},
+        ["rename or drop?"],
+    ),
     # The shape is {"symbol", "description"}, as cli/commands.py prints it.
     # My first draft passed {"table", "difference"} and the message came back
     # reading "~ Unknown", which is how the `.get(..., "Unknown")` fallback
     # below was found.
-    (DriftError, ([{"symbol": "~", "description": "users.email added"}],),
-     {"last_snapshot": "2026-08-14", "current_time": "2026-08-15"},
-     ["users.email added", "2026-08-14", "2026-08-15"]),
+    (
+        DriftError,
+        ([{"symbol": "~", "description": "users.email added"}],),
+        {"last_snapshot": "2026-08-14", "current_time": "2026-08-15"},
+        ["users.email added", "2026-08-14", "2026-08-15"],
+    ),
 ]
 
 
@@ -118,8 +169,7 @@ def test_every_piece_of_context_reaches_the_message(
     assert not missing, f"{kind.__name__} dropped {missing} from:\n{message}"
 
 
-@pytest.mark.parametrize("kind,args,kwargs,_fragments", CASES,
-                         ids=[c[0].__name__ for c in CASES])
+@pytest.mark.parametrize("kind,args,kwargs,_fragments", CASES, ids=[c[0].__name__ for c in CASES])
 def test_every_exception_is_catchable_as_one_declaro_error(
     kind: type[Exception], args: tuple, kwargs: dict, _fragments: list[str]
 ) -> None:
@@ -132,8 +182,7 @@ def test_every_exception_is_catchable_as_one_declaro_error(
     assert isinstance(kind(*args, **kwargs), DeclaroError)
 
 
-@pytest.mark.parametrize("kind,args,_kwargs,_fragments", CASES,
-                         ids=[c[0].__name__ for c in CASES])
+@pytest.mark.parametrize("kind,args,_kwargs,_fragments", CASES, ids=[c[0].__name__ for c in CASES])
 def test_the_absent_context_is_named_and_readable(
     kind: type[Exception], args: tuple, _kwargs: dict, _fragments: list[str]
 ) -> None:
@@ -167,10 +216,14 @@ class TestTheSqlTruncation:
 
     def test_short_sql_is_kept_whole(self) -> None:
         sql = "S" * 499
-        assert "..." not in str(MigrationError("boom", sql=sql, operation=NOTHING, original_error=NOTHING))
+        assert "..." not in str(
+            MigrationError("boom", sql=sql, operation=NOTHING, original_error=NOTHING)
+        )
 
     def test_long_sql_is_truncated_and_marked(self) -> None:
-        message = str(MigrationError("boom", sql="S" * 600, operation=NOTHING, original_error=NOTHING))
+        message = str(
+            MigrationError("boom", sql="S" * 600, operation=NOTHING, original_error=NOTHING)
+        )
         shown = message.split("SQL: ")[1].split("\n")[0]
         assert shown.endswith("...")
         assert len(shown) == 503, "500 characters plus the ellipsis"
@@ -182,7 +235,9 @@ class TestTheSqlTruncation:
 
     def test_exactly_500_is_truncated(self) -> None:
         """Which side the boundary falls on, stated rather than assumed."""
-        assert "..." in str(MigrationError("boom", sql="S" * 500, operation=NOTHING, original_error=NOTHING))
+        assert "..." in str(
+            MigrationError("boom", sql="S" * 500, operation=NOTHING, original_error=NOTHING)
+        )
 
 
 def test_an_exception_with_no_constructor_still_carries_its_message() -> None:

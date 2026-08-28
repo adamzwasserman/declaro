@@ -107,9 +107,7 @@ async def test_the_index_is_there_after_one_migration() -> None:
     conn = await aiosqlite.connect(path)
     try:
         plan = diff({}, DECLARED, dialect="sqlite", decisions=NOTHING)
-        await apply(
-            conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False
-        )
+        await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False)
 
         cursor = await conn.execute(
             "SELECT name FROM sqlite_master WHERE type='index' AND sql IS NOT NULL"
@@ -135,9 +133,7 @@ async def test_one_migration_is_enough_to_converge() -> None:
     conn = await aiosqlite.connect(path)
     try:
         plan = diff({}, DECLARED, dialect="sqlite", decisions=NOTHING)
-        await apply(
-            conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False
-        )
+        await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False)
 
         actual = await introspect(conn, "sqlite")
         second = diff({"t": actual["t"]}, DECLARED, dialect="sqlite", decisions=NOTHING)
@@ -159,9 +155,7 @@ async def test_the_unique_index_actually_constrains() -> None:
     conn = await aiosqlite.connect(path)
     try:
         plan = diff({}, DECLARED, dialect="sqlite", decisions=NOTHING)
-        await apply(
-            conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False
-        )
+        await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False)
 
         await conn.execute("INSERT INTO t (id, email) VALUES ('1', 'a@b')")
         with pytest.raises(aiosqlite.IntegrityError):

@@ -25,9 +25,7 @@ pytestmark = pytest.mark.precommit
 A_TABLE = {"postgresql": "pg", "sqlite": "lite", "turso": "turso"}
 
 
-@pytest.mark.parametrize(
-    "dialect", ["mysql", "libsql", "", "nonsense", "SQLite", "POSTGRESQL"]
-)
+@pytest.mark.parametrize("dialect", ["mysql", "libsql", "", "nonsense", "SQLite", "POSTGRESQL"])
 def test_an_unknown_dialect_is_refused_and_named(dialect: str) -> None:
     """Including the two that differ from a real one only in case.
 
@@ -69,6 +67,5 @@ def test_no_dispatch_table_is_read_with_a_default() -> None:
     """
     assert "dialect" in inspect.signature(for_dialect).parameters
     assert (
-        inspect.signature(for_dialect).parameters["dialect"].default
-        is inspect.Parameter.empty
+        inspect.signature(for_dialect).parameters["dialect"].default is inspect.Parameter.empty
     ), "for_dialect defaults its dialect, so omitting it chooses one silently"

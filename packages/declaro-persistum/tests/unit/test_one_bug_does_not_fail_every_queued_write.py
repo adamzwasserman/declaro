@@ -38,10 +38,7 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.precommit]
 
 
 def _five(room) -> list[str]:
-    return [
-        deposit(room, {"sql": f"INSERT INTO t VALUES ({i})", "params": ()})
-        for i in range(5)
-    ]
+    return [deposit(room, {"sql": f"INSERT INTO t VALUES ({i})", "params": ()}) for i in range(5)]
 
 
 async def test_a_refused_write_still_reaches_only_its_own_caller() -> None:
@@ -106,9 +103,7 @@ async def test_a_bug_of_ours_reaches_at_most_one_caller() -> None:
         if waiter is not None and waiter.done() and waiter.exception() is not None:
             told += 1
 
-    assert told <= 1, (
-        f"{told} callers were handed a bug that was not about their write"
-    )
+    assert told <= 1, f"{told} callers were handed a bug that was not about their write"
 
 
 async def test_the_writes_not_yet_attempted_stay_in_the_room() -> None:

@@ -5,7 +5,6 @@ everything they reach: whether a table is skipped or copied, whether foreign
 key enforcement comes off and goes back, what a resumed run does with a table
 it has seen before. Every name is re-exported from `transfer`."""
 
-
 from __future__ import annotations
 
 import logging
@@ -44,17 +43,13 @@ class TableTransferProgress(TypedDict):
 
 
 @helper
-def _nothing_more_to_place(
-    _graph: dict[str, set[str]], placed: list[str]
-) -> list[str]:
+def _nothing_more_to_place(_graph: dict[str, set[str]], placed: list[str]) -> list[str]:
     """A pass that placed no table means the rest reference each other."""
     return placed
 
 
 @helper
-def _place_the_next_layer(
-    graph: dict[str, set[str]], placed: list[str]
-) -> list[str]:
+def _place_the_next_layer(graph: dict[str, set[str]], placed: list[str]) -> list[str]:
     """Add every table whose parents are all placed, then go round again.
 
     One call places a whole layer, in the order the caller asked for the
@@ -64,9 +59,7 @@ def _place_the_next_layer(
     """
     standing = set(placed)
     ready = [
-        table
-        for table, parents in graph.items()
-        if table not in standing and parents <= standing
+        table for table, parents in graph.items() if table not in standing and parents <= standing
     ]
     return _MORE_TO_PLACE[bool(ready)](graph, placed + ready)
 
@@ -187,9 +180,7 @@ async def _read_one_batch(
     batch_size: int,
 ) -> list[Any]:
     """One batch of rows from the source, starting at `offset`."""
-    return await loader["read_rows"](
-        conn, table, columns, offset=offset, limit=batch_size
-    )
+    return await loader["read_rows"](conn, table, columns, offset=offset, limit=batch_size)
 
 
 _MORE_ROWS: dict[
@@ -217,9 +208,7 @@ async def _next_batch(
     early, so the loop that reads this stops on the batch rather than on the
     offset, and neither case needs a `break`.
     """
-    return await _MORE_ROWS[offset < total_rows](
-        loader, conn, table, columns, offset, batch_size
-    )
+    return await _MORE_ROWS[offset < total_rows](loader, conn, table, columns, offset, batch_size)
 
 
 @helper
@@ -250,7 +239,8 @@ async def _transfer_table(
     }
 
     await _upsert_progress(
-        target_conn, target_loader, table, "in_progress", 0, total_rows, error=NOTHING)
+        target_conn, target_loader, table, "in_progress", 0, total_rows, error=NOTHING
+    )
 
     _report(on_progress, progress)
 
@@ -269,8 +259,14 @@ async def _transfer_table(
         offset += len(batch)
 
         await _upsert_progress(
-            target_conn, target_loader, table, "in_progress",
-            rows_transferred, total_rows, error=NOTHING)
+            target_conn,
+            target_loader,
+            table,
+            "in_progress",
+            rows_transferred,
+            total_rows,
+            error=NOTHING,
+        )
 
         progress["rows_transferred"] = rows_transferred
         _report(on_progress, progress)
@@ -282,8 +278,8 @@ async def _transfer_table(
     progress["status"] = "completed"
     progress["rows_transferred"] = rows_transferred
     await _upsert_progress(
-        target_conn, target_loader, table, "completed",
-        rows_transferred, total_rows, error=NOTHING)
+        target_conn, target_loader, table, "completed", rows_transferred, total_rows, error=NOTHING
+    )
 
     _report(on_progress, progress)
 
@@ -333,9 +329,7 @@ class _Run(TypedDict):
 
 
 @helper
-async def _record_a_failed_table(
-    run: _Run, table: str, failure: Exception
-) -> _TableOutcome:
+async def _record_a_failed_table(run: _Run, table: str, failure: Exception) -> _TableOutcome:
     """The engine refused this table, and only this table is blamed."""
     error_msg = f"{type(failure).__name__}: {failure}"
 
@@ -343,8 +337,14 @@ async def _record_a_failed_table(
     # These two carried `= 0` in the signature, so every caller that omitted
     # them was recorded as having moved nothing whether or not that was true.
     await _upsert_progress(
-        run["target_conn"], run["target_loader"], table, "failed",
-        rows_transferred=0, total_rows=0, error=error_msg)
+        run["target_conn"],
+        run["target_loader"],
+        table,
+        "failed",
+        rows_transferred=0,
+        total_rows=0,
+        error=error_msg,
+    )
     _report(
         run["on_progress"],
         {
@@ -388,9 +388,10 @@ async def _stream_the_table(
     except Exception as failure:
         return await _record_a_failed_table(run, table, failure)
 
-    say(__name__, "info",
-        f"Transferred {table}: "
-        f"{progress['rows_transferred']}/{progress['total_rows']} rows"
+    say(
+        __name__,
+        "info",
+        f"Transferred {table}: {progress['rows_transferred']}/{progress['total_rows']} rows",
     )
     return {
         "table": table,
@@ -460,9 +461,7 @@ async def _clear_and_transfer(
     made resume useless for the one case it exists to serve.
     """
     recorded = cast(dict[str, Any], status)
-    say(__name__, "info",
-        f"Restarting {table}: was {recorded['status']}, deleting existing rows"
-    )
+    say(__name__, "info", f"Restarting {table}: was {recorded['status']}, deleting existing rows")
     await run["target_loader"]["delete_rows"](run["target_conn"], table)
     await run["target_loader"]["commit"](run["target_conn"])
     return await _stream_the_table(run, table, columns, status)
@@ -509,20 +508,14 @@ def _how_a_recorded_table_stands(status: dict[str, Any] | None) -> str:
 
 
 @helper
-async def _from_where_it_got_to(
-    run: _Run, table: str, columns: list[str]
-) -> _TableOutcome:
+async def _from_where_it_got_to(run: _Run, table: str, columns: list[str]) -> _TableOutcome:
     """`resume` was asked for, so the progress table decides what happens."""
     status = await _get_table_status(run["target_conn"], run["target_loader"], table)
-    return await _RESUME_ACTION[_how_a_recorded_table_stands(status)](
-        run, table, columns, status
-    )
+    return await _RESUME_ACTION[_how_a_recorded_table_stands(status)](run, table, columns, status)
 
 
 @helper
-async def _from_the_beginning(
-    run: _Run, table: str, columns: list[str]
-) -> _TableOutcome:
+async def _from_the_beginning(run: _Run, table: str, columns: list[str]) -> _TableOutcome:
     """`resume` was declined, so the progress table is not consulted."""
     return await _stream_the_table(run, table, columns, None)
 
@@ -537,9 +530,7 @@ _WHEN_RESUMING: dict[
 
 
 @helper
-async def _transfer_or_resume(
-    run: _Run, table: str, columns: list[str]
-) -> _TableOutcome:
+async def _transfer_or_resume(run: _Run, table: str, columns: list[str]) -> _TableOutcome:
     """The table has columns, so the only question left is where to start."""
     return await _WHEN_RESUMING[run["resume"]](run, table, columns)
 
@@ -573,7 +564,10 @@ def _refuse_a_failed_migration(migration_result: dict[str, Any]) -> dict[str, An
     """The target does not hold the schema, so there is nowhere to put rows."""
     raise TransferError(
         f"Schema migration failed on target: {migration_result.get('error')}",
-        phase="schema_migration", table=NOTHING, original_error=NOTHING)
+        phase="schema_migration",
+        table=NOTHING,
+        original_error=NOTHING,
+    )
 
 
 @helper
@@ -582,9 +576,7 @@ def _the_target_is_ready(migration_result: dict[str, Any]) -> dict[str, Any]:
     return migration_result
 
 
-_WHEN_THE_TARGET_MIGRATED: dict[
-    bool, Callable[[dict[str, Any]], dict[str, Any]]
-] = {
+_WHEN_THE_TARGET_MIGRATED: dict[bool, Callable[[dict[str, Any]], dict[str, Any]]] = {
     True: _the_target_is_ready,
     False: _refuse_a_failed_migration,
 }
@@ -599,7 +591,11 @@ def _refuse_the_missing_tables(
         f"These tables were asked for and the source does not have "
         f"them: {', '.join(sorted(missing))}. The source holds "
         f"{', '.join(sorted(all_tables))}. Nothing has been "
-        f"transferred.", phase=NOTHING, table=NOTHING, original_error=NOTHING)
+        f"transferred.",
+        phase=NOTHING,
+        table=NOTHING,
+        original_error=NOTHING,
+    )
 
 
 @helper
@@ -656,10 +652,7 @@ def _every_user_table(
     _source_schema: Schema,
 ) -> list[str]:
     """No names given, so everything the source holds that is not ours."""
-    return [
-        t for t in all_tables
-        if not is_enum_table(t) and t != TRANSFER_STATE_TABLE
-    ]
+    return [t for t in all_tables if not is_enum_table(t) and t != TRANSFER_STATE_TABLE]
 
 
 _WHICH_TABLES: dict[
@@ -672,21 +665,19 @@ _WHICH_TABLES: dict[
 
 
 @helper
-def _warn_and_append_the_cycle(
-    sorted_tables: list[str], circular_refs: list[str]
-) -> list[str]:
+def _warn_and_append_the_cycle(sorted_tables: list[str], circular_refs: list[str]) -> list[str]:
     """The tables in a cycle have no order among themselves, so they go last."""
-    say(__name__, "warning",
+    say(
+        __name__,
+        "warning",
         f"Circular FK references detected: {circular_refs}. "
-        f"FK checks will be disabled during transfer."
+        f"FK checks will be disabled during transfer.",
     )
     return [*sorted_tables, *circular_refs]
 
 
 @helper
-def _the_order_the_toposort_gave(
-    sorted_tables: list[str], _circular_refs: list[str]
-) -> list[str]:
+def _the_order_the_toposort_gave(sorted_tables: list[str], _circular_refs: list[str]) -> list[str]:
     """No cycle, so the topological order covers every table."""
     return sorted_tables
 
@@ -698,9 +689,7 @@ _TRANSFER_ORDER: dict[bool, Callable[[list[str], list[str]], list[str]]] = {
 
 
 @boundary
-async def _turn_fk_checks_off(
-    loader: BulkLoader, conn: Any, circular_refs: list[str]
-) -> int:
+async def _turn_fk_checks_off(loader: BulkLoader, conn: Any, circular_refs: list[str]) -> int:
     """DISABLING IS A PRECONDITION, NOT A COURTESY, so a failure stops the run.
 
     This was a warning, and the transfer then proceeded with checks still on:
@@ -720,7 +709,11 @@ async def _turn_fk_checks_off(
             f"these tables have circular references so no load order "
             f"satisfies them: {', '.join(sorted(circular_refs))}. "
             f"Transferring now would fail on the first row of each and "
-            f"report those tables as the problem.", phase=NOTHING, table=NOTHING, original_error=NOTHING) from exc
+            f"report those tables as the problem.",
+            phase=NOTHING,
+            table=NOTHING,
+            original_error=NOTHING,
+        ) from exc
     # ONE CONNECTION HAD ITS CHECKS TURNED OFF, which is what the restore step
     # needs to know. This said `return None` under an `-> int` signature, so
     # the pair claimed to answer a count and one half answered nothing. mypy
@@ -729,9 +722,7 @@ async def _turn_fk_checks_off(
 
 
 @helper
-async def _leave_fk_checks_on(
-    _loader: BulkLoader, _conn: Any, _circular_refs: list[str]
-) -> int:
+async def _leave_fk_checks_on(_loader: BulkLoader, _conn: Any, _circular_refs: list[str]) -> int:
     """No cycle, so every table has a load order its keys are happy with."""
     return 0
 
@@ -771,9 +762,7 @@ async def _turn_fk_checks_back_on(loader: BulkLoader, conn: Any) -> Exception | 
 
 
 @helper
-async def _leave_the_checks_as_they_are(
-    _loader: BulkLoader, _conn: Any
-) -> Exception | Nothing:
+async def _leave_the_checks_as_they_are(_loader: BulkLoader, _conn: Any) -> Exception | Nothing:
     """They were never turned off, so there is nothing to put back."""
     return NOTHING
 

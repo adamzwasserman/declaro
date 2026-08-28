@@ -62,7 +62,7 @@ def test_a_reconstruction_is_deferred_rather_than_attempted() -> None:
 
 
 def test_a_deferred_operation_says_which_table_it_was_on() -> None:
-    """"Something was skipped" is not actionable. The table name is."""
+    """ "Something was skipped" is not actionable. The table name is."""
     operations, order = _plan(
         {"t": {"columns": {"c": {"type": "text"}}}},
         {"t": {"columns": {"c": {"type": "integer"}}}},
@@ -138,8 +138,6 @@ def _replica(push, *, waiting: int = 0) -> dict:
     }
 
 
-
-
 @pytest.mark.asyncio
 async def test_a_commit_wakes_the_loop() -> None:
     """The floor. A loop that never wakes passes the test above.
@@ -177,11 +175,7 @@ async def test_a_commit_wakes_the_loop() -> None:
         task = asyncio.create_task(replication_loop(db, wanted))
         try:
             wanted.set()
-            woke = [
-                None
-                for _ in range(200)
-                if not wanted.is_set() or await asyncio.sleep(0.005)
-            ]
+            woke = [None for _ in range(200) if not wanted.is_set() or await asyncio.sleep(0.005)]
             assert not wanted.is_set(), (
                 f"the loop never woke after {len(woke)} turns: `wanted` is "
                 f"still set, so nothing consumed the signal a commit sends"
@@ -191,7 +185,3 @@ async def test_a_commit_wakes_the_loop() -> None:
             wanted.set()
             await asyncio.wait_for(task, timeout=2)
             await close(db)
-
-
-
-

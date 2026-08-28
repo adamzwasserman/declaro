@@ -52,9 +52,7 @@ def test_an_unset_variable_gives_the_documented_default(
 ) -> None:
     monkeypatch.delenv("EXAMPLE_URL", raising=False)
 
-    assert resolve_url("EXAMPLE_URL", default="postgresql://local/db") == (
-        "postgresql://local/db"
-    )
+    assert resolve_url("EXAMPLE_URL", default="postgresql://local/db") == ("postgresql://local/db")
 
 
 def test_a_set_variable_wins(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -83,7 +81,7 @@ def test_a_variable_set_to_whitespace_raises(monkeypatch: pytest.MonkeyPatch) ->
         resolve_url("EXAMPLE_URL", default="postgresql://local/db")
 
 
-def test_the_default_is_required(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_the_default_is_required() -> None:
     """No default for the default. A caller says what absence means."""
     with pytest.raises(TypeError):
         resolve_url("EXAMPLE_URL")  # type: ignore[call-arg]

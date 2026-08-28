@@ -55,9 +55,7 @@ async def test_sqlite_refuses_a_policy_that_is_not_one(policy: str) -> None:
         await open_sqlite(_path(), shutdown=policy, busy_timeout_s=5.0)
 
     message = str(caught.value)
-    assert "exit_immediately" in message, (
-        f"the error does not name what it takes: {message}"
-    )
+    assert "exit_immediately" in message, f"the error does not name what it takes: {message}"
 
 
 @pytest.mark.parametrize("policy", ["typo", "replicate_then_exit", ""])

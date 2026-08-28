@@ -54,8 +54,6 @@ def generate_metadata_table_schema() -> dict[str, Any]:
     }
 
 
-
-
 def create_matview_sql(
     name: str,
     query: str,
@@ -76,7 +74,7 @@ def create_matview_sql(
     """
     # A default in the signature would decide this where no reader
     # sees it happen and no test reaches it.
-    refresh_strategy = resolved(refresh_strategy, 'manual')
+    refresh_strategy = resolved(refresh_strategy, "manual")
     depends_on = resolved(depends_on, None)
     statements: list[str] = []
 
@@ -204,9 +202,7 @@ def generate_refresh_trigger_sql(
     statements: list[str] = []
 
     for event in events:
-        trigger_name = (
-            f"_dp_refresh_{matview_name}_on_{source_table}_{event.lower()}"
-        )
+        trigger_name = f"_dp_refresh_{matview_name}_on_{source_table}_{event.lower()}"
 
         statements.append(
             f"""CREATE TRIGGER IF NOT EXISTS {trigger_name}
@@ -278,5 +274,3 @@ def list_matviews_sql() -> str:
     return f"""SELECT name, refresh_strategy, last_refreshed_at
 FROM {MATVIEW_METADATA_TABLE}
 ORDER BY name"""
-
-

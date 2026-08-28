@@ -87,9 +87,7 @@ def test_the_decision_can_be_written(tmp_path: Path, decisions: dict) -> None:
 
 
 @pytest.mark.parametrize("decisions", [RENAME, DROP], ids=["rename", "drop"])
-def test_the_decision_reads_back_as_it_was_answered(
-    tmp_path: Path, decisions: dict
-) -> None:
+def test_the_decision_reads_back_as_it_was_answered(tmp_path: Path, decisions: dict) -> None:
     """The floor. Writing without error is not recording the answer.
 
     The differ acts on `type`, `from_column` and `to_column`, and a rename

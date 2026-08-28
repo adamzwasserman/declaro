@@ -48,7 +48,7 @@ from tests.conftest import refuse_without_postgresql
 
 scenarios("../features/schema/view_declaration.feature")
 
-_TABLE = '''from declaro_persistum import table
+_TABLE = """from declaro_persistum import table
 from pydantic import BaseModel
 
 
@@ -57,7 +57,7 @@ class Orders(BaseModel):
     id: int
     user_id: int
     amount: int
-'''
+"""
 
 _AGGREGATE = "SELECT user_id, SUM(amount) AS total FROM orders GROUP BY user_id"
 _PLAIN = "SELECT user_id, amount FROM orders WHERE amount > 0"
@@ -128,7 +128,11 @@ async def _database(ctx: Ctx, engine: str) -> Any:
     elif engine == "turso":
         try:
             database = await open_turso(
-                str(ctx["directory"] / "u.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
+                str(ctx["directory"] / "u.db"),
+                shutdown="exit_immediately",
+                primary=NOTHING,
+                token=NOTHING,
+            )
         except Exception as exc:  # noqa: BLE001
             pytest.skip(f"no Turso: {type(exc).__name__}: {exc}")
     else:
@@ -138,9 +142,7 @@ async def _database(ctx: Ctx, engine: str) -> Any:
         # which eight other places also create.
         url = ctx["postgresql_url"]
         try:
-            database = await open_postgresql(
-                url, shutdown="exit_immediately", busy_timeout_s=5.0
-            )
+            database = await open_postgresql(url, shutdown="exit_immediately", busy_timeout_s=5.0)
         except Exception as exc:  # noqa: BLE001
             refuse_without_postgresql(url, exc)
     ctx["databases"][engine] = database
@@ -158,7 +160,8 @@ async def _migrate(ctx: Ctx, engine: str) -> dict[str, Any]:
     # it. The last scenario still asserts that a second migration applies no
     # operations, which is true with or without the stamp.
     result = await apply_migrations_async(
-        database, engine, ctx["models"], force=True, expand_enums=NOTHING)
+        database, engine, ctx["models"], force=True, expand_enums=NOTHING
+    )
     ctx["results"].append(result)
     return result
 
@@ -185,8 +188,7 @@ async def _objects(ctx: Ctx, engine: str) -> dict[str, str]:
             )
             return {row["n"]: row["k"] for row in rows}
         cursor = await conn.execute(
-            "SELECT name, type FROM sqlite_master "
-            "WHERE type IN ('view', 'table', 'trigger')"
+            "SELECT name, type FROM sqlite_master WHERE type IN ('view', 'table', 'trigger')"
         )
         return dict(await cursor.fetchall())
 
@@ -216,9 +218,7 @@ def _table_only(ctx: Ctx) -> None:
     _declare(ctx)
 
 
-@given(
-    parsers.parse('the models file declares a view "{name}" selecting from "orders"')
-)
+@given(parsers.parse('the models file declares a view "{name}" selecting from "orders"'))
 def _plain_view(ctx: Ctx, name: str) -> None:
     _declare(ctx, f'V = {{"name": "{name}", "query": "{_PLAIN}"}}')
 
@@ -233,11 +233,7 @@ def _unknown_key(ctx: Ctx, key: str) -> None:
     _declare(ctx, f'V = {{"name": "v_plain", "query": "{_PLAIN}", "{key}": "manual"}}')
 
 
-@given(
-    parsers.parse(
-        'the models file declares a materialized view "{name}" refreshed "{refresh}"'
-    )
-)
+@given(parsers.parse('the models file declares a materialized view "{name}" refreshed "{refresh}"'))
 def _materialized(ctx: Ctx, name: str, refresh: str) -> None:
     _declare(
         ctx,
@@ -247,9 +243,7 @@ def _materialized(ctx: Ctx, name: str, refresh: str) -> None:
 
 
 @given(
-    parsers.parse(
-        'the models file declares a materialized view "{name}" depending on "{source}"'
-    )
+    parsers.parse('the models file declares a materialized view "{name}" depending on "{source}"')
 )
 def _with_depends_on(ctx: Ctx, name: str, source: str) -> None:
     _declare(
@@ -305,9 +299,7 @@ def _load_views(ctx: Ctx) -> None:
 
 @when("the declared query is changed")
 def _change_query(ctx: Ctx) -> None:
-    ctx["models"].write_text(
-        ctx["models"].read_text().replace("amount > 0", "amount > 100")
-    )
+    ctx["models"].write_text(ctx["models"].read_text().replace("amount > 0", "amount > 100"))
 
 
 @when("the view declaration is deleted from the models file")
@@ -352,11 +344,7 @@ def _native_matview(ctx: Ctx, engine: str, name: str) -> None:
     assert objects.get(name) == "matview", f"holds {objects.get(name)!r}"
 
 
-@then(
-    parsers.parse(
-        '{engine} holds "{name}" as a table with a row in the matview registry'
-    )
-)
+@then(parsers.parse('{engine} holds "{name}" as a table with a row in the matview registry'))
 def _emulated_matview(ctx: Ctx, engine: str, name: str) -> None:
     objects = ctx["run"](_objects(ctx, engine))
     assert objects.get(name) == "table", f"holds {objects.get(name)!r}"
@@ -405,8 +393,7 @@ def _matview_holds(ctx: Ctx, name: str) -> None:
     rows = ctx["run"](_rows(ctx, engine, name))
 
     assert rows == [], (
-        f"{name} shows {rows} after an insert it was never refreshed for, "
-        f"so it is not a snapshot"
+        f"{name} shows {rows} after an insert it was never refreshed for, so it is not a snapshot"
     )
 
 
@@ -432,9 +419,7 @@ def _no_view_found(ctx: Ctx) -> None:
     assert ctx["views"] == {}
 
 
-@then(
-    parsers.parse('loading fails naming "{key}" and listing the keys a view may carry')
-)
+@then(parsers.parse('loading fails naming "{key}" and listing the keys a view may carry'))
 def _refused_by_name(ctx: Ctx, key: str) -> None:
     assert isinstance(ctx["error"], LoaderError), (
         f"loading returned {ctx['views']!r} instead of raising"
@@ -453,11 +438,7 @@ def _no_error(ctx: Ctx) -> None:
     )
 
 
-@then(
-    parsers.parse(
-        '{engine} holds a refresh trigger on "{source}" for insert, update and delete'
-    )
-)
+@then(parsers.parse('{engine} holds a refresh trigger on "{source}" for insert, update and delete'))
 def _holds_triggers(ctx: Ctx, engine: str, source: str) -> None:
     objects = ctx["run"](_objects(ctx, engine))
     triggers = [name for name, kind in objects.items() if kind == "trigger"]
@@ -486,8 +467,7 @@ def _answers_new_query(ctx: Ctx, name: str) -> None:
 def _second_is_empty(ctx: Ctx) -> None:
     assert len(ctx["results"]) >= 2, "only one migration ran"
     assert ctx["results"][-1]["operations_applied"] == 0, (
-        f"the second migration applied "
-        f"{ctx['results'][-1]['operations_applied']} operations"
+        f"the second migration applied {ctx['results'][-1]['operations_applied']} operations"
     )
 
 

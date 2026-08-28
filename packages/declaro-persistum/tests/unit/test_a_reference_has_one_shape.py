@@ -55,12 +55,12 @@ def test_the_differ_emits_that_shape() -> None:
                 }
             },
         },
-        dialect="sqlite", decisions=NOTHING)
+        dialect="sqlite",
+        decisions=NOTHING,
+    )
 
     keys = [
-        op["details"]["references"]
-        for op in result["operations"]
-        if op["op"] == "add_foreign_key"
+        op["details"]["references"] for op in result["operations"] if op["op"] == "add_foreign_key"
     ]
     assert keys == ["p.id"]
     assert all(isinstance(k, str) for k in keys)

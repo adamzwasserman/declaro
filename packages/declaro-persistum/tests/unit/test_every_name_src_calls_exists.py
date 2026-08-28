@@ -57,11 +57,7 @@ def test_the_gate_can_see_the_source_at_all() -> None:
 
 
 def test_no_module_calls_a_name_that_does_not_exist() -> None:
-    undefined = [
-        line
-        for line in _mypy(str(SRC)).splitlines()
-        if "[name-defined]" in line
-    ]
+    undefined = [line for line in _mypy(str(SRC)).splitlines() if "[name-defined]" in line]
     assert not undefined, (
         "these reference names that do not exist, so the line raises NameError "
         "the moment it runs:\n  " + "\n  ".join(undefined)

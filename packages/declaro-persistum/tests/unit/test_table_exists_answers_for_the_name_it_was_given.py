@@ -188,9 +188,7 @@ async def test_a_name_carrying_sql_is_a_name_and_nothing_else(
     """
     connection = await _prepared(dialect, MADE)
     try:
-        answer = await table_exists(
-            connection, dialect, "x' OR '1'='1"
-        )
+        answer = await table_exists(connection, dialect, "x' OR '1'='1")
 
         assert answer is False, (
             "a name that closes the quote matched something, so it was "

@@ -60,9 +60,7 @@ def test_sqlite_stores_a_string_as_a_number_under_an_unknown_type() -> None:
     connection.execute("CREATE TABLE t (good TEXT, typo TXET)")
     connection.execute("INSERT INTO t VALUES ('007', '007')")
 
-    good, typo = connection.execute(
-        "SELECT typeof(good), typeof(typo) FROM t"
-    ).fetchone()
+    good, typo = connection.execute("SELECT typeof(good), typeof(typo) FROM t").fetchone()
 
     assert good == "text"
     assert typo == "integer", (

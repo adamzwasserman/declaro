@@ -46,13 +46,11 @@ def _dispatch_tables() -> dict[str, dict]:
     """Every module-level dict keyed by dialect names, across the package."""
     found: dict[str, dict] = {}
     modules = [declaro_persistum]
-    for info in pkgutil.walk_packages(
-        declaro_persistum.__path__, prefix="declaro_persistum."
-    ):
+    for info in pkgutil.walk_packages(declaro_persistum.__path__, prefix="declaro_persistum."):
         try:
             modules.append(importlib.import_module(info.name))
         except Exception:  # noqa: BLE001 - a module that will not import is
-            continue      # not a dispatch table, and other gates cover it
+            continue  # not a dispatch table, and other gates cover it
 
     for module in modules:
         for name in dir(module):

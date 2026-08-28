@@ -39,9 +39,7 @@ pytestmark = [pytest.mark.precommit, pytest.mark.postgresql, pytest.mark.integra
 
 PROBE_URL = probe_url()
 
-PARENT: dict[str, Any] = {
-    "columns": {"id": {"type": "integer", "primary_key": True}}
-}
+PARENT: dict[str, Any] = {"columns": {"id": {"type": "integer", "primary_key": True}}}
 
 # Each case is one declaration the engine has to give back unchanged.
 CASES: dict[str, dict[str, Any]] = {
@@ -136,7 +134,9 @@ async def _deploy(connection: Any, declared: dict[str, Any]) -> None:
     plan = diff(
         {n: actual[n] for n in declared if n in actual},
         declared,
-        dialect="postgresql", decisions=NOTHING)
+        dialect="postgresql",
+        decisions=NOTHING,
+    )
     await apply(
         connection,
         plan["operations"],
@@ -173,7 +173,9 @@ async def test_it_reads_back_and_converges(label: str) -> None:
         remaining = diff(
             {n: actual[n] for n in declared if n in actual},
             declared,
-            dialect="postgresql", decisions=NOTHING)["operations"]
+            dialect="postgresql",
+            decisions=NOTHING,
+        )["operations"]
 
         assert remaining == [], (
             f"{label} migrates on every deploy: "

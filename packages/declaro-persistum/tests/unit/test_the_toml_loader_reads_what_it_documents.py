@@ -157,9 +157,7 @@ expression = "lo < hi"
     )
 
     async def run() -> str:
-        connection = await aiosqlite.connect(
-            os.path.join(tempfile.mkdtemp(), "t.db")
-        )
+        connection = await aiosqlite.connect(os.path.join(tempfile.mkdtemp(), "t.db"))
         try:
             plan = diff({}, schema, dialect="sqlite", decisions=NOTHING)
             await apply(
@@ -169,9 +167,7 @@ expression = "lo < hi"
                 "sqlite",
                 dry_run=False,
             )
-            cursor = await connection.execute(
-                "SELECT sql FROM sqlite_master WHERE name='widgets'"
-            )
+            cursor = await connection.execute("SELECT sql FROM sqlite_master WHERE name='widgets'")
             return str((await cursor.fetchone())[0])
         finally:
             await connection.close()

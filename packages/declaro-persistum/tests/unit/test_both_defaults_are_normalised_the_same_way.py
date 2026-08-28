@@ -44,9 +44,7 @@ def test_the_answer_does_not_depend_on_the_order(left, right, dialect) -> None:
     twice, once per side, and a fifth fix adding a guard to only one of them
     would still pass every other test in the suite.
     """
-    assert same_default(left, right, dialect=dialect) == same_default(
-        right, left, dialect=dialect
-    )
+    assert same_default(left, right, dialect=dialect) == same_default(right, left, dialect=dialect)
 
 
 @pytest.mark.parametrize(

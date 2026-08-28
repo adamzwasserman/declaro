@@ -44,7 +44,7 @@ from declaro_persistum.pydantic_loader import load_schema_from_models
 
 pytestmark = [pytest.mark.precommit]
 
-UNRESOLVABLE = '''
+UNRESOLVABLE = """
 from __future__ import annotations
 from pydantic import BaseModel
 from declaro_persistum import table, field
@@ -54,9 +54,9 @@ from declaro_persistum import table, field
 class Widget(BaseModel):
     id: int = field(primary_key=True)
     thing: NeverDefined = None
-'''
+"""
 
-RESOLVABLE = '''
+RESOLVABLE = """
 from __future__ import annotations
 from pydantic import BaseModel
 from declaro_persistum import table, field
@@ -66,7 +66,7 @@ from declaro_persistum import table, field
 class Widget(BaseModel):
     id: int = field(primary_key=True)
     name: str = "unnamed"
-'''
+"""
 
 
 def _models(body: str) -> str:

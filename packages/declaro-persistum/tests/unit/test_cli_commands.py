@@ -88,10 +88,12 @@ class TestCheckDrift:
 
 class TestPrintDriftError:
     def test_every_difference_is_printed(self, capsys):
-        _print_drift_error([
-            {"symbol": "+", "description": "one"},
-            {"symbol": "-", "description": "two"},
-        ])
+        _print_drift_error(
+            [
+                {"symbol": "+", "description": "one"},
+                {"symbol": "-", "description": "two"},
+            ]
+        )
         out = capsys.readouterr().out
         assert "+ one" in out and "- two" in out
 
@@ -113,9 +115,7 @@ class TestPrintDiffResult:
         assert "Proposed changes (1 operations)" in capsys.readouterr().out
 
     def test_operations_are_numbered_from_one(self, capsys):
-        _print_diff_result(
-            _result(_op("drop_table", "a"), _op("drop_table", "b")), verbose=False
-        )
+        _print_diff_result(_result(_op("drop_table", "a"), _op("drop_table", "b")), verbose=False)
         out = capsys.readouterr().out
         assert "1. DROP TABLE a" in out and "2. DROP TABLE b" in out
 
@@ -131,22 +131,28 @@ class TestPrintDiffResult:
     @pytest.mark.parametrize(
         "op,expected",
         [
-            (_op("create_table", "t", columns={"a": {}, "b": {}}),
-             "CREATE TABLE t (2 columns)"),
+            (_op("create_table", "t", columns={"a": {}, "b": {}}), "CREATE TABLE t (2 columns)"),
             (_op("drop_table", "t"), "DROP TABLE t"),
             (_op("rename_table", "t", new_name="u"), "RENAME TABLE t -> u"),
-            (_op("add_column", "t", column="c", definition={"type": "text"}),
-             "ADD COLUMN t.c (text)"),
+            (
+                _op("add_column", "t", column="c", definition={"type": "text"}),
+                "ADD COLUMN t.c (text)",
+            ),
             (_op("drop_column", "t", column="c"), "DROP COLUMN t.c"),
-            (_op("rename_column", "t", from_column="a", to_column="b"),
-             "RENAME COLUMN t.a -> b"),
-            (_op("alter_column", "t", column="c", changes={"type": 1, "nullable": 2}),
-             "ALTER COLUMN t.c (type, nullable)"),
-            (_op("add_index", "t", index="ix", definition={"columns": ["a", "b"]}),
-             "CREATE INDEX ix ON t (a, b)"),
+            (_op("rename_column", "t", from_column="a", to_column="b"), "RENAME COLUMN t.a -> b"),
+            (
+                _op("alter_column", "t", column="c", changes={"type": 1, "nullable": 2}),
+                "ALTER COLUMN t.c (type, nullable)",
+            ),
+            (
+                _op("add_index", "t", index="ix", definition={"columns": ["a", "b"]}),
+                "CREATE INDEX ix ON t (a, b)",
+            ),
             (_op("drop_index", "t", index="ix"), "DROP INDEX ix"),
-            (_op("add_foreign_key", "t", column="c", references="u.id"),
-             "ADD FOREIGN KEY t.c -> u.id"),
+            (
+                _op("add_foreign_key", "t", column="c", references="u.id"),
+                "ADD FOREIGN KEY t.c -> u.id",
+            ),
             (_op("drop_foreign_key", "t", column="c"), "DROP FOREIGN KEY t.c"),
         ],
     )
@@ -171,34 +177,18 @@ class TestPrintDiffResult:
         assert "ADD COLUMN t.c (?)" in capsys.readouterr().out
 
     def test_verbose_prints_the_remaining_detail_keys(self, capsys):
-        _print_diff_result(
-            _result(_op("drop_table", "t", reason="obsolete")), verbose=True
-        )
+        _print_diff_result(_result(_op("drop_table", "t", reason="obsolete")), verbose=True)
         assert "reason: obsolete" in capsys.readouterr().out
 
     def test_verbose_suppresses_keys_already_shown_on_the_line(self, capsys):
-        _print_diff_result(
-            _result(_op("drop_column", "t", column="c")), verbose=True
-        )
+        _print_diff_result(_result(_op("drop_column", "t", column="c")), verbose=True)
         out = capsys.readouterr().out
         assert "column: c" not in out, "already printed as t.c"
 
     def test_non_verbose_prints_no_detail_lines(self, capsys):
-        _print_diff_result(
-            _result(_op("drop_table", "t", reason="obsolete")), verbose=False
-        )
+        _print_diff_result(_result(_op("drop_table", "t", reason="obsolete")), verbose=False)
         assert "reason" not in capsys.readouterr().out
 
 
 class TestCmdValidate:
     """The exit code is the contract with whoever runs the CLI."""
-
-
-
-
-
-
-
-
-
-

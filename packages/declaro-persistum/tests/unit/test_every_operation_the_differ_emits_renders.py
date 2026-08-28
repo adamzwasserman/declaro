@@ -67,9 +67,7 @@ def _ops(current: dict[str, Any], target: dict[str, Any]) -> list[Operation]:
 
 def _corpus() -> dict[str, Operation]:
     """One real operation of each type, produced by the differ itself."""
-    with_email = {
-        "users": {"columns": {**BASE["users"]["columns"], "email": {"type": "text"}}}
-    }
+    with_email = {"users": {"columns": {**BASE["users"]["columns"], "email": {"type": "text"}}}}
     with_index = {"users": {**BASE["users"], "indexes": {"ix_n": {"columns": ["name"]}}}}
     posts_plain = {
         "users": BASE["users"],
@@ -135,9 +133,7 @@ def _corpus() -> dict[str, Operation]:
             {
                 "users": {
                     **BASE["users"],
-                    "constraints": {
-                        "ck2": {"type": "check", "expression": "name <> 'x'"}
-                    },
+                    "constraints": {"ck2": {"type": "check", "expression": "name <> 'x'"}},
                 }
             },
         ),
@@ -211,16 +207,12 @@ def test_every_operation_renders_or_refuses_in_words_a_reader_can_act_on(
         assert "CODE NOT WRITTEN" not in message, message
         return
 
-    assert rendered and rendered[0].strip(), (
-        f"{operation_type} on {dialect} rendered {rendered!r}"
-    )
+    assert rendered and rendered[0].strip(), f"{operation_type} on {dialect} rendered {rendered!r}"
 
 
 @pytest.mark.parametrize("operation_type", APPLY_RECONSTRUCTS)
 @pytest.mark.parametrize("dialect", DIALECTS)
-def test_the_preview_does_not_refuse_what_apply_performs(
-    operation_type: str, dialect: str
-) -> None:
+def test_the_preview_does_not_refuse_what_apply_performs(operation_type: str, dialect: str) -> None:
     """The measured defect, stated on its own so it cannot be lost.
 
     `declaro apply` rebuilt the table and reported success. `declaro generate`,
@@ -230,16 +222,12 @@ def test_the_preview_does_not_refuse_what_apply_performs(
     """
     rendered = generate_sql([CORPUS[operation_type]], [0], dialect)
 
-    assert rendered and rendered[0].strip(), (
-        f"{operation_type} on {dialect} rendered {rendered!r}"
-    )
+    assert rendered and rendered[0].strip(), f"{operation_type} on {dialect} rendered {rendered!r}"
 
 
 @pytest.mark.parametrize("operation_type", sorted(CORPUS))
 @pytest.mark.parametrize("dialect", DIALECTS)
-def test_no_rendered_operation_carries_a_python_repr(
-    operation_type: str, dialect: str
-) -> None:
+def test_no_rendered_operation_carries_a_python_repr(operation_type: str, dialect: str) -> None:
     """The failure that renders and is still wrong.
 
     A dict or a list interpolated into SQL produces text that passes every

@@ -52,9 +52,13 @@ def _schema(tmp_path: pathlib.Path) -> str:
 @pytest.mark.asyncio
 async def test_a_migration_runs_against_a_database(tmp_path):
     """The whole point. It creates the table the schema asks for."""
-    db = await open_turso(str(tmp_path / "app.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
+    db = await open_turso(
+        str(tmp_path / "app.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
+    )
 
-    await apply_migrations_async(db, "turso", _schema(tmp_path), expand_enums=NOTHING, force=NOTHING)
+    await apply_migrations_async(
+        db, "turso", _schema(tmp_path), expand_enums=NOTHING, force=NOTHING
+    )
 
     from declaro_persistum.database import reading
 
@@ -62,15 +66,15 @@ async def test_a_migration_runs_against_a_database(tmp_path):
         cur = await conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='users'"
         )
-        assert await cur.fetchone(), (
-            "the migration reported no error and created no table"
-        )
+        assert await cur.fetchone(), "the migration reported no error and created no table"
 
 
 @pytest.mark.asyncio
 async def test_running_it_twice_changes_nothing_the_second_time(tmp_path):
     """A migration is a diff, so a second run against the same schema is empty."""
-    db = await open_turso(str(tmp_path / "app.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
+    db = await open_turso(
+        str(tmp_path / "app.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
+    )
     schema = _schema(tmp_path)
 
     await apply_migrations_async(db, "turso", schema, expand_enums=NOTHING, force=NOTHING)
@@ -88,12 +92,9 @@ def test_the_entry_point_names_the_type_it_takes():
     params = inspect.signature(apply_migrations_async).parameters
     first = next(iter(params.values()))
     assert first.name != "pool", (
-        "the first parameter is still called 'pool', which is the object that "
-        "no longer exists"
+        "the first parameter is still called 'pool', which is the object that no longer exists"
     )
-    assert first.annotation is not inspect.Parameter.empty, (
-        "the first parameter is unannotated"
-    )
+    assert first.annotation is not inspect.Parameter.empty, "the first parameter is unannotated"
     assert "Any" not in str(first.annotation), (
         f"the first parameter is annotated {first.annotation}; an untyped "
         f"entry point is what hid this break from every checker"

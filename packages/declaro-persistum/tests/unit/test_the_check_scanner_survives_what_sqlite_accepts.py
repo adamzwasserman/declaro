@@ -79,9 +79,7 @@ def _stored(statement: str) -> str | None:
         conn.execute(statement)
     except sqlite3.Error:
         return None
-    return conn.execute(
-        "SELECT sql FROM sqlite_master WHERE type='table'"
-    ).fetchone()[0]
+    return conn.execute("SELECT sql FROM sqlite_master WHERE type='table'").fetchone()[0]
 
 
 @settings(max_examples=250, suppress_health_check=[HealthCheck.too_slow], deadline=None)
@@ -132,10 +130,7 @@ async def test_the_schema_converges_whatever_sqlite_accepted(column, template) -
 
     _name, declaration = column
     expression = template.format(q=declaration)
-    statement = (
-        f"CREATE TABLE t (id TEXT PRIMARY KEY, {declaration} INTEGER "
-        f"CHECK ({expression}))"
-    )
+    statement = f"CREATE TABLE t (id TEXT PRIMARY KEY, {declaration} INTEGER CHECK ({expression}))"
     if _stored(statement) is None:
         return
 

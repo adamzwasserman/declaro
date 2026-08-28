@@ -43,7 +43,7 @@ from declaro_persistum.types import NOTHING
 
 pytestmark = pytest.mark.turso
 
-MODELS = '''
+MODELS = """
 from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel
@@ -68,7 +68,7 @@ stats: View = {
     "materialized": True,
     "refresh": "manual",
 }
-'''
+"""
 
 
 async def _open(kind: str, tmp_path: pathlib.Path):
@@ -78,7 +78,9 @@ async def _open(kind: str, tmp_path: pathlib.Path):
             shutdown="exit_immediately",
             busy_timeout_s=5.0,
         )
-    return await open_turso(str(tmp_path / f"{kind}.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
+    return await open_turso(
+        str(tmp_path / f"{kind}.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
+    )
 
 
 @pytest.mark.parametrize("kind", ["sqlite", "turso"])
@@ -90,26 +92,25 @@ async def test_the_second_migration_does_nothing(kind: str, tmp_path) -> None:
     db = await _open(kind, tmp_path)
 
     first = await apply_migrations_async(
-        db, dialect=kind, schema_path=str(models), expand_enums=NOTHING, force=NOTHING)
+        db, dialect=kind, schema_path=str(models), expand_enums=NOTHING, force=NOTHING
+    )
     assert first["success"], first["error"]
     assert first["operations_applied"] > 0, "nothing was created to begin with"
 
     # `force` skips the schema-hash cache, which would otherwise return before
     # diffing and hide every defect this file exists for.
     again = await apply_migrations_async(
-        db, dialect=kind, schema_path=str(models), force=True, expand_enums=NOTHING)
+        db, dialect=kind, schema_path=str(models), force=True, expand_enums=NOTHING
+    )
     assert again["success"], again["error"]
     assert again["operations_applied"] == 0, (
-        f"nothing changed and the engine proposed "
-        f"{again['operations_applied']} operation(s)"
+        f"nothing changed and the engine proposed {again['operations_applied']} operation(s)"
     )
 
 
 @pytest.mark.parametrize("kind", ["sqlite", "turso"])
 @pytest.mark.asyncio
-async def test_a_materialized_view_is_not_reported_as_a_table(
-    kind: str, tmp_path
-) -> None:
+async def test_a_materialized_view_is_not_reported_as_a_table(kind: str, tmp_path) -> None:
     """The quiet one, named on its own so a regression says which.
 
     The backing table introspected as an ordinary table, was undeclared, and
@@ -121,7 +122,9 @@ async def test_a_materialized_view_is_not_reported_as_a_table(
     models = tmp_path / "models.py"
     models.write_text(MODELS)
     db = await _open(kind, tmp_path)
-    await apply_migrations_async(db, dialect=kind, schema_path=str(models), expand_enums=NOTHING, force=NOTHING)
+    await apply_migrations_async(
+        db, dialect=kind, schema_path=str(models), expand_enums=NOTHING, force=NOTHING
+    )
 
     async with reading(db) as conn:
         schema, views = await introspect_with_views(conn, kind)

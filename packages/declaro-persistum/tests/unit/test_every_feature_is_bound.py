@@ -72,9 +72,7 @@ def _bindings() -> dict[pathlib.Path, list[pathlib.Path]]:
         for raw in _SCENARIOS_CALL.findall(text):
             target = (step_file.parent / raw).resolve()
             for feature in bound:
-                if target == feature or (
-                    target.is_dir() and target in feature.parents
-                ):
+                if target == feature or (target.is_dir() and target in feature.parents):
                     bound[feature].append(step_file)
     return bound
 
@@ -92,10 +90,7 @@ def _scenario_count(path: pathlib.Path) -> int:
 def test_no_feature_file_is_unbound():
     """A specification nobody runs is prose claiming to be a test."""
     bound = _bindings()
-    unbound = [
-        f for f, binders in bound.items()
-        if not binders and f.name not in KNOWN_UNBOUND
-    ]
+    unbound = [f for f, binders in bound.items() if not binders and f.name not in KNOWN_UNBOUND]
 
     assert not unbound, (
         "these .feature files are bound by no scenarios() call and have NEVER "
@@ -117,16 +112,13 @@ def test_no_feature_file_is_bound_twice():
     twice, and a step defined in both resolves to whichever module pytest
     imported last — which is import order, not intent.
     """
-    doubled = {
-        f: binders for f, binders in _bindings().items() if len(binders) > 1
-    }
+    doubled = {f: binders for f, binders in _bindings().items() if len(binders) > 1}
 
     assert not doubled, (
         "these .feature files are bound more than once, so their scenarios run "
         "repeatedly and any duplicated step resolves by import order:\n"
         + "\n".join(
-            f"    {f.relative_to(_FEATURES)}  bound by "
-            + ", ".join(b.name for b in binders)
+            f"    {f.relative_to(_FEATURES)}  bound by " + ", ".join(b.name for b in binders)
             for f, binders in sorted(doubled.items())
         )
     )

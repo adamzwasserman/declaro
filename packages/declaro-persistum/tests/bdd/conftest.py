@@ -7,6 +7,12 @@ from typing import Any, TypedDict
 import pytest
 
 from declaro_persistum.types import Schema
+from tests.bdd.factories.data_factory import todos, users
+from tests.bdd.factories.schema_factory import (
+    complex_ecommerce_schema,
+    simple_todos_schema,
+    simple_users_schema,
+)
 
 # =============================================================================
 # Scenario context — data passed between Given, When and Then
@@ -56,14 +62,6 @@ def new_context() -> ScenarioContext:
     }
 
 
-
-from tests.bdd.factories.data_factory import todos, users
-from tests.bdd.factories.schema_factory import (
-    complex_ecommerce_schema,
-    simple_todos_schema,
-    simple_users_schema,
-)
-
 # =============================================================================
 # Schema Fixtures
 # =============================================================================
@@ -98,32 +96,14 @@ def ecommerce_schema() -> Schema:
 # =============================================================================
 
 
-
-
-
-
-
-
-
-
 # =============================================================================
 # Connection Fixtures
 # =============================================================================
 
 
-
-
-
-
-
-
-
-
 # =============================================================================
 # BDD Context Fixture
 # =============================================================================
-
-
 
 
 @pytest.fixture

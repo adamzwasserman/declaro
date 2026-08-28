@@ -133,8 +133,7 @@ def test_a_case_renders_every_branch_in_order() -> None:
     assert sql.startswith("CASE WHEN "), sql
     assert sql.count("WHEN") == 2, sql
     assert sql.index("_w0_") < sql.index("_w1_"), (
-        f"the branches came out in the wrong order, which changes which one "
-        f"wins: {sql}"
+        f"the branches came out in the wrong order, which changes which one wins: {sql}"
     )
     assert sql.endswith("END AS band"), sql
 
@@ -172,9 +171,7 @@ def test_two_cases_in_one_query_do_not_collide() -> None:
 
 def test_a_case_inside_an_aggregate_renders_bare() -> None:
     """COUNT(CASE ... END) — the alias would be a syntax error inside it."""
-    sql, params = TABLE.render_function(
-        TABLE.count_(_band(), alias="n"), "sqlite", "p"
-    )
+    sql, params = TABLE.render_function(TABLE.count_(_band(), alias="n"), "sqlite", "p")
 
     assert sql.startswith("COUNT(CASE WHEN "), sql
     assert sql.endswith("END) AS n"), sql

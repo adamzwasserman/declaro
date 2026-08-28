@@ -70,10 +70,11 @@ COMPARES_CHECK = {"sqlite": True, "turso": False}
 
 # (label, the DDL that creates the stored table, the property being removed)
 STORED = [
-    ("check", 'CREATE TABLE "widgets" (id INTEGER PRIMARY KEY, '
-              "name TEXT CHECK (length(name) < 3))"),
-    ("unique", 'CREATE TABLE "widgets" (id INTEGER PRIMARY KEY, '
-               "name TEXT UNIQUE)"),
+    (
+        "check",
+        'CREATE TABLE "widgets" (id INTEGER PRIMARY KEY, name TEXT CHECK (length(name) < 3))',
+    ),
+    ("unique", 'CREATE TABLE "widgets" (id INTEGER PRIMARY KEY, name TEXT UNIQUE)'),
 ]
 
 
@@ -95,18 +96,20 @@ ENGINES = {"sqlite": _sqlite, "turso": _turso}
 async def _migrate(connection: Any, dialect: str) -> None:
     actual = await introspect(connection, dialect)
     plan = diff(
-        {n: actual[n] for n in PLAIN if n in actual}, PLAIN, dialect=dialect, decisions=NOTHING)
+        {n: actual[n] for n in PLAIN if n in actual}, PLAIN, dialect=dialect, decisions=NOTHING
+    )
     await apply(
-        connection, plan["operations"], plan["execution_order"], dialect,
+        connection,
+        plan["operations"],
+        plan["execution_order"],
+        dialect,
         dry_run=False,
     )
 
 
 @pytest.mark.parametrize("_prop,ddl", STORED, ids=[s[0] for s in STORED])
 @pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_removing_it_from_the_model_migrates(
-    dialect: str, _prop: str, ddl: str
-) -> None:
+async def test_removing_it_from_the_model_migrates(dialect: str, _prop: str, ddl: str) -> None:
     """The measured crash, for every property that can be taken away."""
     connection = await ENGINES[dialect]()
     try:
@@ -120,9 +123,7 @@ async def test_removing_it_from_the_model_migrates(
 
 @pytest.mark.parametrize("prop,ddl", STORED, ids=[s[0] for s in STORED])
 @pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_the_property_is_actually_gone_afterwards(
-    dialect: str, prop: str, ddl: str
-) -> None:
+async def test_the_property_is_actually_gone_afterwards(dialect: str, prop: str, ddl: str) -> None:
     """The floor. A migration that ran and changed nothing is not a migration."""
     if prop == "check" and not COMPARES_CHECK[dialect]:
         pytest.skip(
@@ -139,8 +140,7 @@ async def test_the_property_is_actually_gone_afterwards(
         actual = await introspect(connection, dialect)
 
         assert prop not in actual["widgets"]["columns"]["name"], (
-            f"{prop} survived the migration that removed it: "
-            f"{actual['widgets']['columns']['name']}"
+            f"{prop} survived the migration that removed it: {actual['widgets']['columns']['name']}"
         )
     finally:
         await connection.close()
@@ -148,16 +148,12 @@ async def test_the_property_is_actually_gone_afterwards(
 
 @pytest.mark.parametrize("_prop,ddl", STORED, ids=[s[0] for s in STORED])
 @pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_the_rows_survive_the_rebuild(
-    dialect: str, _prop: str, ddl: str
-) -> None:
+async def test_the_rows_survive_the_rebuild(dialect: str, _prop: str, ddl: str) -> None:
     """Removing a constraint rebuilds the table, and a rebuild can lose rows."""
     connection = await ENGINES[dialect]()
     try:
         await connection.execute(ddl)
-        await connection.execute(
-            'INSERT INTO "widgets" (id, name) VALUES (1, ?)', ("ab",)
-        )
+        await connection.execute('INSERT INTO "widgets" (id, name) VALUES (1, ?)', ("ab",))
         await connection.commit()
 
         await _migrate(connection, dialect)
@@ -180,7 +176,8 @@ async def test_the_removal_converges(dialect: str, _prop: str, ddl: str) -> None
 
         actual = await introspect(connection, dialect)
         remaining = diff(
-            {n: actual[n] for n in PLAIN if n in actual}, PLAIN, dialect=dialect, decisions=NOTHING)["operations"]
+            {n: actual[n] for n in PLAIN if n in actual}, PLAIN, dialect=dialect, decisions=NOTHING
+        )["operations"]
 
         assert remaining == [], [(o["op"], o["details"]) for o in remaining]
     finally:

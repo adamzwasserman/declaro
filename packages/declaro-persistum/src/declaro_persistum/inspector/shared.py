@@ -156,9 +156,7 @@ def _marked_unique(column: Column) -> Column:
     return {**column, "unique": True}
 
 
-def apply_unique_columns(
-    columns: dict[str, Column], unique_cols: set[str]
-) -> None:
+def apply_unique_columns(columns: dict[str, Column], unique_cols: set[str]) -> None:
     """Mark unique columns (mutates columns in place).
 
     A PK column is already unique and says so, so the flag is not repeated on
@@ -273,12 +271,10 @@ def as_literal(name: str) -> str:
     rather than here because importing the inspector from an abstraction is a
     cycle, and this one is beside its callers for the same reason.
     """
-    return name.replace("\'", "\'\'")
+    return name.replace("'", "''")
 
 
-def _with_foreign_key(
-    columns: dict[str, Column], fk: dict[str, str]
-) -> dict[str, Column]:
+def _with_foreign_key(columns: dict[str, Column], fk: dict[str, str]) -> dict[str, Column]:
     """The columns, with one key folded onto the column it leaves from.
 
     A FOLD RATHER THAN A COMPREHENSION, because two keys can leave the same
@@ -287,11 +283,7 @@ def _with_foreign_key(
     original would let the second key drop the first key's action.
     """
     name = fk["from"]
-    merged = [
-        (name, _pointing_at(columns[name], fk))
-        for present in [name]
-        if present in columns
-    ]
+    merged = [(name, _pointing_at(columns[name], fk)) for present in [name] if present in columns]
     return {**columns, **dict(merged)}
 
 
@@ -304,16 +296,8 @@ def _pointing_at(column: Column, fk: dict[str, str]) -> Column:
     facts: list[tuple[str, Any]] = [
         *column.items(),
         ("references", f"{fk['table']}.{fk['to']}"),
-        *[
-            ("on_delete", action)
-            for action in [normalize_fk_action(fk.get("on_delete"))]
-            if action
-        ],
-        *[
-            ("on_update", action)
-            for action in [normalize_fk_action(fk.get("on_update"))]
-            if action
-        ],
+        *[("on_delete", action) for action in [normalize_fk_action(fk.get("on_delete"))] if action],
+        *[("on_update", action) for action in [normalize_fk_action(fk.get("on_update"))] if action],
     ]
     return dict(facts)  # type: ignore[return-value]
 
@@ -523,9 +507,7 @@ _UNWRAP: dict[bool, Callable[[str], str]] = {
 def _unwrapped(text: str) -> str:
     """Outer parens off, as many times as a pair wraps the whole expression."""
     return _UNWRAP[
-        text.startswith("(")
-        and text.endswith(")")
-        and not _closes_before_the_end(text)
+        text.startswith("(") and text.endswith(")") and not _closes_before_the_end(text)
     ](text)
 
 
@@ -585,16 +567,12 @@ _QUOTE_AFTER: dict[bool, Callable[[str, str], str]] = {
 }
 
 
-def _inside_quote(
-    _openers: dict[str, str], depth: int, quote: str, char: str
-) -> _ScanState:
+def _inside_quote(_openers: dict[str, str], depth: int, quote: str, char: str) -> _ScanState:
     """Depth is frozen inside a quoted name or a string literal."""
     return depth, _QUOTE_AFTER[char == quote](quote, char)
 
 
-def _outside_quote(
-    openers: dict[str, str], depth: int, _quote: str, char: str
-) -> _ScanState:
+def _outside_quote(openers: dict[str, str], depth: int, _quote: str, char: str) -> _ScanState:
     """A parenthesis moves the depth and an opener starts a quote.
 
     No character does both: `(` and `)` are in neither opener table.
@@ -630,11 +608,7 @@ def _quoted_identifier(text: str, closing: str) -> tuple[str, bool] | None:
 
 def _bare_identifier(text: str) -> tuple[str, bool]:
     """The name up to the first space, comma or parenthesis."""
-    ends = [
-        position
-        for position, char in enumerate(text)
-        if char.isspace() or char in "(,"
-    ]
+    ends = [position for position, char in enumerate(text) if char.isspace() or char in "(,"]
     stopped = [(text[:position], False) for position in ends[:1]]
     return [*stopped, (text, False)][0]
 
@@ -676,9 +650,7 @@ def _split_top_level(body: str) -> list[str]:
     # Each cut paired with the next one. `zip(bounds, bounds[1:], strict=True)`
     # cannot express this: the two always differ in length by one, so strict
     # raises on every call. Indexing says what is meant and needs no flag.
-    segments = [
-        body[bounds[i] + 1 : bounds[i + 1]] for i in range(len(bounds) - 1)
-    ]
+    segments = [body[bounds[i] + 1 : bounds[i + 1]] for i in range(len(bounds) - 1)]
     # EVERY SEGMENT BEFORE A COMMA IS A CLAUSE, even an empty one, so `a,,b`
     # keeps its middle. What follows the last comma is a clause only when
     # something follows it, so a trailing comma adds nothing.
@@ -727,9 +699,7 @@ def _check_in(clause: str) -> str | None:
 # The keywords that open a table-level clause. A leading one of these names no
 # column, and a QUOTED one does, which is why `_leading_identifier` reports
 # both the name and how it was written.
-_TABLE_LEVEL_KEYWORDS = frozenset(
-    {"CHECK", "PRIMARY", "FOREIGN", "UNIQUE", "CONSTRAINT"}
-)
+_TABLE_LEVEL_KEYWORDS = frozenset({"CHECK", "PRIMARY", "FOREIGN", "UNIQUE", "CONSTRAINT"})
 
 
 def table_constraints_from_ddl(create_statement: str) -> dict[str, dict[str, str]]:
@@ -764,9 +734,7 @@ def table_constraints_from_ddl(create_statement: str) -> dict[str, dict[str, str
     checked = [
         (name, _check_in(rest))
         for remainder, (name, _quoted) in named
-        for rest in [
-            remainder[remainder.index(name) + len(name) :].lstrip('" ').strip()
-        ]
+        for rest in [remainder[remainder.index(name) + len(name) :].lstrip('" ').strip()]
         if rest.upper().startswith("CHECK")
     ]
     return {

@@ -80,9 +80,7 @@ written once.
 
 
 @helper
-def render_case(
-    expr: CaseExpression, path: str, *, with_alias: bool
-) -> tuple[str, dict[str, Any]]:
+def render_case(expr: CaseExpression, path: str, *, with_alias: bool) -> tuple[str, dict[str, Any]]:
     """Render CASE WHEN ... THEN ... ELSE ... END.
 
     NO DIALECT. It took one and read it zero times. The argument existed only
@@ -120,7 +118,6 @@ def render_case(
     return ALIASED[with_alias and bool(expr["alias"])](sql, expr["alias"]), params
 
 
-
 class OrderBy(TypedDict):
     """An ORDER BY term over a plain column. Data, not an object.
 
@@ -136,7 +133,6 @@ class OrderBy(TypedDict):
     direction: str
 
 
-
 class CaseOrderBy(TypedDict):
     """An ORDER BY term over a CASE expression. The other bounded member."""
 
@@ -146,9 +142,7 @@ class CaseOrderBy(TypedDict):
 
 
 @helper
-def _render_order_by(
-    term: OrderBy, _dialect: str, _path: str
-) -> tuple[str, dict[str, Any]]:
+def _render_order_by(term: OrderBy, _dialect: str, _path: str) -> tuple[str, dict[str, Any]]:
     """A plain column term takes no parameters."""
     return f"{term['column']} {term['direction']}", {}
 
@@ -225,7 +219,9 @@ def kind_of(value: Any) -> str | None:
 
     A plain dict passed as a value carries no tag and is correctly nothing.
     """
-    return value.get("kind") if isinstance(value, dict) else None  # honest: ignore HC-P005: the one place that reads a kind tag
+    return (
+        value.get("kind") if isinstance(value, dict) else None
+    )  # honest: ignore HC-P005: the one place that reads a kind tag
 
 
 @helper

@@ -96,9 +96,12 @@ def _trap_signals(db: Database) -> Database:
             # Python installs a default handler that is not callable, and
             # calling it would raise. Only a handler somebody set runs.
             [h(signum, frame) for h in [_previous] if callable(h)]
-            say(__name__, "info",
+            say(
+                __name__,
+                "info",
                 "Signal %s received; replicating %s before exit.",
-                signum, _db["path"],
+                signum,
+                _db["path"],
             )
             coro = replicate_on_shutdown(_db, now=time.monotonic)
             try:
@@ -140,20 +143,11 @@ def _trap_signals(db: Database) -> Database:
     @helper
     def restore() -> int:
         """Put back what was replaced, and say how many."""
-        put_back = [
-            sig
-            for sig, previous in replaced
-            if _restored(sig, previous)
-        ]
+        put_back = [sig for sig, previous in replaced if _restored(sig, previous)]
         replaced.clear()
         return len(put_back)
 
     return {**db, "untrap": restore}
-
-
-
-
-
 
 
 # Whether this database was opened asking to replicate at shutdown.

@@ -57,9 +57,7 @@ def test_an_environment_url_moves_the_server_and_not_the_database(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The caller chooses the server. The suite chooses the database."""
-    monkeypatch.setenv(
-        "TEST_POSTGRESQL_URL", "postgresql://someone@elsewhere:5432/production"
-    )
+    monkeypatch.setenv("TEST_POSTGRESQL_URL", "postgresql://someone@elsewhere:5432/production")
 
     chosen = probe_url()
 

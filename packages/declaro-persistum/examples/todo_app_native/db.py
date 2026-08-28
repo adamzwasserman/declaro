@@ -138,9 +138,7 @@ def _for_dialect(table: dict[str, Any], dialect: str, what: str) -> Any:
     """
     if dialect in table:
         return table[dialect]
-    raise ValueError(
-        f"Unknown dialect {dialect!r}. {what} exist for: {', '.join(sorted(table))}"
-    )
+    raise ValueError(f"Unknown dialect {dialect!r}. {what} exist for: {', '.join(sorted(table))}")
 
 
 @asynccontextmanager

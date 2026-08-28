@@ -63,9 +63,7 @@ def test_a_trigger_body_is_one_statement() -> None:
     where the cut happened. A trigger that arrives whole here arrives whole
     everywhere.
     """
-    statements = statements_for(
-        {"op": "create_view", "table": "_views", "details": _TRIGGERED}
-    )
+    statements = statements_for({"op": "create_view", "table": "_views", "details": _TRIGGERED})
 
     triggers = [s for s in statements if s.lstrip().upper().startswith("CREATE TRIGGER")]
     assert triggers, f"no trigger among {len(statements)} statements"
@@ -127,9 +125,7 @@ def test_the_generator_and_the_display_agree() -> None:
 
 
 @pytest.mark.parametrize("engine", ["sqlite", "turso"], ids=["sqlite", "turso"])
-async def test_a_triggered_view_reaches_the_database(
-    tmp_path: pathlib.Path, engine: str
-) -> None:
+async def test_a_triggered_view_reaches_the_database(tmp_path: pathlib.Path, engine: str) -> None:
     """The end of it: the declaration becomes a view the engine holds.
 
     The unit assertions above say the statements are whole. Only the engine
@@ -140,13 +136,14 @@ async def test_a_triggered_view_reaches_the_database(
             str(tmp_path / "s.db"), shutdown="exit_immediately", busy_timeout_s=5.0
         )
     else:
-        database = await open_turso(str(tmp_path / "u.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
+        database = await open_turso(
+            str(tmp_path / "u.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
+        )
 
     try:
         async with writing(database) as conn:
             await conn.execute(
-                'CREATE TABLE "orders" ("id" INTEGER, "user_id" INTEGER, '
-                '"amount" INTEGER)'
+                'CREATE TABLE "orders" ("id" INTEGER, "user_id" INTEGER, "amount" INTEGER)'
             )
             await conn.commit()
 
@@ -155,9 +152,7 @@ async def test_a_triggered_view_reaches_the_database(
             await apply(conn, operations, [0], engine, dry_run=False)
 
         async with reading(database) as conn:
-            cursor = await conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'trigger'"
-            )
+            cursor = await conn.execute("SELECT name FROM sqlite_master WHERE type = 'trigger'")
             triggers = [row[0] for row in await cursor.fetchall()]
 
         assert len(triggers) == 3, f"{engine} holds {triggers}"

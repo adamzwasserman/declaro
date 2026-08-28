@@ -128,16 +128,12 @@ def test_a_primary_key_column_says_so() -> None:
 
 def test_nullable_false_becomes_not_null_and_nullable_true_says_nothing() -> None:
     """`nullable: True` is the SQL default, so emitting NULL would be noise."""
-    assert column_sql("c", {"type": "text", "nullable": False}, "sqlite") == (
-        "c TEXT NOT NULL"
-    )
+    assert column_sql("c", {"type": "text", "nullable": False}, "sqlite") == ("c TEXT NOT NULL")
     assert column_sql("c", {"type": "text", "nullable": True}, "sqlite") == "c TEXT"
 
 
 def test_unique_is_carried() -> None:
-    assert column_sql("email", {"type": "text", "unique": True}, "sqlite") == (
-        "email TEXT UNIQUE"
-    )
+    assert column_sql("email", {"type": "text", "unique": True}, "sqlite") == ("email TEXT UNIQUE")
 
 
 DEFAULT_TRANSLATIONS = [
@@ -192,7 +188,7 @@ def test_a_table_renders_every_column_in_declaration_order() -> None:
         }
     }
     assert create_table_sql("todos", table, "sqlite") == (
-        'CREATE TABLE IF NOT EXISTS todos (id TEXT PRIMARY KEY, title TEXT NOT NULL)'
+        "CREATE TABLE IF NOT EXISTS todos (id TEXT PRIMARY KEY, title TEXT NOT NULL)"
     )
 
 

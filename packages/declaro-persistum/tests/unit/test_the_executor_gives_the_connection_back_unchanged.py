@@ -46,9 +46,7 @@ from declaro_persistum.query.executor import (
 _ENTRY_POINTS = {
     "fetch": lambda conn: _execute_fetch(conn, "SELECT id FROM t", {}),
     "fetch_one": lambda conn: _execute_fetch_one(conn, "SELECT id FROM t", {}),
-    "fetch_scalar": lambda conn: _execute_fetch_scalar(
-        conn, "SELECT COUNT(*) AS c FROM t", {}
-    ),
+    "fetch_scalar": lambda conn: _execute_fetch_scalar(conn, "SELECT COUNT(*) AS c FROM t", {}),
     "update": lambda conn: _execute_update(conn, "UPDATE t SET n='b'", {}),
 }
 
@@ -151,7 +149,10 @@ async def test_a_factory_the_caller_chose_is_given_back(name: str) -> None:
     who had set their own would silently lose it.
     """
 
-    def caller_factory(cursor, row):  # noqa: ANN001, ANN202
+    # A ROW FACTORY IS CALLED WITH BOTH, whether or not it reads the cursor.
+    # The signature is the driver's, so dropping the parameter would make
+    # this a factory sqlite3 cannot call.
+    def caller_factory(cursor, row):  # noqa: ANN001, ANN202, ARG001
         return {"chosen": row}
 
     path = tempfile.mktemp(suffix=".db")

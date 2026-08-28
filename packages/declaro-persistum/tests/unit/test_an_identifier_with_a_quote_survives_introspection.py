@@ -68,15 +68,11 @@ def _quoted(name: str) -> str:
 
 @pytest.mark.parametrize("name", AWKWARD)
 @pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_a_table_with_an_awkward_name_is_introspected(
-    dialect: str, name: str
-) -> None:
+async def test_a_table_with_an_awkward_name_is_introspected(dialect: str, name: str) -> None:
     """The measured crash. One such table broke the whole introspection."""
     connection = await ENGINES[dialect]()
     try:
-        await connection.execute(
-            f"CREATE TABLE {_quoted(name)} (id INTEGER PRIMARY KEY, v TEXT)"
-        )
+        await connection.execute(f"CREATE TABLE {_quoted(name)} (id INTEGER PRIMARY KEY, v TEXT)")
         await connection.commit()
 
         actual = await introspect(connection, dialect)
@@ -97,9 +93,7 @@ async def test_its_columns_come_back_too(dialect: str, name: str) -> None:
     """
     connection = await ENGINES[dialect]()
     try:
-        await connection.execute(
-            f"CREATE TABLE {_quoted(name)} (id INTEGER PRIMARY KEY, v TEXT)"
-        )
+        await connection.execute(f"CREATE TABLE {_quoted(name)} (id INTEGER PRIMARY KEY, v TEXT)")
         await connection.commit()
 
         actual = await introspect(connection, dialect)
@@ -115,9 +109,7 @@ async def test_its_index_comes_back_too(dialect: str, name: str) -> None:
     """`index_list` and the sqlite_master index query both take the name."""
     connection = await ENGINES[dialect]()
     try:
-        await connection.execute(
-            f"CREATE TABLE {_quoted(name)} (id INTEGER PRIMARY KEY, v TEXT)"
-        )
+        await connection.execute(f"CREATE TABLE {_quoted(name)} (id INTEGER PRIMARY KEY, v TEXT)")
         await connection.execute(f'CREATE INDEX "ix_v" ON {_quoted(name)} (v)')
         await connection.commit()
 
@@ -138,9 +130,7 @@ async def test_one_awkward_table_does_not_hide_the_others(dialect: str) -> None:
     connection = await ENGINES[dialect]()
     try:
         for name in ("ordinary", "od'd"):
-            await connection.execute(
-                f"CREATE TABLE {_quoted(name)} (id INTEGER PRIMARY KEY)"
-            )
+            await connection.execute(f"CREATE TABLE {_quoted(name)} (id INTEGER PRIMARY KEY)")
         await connection.commit()
 
         actual = await introspect(connection, dialect)

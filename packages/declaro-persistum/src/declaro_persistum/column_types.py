@@ -10,8 +10,6 @@ Every name is re-exported from `model_columns`, and from `pydantic_loader`
 above that, so the declaration API is unchanged.
 """
 
-
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -76,8 +74,7 @@ def _refuse_a_member_that_is_not_a_string(
 ) -> list[str]:
     """A Literal member the loader cannot render as a column value."""
     raise ValueError(
-        f"Literal enum values must be strings, got "
-        f"{type_of(offenders[0]).__name__}: {offenders[0]}"
+        f"Literal enum values must be strings, got {type_of(offenders[0]).__name__}: {offenders[0]}"
     )
 
 
@@ -87,9 +84,7 @@ def _the_literal_strings(_offenders: list[Any], members: tuple[Any, ...]) -> lis
     return list(members)
 
 
-_WHEN_A_MEMBER_IS_NOT_A_STRING: dict[
-    bool, Callable[[list[Any], tuple[Any, ...]], list[str]]
-] = {
+_WHEN_A_MEMBER_IS_NOT_A_STRING: dict[bool, Callable[[list[Any], tuple[Any, ...]], list[str]]] = {
     True: _refuse_a_member_that_is_not_a_string,
     False: _the_literal_strings,
 }
@@ -124,7 +119,9 @@ def is_optional_type(annotation: Any) -> bool:
     """Check if annotation is Optional (Union with None)."""
     origin = get_origin(annotation)
     spelling = getattr(origin, "__name__", str(origin))
-    return spelling in _UNION_SPELLINGS and type(None) in get_args(  # honest: ignore HC-P005: type(None) is how an Optional is spelled
+    return spelling in _UNION_SPELLINGS and type(
+        None
+    ) in get_args(  # honest: ignore HC-P005: type(None) is how an Optional is spelled
         annotation
     )
 
@@ -142,7 +139,9 @@ def _the_type_beside_none(annotation: Any) -> Any:
     A union of nothing but None has no such member, and the annotation comes
     back whole rather than as a member that is not there.
     """
-    beside = [arg for arg in get_args(annotation) if arg is not type(None)]  # honest: ignore HC-P005: type(None) is how an Optional is spelled
+    beside = [
+        arg for arg in get_args(annotation) if arg is not type(None)
+    ]  # honest: ignore HC-P005: type(None) is how an Optional is spelled
     return [*beside, annotation][0]
 
 
@@ -436,9 +435,7 @@ def sql_default(value: Any) -> str:
     """
     # The exact type IS the lookup key, and a type the table does not hold
     # produces no spelling at all rather than a guessed one.
-    spelled = [
-        _SQL_DEFAULT[kind](value) for kind in [type_of(value)] if kind in _SQL_DEFAULT
-    ]
+    spelled = [_SQL_DEFAULT[kind](value) for kind in [type_of(value)] if kind in _SQL_DEFAULT]
     return _WHEN_NO_SQL_SPELLING[not spelled](spelled, value)
 
 
@@ -559,9 +556,7 @@ def _the_known_index_fields(_name: str, unknown: list[str]) -> list[str]:
     return unknown
 
 
-_WHEN_AN_INDEX_FIELD_IS_UNKNOWN: dict[
-    bool, Callable[[str, list[str]], list[str]]
-] = {
+_WHEN_AN_INDEX_FIELD_IS_UNKNOWN: dict[bool, Callable[[str, list[str]], list[str]]] = {
     True: _refuse_an_unknown_index_field,
     False: _the_known_index_fields,
 }
@@ -582,9 +577,7 @@ def _the_index_columns(_name: str, declared: dict[str, Any]) -> list[str]:
     return list(declared["columns"])
 
 
-_WHEN_AN_INDEX_HAS_NO_COLUMNS: dict[
-    bool, Callable[[str, dict[str, Any]], list[str]]
-] = {
+_WHEN_AN_INDEX_HAS_NO_COLUMNS: dict[bool, Callable[[str, dict[str, Any]], list[str]]] = {
     True: _refuse_an_index_over_no_columns,
     False: _the_index_columns,
 }

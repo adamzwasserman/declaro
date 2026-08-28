@@ -6,7 +6,6 @@ is the second of those. Every name here is re-exported from `commands`, so
 nothing that imports from there had to change.
 """
 
-
 import sys
 from collections.abc import Awaitable, Callable
 from datetime import UTC
@@ -149,9 +148,7 @@ def _drift(actual: Schema, schema_dir: str, force: bool) -> list[dict[str, str]]
 
 
 @helper
-def _the_modes_asked_for(
-    interactive: bool, unattended: bool, _is_tty: bool
-) -> tuple[bool, bool]:
+def _the_modes_asked_for(interactive: bool, unattended: bool, _is_tty: bool) -> tuple[bool, bool]:
     """The operator named a mode on the command line, so it stands."""
     return interactive, unattended
 
@@ -240,9 +237,9 @@ async def _settled(
     rerun: Callable[[dict[str, Decision]], DiffResult],
 ) -> DiffResult:
     """The diff, once whatever can answer its ambiguities has answered them."""
-    return await _ANSWER_AMBIGUITIES[
-        (bool(result["ambiguities"]), unattended, interactive)
-    ](result, schema_dir, rerun)
+    return await _ANSWER_AMBIGUITIES[(bool(result["ambiguities"]), unattended, interactive)](
+        result, schema_dir, rerun
+    )
 
 
 @boundary
@@ -490,9 +487,7 @@ async def _pushed_to_the_cloud(conn: Any, result: ApplyResult) -> int:
 @boundary
 async def _not_pushed_to_the_cloud(_conn: Any, result: ApplyResult) -> int:
     """The applier refused, so nothing is sent and it says why."""
-    print(
-        f"\nMigration failed: {result.get('error', 'Unknown error')}", file=sys.stderr
-    )
+    print(f"\nMigration failed: {result.get('error', 'Unknown error')}", file=sys.stderr)
     return 1
 
 
@@ -728,7 +723,6 @@ def _print_drift_error(differences: list[dict[str, str]]) -> None:
     print("    3. Manually reconcile the differences")
 
 
-
 # HOW EACH OPERATION READS, one entry per kind. This was an if/elif chain of
 # eleven branches, which is dispatch on a value written the long way: a kind
 # added to the differ needed a branch here, and one removed left a branch
@@ -753,12 +747,10 @@ _DESCRIBE: dict[str, Callable[[str, dict[str, Any]], str]] = {
         f"RENAME COLUMN {table}.{d['from_column']} -> {d['to_column']}"
     ),
     "alter_column": lambda table, d: (
-        f"ALTER COLUMN {table}.{d['column']} "
-        f"({', '.join(d.get('changes', {}).keys())})"
+        f"ALTER COLUMN {table}.{d['column']} ({', '.join(d.get('changes', {}).keys())})"
     ),
     "add_index": lambda table, d: (
-        f"CREATE INDEX {d['index']} ON {table} "
-        f"({', '.join(d['definition'].get('columns', []))})"
+        f"CREATE INDEX {d['index']} ON {table} ({', '.join(d['definition'].get('columns', []))})"
     ),
     "drop_index": lambda _table, d: f"DROP INDEX {d['index']}",
     "add_foreign_key": lambda table, d: (
@@ -796,9 +788,7 @@ def _print_no_changes(_ops: list[Operation], _order: list[int], _verbose: bool) 
 
 
 @boundary
-def _print_the_operations(
-    ops: list[Operation], order: list[int], verbose: bool
-) -> None:
+def _print_the_operations(ops: list[Operation], order: list[int], verbose: bool) -> None:
     """Every operation in the order it will run."""
     print(f"\nProposed changes ({len(ops)} operations):\n")
     [

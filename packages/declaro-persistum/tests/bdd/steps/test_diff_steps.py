@@ -121,41 +121,43 @@ def _given_any(ctx):
 
 @when("the schemas are diffed")
 def _when_diff(ctx):
-    ctx["result"] = diff(ctx["current"], ctx["target"], decisions=ctx["decisions"], dialect="postgresql")
+    ctx["result"] = diff(
+        ctx["current"], ctx["target"], decisions=ctx["decisions"], dialect="postgresql"
+    )
 
 
 @when("the schemas are diffed twice")
 def _when_diff_twice(ctx):
     ctx["result"] = diff(ctx["current"], ctx["target"], dialect="postgresql", decisions=NOTHING)
-    ctx["result_again"] = diff(ctx["current"], ctx["target"], dialect="postgresql", decisions=NOTHING)
+    ctx["result_again"] = diff(
+        ctx["current"], ctx["target"], dialect="postgresql", decisions=NOTHING
+    )
 
 
 @then(parsers.parse('there is a create_table operation for "{name}"'))
 def _then_create_table(ctx, name):
-    assert any(
-        o["op"] == "create_table" and o["table"] == name for o in _ops(ctx)
-    ), f"no create_table for {name}: {_op_names(ctx)}"
+    assert any(o["op"] == "create_table" and o["table"] == name for o in _ops(ctx)), (
+        f"no create_table for {name}: {_op_names(ctx)}"
+    )
 
 
 @then(parsers.parse('there is a drop_table operation for "{name}"'))
 def _then_drop_table(ctx, name):
-    assert any(
-        o["op"] == "drop_table" and o["table"] == name for o in _ops(ctx)
-    ), f"no drop_table for {name}: {_op_names(ctx)}"
+    assert any(o["op"] == "drop_table" and o["table"] == name for o in _ops(ctx)), (
+        f"no drop_table for {name}: {_op_names(ctx)}"
+    )
 
 
 @then(parsers.parse('there is no create_table operation for "{name}"'))
 def _then_no_create(ctx, name):
-    assert not any(
-        o["op"] == "create_table" and o["table"] == name for o in _ops(ctx)
-    ), f"{name} exists in both schemas and was recreated: {_op_names(ctx)}"
+    assert not any(o["op"] == "create_table" and o["table"] == name for o in _ops(ctx)), (
+        f"{name} exists in both schemas and was recreated: {_op_names(ctx)}"
+    )
 
 
 @then(parsers.parse('there is no drop_table operation for "{name}"'))
 def _then_no_drop(ctx, name):
-    assert not any(
-        o["op"] == "drop_table" and o["table"] == name for o in _ops(ctx)
-    ), (
+    assert not any(o["op"] == "drop_table" and o["table"] == name for o in _ops(ctx)), (
         f"{name} exists in both schemas and was DROPPED — every row in it "
         f"would be gone: {_op_names(ctx)}"
     )
@@ -187,16 +189,12 @@ def _then_pure(ctx):
 @then(parsers.parse('there is a rename_table operation from "{old}" to "{new}"'))
 def _then_rename(ctx, old, new):
     assert any(
-        o["op"] == "rename_table"
-        and o["table"] == old
-        and o["details"].get("new_name") == new
+        o["op"] == "rename_table" and o["table"] == old and o["details"].get("new_name") == new
         for o in _ops(ctx)
     ), f"no rename_table {old} -> {new}: {_ops(ctx)}"
 
 
-@then(
-    "there is NO drop_table operation, because dropping and recreating would discard every row"
-)
+@then("there is NO drop_table operation, because dropping and recreating would discard every row")
 def _then_no_drop_at_all(ctx):
     drops = [o for o in _ops(ctx) if o["op"] == "drop_table"]
     assert not drops, f"a declared rename still emitted a drop: {drops}"
@@ -251,9 +249,7 @@ def _then_ambiguity(ctx, kind, frm, to):
     match = [
         a
         for a in ctx["ambiguities"]
-        if a["type"] == kind
-        and a.get("from_column") == frm
-        and a.get("to_column") == to
+        if a["type"] == kind and a.get("from_column") == frm and a.get("to_column") == to
     ]
     assert match, (
         f"no {kind} from {frm} to {to}; without it a rename is applied as a "
@@ -262,9 +258,7 @@ def _then_ambiguity(ctx, kind, frm, to):
     ctx["matched"] = match[0]
 
 
-@then(
-    "it carries no confidence score, because the differ does not know, which is why it is asking"
-)
+@then("it carries no confidence score, because the differ does not know, which is why it is asking")
 def _then_no_confidence(ctx):
     """A number invites the reader to trust a guess.
 
@@ -279,9 +273,7 @@ def _then_no_confidence(ctx):
 )
 def _then_no_ambiguity(ctx):
     renames = [a for a in ctx["ambiguities"] if a["type"] == "possible_rename"]
-    assert not renames, (
-        f"a decided rename was raised again: {renames}"
-    )
+    assert not renames, f"a decided rename was raised again: {renames}"
 
 
 # WHAT EACH OPERATION CARRIES, measured by running the differ rather than
@@ -374,9 +366,7 @@ def _given_cycle(ctx):
 
 @when("the operations are ordered")
 def _when_order(ctx):
-    deps = ctx.get("cyclic_dependencies") or build_dependency_graph(
-        ctx["operations"]
-    )
+    deps = ctx.get("cyclic_dependencies") or build_dependency_graph(ctx["operations"])
     try:
         ctx["order"] = topological_sort(ctx["operations"], deps)
         ctx["error"] = None
@@ -386,10 +376,7 @@ def _when_order(ctx):
 
 
 def _positions(ctx) -> dict[str, int]:
-    return {
-        ctx["operations"][idx]["op"]: place
-        for place, idx in enumerate(ctx["order"])
-    }
+    return {ctx["operations"][idx]["op"]: place for place, idx in enumerate(ctx["order"])}
 
 
 @then(
@@ -444,9 +431,9 @@ def _then_cycle_error(ctx):
         "a cyclic dependency graph produced an order; some prefix of it would "
         "run and leave the database in a state neither schema describes"
     )
-    assert "cycle" in type(ctx["error"]).__name__.lower() or "cycle" in str(
-        ctx["error"]
-    ).lower(), f"the error does not name the problem: {ctx['error']!r}"
+    assert "cycle" in type(ctx["error"]).__name__.lower() or "cycle" in str(ctx["error"]).lower(), (
+        f"the error does not name the problem: {ctx['error']!r}"
+    )
 
 
 # ------------------------------------------------------------ extended objects
@@ -454,9 +441,7 @@ def _then_cycle_error(ctx):
 
 @given(parsers.parse('an enum "{name}" with values {values}'))
 def _given_enum(ctx, name, values):
-    ctx["old_enums"] = {
-        name: {"name": name, "values": [v.strip() for v in values.split(",")]}
-    }
+    ctx["old_enums"] = {name: {"name": name, "values": [v.strip() for v in values.split(",")]}}
 
 
 @given(parsers.parse('a view "{name}" with one query'))

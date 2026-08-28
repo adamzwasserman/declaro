@@ -77,16 +77,12 @@ def test_the_gate_still_finds_what_it_is_looking_for() -> None:
     Asserted against a sample rather than against the tree, so this keeps
     saying something after the last real offender is gone.
     """
-    sample = '''
+    sample = """
         try:
             connection = await asyncpg.connect(url)
         except OSError as exc:
             pytest.skip(f"no PostgreSQL at {url}: {exc}")
-    '''
-    found = [
-        line
-        for line in sample.splitlines()
-        if _POSTGRESQL_SKIP.search(line)
-    ]
+    """
+    found = [line for line in sample.splitlines() if _POSTGRESQL_SKIP.search(line)]
 
     assert len(found) == 1, f"the scanner no longer finds a skip it should: {found}"

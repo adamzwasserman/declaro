@@ -36,9 +36,7 @@ def _rows_as_the_driver_wrote_them(
 
 
 @helper
-def _rows_through_the_factory(
-    rows: list[Row], row_factory: Callable[[Row], T]
-) -> list[T]:
+def _rows_through_the_factory(rows: list[Row], row_factory: Callable[[Row], T]) -> list[T]:
     """Each row is handed to the caller's factory, in order."""
     return [row_factory(row) for row in rows]
 
@@ -55,9 +53,7 @@ _ALL_ROWS: dict[bool, Callable[..., list[Row] | list[Any]]] = {
 
 
 @helper
-def _row_as_the_driver_wrote_it(
-    row: Row | None, _row_factory: RowFactory[T]
-) -> Row | T | None:
+def _row_as_the_driver_wrote_it(row: Row | None, _row_factory: RowFactory[T]) -> Row | T | None:
     """Either there is no row to shape or no factory to shape it with."""
     return row
 
@@ -90,7 +86,9 @@ def _conn_module(conn: Any) -> str:
     async wrappers like TursoAsyncConnection).
     Falls back to ``type(conn).__module__`` for raw driver connections.
     """
-    return getattr(conn, "_declaro_dialect", type(conn).__module__)  # honest: ignore HC-P005: the driver's own module is the only marker
+    return getattr(
+        conn, "_declaro_dialect", type(conn).__module__
+    )  # honest: ignore HC-P005: the driver's own module is the only marker
 
 
 @helper
@@ -179,8 +177,7 @@ def detect_dialect(connection: Any) -> str:
     """
     conn_type = _conn_module(connection)
     return [
-        _WHEN_ENGINE_UNNAMED[bool(keys)](conn_type, keys)
-        for keys in [_recognised_keys(conn_type)]
+        _WHEN_ENGINE_UNNAMED[bool(keys)](conn_type, keys) for keys in [_recognised_keys(conn_type)]
     ][0]
 
 
@@ -524,9 +521,7 @@ async def _execute_fetch_one(connection: Any, sql: str, params: Any) -> dict[str
         row = await cursor.fetchone()
         columns = [desc[0] for desc in cursor.description] if cursor.description else []
         # AN ABSENT ROW STAYS ABSENT. Only a row that is there gets named.
-        named = [
-            dict(zip(columns, present, strict=True)) for present in [row] if present
-        ]
+        named = [dict(zip(columns, present, strict=True)) for present in [row] if present]
         return [*named, None][0]
 
     _FETCHERS = {
@@ -576,9 +571,7 @@ def _first_value(row: Any) -> Any:
     # asyncpg a Record that also reads by name, and a row_factory can make it
     # a plain dict. A query that matched nothing has no row and no first value.
     found = [
-        _FIRST_VALUE[written_as(dict, present)](present)
-        for present in [row]
-        if present is not None
+        _FIRST_VALUE[written_as(dict, present)](present) for present in [row] if present is not None
     ]
     return [*found, None][0]
 
@@ -648,5 +641,3 @@ def _dict_factory(cursor: Any, row: tuple[Any, ...]) -> dict[str, Any]:
     """Row factory for aiosqlite to return dicts."""
     columns = [col[0] for col in cursor.description]
     return dict(zip(columns, row, strict=True))
-
-

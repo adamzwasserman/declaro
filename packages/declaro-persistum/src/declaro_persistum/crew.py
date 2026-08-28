@@ -78,7 +78,9 @@ class Crew(TypedDict):
 @helper
 def _said_out_loud(orphan: BaseException) -> BaseException:
     """Log one failure whose depositor stopped waiting, and hand it back."""
-    say(__name__, "warning",
+    say(
+        __name__,
+        "warning",
         "A write failed after its caller stopped waiting for it. "
         "Nobody will see this exception except this line.",
         exc_info=orphan,
@@ -251,10 +253,7 @@ async def start_crew(
         raise
 
     stop = asyncio.Event()
-    tasks = [
-        asyncio.create_task(drainer(room, db, conn, stop, retry, idle_s))
-        for conn in conns
-    ]
+    tasks = [asyncio.create_task(drainer(room, db, conn, stop, retry, idle_s)) for conn in conns]
     return {"room": room, "stop": stop, "tasks": tasks, "size": size}
 
 
@@ -284,9 +283,7 @@ def _the_one_that_would_not_close(
 
 # WHETHER ANY CONNECTION REFUSED TO CLOSE. Both entries answer, so reading
 # `unclosed[0]` never runs against an empty list.
-_FIRST_OF: dict[
-    bool, Callable[[list[Exception | Nothing]], Exception | Nothing]
-] = {
+_FIRST_OF: dict[bool, Callable[[list[Exception | Nothing]], Exception | Nothing]] = {
     True: _the_one_that_would_not_close,
     False: _no_connection_leaked,
 }

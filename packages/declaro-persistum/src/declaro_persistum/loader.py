@@ -113,11 +113,7 @@ def load_schema(schema_dir: str | Path) -> Schema:
     declarations = [
         *(schema_path / "tables").glob("*.toml"),
         *[root for root in [schema_path / "schema.toml"] if root.exists()],
-        *[
-            other
-            for other in schema_path.glob("*.toml")
-            if other.name not in _NOT_A_DECLARATION
-        ],
+        *[other for other in schema_path.glob("*.toml") if other.name not in _NOT_A_DECLARATION],
     ]
 
     schema: Schema = {
@@ -217,8 +213,6 @@ _NAMES_OF: dict[type, Callable[[Any], list[str]]] = {
 _TABLE_FIELDS = ("indexes", "constraints", "renamed_from")
 
 
-
-
 @helper
 def _normalize_table(table_data: dict[str, Any], table_name: str) -> Table:
     """Normalize table data from TOML to Table type.
@@ -253,9 +247,7 @@ _COLUMN_FIELDS = (
 
 
 @helper
-def _column_from_table(
-    col_name: str, table_name: str, col_data: dict[str, Any]
-) -> Column:
+def _column_from_table(col_name: str, table_name: str, col_data: dict[str, Any]) -> Column:
     """The long spelling: a TOML table carrying `type` and whatever else.
 
     A MISSING TYPE IS A BROKEN SCHEMA, NOT A TEXT COLUMN. This read
@@ -281,29 +273,25 @@ def _column_from_table(
 
 
 @helper
-def _column_from_type_name(
-    _col_name: str, _table_name: str, col_data: str
-) -> Column:
+def _column_from_type_name(_col_name: str, _table_name: str, col_data: str) -> Column:
     """The short spelling: the value is the type and there is nothing else."""
     return {"type": col_data}
 
 
 @helper
-def _refuse_untyped(
-    col_name: str, table_name: str, col_data: dict[str, Any]
-) -> dict[str, Any]:
+def _refuse_untyped(col_name: str, table_name: str, col_data: dict[str, Any]) -> dict[str, Any]:
     """A column table with no `type` key."""
     raise LoaderError(
         f"Column '{col_name}' in table '{table_name}' declares no type. It "
         f"carries {sorted(col_data)}; a column needs `type`, either as "
         f'`{col_name} = {{ type = "text" }}` or the short form '
-        f'`{col_name} = "text"`.', path=NOTHING)
+        f'`{col_name} = "text"`.',
+        path=NOTHING,
+    )
 
 
 @helper
-def _the_typed_column(
-    _col_name: str, _table_name: str, col_data: dict[str, Any]
-) -> dict[str, Any]:
+def _the_typed_column(_col_name: str, _table_name: str, col_data: dict[str, Any]) -> dict[str, Any]:
     """A column table carrying `type`, handed back to be read."""
     return col_data
 
@@ -324,9 +312,7 @@ _COLUMN_FROM: dict[type, Callable[[str, str, Any], Column]] = {
 
 
 @helper
-def _refuse_unknown_columns(
-    unknown: dict[str, str], table_name: str
-) -> dict[str, str]:
+def _refuse_unknown_columns(unknown: dict[str, str], table_name: str) -> dict[str, str]:
     """Columns written in neither spelling, named so the author can find them.
 
     They used to produce no column, no error and no warning, so the author
@@ -336,8 +322,10 @@ def _refuse_unknown_columns(
     written = ", ".join(f"'{name}' ({shape})" for name, shape in sorted(unknown.items()))
     raise LoaderError(
         f"Table '{table_name}' declares {written}, which is neither spelling "
-        f"of a column. Write either `name = \"text\"` or "
-        f"`[{table_name}.columns.name]` with a `type`.", path=NOTHING)
+        f'of a column. Write either `name = "text"` or '
+        f"`[{table_name}.columns.name]` with a `type`.",
+        path=NOTHING,
+    )
 
 
 @helper
@@ -353,9 +341,7 @@ _WHEN_UNKNOWN: dict[bool, Callable[[dict[str, str], str], dict[str, str]]] = {
 
 
 @helper
-def _normalize_columns(
-    columns_data: dict[str, Any], table_name: str
-) -> dict[str, Column]:
+def _normalize_columns(columns_data: dict[str, Any], table_name: str) -> dict[str, Column]:
     """Normalize column definitions from TOML.
 
     THE TABLE NAME IS PASSED SO A REFUSAL CAN SAY WHERE. It was not needed
@@ -624,8 +610,6 @@ def save_decisions(schema_dir: str | Path, decisions: dict[str, Any]) -> None:
     pending_path.write_text(content)
 
 
-
-
 # =============================================================================
 # Extended Schema Objects (Addendum)
 # =============================================================================
@@ -637,24 +621,6 @@ _VALID_IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 def _is_valid_identifier(name: str) -> bool:
     """Check if name is a valid SQL identifier."""
     return bool(_VALID_IDENTIFIER.match(name))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 _VALID_REFRESH_STRATEGIES = {"on_demand", "on_commit", "manual", "trigger", "hybrid"}
@@ -679,8 +645,7 @@ _VIEW_FAULTS: tuple[tuple[Callable[[View], bool], Callable[[View], str]], ...] =
         lambda view: bool(view.get("refresh"))
         and view.get("refresh") not in _VALID_REFRESH_STRATEGIES,
         lambda view: (
-            f"View refresh must be one of {_VALID_REFRESH_STRATEGIES}, "
-            f"got '{view.get('refresh')}'"
+            f"View refresh must be one of {_VALID_REFRESH_STRATEGIES}, got '{view.get('refresh')}'"
         ),
     ),
     (

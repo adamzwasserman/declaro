@@ -120,8 +120,7 @@ async def test_a_recovery_that_cannot_land_raises(tmp_path) -> None:
             await _recover_orphaned_tmp_tables(db)
 
         assert tmp in str(caught.value), (
-            f"the error does not name the table that could not be recovered: "
-            f"{caught.value}"
+            f"the error does not name the table that could not be recovered: {caught.value}"
         )
     finally:
         await close(db)

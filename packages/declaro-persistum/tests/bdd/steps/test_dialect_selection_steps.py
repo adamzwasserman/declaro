@@ -51,11 +51,7 @@ def _call(ctx: Ctx, fn: Any, *args: Any) -> None:
         ctx["refusal"] = refused
 
 
-@when(
-    parsers.parse(
-        '_keep_given_dialect is given "{given}" alongside the url "{url}"'
-    )
-)
+@when(parsers.parse('_keep_given_dialect is given "{given}" alongside the url "{url}"'))
 def _when_keep_given(ctx, given, url):
     ctx["answer"] = _keep_given_dialect(given, url)
 
@@ -98,11 +94,7 @@ def _when_named(ctx, named):
     _call(ctx, _the_named_dialect, [named])
 
 
-@when(
-    parsers.parse(
-        'an operator types the url "{typed}" with "{env}" in the environment'
-    )
-)
+@when(parsers.parse('an operator types the url "{typed}" with "{env}" in the environment'))
 def _when_both(ctx, typed, env, monkeypatch):
     # SETTING AN ENVIRONMENT VARIABLE IS NOT A FAKE. `get_connection_string`
     # reads this variable in production, and this sets the real one; nothing

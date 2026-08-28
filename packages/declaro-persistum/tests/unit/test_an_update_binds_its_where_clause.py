@@ -55,7 +55,9 @@ def _rendered(query) -> tuple[str, dict]:
 
 def test_an_update_binds_every_placeholder_it_renders() -> None:
     """The measured defect. A rendered `:name` with no value cannot run."""
-    sql, params = _rendered(update("t", {"a": 1}, where={"id": "x"}, params=NOTHING, returning=NOTHING))
+    sql, params = _rendered(
+        update("t", {"a": 1}, where={"id": "x"}, params=NOTHING, returning=NOTHING)
+    )
 
     missing = [
         token
@@ -67,14 +69,18 @@ def test_an_update_binds_every_placeholder_it_renders() -> None:
 
 def test_the_where_value_is_the_one_that_was_passed() -> None:
     """Binding something is not the same as binding the right thing."""
-    _sql, params = _rendered(update("t", {"a": 1}, where={"id": "x"}, params=NOTHING, returning=NOTHING))
+    _sql, params = _rendered(
+        update("t", {"a": 1}, where={"id": "x"}, params=NOTHING, returning=NOTHING)
+    )
 
     assert "x" in params.values(), params
 
 
 def test_the_set_values_survive_the_merge() -> None:
     """The obvious way to fix this is to return `_clause`'s dict and lose SET."""
-    _sql, params = _rendered(update("t", {"a": 1, "b": 2}, where={"id": "x"}, params=NOTHING, returning=NOTHING))
+    _sql, params = _rendered(
+        update("t", {"a": 1, "b": 2}, where={"id": "x"}, params=NOTHING, returning=NOTHING)
+    )
 
     assert params["set_a"] == 1 and params["set_b"] == 2, params
 
@@ -91,7 +97,18 @@ def test_a_string_where_still_works() -> None:
 @pytest.mark.parametrize(
     "builder",
     [
-        lambda: select("a", from_table="t", where={"id": "x"}, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING),
+        lambda: select(
+            "a",
+            from_table="t",
+            where={"id": "x"},
+            params=NOTHING,
+            order_by=NOTHING,
+            limit=NOTHING,
+            offset=NOTHING,
+            joins=NOTHING,
+            group_by=NOTHING,
+            having=NOTHING,
+        ),
         lambda: delete("t", where={"id": "x"}, params=NOTHING, returning=NOTHING),
         lambda: update("t", {"a": 1}, where={"id": "x"}, params=NOTHING, returning=NOTHING),
     ],
@@ -154,7 +171,11 @@ async def test_an_update_through_the_executor_lands() -> None:
         await conn.execute("INSERT INTO t VALUES ('x', 0)")
         await conn.commit()
 
-        await execute(update("t", {"a": 1}, where={"id": "x"}, params=NOTHING, returning=NOTHING), conn, row_factory=NOTHING)
+        await execute(
+            update("t", {"a": 1}, where={"id": "x"}, params=NOTHING, returning=NOTHING),
+            conn,
+            row_factory=NOTHING,
+        )
         await conn.commit()
 
         cursor = await conn.execute("SELECT a FROM t")

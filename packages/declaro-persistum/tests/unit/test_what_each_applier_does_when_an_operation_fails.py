@@ -132,9 +132,7 @@ async def test_a_batch_of_good_operations_succeeds(dialect: str) -> None:
     """The control on every test below."""
     connection = await CONNECT[dialect]()
     try:
-        result = await _apply(
-            connection, dialect, [_create("first"), _create("second")]
-        )
+        result = await _apply(connection, dialect, [_create("first"), _create("second")])
 
         assert result["success"] is True, result
     finally:
@@ -204,9 +202,7 @@ async def test_an_all_or_nothing_applier_leaves_nothing_behind() -> None:
         await _apply(connection, "sqlite", [_create("first")])
 
         with pytest.raises(MigrationError):
-            await _apply(
-                connection, "sqlite", [_create("second"), _create("first")]
-            )
+            await _apply(connection, "sqlite", [_create("second"), _create("first")])
     finally:
         await connection.close()
 
@@ -215,9 +211,7 @@ async def test_an_all_or_nothing_applier_leaves_nothing_behind() -> None:
         cursor = await reader.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='second'"
         )
-        assert not await cursor.fetchall(), (
-            "the operation before the failure survived the rollback"
-        )
+        assert not await cursor.fetchall(), "the operation before the failure survived the rollback"
     finally:
         await reader.close()
 
@@ -248,9 +242,7 @@ async def test_the_per_operation_applier_keeps_going() -> None:
         )
 
         cursor = connection.cursor()
-        await cursor.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-        )
+        await cursor.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
         made = [row[0] for row in await cursor.fetchall()]
 
         assert "second" in made, made

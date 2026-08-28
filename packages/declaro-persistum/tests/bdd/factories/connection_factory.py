@@ -21,10 +21,6 @@ _SQLITE_TEMP_DB = os.path.join(tempfile.gettempdir(), "declaro_test.db")
 _TURSO_TEMP_DB = os.path.join(tempfile.gettempdir(), "declaro_test_turso.db")
 
 
-
-
-
-
 def get_turso_url() -> str:
     """Get the local Turso database path for BDD runs.
 
@@ -107,6 +103,7 @@ def turso_path() -> str:
 # SQLite Connection
 # =============================================================================
 
+
 @asynccontextmanager
 async def get_sqlite_connection() -> AsyncGenerator[Any, None]:
     """Get an SQLite connection."""
@@ -118,11 +115,9 @@ async def get_sqlite_connection() -> AsyncGenerator[Any, None]:
         yield conn
 
 
-
-
 async def teardown_sqlite_schema(conn: Any, schema: Schema) -> None:
     """Drop tables in SQLite."""
-    for table_name in schema.keys():
+    for table_name in schema:
         await conn.execute(f"DROP TABLE IF EXISTS {table_name}")
     await conn.commit()
 
@@ -132,10 +127,9 @@ async def teardown_sqlite_schema(conn: Any, schema: Schema) -> None:
 # =============================================================================
 
 
-
 def teardown_turso_schema(conn: Any, schema: Schema) -> None:
     """Drop tables in Turso (sync API)."""
-    for table_name in schema.keys():
+    for table_name in schema:
         conn.execute(f"DROP TABLE IF EXISTS {table_name}")
     conn.commit()
 
@@ -143,6 +137,7 @@ def teardown_turso_schema(conn: Any, schema: Schema) -> None:
 # =============================================================================
 # PostgreSQL Connection
 # =============================================================================
+
 
 @asynccontextmanager
 async def get_postgresql_connection() -> AsyncGenerator[Any, None]:
@@ -157,14 +152,11 @@ async def get_postgresql_connection() -> AsyncGenerator[Any, None]:
         await conn.close()
 
 
-
-
 async def teardown_postgresql_schema(conn: Any, schema: Schema) -> None:
     """Drop tables in PostgreSQL."""
     # Drop in reverse order to handle foreign keys
     for table_name in reversed(list(schema.keys())):
         await conn.execute(f"DROP TABLE IF EXISTS {table_name} CASCADE")
-
 
 
 # =============================================================================
@@ -265,7 +257,7 @@ def column_sql(name: str, column: dict[str, Any], dialect: str) -> str:
     if "default" in column:
         defaults = DEFAULT_TRANSLATIONS[dialect]
         value = column["default"]
-        parts.append(f"DEFAULT {defaults[value] if value in defaults else value}")
+        parts.append(f"DEFAULT {defaults.get(value, value)}")
     if "references" in column and dialect == "postgresql":
         target = column["references"].replace(".", "(") + ")"
         on_delete = column.get("on_delete")
@@ -286,9 +278,7 @@ def create_table_sql(name: str, table: dict[str, Any], dialect: str) -> str:
     """
     columns = table.get("columns")
     if not columns:
-        raise ValueError(
-            f"table {name!r} declares no columns, so there is nothing to create"
-        )
+        raise ValueError(f"table {name!r} declares no columns, so there is nothing to create")
 
     parts = [column_sql(col, spec, dialect) for col, spec in columns.items()]
     if "primary_key" in table:
@@ -318,6 +308,7 @@ async def setup_postgresql_schema(conn: Any, schema: Schema) -> None:
     """No commit: asyncpg autocommits outside an explicit transaction."""
     for name, table in schema.items():
         await conn.execute(create_table_sql(name, table, "postgresql"))
+
 
 # =============================================================================
 # Connection Factory

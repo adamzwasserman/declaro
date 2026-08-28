@@ -54,7 +54,7 @@ pytestmark = [pytest.mark.precommit, pytest.mark.postgresql, pytest.mark.integra
 PROBE_URL = probe_url()
 
 # Two tables that reference each other. No load order satisfies both.
-MODELS = '''
+MODELS = """
 from pydantic import BaseModel
 from declaro_persistum import table, field
 
@@ -69,7 +69,7 @@ class Husband(BaseModel):
 class Wife(BaseModel):
     id: int = field(primary_key=True)
     husband_id: int | None = field(references="husbands.id", default=None)
-'''
+"""
 
 TABLES = ("husbands", "wives", "_dp_transfer_state")
 
@@ -97,9 +97,7 @@ async def _pair() -> tuple[Any, Any]:
         shutdown="exit_immediately",
         busy_timeout_s=5.0,
     )
-    target = await open_postgresql(
-        PROBE_URL, shutdown="exit_immediately", busy_timeout_s=5.0
-    )
+    target = await open_postgresql(PROBE_URL, shutdown="exit_immediately", busy_timeout_s=5.0)
 
     # THE SOURCE CARRIES THE SAME KEYS, and it has to. `bulk_transfer`
     # decides whether to suspend enforcement by toposorting the SOURCE
@@ -227,9 +225,7 @@ async def test_a_violating_row_is_refused_after_the_transfer(
 
         async with writing(target) as connection:
             with pytest.raises(asyncpg.ForeignKeyViolationError):
-                await connection.execute(
-                    'INSERT INTO "wives" (id, husband_id) VALUES (99, 404)'
-                )
+                await connection.execute('INSERT INTO "wives" (id, husband_id) VALUES (99, 404)')
     finally:
         await _cleanup(target)
         await close(source)

@@ -69,8 +69,7 @@ async def _seeded(path):
     await conn.execute("PRAGMA foreign_keys = ON")
     await conn.execute("CREATE TABLE parent (id INTEGER PRIMARY KEY)")
     await conn.execute(
-        "CREATE TABLE child (id INTEGER PRIMARY KEY, "
-        "pid INTEGER REFERENCES parent(id), note TEXT)"
+        "CREATE TABLE child (id INTEGER PRIMARY KEY, pid INTEGER REFERENCES parent(id), note TEXT)"
     )
     await conn.execute("INSERT INTO parent VALUES (1)")
     await conn.execute("INSERT INTO child VALUES (1, 1, 'x')")
@@ -99,9 +98,7 @@ async def test_a_successful_migration_leaves_enforcement_on(tmp_path) -> None:
         assert await _enforcement(conn) == 1, "the fixture did not start enforcing"
 
         ops = _reconstruction_ops()
-        result = await apply_operations(
-            conn, ops, list(range(len(ops))), "sqlite", dry_run=False
-        )
+        result = await apply_operations(conn, ops, list(range(len(ops))), "sqlite", dry_run=False)
         assert result["success"] is True, result.get("error")
 
         assert await _enforcement(conn) == 1, (
@@ -119,9 +116,7 @@ async def test_the_data_survives_the_migration(tmp_path) -> None:
     conn = await _seeded(tmp_path / "d.db")
     try:
         ops = _reconstruction_ops()
-        await apply_operations(
-            conn, ops, list(range(len(ops))), "sqlite", dry_run=False
-        )
+        await apply_operations(conn, ops, list(range(len(ops))), "sqlite", dry_run=False)
 
         cursor = await conn.execute("SELECT id, pid, note FROM child")
         assert await cursor.fetchall() == [(1, 1, "x")]
@@ -139,9 +134,7 @@ async def test_enforcement_is_real_after_the_migration(tmp_path) -> None:
     conn = await _seeded(tmp_path / "e.db")
     try:
         ops = _reconstruction_ops()
-        await apply_operations(
-            conn, ops, list(range(len(ops))), "sqlite", dry_run=False
-        )
+        await apply_operations(conn, ops, list(range(len(ops))), "sqlite", dry_run=False)
 
         with pytest.raises(aiosqlite.IntegrityError):
             await conn.execute("INSERT INTO child VALUES (99, 12345, 'orphan')")
@@ -162,13 +155,10 @@ async def test_a_connection_that_was_not_enforcing_is_left_alone(tmp_path) -> No
         assert await _enforcement(conn) == 0
 
         ops = _reconstruction_ops()
-        await apply_operations(
-            conn, ops, list(range(len(ops))), "sqlite", dry_run=False
-        )
+        await apply_operations(conn, ops, list(range(len(ops))), "sqlite", dry_run=False)
 
         assert await _enforcement(conn) == 0, (
-            "the migration switched enforcement on for a caller who had turned "
-            "it off"
+            "the migration switched enforcement on for a caller who had turned it off"
         )
     finally:
         await conn.close()
@@ -248,7 +238,9 @@ async def _turso_seeded(tmp_path):
     """
     from declaro_persistum import open_turso, writing
 
-    db = await open_turso(str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING)
+    db = await open_turso(
+        str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
+    )
     async with writing(db) as conn:
         await conn.execute("CREATE TABLE parent (id INTEGER PRIMARY KEY)")
         await conn.execute(
@@ -263,9 +255,7 @@ async def _turso_seeded(tmp_path):
 
 @pytest.mark.turso
 @pytest.mark.parametrize("start_enforcing", [True, False])
-async def test_turso_leaves_enforcement_as_it_found_it(
-    tmp_path, start_enforcing: bool
-) -> None:
+async def test_turso_leaves_enforcement_as_it_found_it(tmp_path, start_enforcing: bool) -> None:
     """Both directions, because forcing ON passes a one-direction test."""
     from declaro_persistum import close as close_db
     from declaro_persistum import writing
@@ -274,16 +264,12 @@ async def test_turso_leaves_enforcement_as_it_found_it(
     db = await _turso_seeded(tmp_path)
     try:
         async with writing(db) as conn:
-            await conn.execute(
-                f"PRAGMA foreign_keys = {'ON' if start_enforcing else 'OFF'}"
-            )
+            await conn.execute(f"PRAGMA foreign_keys = {'ON' if start_enforcing else 'OFF'}")
             assert await _enforcement(conn) == expected, "the fixture did not take"
 
             ops = [
                 o
-                for o in diff(ACTUAL, TARGET, dialect="turso", decisions={})[
-                    "operations"
-                ]
+                for o in diff(ACTUAL, TARGET, dialect="turso", decisions={})["operations"]
                 if o["op"] == "alter_column"
             ]
             result = await apply_operations(

@@ -107,7 +107,7 @@ class ValidationResult(TypedDict):
 # NOT refused. A check that rejected anything unusual would be worse than the
 # defect, because it would reject working schemas.
 UNRENDERABLE_IN_A_NAME = {
-    '"': 'the appliers do not escape a double quote inside a quoted name',
+    '"': "the appliers do not escape a double quote inside a quoted name",
     ";": "the SQLite and Turso appliers split rendered SQL on a semicolon",
 }
 
@@ -151,15 +151,10 @@ def validate_schema(schema: Schema) -> ValidationResult:
         - warnings: Non-fatal issues (unknown types, etc.)
         - errors: Fatal issues (invalid references, etc.)
     """
-    checked = [
-        _validate_table(table_name, table, schema)
-        for table_name, table in schema.items()
-    ]
+    checked = [_validate_table(table_name, table, schema) for table_name, table in schema.items()]
 
     return {
-        "warnings": [
-            message for result in checked for message in result["warnings"]
-        ]
+        "warnings": [message for result in checked for message in result["warnings"]]
         + _check_circular_dependencies(schema),
         "errors": [message for result in checked for message in result["errors"]],
     }
@@ -192,7 +187,7 @@ def _the_empty_table(
         "errors": _unrenderable("Table", table_name, table_name)
         + [
             f"Table '{table_name}': no columns. A table needs at least "
-            f"one, and this renders as `CREATE TABLE \"{table_name}\" ()`, "
+            f'one, and this renders as `CREATE TABLE "{table_name}" ()`, '
             f"which no engine accepts."
         ],
     }
@@ -208,15 +203,12 @@ def _the_populated_table(
     ]
 
     return {
-        "warnings": [
-            message for _, result in inspected for message in result["warnings"]
-        ],
+        "warnings": [message for _, result in inspected for message in result["warnings"]],
         "errors": _unrenderable("Table", table_name, table_name)
         + [
             message
             for col_name, result in inspected
-            for message in _unrenderable("Column", table_name, col_name)
-            + result["errors"]
+            for message in _unrenderable("Column", table_name, col_name) + result["errors"]
         ]
         + [
             message
@@ -242,9 +234,7 @@ _WHEN_THE_TABLE_HAS_COLUMNS: dict[
 def _validate_table(table_name: str, table: Table, schema: Schema) -> ValidationResult:
     """Validate one table: its name, its columns, its indexes and its key."""
     columns = table.get("columns", {})
-    return _WHEN_THE_TABLE_HAS_COLUMNS[bool(columns)](
-        table_name, table, columns, schema
-    )
+    return _WHEN_THE_TABLE_HAS_COLUMNS[bool(columns)](table_name, table, columns, schema)
 
 
 def _the_typeless_column(
@@ -328,9 +318,7 @@ def _the_typed_column(
 
     # Only a NEW column can fail against rows that already exist.
     new_not_null = _reported(
-        bool(col_def.get("is_new"))
-        and not is_nullable(col_def)
-        and "default" not in col_def,
+        bool(col_def.get("is_new")) and not is_nullable(col_def) and "default" not in col_def,
         f"Table '{table_name}', column '{col_name}': "
         f"New NOT NULL column without default may fail if table has data",
     )
@@ -370,9 +358,7 @@ def _the_typed_column(
     references = [
         message
         for reference in [col_def[key] for key in ("references",) if key in col_def]
-        for message in [
-            _validate_reference(table_name, col_name, reference, schema)
-        ]
+        for message in [_validate_reference(table_name, col_name, reference, schema)]
         if message
     ]
 
@@ -382,9 +368,7 @@ def _the_typed_column(
     }
 
 
-_WHEN_THE_COLUMN_HAS_A_TYPE: dict[
-    bool, Callable[[str, str, Column, Schema], ValidationResult]
-] = {
+_WHEN_THE_COLUMN_HAS_A_TYPE: dict[bool, Callable[[str, str, Column, Schema], ValidationResult]] = {
     True: _the_typed_column,
     False: _the_typeless_column,
 }
@@ -423,8 +407,7 @@ def _validate_reference(
     problems = (
         _reported(
             not dot,
-            f"{where}Invalid reference format '{reference}' "
-            f"(expected 'table.column')",
+            f"{where}Invalid reference format '{reference}' (expected 'table.column')",
         )
         + _reported(
             bool(dot) and ref_table not in schema,
@@ -540,9 +523,7 @@ def _walk(
     node: str, path: tuple[str, ...], walked: frozenset[str], deps: dict[str, set[str]]
 ) -> _Walked:
     """One step of the depth-first walk."""
-    return _WHERE_THE_TABLE_STANDS[(node in path, node in walked)](
-        node, path, walked, deps
-    )
+    return _WHERE_THE_TABLE_STANDS[(node in path, node in walked)](node, path, walked, deps)
 
 
 def _the_cycle_in_hand(
@@ -607,33 +588,25 @@ def _the_recorded_cycle(found: _Scanned, cycle: list[str]) -> _Scanned:
     )
 
 
-_WHEN_THE_WALK_MET_A_CYCLE: dict[
-    bool, Callable[[_Scanned, list[str]], _Scanned]
-] = {
+_WHEN_THE_WALK_MET_A_CYCLE: dict[bool, Callable[[_Scanned, list[str]], _Scanned]] = {
     True: _the_recorded_cycle,
     False: _no_cycle_here,
 }
 
 
-def _the_unchecked_table(
-    found: _Scanned, table_name: str, deps: dict[str, set[str]]
-) -> _Scanned:
+def _the_unchecked_table(found: _Scanned, table_name: str, deps: dict[str, set[str]]) -> _Scanned:
     """Walk from this table and record whatever cycle it meets."""
     cycle = _cycle_from(table_name, deps)
     return _WHEN_THE_WALK_MET_A_CYCLE[bool(cycle)](found, cycle)
 
 
-_WHEN_THE_TABLE_IS_NAMED: dict[
-    bool, Callable[[_Scanned, str, dict[str, set[str]]], _Scanned]
-] = {
+_WHEN_THE_TABLE_IS_NAMED: dict[bool, Callable[[_Scanned, str, dict[str, set[str]]], _Scanned]] = {
     True: _the_table_in_a_cycle,
     False: _the_unchecked_table,
 }
 
 
-def _the_next_table(
-    found: _Scanned, table_name: str, *, deps: dict[str, set[str]]
-) -> _Scanned:
+def _the_next_table(found: _Scanned, table_name: str, *, deps: dict[str, set[str]]) -> _Scanned:
     """One table of the schema, skipped when a cycle has already named it."""
     return _WHEN_THE_TABLE_IS_NAMED[table_name in found[0]](found, table_name, deps)
 
@@ -646,9 +619,7 @@ def _check_circular_dependencies(schema: Schema) -> list[str]:
     can be valid with deferrable constraints.
     """
     deps = _foreign_key_graph(schema)
-    _named, warnings = reduce(
-        partial(_the_next_table, deps=deps), schema, (frozenset(), ())
-    )
+    _named, warnings = reduce(partial(_the_next_table, deps=deps), schema, (frozenset(), ()))
     return list(warnings)
 
 
