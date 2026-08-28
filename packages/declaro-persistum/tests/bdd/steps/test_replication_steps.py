@@ -55,8 +55,6 @@ def ctx() -> Ctx:
     return {}
 
 
-
-
 async def _write_one(conn, sql, params):
     await conn.execute(sql, params)
 
@@ -90,74 +88,6 @@ def new_recorder(*, batches: int, failures: int) -> dict:
         # every scenario in this file.
         "waits": [],
     }
-
-
-def new_replica_stand_in(rec: dict) -> SimpleNamespace:
-    """What `turso.aio.sync.connect` returns, as closures over `rec`.
-
-    EVERY METHOD AND ITS AWAITABILITY MEASURED AGAINST A LIVE REPLICA on
-    2026-08-16, opened with TEST_TURSO_URL and TEST_TURSO_AUTH_TOKEN:
-
-        push  pull  close  commit  rollback  execute     all present
-        all of them coroutine functions
-
-    so this stand-in is `async` throughout, matching. A stand-in that is MORE
-    permissive than the driver is the quiet half of a known failure mode here:
-    the loud half invents a defect that does not exist, this half hides a real
-    one, and only the second leaves a passing suite.
-
-    `test_the_replica_stand_in_matches_the_real_driver` compares the two
-    surfaces, so a driver that adds or tightens a method fails there rather
-    than at a customer.
-    """
-
-    async def push() -> None:
-        if rec["failures"] > 0:
-            rec["failures"] -= 1
-            raise ConnectionResetError("primary unreachable")
-        rec["calls"].append("up")
-
-    async def pull() -> bool:
-        rec["calls"].append("down")
-        if rec["batches"] > 0:
-            rec["batches"] -= 1
-            return True
-        return False
-
-    async def close() -> None:
-        rec["closed"] = True
-
-    async def commit() -> None:
-        """persistum never commits on a SYNC connection, so reaching this is news.
-
-        `ReplicaConnection` declares `commit` and `rollback` because pyturso's
-        `ConnectionSync` has them, verified against the library on 2026-08-23.
-        Persistum only pushes, pulls and closes on one: data writes go to the
-        local connection, which is a real aiosqlite connection here.
-
-        So these two are doors this test never opens, and `return None` made a
-        wrong call look like a working one. Refusing keeps the driver's return
-        type honest -- nothing here claims a commit answers anything -- while
-        saying loudly if persistum ever starts committing on the replication
-        connection, which would be a change worth noticing.
-        """
-        raise AssertionError(
-            "persistum committed on the sync connection; replication writes "
-            "belong on the local connection"
-        )
-
-    async def rollback() -> None:
-        """Never called either, for the same reason as `commit` above."""
-        raise AssertionError(
-            "persistum rolled back on the sync connection; replication writes "
-            "belong on the local connection"
-        )
-
-    return SimpleNamespace(
-        push=push, pull=pull, close=close, commit=commit, rollback=rollback
-    )
-
-
 
 
 def _make(tmp_path, *, replicated=True, recorder=None, shutdown="exit_immediately"):
@@ -297,7 +227,6 @@ def _then_converges(ctx):
     mutation that removed the real loop survived exactly that way.
     """
     from declaro_persistum.turso_database import _pull_until_level
-
 
     # A CLOSURE, NOT A CLASS. `_pull_until_level` is control flow over an
     # injected `pull`, so its stand-in needs one attribute and a dict.
@@ -455,9 +384,7 @@ def _when_ten_passes(ctx):
 def _then_no_backlog(ctx):
     assert ctx["under_load"] == [], f"replication ran under load: {ctx['under_load']}"
     ups = [c for c in ctx["after_load"] if c == "up"]
-    assert len(ups) == 1, (
-        f"ten deferred passes released {len(ups)} when the load cleared"
-    )
+    assert len(ups) == 1, f"ten deferred passes released {len(ups)} when the load cleared"
 
 
 @when("time passes")
@@ -469,8 +396,7 @@ def _when_time_passes(ctx):
 @then("no timer wakes to take the connection and discover there is nothing to do")
 def _then_no_clock(ctx):
     assert not any("interval" in p for p in ctx["params"]), (
-        "an interval is back; replication is triggered by the connection being "
-        "free, not by a clock"
+        "an interval is back; replication is triggered by the connection being free, not by a clock"
     )
     assert "wanted" in ctx["loop_params"], (
         "the replication loop takes no trigger, so it can only be a timer"
@@ -610,9 +536,7 @@ def _when_opened_untrapped(ctx):
     "no signal handler is installed, because installing one behind a caller's back changes the behaviour of a program that never opted into it"
 )
 def _then_untrapped(ctx):
-    assert ctx["unchanged"], (
-        'a database asked for "exit_immediately" installed a handler anyway'
-    )
+    assert ctx["unchanged"], 'a database asked for "exit_immediately" installed a handler anyway'
 
 
 @then(
@@ -720,16 +644,12 @@ def _given_no_copy(ctx, tmp_path):
     ctx["path"] = str(tmp_path / "users" / "new" / "app.db")
 
 
-
-
 @then("the local copy is created and filled from the primary, and the call succeeds")
 def _then_created(ctx):
     assert ctx["made"] == [ctx["path"]], (
         f"replicate_path opened nothing at that path: {ctx['made']}"
     )
-    assert "down" in ctx["calls"], (
-        f"the new copy was never filled from the primary: {ctx['calls']}"
-    )
+    assert "down" in ctx["calls"], f"the new copy was never filled from the primary: {ctx['calls']}"
 
 
 @then(
@@ -737,8 +657,7 @@ def _then_created(ctx):
 )
 def _then_same_verb(ctx):
     assert ctx["calls"].index("up") < ctx["calls"].index("down"), (
-        f"the provisioning path brought changes down before sending up: "
-        f"{ctx['calls']}"
+        f"the provisioning path brought changes down before sending up: {ctx['calls']}"
     )
     assert ctx["closed"], (
         "replicate_path left its connection open; it must neither disturb nor "

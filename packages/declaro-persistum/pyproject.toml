@@ -99,6 +99,19 @@ ignore = [
     "B008",   # do not perform function calls in argument defaults
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# ARG001 IS WRONG FOR A GHERKIN STEP, and for a callable injected into a
+# declared field. pytest-bdd hands a step its fixtures by name, so a step
+# that asserts on the code rather than on the context still has to take
+# `ctx`. And a function put into a `Database` field has to match the
+# signature that field declares, whether or not this one reads every
+# argument. Renaming either to `_ctx` or `_db` breaks the match.
+#
+# Added 2026-08-28, when pre-commit was installed and started enforcing a
+# rule that had been declared for months and never run. Five sites, all of
+# them one of those two shapes.
+"tests/bdd/steps/*.py" = ["ARG001"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["declaro_persistum"]
 

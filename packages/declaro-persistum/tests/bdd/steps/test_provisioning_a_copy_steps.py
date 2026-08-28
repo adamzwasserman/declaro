@@ -15,7 +15,7 @@ import asyncio
 import os
 import pathlib
 import tempfile
-from typing import Any, TypedDict
+from typing import TypedDict
 
 import pytest
 from pytest_bdd import given, scenarios, then, when
@@ -49,9 +49,7 @@ async def _tables_on_the_primary() -> list[str]:
 
     url, token = _the_primary()
     scratch = pathlib.Path(tempfile.mkdtemp()) / "peek.db"
-    conn = await turso.aio.sync.connect(
-        str(scratch), remote_url=url, auth_token=token
-    )
+    conn = await turso.aio.sync.connect(str(scratch), remote_url=url, auth_token=token)
     try:
         await conn.pull()
         cursor = await conn.execute(
@@ -106,14 +104,12 @@ def _when_replica_opened(ctx):
 @then("a copy is there")
 def _then_copy_there(ctx):
     assert ctx["path"].exists(), (
-        f"nothing was made at {ctx['path']}; a caller asked for a copy and "
-        f"got no file"
+        f"nothing was made at {ctx['path']}; a caller asked for a copy and got no file"
     )
 
 
 @then("the primary is unchanged")
 def _then_primary_unchanged(ctx):
     assert ctx["before"] == ctx["after"], (
-        f"asking for a local copy changed the primary: "
-        f"{set(ctx['after']) ^ set(ctx['before'])}"
+        f"asking for a local copy changed the primary: {set(ctx['after']) ^ set(ctx['before'])}"
     )
