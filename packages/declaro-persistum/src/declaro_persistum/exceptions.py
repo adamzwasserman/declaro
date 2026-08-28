@@ -236,6 +236,7 @@ class MigrationError(DeclaroError):
     Contains the failing operation and SQL for debugging.
     """
 
+    # honest-code-allow: L1.21.1 - this and ValidationError.__init__ both resolve three optional fields and store them, and that half is real duplication. Collapsing it needs setattr, which mypy cannot follow, so error.operation, error.sql, error.table and error.column would every one lose its type. The half duplicated for nothing is already gone: RollbackError resolved the three its parent owns and handed them back to a constructor that resolves them again, which cost four mypy errors
     def __init__(
         self,
         message: str,
@@ -286,11 +287,6 @@ class RollbackError(MigrationError):
         original_error: Exception | Nothing,
         rollback_error: Exception | Nothing,
     ) -> None:
-        # A default in the signature would decide this where no reader
-        # sees it happen and no test reaches it.
-        the_operation = resolved(operation, None)
-        the_sql = resolved(sql, None)
-        the_original_error = resolved(original_error, None)
         the_rollback_error = resolved(rollback_error, None)
         self.rollback_error = the_rollback_error
         rollback_msg = (
@@ -302,11 +298,15 @@ class RollbackError(MigrationError):
             if the_rollback_error
             else ""
         )
+        # THE PARENT RESOLVES THE THREE IT OWNS. This resolved them and then
+        # handed the resolved values back to a constructor that resolves them
+        # again, which is the same three lines written twice and the second
+        # copy doing nothing. Only `rollback_error` is this class's own.
         super().__init__(
             f"{message}{rollback_msg}",
-            operation=the_operation,
-            sql=the_sql,
-            original_error=the_original_error,
+            operation=operation,
+            sql=sql,
+            original_error=original_error,
         )
 
 
