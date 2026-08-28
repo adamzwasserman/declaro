@@ -119,36 +119,48 @@ def drop_enum_table_sql(table: str, column: str) -> list[str]:
     return [f'DROP TABLE IF EXISTS "{lookup_name}"']
 
 
-def add_enum_value_sql(table: str, column: str, value: str) -> list[str]:
-    """Generate SQL to add a new value to an enum lookup table.
+# WIDENING AND NARROWING AN ENUM, one row each. Both took the same three
+# arguments, named the same lookup table, escaped the same value and returned
+# one statement. The statement was all that differed.
+#
+# THE ESCAPE IS WHY ONE COPY MATTERS. A value carrying an apostrophe ends the
+# statement early if it is not doubled, and two copies of that rule are two
+# chances for one of them to be forgotten.
+_ENUM_VALUE_SQL: dict[str, tuple[str, str]] = {
+    "add_enum_value_sql": (
+        "INSERT INTO \"{lookup}\" (value) VALUES ('{value}')",
+        "Generate SQL to add a new value to an enum lookup table.\n\n"
+        '    A column declared `Literal["a", "b"]` points at a lookup table,\n'
+        "    so widening the Literal means inserting a row. Until it is there\n"
+        "    the column refuses every row carrying the new value.\n    ",
+    ),
+    "remove_enum_value_sql": (
+        "DELETE FROM \"{lookup}\" WHERE value = '{value}'",
+        "Generate SQL to remove a value from an enum lookup table.\n\n"
+        "    This fails if any row still references the value, and that is the\n"
+        "    foreign key doing its job rather than a defect: narrowing a\n"
+        "    Literal while rows still use the value would strand them.\n    ",
+    ),
+}
 
-    Args:
-        table: The parent table name
-        column: The enum column name
-        value: The new value to add
 
-    Returns:
-        List of SQL statements
-    """
-    lookup_name = enum_table_name(table, column)
-    return [f"INSERT INTO \"{lookup_name}\" (value) VALUES ('{_escape_sql(value)}')"]
+def _changes_the_lookup(name: str) -> Callable[[str, str, str], list[str]]:
+    """Build the function that writes one kind of change to a lookup table."""
+
+    template, purpose = _ENUM_VALUE_SQL[name]
+
+    def change(table: str, column: str, value: str) -> list[str]:
+        lookup = enum_table_name(table, column)
+        return [template.format(lookup=lookup, value=_escape_sql(value))]
+
+    change.__name__ = name
+    change.__qualname__ = name
+    change.__doc__ = purpose
+    return change
 
 
-def remove_enum_value_sql(table: str, column: str, value: str) -> list[str]:
-    """Generate SQL to remove a value from an enum lookup table.
-
-    Note: This will fail if any rows reference the value.
-
-    Args:
-        table: The parent table name
-        column: The enum column name
-        value: The value to remove
-
-    Returns:
-        List of SQL statements
-    """
-    lookup_name = enum_table_name(table, column)
-    return [f"DELETE FROM \"{lookup_name}\" WHERE value = '{_escape_sql(value)}'"]
+add_enum_value_sql = _changes_the_lookup("add_enum_value_sql")
+remove_enum_value_sql = _changes_the_lookup("remove_enum_value_sql")
 
 
 def get_enum_fk_reference(table: str, column: str) -> str:
