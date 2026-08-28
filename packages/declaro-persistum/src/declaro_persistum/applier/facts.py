@@ -17,7 +17,7 @@ other two had declared it all along, `usage.md` documented importing it, and
 the import raised. A row here has both columns or it is not a row.
 """
 
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, cast
 
 TransactionMode = Literal["all_or_nothing", "per_operation"]
 
@@ -36,11 +36,15 @@ FACTS: dict[str, AppliedBy] = {
 }
 
 
-def dialect_of(engine: str) -> str:
-    """Which engine this applier is."""
-    return FACTS[engine]["dialect"]
+# ONE READER, NOT TWO. `dialect_of` and `transaction_mode_of` each read one
+# key out of one row, so the key was the only thing separating them. The audit
+# reported this file within an hour of my writing it, which is fair: replacing
+# six functions with a table and then adding two functions over the table is
+# the same shape one layer up.
+def fact_of(engine: str, fact: str) -> str:
+    """One column of one engine's row.
 
-
-def transaction_mode_of(engine: str) -> TransactionMode:
-    """How this applier scopes a batch: the whole thing, or one at a time."""
-    return FACTS[engine]["transaction_mode"]
+    Both are read with `[]`. An engine nobody described raises here rather
+    than answering, and so does a column no row carries.
+    """
+    return cast(str, FACTS[engine][fact])

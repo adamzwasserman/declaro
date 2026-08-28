@@ -19,7 +19,7 @@ from collections.abc import Awaitable, Callable
 from functools import reduce
 from typing import Any
 
-from declaro_persistum.applier.facts import dialect_of, transaction_mode_of
+from declaro_persistum.applier.facts import fact_of
 from declaro_persistum.applier.shared import (
     apply_reconstruction_changes,
     dry_run_preview,
@@ -564,11 +564,11 @@ __all__ = [
 ]
 
 
-def _partial(read: Callable[[str], Any], engine: str) -> Callable[[], Any]:
-    """Bind one engine to one reader, keeping a no-argument function."""
+def _reads(fact: str) -> Callable[[], Any]:
+    """Bind this engine and one column, keeping a no-argument function."""
 
     def ask() -> Any:
-        return read(engine)
+        return fact_of(_ENGINE, fact)
 
     return ask
 
@@ -576,5 +576,7 @@ def _partial(read: Callable[[str], Any], engine: str) -> Callable[[], Any]:
 # THIS APPLIER'S OWN ROW, read from the one table rather than written again.
 # Both names are bound at module level exactly as before, because the migration
 # runner reaches them off the module and `applier/__init__.py` re-exports them.
-get_dialect = _partial(dialect_of, "turso")
-get_transaction_mode = _partial(transaction_mode_of, "turso")
+_ENGINE = "turso"
+
+get_dialect = _reads("dialect")
+get_transaction_mode = _reads("transaction_mode")
