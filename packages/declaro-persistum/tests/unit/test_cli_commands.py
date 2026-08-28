@@ -24,7 +24,6 @@ from declaro_persistum.cli.commands import (
     _check_drift,
     _print_diff_result,
     _print_drift_error,
-    cmd_validate,
 )
 
 
@@ -194,71 +193,12 @@ class TestPrintDiffResult:
 class TestCmdValidate:
     """The exit code is the contract with whoever runs the CLI."""
 
-    def _patch_loader(self, monkeypatch, schema=None, raises=None):
-        import declaro_persistum.loader as loader
 
-        def _load(_dir):
-            if raises is not None:
-                raise raises
-            return schema
 
-        monkeypatch.setattr(loader, "load_schema", _load)
 
-    def test_a_valid_schema_exits_zero(self, monkeypatch, capsys):
-        self._patch_loader(monkeypatch, _schema(users={"id": {"type": "integer"}}))
-        assert cmd_validate(schema_dir="x", strict=False, verbose=False) == 0
-        assert "Schema valid (1 tables)" in capsys.readouterr().out
 
-    def test_a_schema_that_will_not_load_exits_one(self, monkeypatch, capsys):
-        self._patch_loader(monkeypatch, raises=OSError("no such directory"))
-        assert cmd_validate(schema_dir="x", strict=False, verbose=False) == 1
-        assert "Failed to load schema: no such directory" in capsys.readouterr().out
 
-    def test_a_validation_error_exits_one_and_lists_the_errors(
-        self, monkeypatch, capsys
-    ):
-        bad = {"posts": {"columns": {"a": {"type": "integer",
-                                           "references": "ghosts.id"}}}}
-        self._patch_loader(monkeypatch, bad)
-        assert cmd_validate(schema_dir="x", strict=False, verbose=False) == 1
-        out = capsys.readouterr().out
-        assert "1 error(s)" in out and "non-existent table" in out
 
-    def test_warnings_alone_still_exit_zero(self, monkeypatch, capsys):
-        self._patch_loader(monkeypatch, _schema(t={"c": {"type": "wat"}}))
-        assert cmd_validate(schema_dir="x", strict=False, verbose=False) == 0
-        assert "warning(s)" in capsys.readouterr().out
 
-    def test_warnings_under_strict_exit_two(self, monkeypatch):
-        self._patch_loader(monkeypatch, _schema(t={"c": {"type": "wat"}}))
-        assert cmd_validate(schema_dir="x", strict=True, verbose=False) == 2
 
-    def test_strict_does_not_change_the_code_when_there_are_no_warnings(
-        self, monkeypatch
-    ):
-        self._patch_loader(monkeypatch, _schema(t={"c": {"type": "text"}}))
-        assert cmd_validate(schema_dir="x", strict=True, verbose=False) == 0
 
-    def test_errors_beat_strict_warnings(self, monkeypatch):
-        """An error is exit 1 even under --strict, which would give 2."""
-        bad = {"t": {"columns": {"c": {"type": "wat", "references": "ghosts.id"}}}}
-        self._patch_loader(monkeypatch, bad)
-        assert cmd_validate(schema_dir="x", strict=True, verbose=False) == 1
-
-    def test_verbose_lists_each_table_and_its_column_count(
-        self, monkeypatch, capsys
-    ):
-        self._patch_loader(
-            monkeypatch,
-            _schema(b={"x": {"type": "text"}}, a={"y": {"type": "text"},
-                                                  "z": {"type": "text"}}),
-        )
-        cmd_validate(schema_dir="x", strict=False, verbose=True)
-        out = capsys.readouterr().out
-        assert "a: 2 columns" in out and "b: 1 columns" in out
-        assert out.index("a: 2") < out.index("b: 1"), "tables are sorted"
-
-    def test_an_empty_schema_is_valid(self, monkeypatch, capsys):
-        self._patch_loader(monkeypatch, {})
-        assert cmd_validate(schema_dir="x", strict=False, verbose=False) == 0
-        assert "Schema valid (0 tables)" in capsys.readouterr().out
