@@ -19,7 +19,7 @@ keeps it acyclic.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Literal, Protocol, TypedDict
+from typing import Any, Final, Literal, Protocol, TypedDict, get_args, get_type_hints
 
 from declaro_persistum.boundary import helper, recognizer
 from declaro_persistum.types import Dialect
@@ -196,6 +196,11 @@ class SubqueryExpr(TypedDict):
     query: Any
 
 
+# THE ONE PLACE THE WORD IS WRITTEN. `SubqueryExpr` declares it and this
+# reads it back, so the type and the recogniser cannot disagree.
+SUBQUERY: Final[str] = get_args(get_type_hints(SubqueryExpr)["kind"])[0]
+
+
 @helper
 def is_subquery(value: Any) -> bool:
     """True when a value is a subquery expression.
@@ -204,8 +209,14 @@ def is_subquery(value: Any) -> bool:
     caller-supplied — a list, a scalar, or a subquery — so the check is on
     the tag, not the type. A plain dict passed as a value has no `kind` and
     is correctly not a subquery.
+
+    THE TAG IS READ OFF THE DECLARATION, not typed out again. It used to be
+    written in two places, `SubqueryExpr.kind` and here, and only the first is
+    enforced by anything. Changing the `Literal` would leave this comparing
+    against the old word, so every subquery would stop being recognised and
+    nothing would raise: a value that is not a subquery is a legitimate case.
     """
-    return kind_of(value) == "subquery"
+    return kind_of(value) == SUBQUERY
 
 
 @recognizer
