@@ -16,7 +16,7 @@ exists: SQLite compatibility is the aim, not a guarantee.
 
 import re
 from collections.abc import Callable
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 
 from declaro_persistum.abstractions.materialized_views import (
     MATVIEW_METADATA_TABLE,
@@ -230,10 +230,43 @@ def _reference_as_declared(column: Column, declared: dict[str, str]) -> Column:
     return [*[_referring_to(column, target) for target in targets], column][0]
 
 
-@helper
-def _referring_to(column: Column, target: str) -> Column:
-    """The same column, carrying the reference rewritten as declared."""
-    return {**column, "references": target}
+# WHAT A PRAGMA DOES NOT HAND BACK, one row per key. Both functions took a
+# column and a value and returned the column carrying one more key. The key was
+# the only thing that differed.
+#
+# A NEW COLUMN, NEVER THE ONE HANDED IN. `{**column, ...}` builds a new dict, so
+# a caller still holding the original sees what the pragma gave it. Mutating in
+# place would work for the immediate caller and quietly change a column
+# somebody else was still reading.
+_RECOVERED: dict[str, tuple[str, str]] = {
+    "_referring_to": (
+        "references",
+        "The same column, carrying the reference rewritten as declared.",
+    ),
+    "_with_check": (
+        "check",
+        "The same column, carrying the CHECK expression read out of the DDL.",
+    ),
+}
+
+
+def _puts_back(name: str) -> Callable[[Column, str], Column]:
+    """Build the function that restores one key onto a column."""
+
+    key, purpose = _RECOVERED[name]
+
+    @helper
+    def restore(column: Column, value: str) -> Column:
+        return cast("Column", {**column, key: value})
+
+    restore.__name__ = name
+    restore.__qualname__ = name
+    restore.__doc__ = purpose
+    return restore
+
+
+_referring_to = _puts_back("_referring_to")
+_with_check = _puts_back("_with_check")
 
 
 @helper
@@ -400,12 +433,6 @@ def _checked(column: Column, expressions: list[str]) -> Column:
     column here, and is dropped rather than invented.
     """
     return [*[_with_check(column, text) for text in expressions], column][0]
-
-
-@helper
-def _with_check(column: Column, expression: str) -> Column:
-    """The same column, carrying the CHECK expression read out of the DDL."""
-    return {**column, "check": expression}
 
 
 @helper
