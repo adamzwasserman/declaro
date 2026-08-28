@@ -246,21 +246,6 @@ _STORE_HASH = {
 }
 
 
-@helper
-def store_hash_sql(dialect: str) -> str:
-    """Write one stamp, updating it if the key is already there.
-
-    `DO UPDATE`, never `DO NOTHING`. Both keep the row count at one, and only
-    the first refreshes the stamp, so `DO NOTHING` leaves a database reporting
-    a boot that never happened.
-
-    asyncpg numbers its parameters and repeats them by number; SQLite reads
-    the row it was about to insert, through `excluded`. The clause is the same
-    clause.
-    """
-    return cast(str, for_dialect(_STORE_HASH, dialect, "Statement builders"))
-
-
 _USER_TABLES = {
     "postgresql": (
         f"SELECT tablename FROM pg_tables WHERE schemaname = 'public' "
@@ -274,16 +259,53 @@ _USER_TABLES = {
 }
 
 
-@helper
-def user_tables_sql(dialect: str) -> str:
-    """Any table that is not ours. The one query that genuinely differs.
+# THE TWO PER-DIALECT BUILDERS, one row each. Both had the same body -- look
+# the statement up in a per-dialect table and hand it back -- so the table was
+# the only thing that differed, and it is data now.
+#
+# THE DOCSTRING IS IN THE ROW because it carried the reason, and the reason is
+# what a reader came for. `DO UPDATE` rather than `DO NOTHING` is the whole
+# point of the first one, and it would be lost in a shared body.
+_PER_DIALECT: dict[str, tuple[dict[str, str], str]] = {
+    "store_hash_sql": (
+        _STORE_HASH,
+        "Write one stamp, updating it if the key is already there.\n\n"
+        "    `DO UPDATE`, never `DO NOTHING`. Both keep the row count at one,\n"
+        "    and only the first refreshes the stamp, so `DO NOTHING` leaves a\n"
+        "    database reporting a boot that never happened.\n\n"
+        "    asyncpg numbers its parameters and repeats them by number; SQLite\n"
+        "    reads the row it was about to insert, through `excluded`. The\n"
+        "    clause is the same clause.\n    ",
+    ),
+    "user_tables_sql": (
+        _USER_TABLES,
+        "Any table that is not ours.\n\n"
+        "    `_declaro_meta` is excluded because it is ours: a database holding\n"
+        "    only it is empty, and counting it would make every fresh database\n"
+        "    look populated. SQLite's own `sqlite_%` tables are excluded for the\n"
+        "    same reason, and `sqlite_sequence` appears the moment any table\n"
+        "    uses AUTOINCREMENT.\n    ",
+    ),
+}
 
-    `_declaro_meta` is excluded because it is ours: a database holding only it
-    is empty, and counting it would make every fresh database look populated.
-    SQLite's own `sqlite_%` tables are excluded for the same reason, and
-    `sqlite_sequence` appears the moment any table uses AUTOINCREMENT.
-    """
-    return cast(str, for_dialect(_USER_TABLES, dialect, "Statement builders"))
+
+def _looks_up(name: str) -> Callable[[str], str]:
+    """Build the function that reads one statement table by dialect."""
+
+    table, purpose = _PER_DIALECT[name]
+
+    @helper
+    def ask(dialect: str) -> str:
+        return cast(str, for_dialect(table, dialect, "Statement builders"))
+
+    ask.__name__ = name
+    ask.__qualname__ = name
+    ask.__doc__ = purpose
+    return ask
+
+
+store_hash_sql = _looks_up("store_hash_sql")
+user_tables_sql = _looks_up("user_tables_sql")
 
 
 @helper
