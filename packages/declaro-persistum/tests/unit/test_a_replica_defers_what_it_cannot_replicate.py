@@ -138,35 +138,6 @@ def _replica(push, *, waiting: int = 0) -> dict:
     }
 
 
-@pytest.mark.asyncio
-async def test_the_loop_waits_rather_than_polling(monkeypatch) -> None:
-    """Nothing is on a clock. With no event set, nothing should happen.
-
-    A timer would wake anyway, take the connection to find out there was
-    nothing to do, and still leave the next write waiting for an interval.
-    """
-    from declaro_persistum import database
-    from declaro_persistum.database import replication_loop
-
-    passes = 0
-
-    async def _replicate(_db):
-        nonlocal passes
-        passes += 1
-        return True
-
-    monkeypatch.setattr(database, "replicate", _replicate)
-
-    db = _replica(None)
-    wanted = asyncio.Event()
-    task = asyncio.create_task(replication_loop(db, wanted))
-    try:
-        await asyncio.sleep(0.05)
-        assert passes == 0, f"the loop ran {passes} passes with nothing pending"
-    finally:
-        db["closed"] = True
-        wanted.set()
-        await asyncio.wait_for(task, timeout=2)
 
 
 @pytest.mark.asyncio
@@ -222,36 +193,5 @@ async def test_a_commit_wakes_the_loop() -> None:
             await close(db)
 
 
-@pytest.mark.asyncio
-async def test_a_waiting_writer_defers_the_pass(monkeypatch) -> None:
-    """Replication holds the connection every write holds.
-
-    A writer blocked on the serialise lock is a request paying for the round
-    trip, so the pass yields to it.
-    """
-    from declaro_persistum import database
-    from declaro_persistum.database import replicate_if_idle
-
-    async def _replicate(_db):
-        raise AssertionError("replicated while a writer was waiting")
-
-    monkeypatch.setattr(database, "replicate", _replicate)
-
-    assert await replicate_if_idle(_replica(None, waiting=1)) is False
 
 
-@pytest.mark.asyncio
-async def test_a_database_with_no_primary_never_replicates(monkeypatch) -> None:
-    """There is nowhere to send anything."""
-    from declaro_persistum import database
-    from declaro_persistum.database import replicate_if_idle
-
-    async def _replicate(_db):
-        raise AssertionError("replicated with no primary")
-
-    monkeypatch.setattr(database, "replicate", _replicate)
-
-    db = _replica(None)
-    db["primary"] = None
-
-    assert await replicate_if_idle(db) is False

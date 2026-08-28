@@ -1,0 +1,101 @@
+@bdd
+Feature: When a replica decides a replication pass is worth taking
+  As a service holding a local copy of a remote database
+  I want a pass only when there is something to send and nobody waiting to write
+  So that replication never takes the connection a request is queued for
+
+  # ONE SCENARIO PER FUNCTION on the path from "a commit happened" to "a pass
+  # ran". Every one is pure: a database record in, an answer out.
+  #
+  # WHY THIS FILE EXISTS. Three tests replaced `replicate` on the module and
+  # counted the calls. The dispatch table binds that function when the module
+  # loads, so the replacement never reached the code under test: all three
+  # patches were dead lines that read as the test's mechanism. Measured
+  # 2026-08-27 by deleting them, after which every test in that file passed.
+
+  @precommit
+  Scenario: is_replicated says a database with a primary is a replica
+    Given a database with a primary
+    Then is_replicated answers yes
+
+  @precommit
+  Scenario: is_replicated says a database with no primary is not
+    Given a database with no primary
+    Then is_replicated answers no
+
+  @precommit
+  Scenario: writers_waiting counts nobody when no lock is held
+    Given a database with no primary
+    Then writers_waiting counts 0
+
+  @precommit
+  Scenario: nothing_happened answers no rather than failing
+    Given a database with no primary
+    When nothing_happened is asked to run a pass
+    Then it answers that no pass ran
+
+  @precommit
+  Scenario: replicate_if_idle drops the pass on a database with no primary
+    Given a database with no primary
+    When replicate_if_idle is asked to run a pass
+    Then it answers that no pass ran
+
+  @precommit
+  Scenario: replicate_if_idle drops the pass while a writer is waiting
+    Given a database with a primary and one writer waiting
+    When replicate_if_idle is asked to run a pass
+    Then it answers that no pass ran
+
+  @precommit
+  Scenario: replicate_if_idle drops the pass on a closed database
+    Given a database with a primary that has been closed
+    When replicate_if_idle is asked to run a pass
+    Then it answers that no pass ran
+
+  @precommit
+  Scenario: replicate_if_idle takes the pass when nobody is waiting
+    Given a database with a primary
+    When replicate_if_idle is asked to run a pass
+    Then it answers that a pass ran
+
+  @precommit
+  Scenario: replicate sends before it receives
+    Given a database with a primary
+    When replicate runs one pass
+    Then it sent before it received
+
+  @precommit
+  Scenario: _replication_stands accepts a policy that has somewhere to send
+    When _replication_stands is asked about "replicate" from "open_turso"
+    Then it accepts
+
+  @precommit
+  Scenario: _refuse_replicating_nowhere refuses at open rather than at SIGTERM
+    When _refuse_replicating_nowhere is asked about "replicate" from "open_sqlite"
+    Then it refuses and names "open_sqlite"
+
+  @precommit
+  Scenario: _nothing_to_deliver answers zero passes for a local-only database
+    Given a database with no primary
+    When _nothing_to_deliver is asked to deliver before exit
+    Then it answers 0 passes
+
+  # NOTHING IS ON A CLOCK. The loop waits on an event a commit sets, so a
+  # database with nothing pending takes no connection and burns no round trip.
+  #
+  # These two used to count calls to a `replicate` patched onto the module.
+  # `test_a_commit_wakes_the_loop` had already been rewritten on 2026-08-22
+  # after that patch was found to have stopped working silently; its three
+  # siblings kept the dead patch for five more days.
+
+  @precommit
+  Scenario: replication_loop takes no pass while nothing is pending
+    Given a database with a primary
+    When the loop runs with nothing pending
+    Then no pass ran
+
+  @precommit
+  Scenario: replication_loop takes a pass once a commit says so
+    Given a database with a primary
+    When the loop runs and a commit says there is work
+    Then a pass ran
