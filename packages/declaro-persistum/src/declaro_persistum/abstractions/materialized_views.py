@@ -242,35 +242,46 @@ def drop_refresh_triggers_sql(
     return statements
 
 
-def is_matview_sql() -> str:
-    """
-    Generate SQL to check if a table is an emulated matview.
+# WHAT EACH QUESTION ASKS THE REGISTRY, one row per question. These were three
+# functions taking nothing and returning a fixed SELECT against the same table,
+# so the SQL was the only thing that differed and it is data now.
+#
+# THE PARAMETER NAME IS IN THE ROW because it is part of the query. The
+# is-it-one question binds `:table_name` and the metadata question binds
+# `:name`; a caller reading this table sees which, where before it had to read
+# three function bodies.
+_REGISTRY_QUERIES: dict[str, tuple[str, str]] = {
+    "is_matview_sql": (
+        f"SELECT 1 FROM {MATVIEW_METADATA_TABLE} WHERE name = :table_name",
+        "SQL asking whether a table is an emulated matview. Binds :table_name.",
+    ),
+    "get_matview_metadata_sql": (
+        "SELECT name, query, refresh_strategy, depends_on, last_refreshed_at, "
+        f"created_at\nFROM {MATVIEW_METADATA_TABLE}\nWHERE name = :name",
+        "SQL for one matview's registry row. Binds :name.",
+    ),
+    "list_matviews_sql": (
+        "SELECT name, refresh_strategy, last_refreshed_at\n"
+        f"FROM {MATVIEW_METADATA_TABLE}\nORDER BY name",
+        "SQL listing every emulated matview, by name.",
+    ),
+}
 
-    Returns:
-        SELECT query that returns 1 if table is a matview, NULL otherwise
-    """
-    return f"SELECT 1 FROM {MATVIEW_METADATA_TABLE} WHERE name = :table_name"
+
+def _asks(question: str) -> Callable[[], str]:
+    """Build the function that hands back one registry query."""
+
+    sql, purpose = _REGISTRY_QUERIES[question]
+
+    def ask() -> str:
+        return sql
+
+    ask.__name__ = question
+    ask.__qualname__ = question
+    ask.__doc__ = purpose
+    return ask
 
 
-def get_matview_metadata_sql() -> str:
-    """
-    Generate SQL to get matview metadata.
-
-    Returns:
-        SELECT query for matview metadata
-    """
-    return f"""SELECT name, query, refresh_strategy, depends_on, last_refreshed_at, created_at
-FROM {MATVIEW_METADATA_TABLE}
-WHERE name = :name"""
-
-
-def list_matviews_sql() -> str:
-    """
-    Generate SQL to list all emulated matviews.
-
-    Returns:
-        SELECT query for all matviews
-    """
-    return f"""SELECT name, refresh_strategy, last_refreshed_at
-FROM {MATVIEW_METADATA_TABLE}
-ORDER BY name"""
+is_matview_sql = _asks("is_matview_sql")
+get_matview_metadata_sql = _asks("get_matview_metadata_sql")
+list_matviews_sql = _asks("list_matviews_sql")
