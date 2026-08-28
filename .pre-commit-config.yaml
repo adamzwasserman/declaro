@@ -2,7 +2,14 @@
 # monorepo root and inside every package. Nothing gated a commit: the only
 # workflow publishes to PyPI on a tag and runs no tests.
 #
-# Install once per clone:
+# THIS FILE EXISTED AND NOTHING RAN IT. Measured 2026-08-28: `.git/hooks/pre-commit`
+# was the beads hook, which flushes issues and exits 0. `pre-commit install` had
+# never been run, or beads had overwritten it. So the config below was written,
+# reviewed and inert -- a gate that gates nothing, which is the shape the pytest
+# hook's own comment warns about, one level up.
+#
+# Install once per clone, and pre-commit keeps the beads hook as
+# `pre-commit.legacy` and runs it first:
 #     uv run pre-commit install
 #
 # The audit's own analyzer ships a `--gate` mode built for this position. It is
@@ -34,19 +41,32 @@ repos:
 
   - repo: local
     hooks:
-      # This runs the WHOLE suite, not `-m precommit`. The `precommit` marker
-      # is declared in pyproject.toml and carried by zero tests, so `-m
-      # precommit` deselects all 1223 and exits green — a gate that gates
-      # nothing, which is worse than no gate because it reads as one.
-      # Tracked as declaro-wdl. The full suite is ~14s, inside the 30s budget
-      # the marker was meant to enforce, so there is nothing to trade.
+      # THE SUITE RUNS ON PUSH, NOT ON COMMIT, and the numbers are why.
+      # Measured 2026-08-28 on 3,034 tests:
+      #
+      #     whole suite                        83s
+      #     -m precommit                       44s
+      #     -m "precommit and not network"     37s
+      #
+      # Both of the old comment's figures had gone stale. It said the whole
+      # suite was ~14s, and it said the `precommit` marker was carried by zero
+      # tests; 2,138 carry it now. Nothing was wrong when it was written.
+      #
+      # None of the three fits the 30s budget, and an 83s wait on every commit
+      # is a gate people learn to pass with --no-verify. So the fast checks
+      # above gate a commit and the suite gates a push, which is the last point
+      # before the work leaves this machine.
+      #
+      # It is the WHOLE suite rather than the marked subset, because the 896
+      # unmarked tests are a third of the coverage and a regression in them
+      # would reach the remote.
       - id: pytest-declaro-persistum
-        name: pytest (declaro-persistum)
+        name: pytest (declaro-persistum, whole suite)
         entry: uv run --project packages/declaro-persistum pytest -q
         language: system
         pass_filenames: false
         files: ^packages/declaro-persistum/
-        stages: [pre-commit]
+        stages: [pre-push]
 
       # This gate PASSES: 0 production god-files. pool.py was 2689 LOC and
       # the sole L1.17 offender; declaro-tvx split it into eight modules,
