@@ -380,7 +380,7 @@ def _stamp_key(schema_name: str, schema_hash: str) -> str:
     return f"schema_hash:{schema_name}:{schema_hash}"
 
 
-@helper
+@boundary
 async def _read_stamp_from_postgres(conn: Any, sql: str, key: str) -> str | None:
     """asyncpg hands the row straight back, keyed by column name."""
     row = await conn.fetchrow(sql, key)
@@ -506,7 +506,7 @@ _WHEN_THE_DATABASE_IS_POPULATED: dict[bool, Callable[[Path], bool]] = {
 }
 
 
-@helper
+@boundary
 async def _count_tables_on_postgres(conn: Any, sql: str) -> bool:
     """asyncpg returns the rows, so their number is the answer."""
     return bool(await conn.fetch(sql))

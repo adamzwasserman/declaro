@@ -447,7 +447,7 @@ async def _execute_fetch(connection: Any, sql: str, params: Any) -> list[dict[st
     """Execute and fetch all rows."""
     conn_type = _conn_module(connection)
 
-    @helper
+    @boundary
     async def _fetch_asyncpg() -> list[dict[str, Any]]:
         rows = await connection.fetch(sql, *params)
         return [dict(row) for row in rows]
@@ -499,7 +499,7 @@ async def _execute_fetch_one(connection: Any, sql: str, params: Any) -> dict[str
     """Execute and fetch single row."""
     conn_type = _conn_module(connection)
 
-    @helper
+    @boundary
     async def _fetch_one_asyncpg() -> dict[str, Any] | None:
         row = await connection.fetchrow(sql, *params)
         return dict(row) if row else None
@@ -581,7 +581,7 @@ async def _execute_fetch_scalar(connection: Any, sql: str, params: Any) -> Any:
     """Execute and fetch scalar value."""
     conn_type = _conn_module(connection)
 
-    @helper
+    @boundary
     async def _scalar_asyncpg() -> Any:
         return await connection.fetchval(sql, *params)
 

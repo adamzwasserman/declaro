@@ -136,7 +136,7 @@ async def _pull_batches(conn: ReplicaConnection, budget: int, fetched_any: bool)
     )
 
 
-@helper
+@boundary
 async def _pull_one_more(conn: ReplicaConnection, budget: int, fetched_any: bool) -> bool:
     """Fetch one batch. Anything fetched means ask again; nothing means level."""
     fetched = await conn.pull()
@@ -156,7 +156,7 @@ def _out_of_batches(fetched_any: bool) -> bool:
     return fetched_any
 
 
-@helper
+@boundary
 async def replicate_path(path: str, *, primary: str, token: str | None) -> None:
     """Bring a PATH into conformity with its primary, creating it if absent.
 
@@ -310,7 +310,7 @@ async def _set_journal_mode(conn: DbapiConnection, mode: str) -> str:
     return row[0] if row else "unknown"
 
 
-@helper
+@boundary
 async def negotiate_journal_mode(path: str, mode: str) -> str:
     """Ask the file for a journal mode, once, and report what was granted.
 
@@ -362,7 +362,7 @@ async def connect_local(db: Database) -> Any:
 
 
 @asynccontextmanager
-@helper
+@boundary
 async def migrating(db: Database) -> AsyncIterator[Any]:
     """Open a connection for DDL. ALWAYS WAL, even on a local database.
 
@@ -402,7 +402,7 @@ async def migrating(db: Database) -> AsyncIterator[Any]:
         await negotiate_journal_mode(db["path"], db["journal_mode"])
 
 
-@helper
+@boundary
 async def _close_connection(conn: Any) -> int:
     """Close one connection and say one was closed.
 

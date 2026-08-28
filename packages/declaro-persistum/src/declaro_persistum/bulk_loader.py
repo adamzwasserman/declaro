@@ -232,7 +232,7 @@ def _paged(sql: str, offset: int, limit: int | None) -> str:
     return sql + "".join(clauses)
 
 
-@helper
+@boundary
 async def postgres_read_rows(
     conn: FetchingConnection,
     table: str,
@@ -297,7 +297,7 @@ async def postgres_load_rows(
     return await _WHEN_POSTGRES_HAS_ROWS[bool(rows)](conn, table, columns, rows)
 
 
-@helper
+@boundary
 async def postgres_count_rows(conn: FetchingConnection, table: str) -> int:
     return int(await conn.fetchval(f'SELECT COUNT(*) FROM "{table}"'))
 
@@ -320,7 +320,7 @@ async def postgres_ensure_progress(conn: FetchingConnection) -> None:
     await conn.execute(_CREATE_PROGRESS_TABLE_SQL)
 
 
-@helper
+@boundary
 async def postgres_read_progress(conn: FetchingConnection, table: str) -> dict[str, Any] | None:
     row = await conn.fetchrow(
         f'SELECT * FROM "{TRANSFER_STATE_TABLE}" WHERE table_name = $1',
@@ -384,7 +384,7 @@ async def dbapi_read_rows(
     return [tuple(row) for row in await cursor.fetchall()]
 
 
-@helper
+@boundary
 async def _inserted(
     conn: DbapiConnection,
     table: str,

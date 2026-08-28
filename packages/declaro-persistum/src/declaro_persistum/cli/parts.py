@@ -645,7 +645,7 @@ async def _connect(connection_string: str, dialect: Dialect) -> Any:
     return await connector(connection_string)
 
 
-@helper
+@boundary
 async def _disconnect(connection: Any, dialect: Dialect) -> None:
     """Close a connection.
 
