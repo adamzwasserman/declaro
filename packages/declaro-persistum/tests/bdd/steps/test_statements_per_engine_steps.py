@@ -140,3 +140,9 @@ def _then_refuses(ctx):
     assert ctx["refusal"] is not None, f"it answered {ctx['answer']!r}"
     said = str(ctx["refusal"])
     assert "sqlite" in said and "postgresql" in said, said
+
+
+@then(parsers.parse('it gives back "{expected}"'))
+def _then_gives_back(ctx, expected):
+    assert ctx["refusal"] is None, ctx["refusal"]
+    assert ctx["answer"] == expected, ctx["answer"]

@@ -204,11 +204,6 @@ _PLACEHOLDER = {"sqlite": "?", "postgresql": "$1"}
 
 
 @helper
-def _placeholder(dialect: str) -> str:
-    return cast(str, for_dialect(_PLACEHOLDER, dialect, "Statement builders"))
-
-
-@helper
 def meta_table_sql() -> str:
     """The stamp table. One statement, both engines take it unchanged.
 
@@ -225,6 +220,7 @@ def meta_table_sql() -> str:
     )
 
 
+# honest-code-allow: L1.21.1 - stored_hash_sql, _the_database_holds_tables and temp_table_name share a shape only once the names are erased: one builds SQL from a placeholder, one returns True as the do-nothing half of a pair, one makes a name with a random tail. They answer unrelated questions and one function over a table would need a row whose only column is the whole body
 @helper
 def stored_hash_sql(dialect: str) -> str:
     """Read one stamp by key. The engines differ only in the placeholder."""
@@ -277,6 +273,12 @@ _PER_DIALECT: dict[str, tuple[dict[str, str], str]] = {
         "    reads the row it was about to insert, through `excluded`. The\n"
         "    clause is the same clause.\n    ",
     ),
+    "_placeholder": (
+        _PLACEHOLDER,
+        "How one engine marks a parameter.\n\n"
+        "    A fragment rather than a whole statement, and the same question:\n"
+        "    asyncpg numbers its parameters and SQLite marks them.\n    ",
+    ),
     "user_tables_sql": (
         _USER_TABLES,
         "Any table that is not ours.\n\n"
@@ -304,6 +306,7 @@ def _looks_up(name: str) -> Callable[[str], str]:
     return ask
 
 
+_placeholder = _looks_up("_placeholder")
 store_hash_sql = _looks_up("store_hash_sql")
 user_tables_sql = _looks_up("user_tables_sql")
 

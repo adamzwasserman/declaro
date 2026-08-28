@@ -45,3 +45,21 @@ Feature: The statements a migration runs, spelled for each engine
       | builder         |
       | store_hash_sql  |
       | user_tables_sql |
+
+  # THE PLACEHOLDER IS THE SAME QUESTION, one fragment rather than a whole
+  # statement: asyncpg numbers its parameters and SQLite marks them.
+
+  @precommit
+  Scenario Outline: each engine marks a parameter its own way
+    When "_placeholder" is asked for "<engine>"
+    Then it gives back "<mark>"
+
+    Examples:
+      | engine     | mark |
+      | sqlite     | ?    |
+      | postgresql | $1   |
+
+  @precommit
+  Scenario: an engine nobody wrote a placeholder for is refused
+    When "_placeholder" is asked for "mysql"
+    Then it refuses and names the engines it has
