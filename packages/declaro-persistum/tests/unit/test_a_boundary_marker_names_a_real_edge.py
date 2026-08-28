@@ -92,7 +92,11 @@ SRC = ROOT / "src"
 # THE TRADE, MEASURED. Logging-a-failure findings went 5 to 1 and bare
 # silences went 5 to 1, against this count going 12 to 14. Eight findings
 # gone for two markers, and the two name real edges the tool cannot see.
-BASELINE = 14
+# 15 for `_the_folder_for`, which calls `mkdir` before a database file is
+# opened. Making a directory is as much an edge as opening the file in it, and
+# the analyzer does not count `mkdir` as I/O. The marker is true; the tool
+# cannot see it.
+BASELINE = 15
 BASELINE_BUILD = "92066fd, built 2026-08-27 12:57"
 
 # THE OTHER HALF OF THE SAME CLAUSE: a function that does I/O and is called

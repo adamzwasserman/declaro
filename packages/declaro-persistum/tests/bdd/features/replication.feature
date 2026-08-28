@@ -114,8 +114,10 @@ Feature: Replication — one function, both directions, out of the way of real w
     When it calls flush and awaits it
     Then it returns once both directions have completed, and it ignores load, because a caller that awaited this has already said it is willing to wait
 
-  Scenario: replicating a path creates the local copy when there is not one yet
-    Given a path with no local copy and a primary
-    When replicate is asked for on that path
-    Then the local copy is created and filled from the primary, and the call succeeds
-    And this is how a database is provisioned before anyone opens it — the same verb whether or not a copy exists yet, because a caller should not have to know which case it is in to ask for the same outcome
+  # MOVED TO `replication/provisioning_a_copy.feature`, AND IT WAS WRONG HERE.
+  # This scenario ran against a stand-in for the pyturso driver that accepted
+  # any path. The real driver refuses a path whose folder does not exist, and
+  # the path this scenario used was two folders deep with neither there. So it
+  # asserted a copy had been provisioned in the one case that did not work.
+  # The replacement runs against the real primary and is marked as reaching
+  # one, so it can be selected out.

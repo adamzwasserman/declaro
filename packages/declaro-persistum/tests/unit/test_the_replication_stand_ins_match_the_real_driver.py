@@ -89,31 +89,6 @@ def test_auth_token_is_keyword_only_in_the_real_connect() -> None:
     )
 
 
-def test_the_stand_in_connect_refuses_what_the_driver_refuses() -> None:
-    """Both call shapes the old double wrongly accepted, asserted against ours.
-
-    Written as a call rather than a signature comparison because that is how
-    the mistake would recur: someone relaxes the stand-in to make a step
-    easier, and nothing notices until pyturso rejects the same call.
-    """
-    import asyncio
-
-    from tests.bdd.steps.test_replication_steps import new_recorder, new_sync_connect
-
-    made: list[str] = []
-    rec = new_recorder(batches=0, failures=0)
-    stand_in_connect = new_sync_connect(rec, made)
-
-    with pytest.raises(TypeError):
-        asyncio.run(stand_in_connect("/tmp/x.db"))  # remote_url omitted
-
-    with pytest.raises(TypeError):
-        asyncio.run(stand_in_connect("/tmp/x.db", "libsql://p", "token"))  # positional
-
-    assert made == [], "a refused call still ran"
-    conn = asyncio.run(stand_in_connect("/tmp/x.db", "libsql://p", auth_token="t"))
-    assert made == ["/tmp/x.db"], made
-    assert hasattr(conn, "push"), "the accepted call returned no replica"
 
 
 # ---------------------------------------------------------------------------

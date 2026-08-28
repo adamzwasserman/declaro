@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import pathlib
 import sys
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -184,7 +185,9 @@ async def replicate_path(path: str, *, primary: str, token: str | None) -> None:
 
     import turso.aio.sync
 
-    conn = await turso.aio.sync.connect(path, remote_url=primary, auth_token=token)
+    conn = await turso.aio.sync.connect(
+        _the_folder_for(path), remote_url=primary, auth_token=token
+    )
     try:
         await conn.push()
         await _pull_until_level(conn)
@@ -194,6 +197,26 @@ async def replicate_path(path: str, *, primary: str, token: str | None) -> None:
         # suppressed because raising here would replace the push or pull
         # failure the caller is waiting for. The note does not replace it.
         _left_open(await _closed(conn))
+
+@boundary
+def _the_folder_for(path: str) -> str:
+    """Make the folder the database file will sit in, and hand the path back.
+
+    THE DRIVER WILL NOT MAKE IT. Measured 2026-08-28 against the real primary:
+    asking for a copy at `tenants/acme/app.db` with neither folder there fails
+    with `I/O error (open): entity not found`, which names neither the path
+    nor the folder. A test had replaced the driver with a stand-in that
+    accepted any path, so this had never run.
+
+    It matters most where it is least visible: a service on a fresh disk names
+    the path it wants, and the folder is not there yet.
+
+    `exist_ok` because two workers can start at once, and a folder that is
+    already there is the outcome asked for rather than a clash.
+    """
+    pathlib.Path(path).expanduser().parent.mkdir(parents=True, exist_ok=True)
+    return path
+
 
 @boundary
 async def _closed(conn: Any) -> Exception | Nothing:
@@ -327,7 +350,7 @@ async def negotiate_journal_mode(path: str, mode: str) -> str:
     """
     import turso.aio
 
-    conn = await turso.aio.connect(path)
+    conn = await turso.aio.connect(_the_folder_for(path))
     try:
         return await _set_journal_mode(conn, mode)
     finally:
@@ -521,7 +544,9 @@ async def _open_replicated(
     """
     import turso.aio.sync
 
-    held = await turso.aio.sync.connect(path, remote_url=primary, auth_token=token)
+    held = await turso.aio.sync.connect(
+        _the_folder_for(path), remote_url=primary, auth_token=token
+    )
     await _set_journal_mode(held, "wal")
 
     @helper

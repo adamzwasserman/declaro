@@ -158,25 +158,6 @@ def new_replica_stand_in(rec: dict) -> SimpleNamespace:
     )
 
 
-def new_sync_connect(rec: dict, made: list[str]):
-    """`turso.aio.sync.connect`, with pyturso's own signature.
-
-    AT MODULE LEVEL SO A TEST CAN IMPORT IT. It was a closure inside the step,
-    and the contract test that was supposed to police it defined its own copy
-    inline -- so relaxing the real one changed nothing and the test stayed
-    green. A companion that reimplements the thing it checks is a second
-    implementation with nobody checking the first.
-
-    The signature is lifted from `inspect.signature(turso.aio.sync.connect)`:
-    `remote_url` REQUIRED, `auth_token` KEYWORD-ONLY. The previous version
-    defaulted both, so it accepted two call shapes the driver refuses.
-    """
-
-    async def connect(path, remote_url, *, auth_token=None, **_rest):
-        made.append(path)
-        return new_replica_stand_in(rec)
-
-    return connect
 
 
 def _make(tmp_path, *, replicated=True, recorder=None, shutdown="exit_immediately"):
@@ -739,26 +720,6 @@ def _given_no_copy(ctx, tmp_path):
     ctx["path"] = str(tmp_path / "users" / "new" / "app.db")
 
 
-@when("replicate is asked for on that path")
-def _when_replicate_path(ctx, monkeypatch):
-    rec = new_recorder(batches=0, failures=0)
-    made: list[str] = []
-
-    fake_sync = SimpleNamespace(connect=new_sync_connect(rec, made))
-
-    import turso.aio
-
-    monkeypatch.setattr(turso.aio, "sync", fake_sync, raising=False)
-    import sys
-
-    monkeypatch.setitem(sys.modules, "turso.aio.sync", fake_sync)
-
-    asyncio.run(
-        replicate_path(ctx["path"], primary="https://example.turso.io", token="t")
-    )
-    ctx["made"] = made
-    ctx["calls"] = list(rec["calls"])
-    ctx["closed"] = rec["closed"]
 
 
 @then("the local copy is created and filled from the primary, and the call succeeds")
