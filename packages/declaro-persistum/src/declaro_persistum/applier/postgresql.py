@@ -11,6 +11,7 @@ can promise which the SQLite and Turso ones cannot.
 from collections.abc import Callable
 from typing import Any
 
+from declaro_persistum.applier.facts import dialect_of, transaction_mode_of
 from declaro_persistum.applier.rendering import (
     statements_for as render_statements,
 )
@@ -26,32 +27,6 @@ from declaro_persistum.types import (
 )
 
 # Type for SQL generator functions
-
-
-@helper
-def get_dialect() -> str:
-    """Return dialect identifier."""
-    return "postgresql"
-
-
-@helper
-def get_transaction_mode() -> str:
-    """One failure ends the batch, and the whole batch is rolled back.
-
-    THE OTHER TWO APPLIERS HAVE DECLARED THIS ALL ALONG AND THIS ONE DID NOT.
-    `usage.md` documents importing it from here, and that import raised
-    ImportError. A note in `test_every_cli_command_can_be_called` recorded the
-    absence on 2026-08-17, alongside `generate_sql` missing from the other
-    two: a five-member Protocol that no module satisfied, deleted rather than
-    filled. Deleting it left this hole documented and open.
-
-    `all_or_nothing` is what this module already does. `apply` runs inside
-    `connection.transaction()` and re-raises, so an operation that fails takes
-    the batch with it and leaves nothing behind. Turso is the odd one and says
-    `per_operation`, because it cannot perform several operations the differ
-    emits and refusing a batch for one of them would block the rest forever.
-    """
-    return "all_or_nothing"
 
 
 @helper
@@ -232,3 +207,19 @@ def generate_operation_sql(operation: Operation) -> str:
 # `insert_enum_values` renders identically on every engine -- it is an INSERT
 # of literal values into a two-column table -- so the entry points at the one
 # in `shared.py` rather than at a fourth copy.
+
+
+def _partial(read: Callable[[str], Any], engine: str) -> Callable[[], Any]:
+    """Bind one engine to one reader, keeping a no-argument function."""
+
+    def ask() -> Any:
+        return read(engine)
+
+    return ask
+
+
+# THIS APPLIER'S OWN ROW, read from the one table rather than written again.
+# Both names are bound at module level exactly as before, because the migration
+# runner reaches them off the module and `applier/__init__.py` re-exports them.
+get_dialect = _partial(dialect_of, "postgresql")
+get_transaction_mode = _partial(transaction_mode_of, "postgresql")

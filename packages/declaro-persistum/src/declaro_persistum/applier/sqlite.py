@@ -14,8 +14,9 @@ SQL generation is shared with Turso through `applier.shared`.
 """
 
 from collections.abc import Awaitable, Callable
-from typing import Any, Literal
+from typing import Any
 
+from declaro_persistum.applier.facts import dialect_of, transaction_mode_of
 from declaro_persistum.applier.shared import (
     apply_reconstruction_changes,
     dry_run_preview,
@@ -35,18 +36,6 @@ from declaro_persistum.types import (
     View,
     resolved,
 )
-
-
-@helper
-def get_dialect() -> str:
-    """Return dialect identifier."""
-    return "sqlite"
-
-
-@helper
-def get_transaction_mode() -> Literal["all_or_nothing", "per_operation"]:
-    """SQLite supports transactional DDL."""
-    return "all_or_nothing"
 
 
 @boundary
@@ -564,3 +553,19 @@ __all__ = [
     "generate_drop_view",
     "generate_operation_sql",
 ]
+
+
+def _partial(read: Callable[[str], Any], engine: str) -> Callable[[], Any]:
+    """Bind one engine to one reader, keeping a no-argument function."""
+
+    def ask() -> Any:
+        return read(engine)
+
+    return ask
+
+
+# THIS APPLIER'S OWN ROW, read from the one table rather than written again.
+# Both names are bound at module level exactly as before, because the migration
+# runner reaches them off the module and `applier/__init__.py` re-exports them.
+get_dialect = _partial(dialect_of, "sqlite")
+get_transaction_mode = _partial(transaction_mode_of, "sqlite")

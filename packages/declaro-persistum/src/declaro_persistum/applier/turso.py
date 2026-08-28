@@ -17,8 +17,9 @@ real outcome here, which it is not on PostgreSQL.
 
 from collections.abc import Awaitable, Callable
 from functools import reduce
-from typing import Any, Literal
+from typing import Any
 
+from declaro_persistum.applier.facts import dialect_of, transaction_mode_of
 from declaro_persistum.applier.shared import (
     apply_reconstruction_changes,
     dry_run_preview,
@@ -45,18 +46,6 @@ from declaro_persistum.types import (
     is_nothing,
     resolved,
 )
-
-
-@helper
-def get_dialect() -> str:
-    """Return dialect identifier."""
-    return "turso"
-
-
-@helper
-def get_transaction_mode() -> Literal["all_or_nothing", "per_operation"]:
-    """Per-operation: each op gets its own transaction."""
-    return "per_operation"
 
 
 @boundary
@@ -573,3 +562,19 @@ __all__ = [
     # breaks `declaro generate` on this dialect.
     "generate_operation_sql",
 ]
+
+
+def _partial(read: Callable[[str], Any], engine: str) -> Callable[[], Any]:
+    """Bind one engine to one reader, keeping a no-argument function."""
+
+    def ask() -> Any:
+        return read(engine)
+
+    return ask
+
+
+# THIS APPLIER'S OWN ROW, read from the one table rather than written again.
+# Both names are bound at module level exactly as before, because the migration
+# runner reaches them off the module and `applier/__init__.py` re-exports them.
+get_dialect = _partial(dialect_of, "turso")
+get_transaction_mode = _partial(transaction_mode_of, "turso")
