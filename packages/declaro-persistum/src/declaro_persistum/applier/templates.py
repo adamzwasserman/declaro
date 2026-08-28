@@ -122,6 +122,7 @@ def _escaped_values(operation: Operation, _dialect: Dialect) -> list[str]:
 
 
 @helper
+# honest-code-allow: L1.21.1 - _sqlite_rows and _postgresql_rows ARE the tables this clause asks for, and TEMPLATES is the table of them. PostgreSQL's is already built from SQLite's with the differing rows replaced, so collapsing them would mean a table whose one column is a whole table. what_an_applier_says_about_itself.feature holds the reuse instead
 def _sqlite_rows(dialect: Dialect) -> dict[str, Rendering]:
     """The rows for an engine that cannot alter a column in place."""
     return {

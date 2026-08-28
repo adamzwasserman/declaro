@@ -105,3 +105,46 @@ def _then_error_names(ctx):
     assert ctx["said"] is not None, "two operations were skipped and the result says nothing"
     assert "2 operation(s) skipped" in ctx["said"], ctx["said"]
     assert "no such type" in ctx["said"] and "refused" in ctx["said"], ctx["said"]
+
+
+@when("the rendering tables are compared with the operations the differ emits")
+def _when_tables_compared(ctx):
+    from declaro_persistum.applier.templates import TEMPLATES
+
+    ctx["tables"] = {engine: set(rows) for engine, rows in TEMPLATES.items()}
+
+
+@then("each engine can render every one of them")
+def _then_all_renderable(ctx):
+    # SQLite's rows are the floor: PostgreSQL is built from them, so anything
+    # SQLite renders and PostgreSQL does not is a gap rather than a choice.
+    # `alter_column` is the one deliberate absence and is supervised instead.
+    floor = ctx["tables"]["sqlite"] - {"alter_column"}
+    for engine, rows in ctx["tables"].items():
+        missing = sorted(floor - rows)
+        assert not missing, (
+            f"the {engine} table cannot render {missing}, which SQLite's can. "
+            f"An operation added to one table and forgotten for another is an "
+            f"operation the runner meets at deploy time."
+        )
+
+
+@when("the PostgreSQL rendering table is read")
+def _when_pg_table(ctx):
+    from declaro_persistum.applier.templates import TEMPLATES
+
+    ctx["tables"] = {"postgresql": set(TEMPLATES["postgresql"])}
+
+
+@then("it has no whole-table rebuild for a column change")
+def _then_no_rebuild(ctx):
+    rows = ctx["tables"]["postgresql"]
+    assert "alter_column" not in rows, (
+        "PostgreSQL carries a whole-table alter_column row. It alters a column "
+        "where it stands, one statement per property changed, and the "
+        "supervisor renders those from the alter_column:* rows instead."
+    )
+    assert any(row.startswith("alter_column:") for row in rows), (
+        f"PostgreSQL has neither the whole-table row nor the per-property "
+        f"ones, so a column change renders nothing: {sorted(rows)}"
+    )

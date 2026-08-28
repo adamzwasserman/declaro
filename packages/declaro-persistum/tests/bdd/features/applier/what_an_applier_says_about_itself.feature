@@ -59,3 +59,18 @@ Feature: What each applier says about itself
   Scenario: a batch with skips names every one of them
     When the skip summary is asked about two skipped operations
     Then the error field counts them and names both
+
+  # THE RENDERING TABLES. Each engine has one, and PostgreSQL's is built from
+  # SQLite's with the rows that differ replaced. That reuse is the thing worth
+  # holding: an operation added to SQLite's table and forgotten for PostgreSQL
+  # would be an operation the runner cannot render on that engine.
+
+  @precommit
+  Scenario: every engine can render every operation the differ emits
+    When the rendering tables are compared with the operations the differ emits
+    Then each engine can render every one of them
+
+  @precommit
+  Scenario: PostgreSQL alters a column in place rather than rebuilding
+    When the PostgreSQL rendering table is read
+    Then it has no whole-table rebuild for a column change
