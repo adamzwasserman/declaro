@@ -11,6 +11,7 @@ missing capability.
 from __future__ import annotations
 
 import inspect
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from declaro_persistum.boundary import boundary, helper
@@ -58,28 +59,47 @@ def as_identifier(name: str) -> str:
     return name.replace('"', '""')
 
 
-@helper
-async def pragma_table_info(conn: Any, table: str) -> list[tuple]:
-    """Columns of `table`."""
-    return await _rows(conn, f'PRAGMA table_info("{as_identifier(table)}")')
+# WHAT EACH READER ASKS FOR, one row per pragma. These were four functions
+# with one body between them: name a pragma, quote the identifier, hand the
+# rows back. The pragma was the only thing that differed, and it is data now.
+#
+# THE DOCSTRING IS IN THE TABLE TOO, because it was the second thing that
+# differed and a reader looking for "what does index_info give me" should find
+# the answer beside the pragma rather than in a function that no longer exists.
+_PRAGMAS: dict[str, tuple[str, str]] = {
+    "pragma_table_info": ("table_info", "Columns of `table`."),
+    "pragma_index_list": ("index_list", "Indexes on `table`."),
+    "pragma_index_info": ("index_info", "Columns covered by `index_name`."),
+    "pragma_foreign_key_list": (
+        "foreign_key_list",
+        "Foreign keys declared on `table`.",
+    ),
+}
 
 
-@helper
-async def pragma_index_list(conn: Any, table: str) -> list[tuple]:
-    """Indexes on `table`."""
-    return await _rows(conn, f'PRAGMA index_list("{as_identifier(table)}")')
+def _reader(pragma: str, purpose: str) -> Callable[[Any, str], Awaitable[list[tuple]]]:
+    """Build the reader for one pragma.
+
+    THE QUOTING IS WHY THIS IS ONE FUNCTION AND NOT FOUR. A pragma takes a
+    quoted identifier, a double quote inside a name has to be doubled, and
+    four copies of that rule are four chances for one of them to drift. There
+    is one copy now, on the line below.
+    """
+
+    @helper
+    async def read(conn: Any, subject: str) -> list[tuple]:
+        return await _rows(conn, f'PRAGMA {pragma}("{as_identifier(subject)}")')
+
+    read.__name__ = f"pragma_{pragma}"
+    read.__qualname__ = read.__name__
+    read.__doc__ = purpose
+    return read
 
 
-@helper
-async def pragma_index_info(conn: Any, index_name: str) -> list[tuple]:
-    """Columns covered by `index_name`."""
-    return await _rows(conn, f'PRAGMA index_info("{as_identifier(index_name)}")')
-
-
-@helper
-async def pragma_foreign_key_list(conn: Any, table: str) -> list[tuple]:
-    """Foreign keys declared on `table`."""
-    return await _rows(conn, f'PRAGMA foreign_key_list("{as_identifier(table)}")')
+pragma_table_info = _reader(*_PRAGMAS["pragma_table_info"])
+pragma_index_list = _reader(*_PRAGMAS["pragma_index_list"])
+pragma_index_info = _reader(*_PRAGMAS["pragma_index_info"])
+pragma_foreign_key_list = _reader(*_PRAGMAS["pragma_foreign_key_list"])
 
 
 # =============================================================================
