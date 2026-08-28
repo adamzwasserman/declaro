@@ -43,3 +43,19 @@ Feature: What each applier says about itself
   Scenario: the mode is one of the two the runner knows
     When the appliers are listed
     Then no applier names a mode the runner cannot act on
+
+  # WHAT THE RESULT SAYS WHEN NOTHING WENT WRONG. `ApplyResult["error"]` is
+  # declared `str | None`, and None is that field's own vocabulary for "no
+  # error" rather than a function forgetting to answer. These two scenarios
+  # make it a tested answer: the checker cannot tell a declared None from an
+  # unwritten one, and only a caller reading the field can.
+
+  @precommit
+  Scenario: a batch with nothing skipped reports no error
+    When the skip summary is asked about an empty list
+    Then the error field is empty
+
+  @precommit
+  Scenario: a batch with skips names every one of them
+    When the skip summary is asked about two skipped operations
+    Then the error field counts them and names both

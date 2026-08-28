@@ -74,3 +74,34 @@ def _then_known_mode(ctx):
             f"the {engine} applier scopes a batch {mode!r}, which is neither "
             f"of the two the runner knows: {MODES}"
         )
+
+
+@when("the skip summary is asked about an empty list")
+def _when_no_skips(ctx):
+    from declaro_persistum.applier.turso import _SKIP_SUMMARY
+
+    ctx["said"] = _SKIP_SUMMARY[False]([])
+
+
+@when("the skip summary is asked about two skipped operations")
+def _when_two_skips(ctx):
+    from declaro_persistum.applier.turso import _SKIP_SUMMARY
+
+    skipped = ["create_table users: no such type", "add_column t.c: refused"]
+    ctx["said"] = _SKIP_SUMMARY[True](skipped)
+
+
+@then("the error field is empty")
+def _then_error_empty(ctx):
+    assert ctx["said"] is None, (
+        f"the result reports {ctx['said']!r} as its error when nothing was "
+        f"skipped; ApplyResult['error'] is str | None and None is what a "
+        f"caller reads as no error"
+    )
+
+
+@then("the error field counts them and names both")
+def _then_error_names(ctx):
+    assert ctx["said"] is not None, "two operations were skipped and the result says nothing"
+    assert "2 operation(s) skipped" in ctx["said"], ctx["said"]
+    assert "no such type" in ctx["said"] and "refused" in ctx["said"], ctx["said"]
