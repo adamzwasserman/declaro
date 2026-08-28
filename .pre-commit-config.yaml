@@ -84,7 +84,11 @@ repos:
       # would reach the remote.
       - id: pytest-declaro-persistum
         name: pytest (declaro-persistum, whole suite)
-        entry: uv run --project packages/declaro-persistum pytest -q
+        # `cd` FIRST. `uv run --project <dir> pytest` runs FROM the repo root,
+        # so pytest takes the monorepo as its rootdir, collects every package
+        # and dies on 7 import-path clashes between them. Measured 2026-08-28,
+        # and it would have failed on the first push rather than here.
+        entry: sh -c 'cd packages/declaro-persistum && uv run pytest -q'
         language: system
         pass_filenames: false
         files: ^packages/declaro-persistum/
