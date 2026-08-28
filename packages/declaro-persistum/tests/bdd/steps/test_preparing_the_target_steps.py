@@ -31,43 +31,59 @@ _A_CYCLE = ["authors", "books"]
 
 class Ctx(TypedDict, total=False):
     loader: Any
+    asked: list[str]
     answer: Any
     refusal: Exception | None
 
 
 @pytest.fixture
 def ctx() -> Ctx:
-    return {"loader": None, "answer": None, "refusal": None}
+    return {"loader": None, "asked": [], "answer": None, "refusal": None}
 
 
-async def _it_works(_conn: Any) -> None:
-    """The target did what it was asked. A pragma answers nothing."""
-    return None
+def _it_works(asked: list[str], what: str) -> Any:
+    """A target that does what it is asked, and records being asked.
+
+    IT RECORDS BECAUSE OTHERWISE NOTHING WOULD NOTICE. An empty body returning
+    None matched the real loader step, which also returns None, so the shape
+    looked right. But then "answered 1 connection" passed whether or not the
+    target was ever asked. Measured 2026-08-28 by deleting the call: only the
+    refusal scenario failed, and the success one stayed green.
+    """
+
+    async def _step(_conn: Any) -> None:
+        asked.append(what)
+
+    return _step
 
 
-async def _it_refuses(_conn: Any) -> None:
-    """The target would not do it, and says so the way a driver would."""
-    raise RuntimeError("the target refused")
+def _it_refuses(what: str) -> Any:
+    """A target that will not do it, and says so the way a driver would."""
+
+    async def _step(_conn: Any) -> None:
+        raise RuntimeError(f"the target refused to {what}")
+
+    return _step
 
 
 @given("a loader whose target drops its checks")
 def _given_drops(ctx):
-    ctx["loader"] = {"disable_fk_checks": _it_works}
+    ctx["loader"] = {"disable_fk_checks": _it_works(ctx["asked"], "drop its checks")}
 
 
 @given("a loader whose target refuses to drop its checks")
 def _given_refuses_drop(ctx):
-    ctx["loader"] = {"disable_fk_checks": _it_refuses}
+    ctx["loader"] = {"disable_fk_checks": _it_refuses("drop its checks")}
 
 
 @given("a loader whose target restores its checks")
 def _given_restores(ctx):
-    ctx["loader"] = {"enable_fk_checks": _it_works}
+    ctx["loader"] = {"enable_fk_checks": _it_works(ctx["asked"], "restore its checks")}
 
 
 @given("a loader whose target refuses to restore its checks")
 def _given_refuses_restore(ctx):
-    ctx["loader"] = {"enable_fk_checks": _it_refuses}
+    ctx["loader"] = {"enable_fk_checks": _it_refuses("restore its checks")}
 
 
 def _run(ctx: Ctx, coroutine: Any) -> None:
@@ -106,6 +122,12 @@ def _then_count(ctx, expected):
     assert ctx["answer"] == expected, (
         f"answered {ctx['answer']!r}; the pair exists to say how many "
         f"connections had their checks turned off"
+    )
+    # AND THE TARGET WAS ACTUALLY ASKED. The count alone passed with the call
+    # to the loader deleted, so a step that answered 1 without doing anything
+    # was indistinguishable from one that worked.
+    assert len(ctx["asked"]) == expected, (
+        f"it answered {expected} but asked the target {ctx['asked']}"
     )
 
 
