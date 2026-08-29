@@ -52,7 +52,7 @@ from typing import Any, TypedDict
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.database import Database, is_replicated
 from declaro_persistum.exceptions import also_failed
-from declaro_persistum.reporting import say
+from declaro_persistum.reporting import say_because
 from declaro_persistum.retry import Retry
 from declaro_persistum.types import NOTHING, Nothing, is_nothing
 from declaro_persistum.write_queue import PendingWrite, Room, drain
@@ -78,12 +78,12 @@ class Crew(TypedDict):
 @helper
 def _said_out_loud(orphan: BaseException) -> BaseException:
     """Log one failure whose depositor stopped waiting, and hand it back."""
-    say(
+    say_because(
         __name__,
         "warning",
         "A write failed after its caller stopped waiting for it. "
         "Nobody will see this exception except this line.",
-        exc_info=orphan,
+        orphan,
     )
     return orphan
 

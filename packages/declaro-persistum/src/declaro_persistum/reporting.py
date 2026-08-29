@@ -28,6 +28,7 @@ caller so existing configuration still filters by it, and stops there.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from declaro_persistum.boundary import helper
@@ -66,6 +67,80 @@ def say(module: str, level: str, message: str, *args: Any, **facts: Any) -> None
     NO `error` LEVEL, on purpose. A failure is a value a function returns. If
     this had one, the first thing anybody would do with it is log a failure
     instead of returning it, which is the shape this module exists to remove.
+
+    NO EXCEPTION EITHER. A caller with a cause to record calls `say_because`.
     """
+    _A_FACT_IS_A_FACT[bool(facts.keys() & _LOGGING_KEYWORDS)](facts)
+    _write(module, level, message, args, facts, None)
+
+
+@helper
+def say_because(
+    module: str,
+    level: str,
+    message: str,
+    cause: BaseException,
+    *args: Any,
+    **facts: Any,
+) -> None:
+    """Write one line about a failure, carrying the exception that caused it.
+
+    THIS EXISTS BECAUSE `say(..., exc_info=True)` LOOKED LIKE IT WORKED. Every
+    keyword `say` takes becomes "name=value" text, so `exc_info` -- which is
+    the standard library's own word for "attach the exception being handled"
+    -- was written out as the four characters T-r-u-e and the exception was
+    thrown away. Two call sites did that, and the comment above one of them
+    said "exc_info=True keeps the type and the traceback". It kept neither.
+
+    Measured 2026-08-29 against a real Turso primary: a push failed, the
+    warning read "... exc_info=True", and nothing anywhere held the type, the
+    message or the traceback of what had actually gone wrong.
+
+    The cause is a positional parameter rather than a keyword, so it cannot be
+    forgotten and cannot be confused with a fact.
+    """
+    _A_FACT_IS_A_FACT[bool(facts.keys() & _LOGGING_KEYWORDS)](facts)
+    _write(module, level, message, args, facts, cause)
+
+
+# The names the standard library's own `log` reads. A caller who passes one of
+# these as a fact means the standard library's behaviour and will not get it,
+# so it is refused rather than rendered as text.
+_LOGGING_KEYWORDS: frozenset[str] = frozenset({"exc_info", "stack_info", "stacklevel", "extra"})
+
+
+@helper
+def _facts_are_facts(_facts: dict[str, Any]) -> int:
+    """Nothing here means anything to the standard library."""
+    return 0
+
+
+@helper
+def _refuse_a_logging_keyword(facts: dict[str, Any]) -> int:
+    """A name the standard library owns cannot be carried as text."""
+    taken = ", ".join(sorted(facts.keys() & _LOGGING_KEYWORDS))
+    raise TypeError(
+        f"say does not take {taken}: the standard library owns that name, and "
+        f"passing it here would write it out as text instead. Call "
+        f"say_because(module, level, message, cause) to record an exception."
+    )
+
+
+_A_FACT_IS_A_FACT: dict[bool, Callable[[dict[str, Any]], int]] = {
+    False: _facts_are_facts,
+    True: _refuse_a_logging_keyword,
+}
+
+
+@helper
+def _write(
+    module: str,
+    level: str,
+    message: str,
+    args: tuple[Any, ...],
+    facts: dict[str, Any],
+    cause: BaseException | None,
+) -> None:
+    """The one call to the standard library. `cause` is None when there is none."""
     detail = " ".join(f"{name}={value}" for name, value in facts.items())
-    _named(module).log(_LEVELS[level], f"{message} {detail}".rstrip(), *args)
+    _named(module).log(_LEVELS[level], f"{message} {detail}".rstrip(), *args, exc_info=cause)

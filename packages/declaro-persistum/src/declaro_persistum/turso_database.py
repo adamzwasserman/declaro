@@ -76,7 +76,7 @@ from declaro_persistum.exceptions import (
     ConnectionError,
     also_failed,
 )
-from declaro_persistum.reporting import say
+from declaro_persistum.reporting import say, say_because
 from declaro_persistum.types import (
     NOTHING,
     DbapiConnection,
@@ -573,7 +573,7 @@ async def _open_replicated(
             # wrong call is not ordinary, and patience is the wrong response
             # to it.
             raise
-        except Exception:
+        except Exception as failed:
             # A failed push is ordinary — the network is not always there. The
             # caller decides how long to keep trying; `flush` retries until it
             # lands, and the return value is what it loops on.
@@ -583,14 +583,20 @@ async def _open_replicated(
             # object entirely. `replicate_on_shutdown` loops on the bool and
             # logs "attempt 1247 failed after 3021s" without ever being able
             # to say why, because by then the only thing that knew was gone.
-            # `exc_info=True` keeps the type and the traceback.
-            say(
+            #
+            # IT THEN SPENT TWELVE DAYS STILL DISCARDING IT. The line read
+            # `say(..., exc_info=True)`, and `say` renders every keyword as
+            # text, so the warning carried the four characters "True" where
+            # the traceback was supposed to be. Measured 2026-08-29 against a
+            # real primary: a genuine push failure, and nothing anywhere held
+            # its type. `say_because` takes the exception itself.
+            say_because(
                 __name__,
                 "warning",
                 "Push to the primary for %s failed. Returning False so the "
                 "caller's retry loop decides what to do next.",
+                failed,
                 path,
-                exc_info=True,
             )
             return False
 
