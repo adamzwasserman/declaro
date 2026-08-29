@@ -332,14 +332,14 @@ async def test_a_write_through_the_example_lands(tmp_path: pathlib.Path) -> None
 
     await db.init_schema(config)
 
-    async with db.get_connection() as (conn, dialect):
+    async with db.get_connection(config) as (conn, dialect):
         await conn.execute(
             "INSERT INTO todos (id, title, completed) VALUES (?, ?, ?)",
             ("1", "buy milk", 0),
         )
         await db.commit(conn, dialect)
 
-    async with db.get_connection() as (conn, _dialect):
+    async with db.get_connection(config) as (conn, _dialect):
         cursor = await conn.execute("SELECT title FROM todos")
         rows = await cursor.fetchall()
 
@@ -375,26 +375,49 @@ async def test_reaching_a_database_that_is_not_there_says_so() -> None:
     assert "reach" in message or "Driver" in message, message
 
 
-@pytest.mark.asyncio
-async def test_a_failed_probe_leaves_the_current_database_alone(
-    tmp_path: pathlib.Path,
-) -> None:
-    """Probing a backend must not switch the app onto it.
+def test_the_module_holds_no_current_database() -> None:
+    """The defect the old restore guarded, made impossible instead.
 
-    `test_connection` calls `set_database` to use the shared connection path.
-    Without the restore, clicking a backend that is down leaves every later
-    query pointed at the database that just failed.
+    `test_connection` used to borrow a module global to reach the shared
+    connection path, and put the old value back in a `finally`. Without that
+    restore, clicking a backend that was down left every later query pointed
+    at the database that had just failed.
+
+    THE RESTORE IS GONE BECAUSE THE SHARED VALUE IS. Every function takes the
+    config it is to use, so a probe has nothing to disturb, and this asserts
+    that rather than asserting the restore worked: a test of a `finally` block
+    passes the moment somebody deletes the state and the block with it.
+
+    Which database the app is talking to is the app's, and lives in
+    `app.state`.
     """
     db = _load_example_db()
-    working = db.get_sqlite_config(str(tmp_path / "todos.db"))
-    db.set_database(working)
 
-    await db.test_connection(
-        db.get_postgres_config(host="127.0.0.1", port=1, user="u", password="p", database="d")
+    left_behind = [
+        name for name in ("_current_db", "set_database", "get_database") if hasattr(db, name)
+    ]
+
+    assert left_behind == [], (
+        f"the example module still holds {left_behind}, so a function that "
+        f"opens a connection can depend on state no caller passed it"
     )
 
-    assert db.get_database() == working, (
-        "a failed probe left the app pointed at the backend that failed"
+
+@pytest.mark.asyncio
+async def test_a_failed_probe_disturbs_nothing(tmp_path: pathlib.Path) -> None:
+    """Probing a backend that is down leaves a working config working."""
+    db = _load_example_db()
+    working = db.get_sqlite_config(str(tmp_path / "todos.db"))
+
+    ok, _message = await db.test_connection(
+        db.get_postgres_config(host="127.0.0.1", port=1, user="u", password="p", database="d")
+    )
+    assert ok is False, "a database on a closed port reported itself reachable"
+
+    still_ok, _message = await db.test_connection(working)
+    assert still_ok is True, (
+        "a failed probe left the working config unusable, so something was "
+        "shared between the two calls"
     )
 
 

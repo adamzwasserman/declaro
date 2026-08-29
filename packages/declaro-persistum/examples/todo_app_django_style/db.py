@@ -126,16 +126,15 @@ get_turso_config = get_turso_cloud_config
 SQLITE_CONFIG = get_sqlite_config(DEFAULT_SQLITE_PATH)
 TURSO_EMBEDDED_CONFIG = get_turso_embedded_config(DEFAULT_TURSO_EMBEDDED_PATH)
 
-_current_db: DatabaseConfig = SQLITE_CONFIG
-
-
-def set_database(config: DatabaseConfig) -> None:
-    global _current_db
-    _current_db = config
-
-
-def get_database() -> DatabaseConfig:
-    return _current_db
+# THERE IS NO CURRENT DATABASE HERE. This module held one in `_current_db`,
+# with `set_database` writing it and `get_database` reading it, so every
+# function that opened a connection depended on module state no caller could
+# see. Two functions in this file wrote it, and `test_connection` had to save
+# the old value and put it back in a `finally` because it borrowed the shared
+# one to try a different engine.
+#
+# Which database the app is talking to is the APP's, and the app keeps it in
+# `app.state`. Everything here takes the config it is to use.
 
 
 # ---------------------------------------------------------------------------
@@ -256,8 +255,8 @@ NEEDS_COMMIT = {
 
 
 @asynccontextmanager
-async def get_connection():
-    """A connection to whatever `set_database` last chose, AND what engine it is.
+async def get_connection(config: DatabaseConfig):
+    """A connection to `config`'s database, AND what engine it is.
 
     THE ENGINE TRAVELS WITH THE CONNECTION, because it is true of the
     connection. Every function that touched a connection used to ask
@@ -267,7 +266,6 @@ async def get_connection():
 
     This is the ONLY place engine-specific code lives, and it is a lookup.
     """
-    config = get_database()
     connector = _for_dialect(CONNECTORS, config["dialect"], "Connectors")
     async with connector(config) as conn:
         yield conn, config["dialect"]
@@ -327,8 +325,7 @@ def todos_table_sql(dialect: str) -> str:
 
 async def init_schema(config: DatabaseConfig) -> None:
     """Create the todos table on `config`'s engine."""
-    set_database(config)
-    async with get_connection() as (conn, dialect):
+    async with get_connection(config) as (conn, dialect):
         await _run(conn, todos_table_sql(config["dialect"]), dialect)
 
 
@@ -345,18 +342,14 @@ async def test_connection(config: DatabaseConfig) -> tuple[bool, str]:
     was called wrongly, and reporting that as "the database is unreachable"
     sends the reader to check a database that is fine.
     """
-    previous = get_database()
     try:
-        set_database(config)
-        async with get_connection() as (conn, dialect):
+        async with get_connection(config) as (conn, dialect):
             await _run(conn, "SELECT 1", dialect)
         return True, "Connection successful"
     except ImportError as exc:
         return False, f"Driver not installed: {exc}"
     except OSError as exc:
         return False, f"Could not reach the database: {exc}"
-    finally:
-        set_database(previous)
 
 
 def check_driver_available(dialect: str) -> tuple[bool, str]:

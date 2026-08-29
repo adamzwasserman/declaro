@@ -63,6 +63,9 @@ async def _ready(app_dir: str):
     app, db = _load(app_dir)
     config = db.get_sqlite_config(tempfile.mktemp(suffix=".db"))
     await db.init_schema(config)
+    # WHERE A ROUTE LOOKS FOR IT. The lifespan sets this when the app starts;
+    # these tests call the routes directly, so they set it the same way.
+    app.app.state.database = config
     app._schema = {
         "todos": {
             "columns": {
@@ -87,9 +90,9 @@ async def test_creating_a_todo_stores_it(app_dir: str) -> None:
     """The route a reader clicks first."""
     app, db = await _ready(app_dir)
 
-    await app.create_todo(_request(), title="buy milk")
+    await app.create_todo(_request(app.app), title="buy milk")
 
-    async with db.get_connection() as (conn, dialect):
+    async with db.get_connection(app.app.state.database) as (conn, dialect):
         cursor = await conn.execute("SELECT title FROM todos")
         assert await cursor.fetchall() == [("buy milk",)]
 
@@ -98,15 +101,15 @@ async def test_creating_a_todo_stores_it(app_dir: str) -> None:
 async def test_deleting_a_todo_removes_it(app_dir: str) -> None:
     """The route that measured the defect."""
     app, db = await _ready(app_dir)
-    await app.create_todo(_request(), title="buy milk")
+    await app.create_todo(_request(app.app), title="buy milk")
 
-    async with db.get_connection() as (conn, dialect):
+    async with db.get_connection(app.app.state.database) as (conn, dialect):
         cursor = await conn.execute("SELECT id FROM todos")
         todo_id = (await cursor.fetchone())[0]
 
-    await app.delete_todo(todo_id)
+    await app.delete_todo(_request(app.app), todo_id)
 
-    async with db.get_connection() as (conn, dialect):
+    async with db.get_connection(app.app.state.database) as (conn, dialect):
         cursor = await conn.execute("SELECT COUNT(*) FROM todos")
         assert (await cursor.fetchone())[0] == 0
 
@@ -115,20 +118,20 @@ async def test_deleting_a_todo_removes_it(app_dir: str) -> None:
 async def test_toggling_a_todo_flips_it_and_flips_it_back(app_dir: str) -> None:
     """Toggle reads, computes and writes, so it exercises all three verbs."""
     app, db = await _ready(app_dir)
-    await app.create_todo(_request(), title="buy milk")
+    await app.create_todo(_request(app.app), title="buy milk")
 
-    async with db.get_connection() as (conn, dialect):
+    async with db.get_connection(app.app.state.database) as (conn, dialect):
         cursor = await conn.execute("SELECT id, completed FROM todos")
         todo_id, completed = await cursor.fetchone()
     assert completed == 0
 
-    await app.toggle_todo(_request(), todo_id)
-    async with db.get_connection() as (conn, dialect):
+    await app.toggle_todo(_request(app.app), todo_id)
+    async with db.get_connection(app.app.state.database) as (conn, dialect):
         cursor = await conn.execute("SELECT completed FROM todos")
         assert (await cursor.fetchone())[0] == 1
 
-    await app.toggle_todo(_request(), todo_id)
-    async with db.get_connection() as (conn, dialect):
+    await app.toggle_todo(_request(app.app), todo_id)
+    async with db.get_connection(app.app.state.database) as (conn, dialect):
         cursor = await conn.execute("SELECT completed FROM todos")
         assert (await cursor.fetchone())[0] == 0
 
@@ -136,10 +139,10 @@ async def test_toggling_a_todo_flips_it_and_flips_it_back(app_dir: str) -> None:
 @pytest.mark.parametrize("app_dir", APPS)
 async def test_the_index_lists_what_was_created(app_dir: str) -> None:
     app, db = await _ready(app_dir)
-    await app.create_todo(_request(), title="one")
-    await app.create_todo(_request(), title="two")
+    await app.create_todo(_request(app.app), title="one")
+    await app.create_todo(_request(app.app), title="two")
 
-    response = await app.index(_request())
+    response = await app.index(_request(app.app))
 
     titles = {t["title"] for t in response.context["todos"]}
     assert titles == {"one", "two"}
@@ -159,7 +162,7 @@ async def test_the_index_lists_the_newest_first(app_dir: str) -> None:
     """
     app, db = await _ready(app_dir)
 
-    async with db.get_connection() as (conn, dialect):
+    async with db.get_connection(app.app.state.database) as (conn, dialect):
         await conn.execute(
             "INSERT INTO todos (id, title, completed, created_at) VALUES "
             "('1', 'older', 0, '2026-01-01 00:00:00'), "
@@ -167,7 +170,7 @@ async def test_the_index_lists_the_newest_first(app_dir: str) -> None:
         )
         await conn.commit()
 
-    response = await app.index(_request())
+    response = await app.index(_request(app.app))
 
     assert [t["title"] for t in response.context["todos"]] == ["newer", "older"], (
         "the index is not newest-first, so a reader's most recent todo is at the bottom of the page"
@@ -178,16 +181,22 @@ async def test_the_index_lists_the_newest_first(app_dir: str) -> None:
 async def test_the_count_route_counts(app_dir: str) -> None:
     """This one runs through `count_`, which returned a string until today."""
     app, db = await _ready(app_dir)
-    await app.create_todo(_request(), title="one")
-    await app.create_todo(_request(), title="two")
+    await app.create_todo(_request(app.app), title="one")
+    await app.create_todo(_request(app.app), title="two")
 
-    response = await app.get_count(_request())
+    response = await app.get_count(_request(app.app))
 
     assert response.context["active_count"] == 2
 
 
-def _request():
-    """The minimum a TemplateResponse needs, without serving HTTP."""
+def _request(app=None):
+    """The minimum a TemplateResponse needs, without serving HTTP.
+
+    THE APP IS REAL WHEN A ROUTE READS ITS STATE. Which database the app is
+    talking to lives in `app.state`, so a route reaching for it needs the app
+    the test set up rather than None, and passing the real one is what makes
+    these scenarios exercise the same lookup a served request would.
+    """
     from starlette.datastructures import Headers
     from starlette.requests import Request
 
@@ -198,6 +207,6 @@ def _request():
             "path": "/",
             "headers": Headers({}).raw,
             "query_string": b"",
-            "app": None,
+            "app": app,
         }
     )

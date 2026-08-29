@@ -36,16 +36,15 @@ from pathlib import Path
 from db import (
     DEFAULT_SQLITE_PATH,
     DEFAULT_TURSO_EMBEDDED_PATH,
+    SQLITE_CONFIG,
     check_driver_available,
     commit,
     get_connection,
-    get_database,
     get_postgres_config,
     get_sqlite_config,
     get_turso_cloud_config,
     get_turso_embedded_config,
     init_schema,
-    set_database,
     test_connection,
 )
 from fastapi import FastAPI, Form, Request
@@ -72,10 +71,16 @@ _schema = None
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):  # noqa: ARG001 - FastAPI passes it
-    """Application lifespan - initialize DB and schema on startup."""
+async def lifespan(app: FastAPI):
+    """Application lifespan - initialize DB and schema on startup.
+
+    WHICH DATABASE THIS APP IS TALKING TO IS THE APP'S, and it lives in
+    `app.state`. It used to be a module global inside db.py, which meant every
+    function that opened a connection read state no caller could see.
+    """
     global _schema
-    await init_schema(get_database())
+    app.state.database = SQLITE_CONFIG
+    await init_schema(app.state.database)
     _schema = load_schema(str(SCHEMA_DIR))
     yield
 
@@ -92,7 +97,7 @@ templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 @app.get("/db", response_class=HTMLResponse)
 async def db_settings(request: Request):
     """Show database selection page."""
-    current = get_database()
+    current = request.app.state.database
     sqlite_ok, sqlite_msg = check_driver_available("sqlite")
     pg_ok, pg_msg = check_driver_available("postgresql")
     turso_cloud_ok, turso_cloud_msg = check_driver_available("turso_cloud")
@@ -135,7 +140,7 @@ async def _switch_to(request, config, fallback_name: str, said_on_success: str):
     """
     success, message = await test_connection(config)
     if success:
-        set_database(config)
+        request.app.state.database = config
         await init_schema(config)
 
     return templates.TemplateResponse(
@@ -149,6 +154,7 @@ async def _switch_to(request, config, fallback_name: str, said_on_success: str):
     )
 
 
+# honest-code-allow: L1.21.1 - these four are the rows, and a route has to be its own function: FastAPI registers it by the decorator and the path, so generating them from a table would hide the URL map, which is the thing an example most needs to show. Their bodies already share _switch_to and are four lines each
 @app.post("/db/sqlite", response_class=HTMLResponse)
 async def use_sqlite(request: Request, database_path: str = Form(DEFAULT_SQLITE_PATH)):
     """Switch to SQLite."""
@@ -219,7 +225,7 @@ async def use_turso_embedded(
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Render the main page with all todos."""
-    async with get_connection() as (conn, dialect):
+    async with get_connection(request.app.state.database) as (conn, dialect):
         todos = await execute(
             select(
                 "id",
@@ -245,7 +251,7 @@ async def index(request: Request):
         {
             "request": request,
             "todos": todos,
-            "current_db": get_database()["display_name"],
+            "current_db": request.app.state.database["display_name"],
         },
     )
 
@@ -255,7 +261,7 @@ async def create_todo(request: Request, title: str = Form(...)):
     """Create a new todo."""
     todo_id = str(uuid.uuid4())
 
-    async with get_connection() as (conn, dialect):
+    async with get_connection(request.app.state.database) as (conn, dialect):
         await execute(
             insert(
                 "todos",
@@ -299,7 +305,7 @@ async def create_todo(request: Request, title: str = Form(...)):
 @app.put("/todos/{todo_id}/toggle", response_class=HTMLResponse)
 async def toggle_todo(request: Request, todo_id: str):
     """Toggle todo completion status."""
-    async with get_connection() as (conn, dialect):
+    async with get_connection(request.app.state.database) as (conn, dialect):
         current = await execute_one(
             select(
                 "completed",
@@ -360,9 +366,9 @@ async def toggle_todo(request: Request, todo_id: str):
 
 
 @app.delete("/todos/{todo_id}", response_class=HTMLResponse)
-async def delete_todo(todo_id: str):
+async def delete_todo(request: Request, todo_id: str):
     """Delete a todo."""
-    async with get_connection() as (conn, dialect):
+    async with get_connection(request.app.state.database) as (conn, dialect):
         await execute(
             delete("todos", where={"id": todo_id}, params=NOTHING, returning=NOTHING),
             conn,
@@ -376,7 +382,7 @@ async def delete_todo(todo_id: str):
 @app.get("/todos/count", response_class=HTMLResponse)
 async def get_count(request: Request):
     """Get todo counts for the footer."""
-    async with get_connection() as (conn, dialect):
+    async with get_connection(request.app.state.database) as (conn, dialect):
         active_count = await execute_scalar(
             select(
                 "COUNT(*) AS c",
