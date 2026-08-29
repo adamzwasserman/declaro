@@ -843,6 +843,84 @@ def _commit(recon_context) -> None:
     recon_context["run"](recon_context["conn"].commit())
 
 
+def _directly_or_by_rebuild(recon_context, table_name: str, operation) -> None:
+    """Ask SQLite to do it, and rebuild only when it refuses.
+
+    THE ENGINE DECIDES, NOT US. Which columns SQLite will drop in place was
+    measured rather than reasoned about:
+
+        ALTER TABLE users DROP COLUMN phone   (UNIQUE)
+            OperationalError: cannot drop UNIQUE column: "phone"
+        ALTER TABLE users DROP COLUMN name    (unconstrained)
+            succeeded
+
+    So asking is cheaper and more accurate than inspecting the schema to
+    predict the answer, and the two scenarios in this feature are exactly the
+    two outcomes.
+
+    THE EXCEPT IS `MigrationError`, which is what the applier raises: it wraps
+    the driver error and re-raises rather than returning a failure dict. A
+    TypeError from calling the applier wrongly stays uncaught, so a bug of ours
+    cannot be read as "SQLite wants a rebuild".
+    """
+    try:
+        recon_context["run"](
+            apply_operations(recon_context["conn"], [operation], [0], "sqlite", dry_run=False)
+        )
+    except MigrationError:
+        current_columns = recon_context["run"](
+            _build_full_schema(recon_context["conn"], table_name)
+        )
+        recon_context["run"](
+            execute_reconstruction_async(
+                recon_context["conn"],
+                table_name,
+                get_reconstruction_columns(current_columns, operation),
+                preserve_data=NOTHING,
+                manage_foreign_keys=NOTHING,
+            )
+        )
+
+
+def _rootpage_of(recon_context, table_name: str):
+    """Where SQLite keeps this table, or None if it has none.
+
+    THE ONLY THING THAT TELLS THE TWO DROP ROUTES APART. A direct
+    `ALTER TABLE DROP COLUMN` edits the schema in place and leaves the rootpage
+    where it was; a reconstruction builds a new table and renames it over the
+    old, which moves it. Both end with the column gone, so the column being
+    absent proves nothing about which route ran.
+    """
+    row = _one_row(
+        recon_context,
+        "SELECT rootpage FROM sqlite_master WHERE type = 'table' AND name = ?",
+        table_name,
+    )
+    return row[0] if row else None
+
+
+def _referenced_by(recon_context, table_name: str, column_name: str) -> str | None:
+    """The table whose foreign key points at this column, if any does.
+
+    A column another table references cannot be dropped by either route, and
+    the scenario that asks for it expects to be told which table is holding on
+    rather than to see a driver error.
+    """
+    tables = [
+        row[0] for row in _rows(recon_context, "SELECT name FROM sqlite_master WHERE type='table'")
+    ]
+    return next(
+        (
+            other
+            for other in tables
+            for key in recon_context["run"](pragma_foreign_key_list(recon_context["conn"], other))
+            # (id, seq, ref_table, from_col, ref_col, ...)
+            if key[2] == table_name and key[4] == column_name
+        ),
+        None,
+    )
+
+
 def _the_table_and_column(recon_context, table_col: str) -> tuple[str, str]:
     """A step writes either "table.column" or just "column"."""
     if "." in table_col:
@@ -940,48 +1018,20 @@ def when_drop_foreign_key(recon_context, table_col):
 @when(parsers.parse('I drop column "{column}"'))
 def when_drop_column(recon_context, column):
     """Drop column via reconstruction. Handles table.column format."""
-    if "." in column:
-        table_name, column_name = column.split(".", 1)
-        recon_context["table_name"] = table_name
-    else:
-        table_name = recon_context["table_name"]
-        column_name = column
+    table_name, column_name = _the_table_and_column(recon_context, column)
+    recon_context["table_name"] = table_name
 
-    from declaro_persistum.types import Operation
-
-    # THE ROOTPAGE, BEFORE. A direct ALTER TABLE DROP COLUMN edits the schema
-    # in place and leaves it unchanged; a reconstruction builds a new table and
-    # renames it over the old, which moves it. Both end with the column gone,
-    # so this is the only thing that tells the two routes apart, and it has to
-    # be taken now because afterwards the old value is unrecoverable.
-    cursor = recon_context["run"](
-        recon_context["conn"].execute(
-            "SELECT rootpage FROM sqlite_master WHERE type = 'table' AND name = ?",
-            (table_name,),
-        )
-    )
-    before = recon_context["run"](cursor.fetchone())
-    recon_context["schema_snapshot"] = before[0] if before else None
+    # TAKEN NOW, because after the drop the old value is unrecoverable.
+    recon_context["schema_snapshot"] = _rootpage_of(recon_context, table_name)
 
     try:
         _enable_fk(recon_context)
 
-        # Check if column is referenced by any FK constraint in other tables
-        cursor = recon_context["run"](
-            recon_context["conn"].execute("SELECT name FROM sqlite_master WHERE type='table'")
-        )
-        all_tables = [row[0] for row in recon_context["run"](cursor.fetchall())]
-        for other_table in all_tables:
-            fk_list = recon_context["run"](
-                pragma_foreign_key_list(recon_context["conn"], other_table)
+        holder = _referenced_by(recon_context, table_name, column_name)
+        if holder:
+            raise ValueError(
+                f"Cannot drop '{table_name}.{column_name}': referenced by FK in '{holder}'"
             )
-            for fk_row in fk_list:
-                # (id, seq, ref_table, from_col, ref_col, ...)
-                if fk_row[2] == table_name and fk_row[4] == column_name:
-                    raise ValueError(
-                        f"Cannot drop '{table_name}.{column_name}': "
-                        f"referenced by FK in '{other_table}'"
-                    )
 
         operation: Operation = {
             "op": "drop_column",
@@ -1025,24 +1075,7 @@ def when_drop_column(recon_context, column):
         # wraps the driver error and re-raises rather than returning a failure
         # dict. A TypeError from calling the applier wrongly stays uncaught, so
         # it cannot be read as "SQLite wants a rebuild".
-        try:
-            recon_context["run"](
-                apply_operations(recon_context["conn"], [operation], [0], "sqlite", dry_run=False)
-            )
-        except MigrationError:
-            current_columns = recon_context["run"](
-                _build_full_schema(recon_context["conn"], table_name)
-            )
-            new_columns = get_reconstruction_columns(current_columns, operation)
-            recon_context["run"](
-                execute_reconstruction_async(
-                    recon_context["conn"],
-                    table_name,
-                    new_columns,
-                    preserve_data=NOTHING,
-                    manage_foreign_keys=NOTHING,
-                )
-            )
+        _directly_or_by_rebuild(recon_context, table_name, operation)
         _commit(recon_context)
     except Exception as e:
         recon_context["error"] = e
