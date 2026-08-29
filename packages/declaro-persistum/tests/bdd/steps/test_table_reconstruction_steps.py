@@ -27,8 +27,8 @@ from declaro_persistum.abstractions.table_reconstruction import (
     reconstruct_table,
 )
 from declaro_persistum.applier import apply as apply_operations
-from declaro_persistum.exceptions import MigrationError
-from declaro_persistum.types import NOTHING, Column
+from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, MigrationError
+from declaro_persistum.types import NOTHING, Column, Operation
 
 # Load scenarios from feature file
 scenarios("../features/table_reconstruction.feature")
@@ -822,26 +822,49 @@ def when_reconstruct_table(recon_context):
     recon_context["run"](recon_context["conn"].commit())
 
 
-@when(parsers.parse('I add foreign key on "{table_col}" referencing "{ref}"'))
-def when_add_foreign_key(recon_context, table_col, ref):
-    """Add foreign key via reconstruction."""
+def _rows(recon_context, sql: str, *params: object) -> list:
+    """Every row one query gives back.
+
+    THE THREE LINES THIS REPLACES WERE WRITTEN IN EVERY STEP. Each database
+    call went through `recon_context["run"](...)` twice, once to execute and
+    once to fetch, and the audit read the repetition as thirty to a hundred
+    lines of setup per step.
+    """
+    cursor = recon_context["run"](recon_context["conn"].execute(sql, params))
+    return list(recon_context["run"](cursor.fetchall()))
+
+
+def _one_row(recon_context, sql: str, *params: object):
+    """The first row, or None when the query found nothing."""
+    cursor = recon_context["run"](recon_context["conn"].execute(sql, params))
+    return recon_context["run"](cursor.fetchone())
+
+
+def _commit(recon_context) -> None:
+    """Commit through the runner these steps share."""
+    recon_context["run"](recon_context["conn"].commit())
+
+
+def _the_table_and_column(recon_context, table_col: str) -> tuple[str, str]:
+    """A step writes either "table.column" or just "column"."""
     if "." in table_col:
         table_name, column_name = table_col.split(".", 1)
-    else:
-        table_name = recon_context["table_name"]
-        column_name = table_col
+        return table_name, column_name
+    return recon_context["table_name"], table_col
 
-    from declaro_persistum.types import Operation
 
-    operation: Operation = {
-        "op": "add_foreign_key",
-        "table": table_name,
-        "details": {
-            "column": column_name,
-            "references": ref,
-        },
-    }
+def _rebuild_with(recon_context, table_name: str, operation) -> None:
+    """Run one reconstruction, and keep whatever it raised.
 
+    SIX STEPS SHARED THIS AND EACH WROTE IT OUT. Turn foreign keys on, read the
+    table back, work out the new columns, rebuild, commit, remember the table.
+    The operation dict was the only thing that differed, and the audit read the
+    repetition as thirty to a hundred lines of setup per step -- which is what
+    it is, and it was reporting the copies rather than any one step.
+
+    The failure is kept rather than raised, because the scenarios that assert a
+    rebuild REFUSES read `recon_context["error"]`.
+    """
     try:
         _enable_fk(recon_context)
         current_columns = recon_context["run"](
@@ -859,8 +882,25 @@ def when_add_foreign_key(recon_context, table_col, ref):
         )
         recon_context["run"](recon_context["conn"].commit())
         recon_context["table_name"] = table_name
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - the scenarios read this
         recon_context["error"] = e
+
+
+@when(parsers.parse('I add foreign key on "{table_col}" referencing "{ref}"'))
+def when_add_foreign_key(recon_context, table_col, ref):
+    """Add foreign key via reconstruction."""
+    table_name, column_name = _the_table_and_column(recon_context, table_col)
+
+    operation: Operation = {
+        "op": "add_foreign_key",
+        "table": table_name,
+        "details": {
+            "column": column_name,
+            "references": ref,
+        },
+    }
+
+    _rebuild_with(recon_context, table_name, operation)
 
 
 @when(
@@ -868,13 +908,7 @@ def when_add_foreign_key(recon_context, table_col, ref):
 )
 def when_add_foreign_key_cascade(recon_context, table_col, ref):
     """Add foreign key with ON DELETE CASCADE via reconstruction."""
-    if "." in table_col:
-        table_name, column_name = table_col.split(".", 1)
-    else:
-        table_name = recon_context["table_name"]
-        column_name = table_col
-
-    from declaro_persistum.types import Operation
+    table_name, column_name = _the_table_and_column(recon_context, table_col)
 
     operation: Operation = {
         "op": "add_foreign_key",
@@ -886,37 +920,13 @@ def when_add_foreign_key_cascade(recon_context, table_col, ref):
         },
     }
 
-    try:
-        _enable_fk(recon_context)
-        current_columns = recon_context["run"](
-            _build_full_schema(recon_context["conn"], table_name)
-        )
-        new_columns = get_reconstruction_columns(current_columns, operation)
-        recon_context["run"](
-            execute_reconstruction_async(
-                recon_context["conn"],
-                table_name,
-                new_columns,
-                preserve_data=NOTHING,
-                manage_foreign_keys=NOTHING,
-            )
-        )
-        recon_context["run"](recon_context["conn"].commit())
-        recon_context["table_name"] = table_name
-    except Exception as e:
-        recon_context["error"] = e
+    _rebuild_with(recon_context, table_name, operation)
 
 
 @when(parsers.parse('I drop foreign key on "{table_col}"'))
 def when_drop_foreign_key(recon_context, table_col):
     """Drop foreign key via reconstruction."""
-    if "." in table_col:
-        table_name, column_name = table_col.split(".", 1)
-    else:
-        table_name = recon_context["table_name"]
-        column_name = table_col
-
-    from declaro_persistum.types import Operation
+    table_name, column_name = _the_table_and_column(recon_context, table_col)
 
     operation: Operation = {
         "op": "drop_foreign_key",
@@ -926,25 +936,7 @@ def when_drop_foreign_key(recon_context, table_col):
         },
     }
 
-    try:
-        _enable_fk(recon_context)
-        current_columns = recon_context["run"](
-            _build_full_schema(recon_context["conn"], table_name)
-        )
-        new_columns = get_reconstruction_columns(current_columns, operation)
-        recon_context["run"](
-            execute_reconstruction_async(
-                recon_context["conn"],
-                table_name,
-                new_columns,
-                preserve_data=NOTHING,
-                manage_foreign_keys=NOTHING,
-            )
-        )
-        recon_context["run"](recon_context["conn"].commit())
-        recon_context["table_name"] = table_name
-    except Exception as e:
-        recon_context["error"] = e
+    _rebuild_with(recon_context, table_name, operation)
 
 
 @when(parsers.parse('I drop column "{column}"'))
@@ -1408,46 +1400,34 @@ def then_indexes_functional(recon_context):
 @then(parsers.parse('the UNIQUE constraint on "{column}" is preserved'))
 def then_unique_preserved(recon_context, column):
     """Verify UNIQUE constraint preserved."""
-    cursor = recon_context["run"](
-        recon_context["conn"].execute(f'SELECT COUNT(*) FROM "{recon_context["table_name"]}"')
+    table = recon_context["table_name"]
+    if _one_row(recon_context, f'SELECT COUNT(*) FROM "{table}"')[0] == 0:
+        _rows(
+            recon_context,
+            f"INSERT INTO \"{table}\" (id, code) VALUES (1, 'test_code')",
+        )
+        _commit(recon_context)
+
+    existing = _one_row(recon_context, f'SELECT "{column}" FROM "{table}" LIMIT 1')
+    assert existing, f"no data in {table} to test the UNIQUE on {column!r}"
+
+    # `pytest.raises` RATHER THAN A try/except THAT READ THE MESSAGE. This
+    # called `pytest.fail` inside the try and then re-raised by checking
+    # whether the exception's text contained "Should have failed", so the
+    # test's own failure and the engine's refusal were told apart by a string.
+    # A reworded pytest.fail would have made a failing test pass.
+    with pytest.raises(Exception) as refused:  # noqa: B017 - checked below
+        _rows(
+            recon_context,
+            f'INSERT INTO "{table}" (id, "{column}") VALUES (9999, ?)',
+            existing[0],
+        )
+        _commit(recon_context)
+    assert not isinstance(refused.value, A_BUG_IN_THIS_PACKAGE), (
+        f"the UNIQUE was supposed to refuse a duplicate; instead a bug of ours "
+        f"raised {type(refused.value).__name__}: {refused.value}"
     )
-    count = recon_context["run"](cursor.fetchone())[0]
-
-    if count == 0:
-        recon_context["run"](
-            recon_context["conn"].execute(
-                f'INSERT INTO "{recon_context["table_name"]}" (id, code) VALUES (1, "test_code")'
-            )
-        )
-        recon_context["run"](recon_context["conn"].commit())
-
-    # Fetch existing value for the unique column
-    cursor = recon_context["run"](
-        recon_context["conn"].execute(
-            f'SELECT "{column}" FROM "{recon_context["table_name"]}" LIMIT 1'
-        )
-    )
-    existing_val = recon_context["run"](cursor.fetchone())
-    if not existing_val:
-        pytest.fail(f"No data in table to test UNIQUE constraint on '{column}'")
-
-    val = existing_val[0]
-
-    try:
-        recon_context["run"](
-            recon_context["conn"].execute(
-                f'INSERT INTO "{recon_context["table_name"]}" (id, "{column}") VALUES (9999, ?)',
-                (val,),
-            )
-        )
-        recon_context["run"](recon_context["conn"].commit())
-        recon_context["run"](recon_context["conn"].rollback())
-        pytest.fail(f"Should have failed UNIQUE constraint on '{column}'")
-    except Exception as e:
-        if "Should have failed" in str(e):
-            raise
-        # Expected — UNIQUE constraint is working
-        recon_context["run"](recon_context["conn"].rollback())
+    recon_context["run"](recon_context["conn"].rollback())
 
 
 @then("only explicit CREATE INDEX statements are recreated")
