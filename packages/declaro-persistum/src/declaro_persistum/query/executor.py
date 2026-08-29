@@ -80,15 +80,23 @@ _DIALECT_MAP = {
 
 
 def _conn_module(conn: Any) -> str:
-    """Return the connection's dialect identifier.
+    """Where this connection's class lives, which is the only marker it has.
 
-    Checks for a ``_declaro_dialect`` class attribute first (set on driver-owned
-    async wrappers like TursoAsyncConnection).
-    Falls back to ``type(conn).__module__`` for raw driver connections.
+    IT USED TO READ AN ATTRIBUTE FIRST. `getattr(conn, "_declaro_dialect",
+    type(conn).__module__)`, with a docstring promising the attribute is "set
+    on driver-owned async wrappers like TursoAsyncConnection". Nothing set it:
+    zero occurrences in the package outside this line, zero in any installed
+    driver, zero in the docs. It arrived in 4b4098c for `LibSQLAsyncConnection`
+    and `TursoAsyncConnection`, 7a5c9ac deleted every class in the package, and
+    libsql was eradicated. Both classes it was written for are gone.
+
+    The cost was not the wasted lookup. The package was advertising an
+    extension point it does not have, and an integrator who read that docstring
+    and set the attribute on their own wrapper would have been depending on a
+    dead line. A connection this package cannot place by its module path is
+    refused by name instead.
     """
-    return getattr(
-        conn, "_declaro_dialect", type(conn).__module__
-    )  # honest: ignore HC-P005: the driver's own module is the only marker
+    return type(conn).__module__
 
 
 @helper
