@@ -15,6 +15,14 @@ Feature: A write queue that hands failures back to whoever wrote them
   cannot tell those apart will retry the one that will never succeed and give up on the
   one that would have.
 
+  A DEPOSIT IS NOT A TRANSACTION AND NEVER BECOMES ONE. Two deposits are two
+  independent writes, whoever made them. A write that has landed stays landed when a
+  later one fails, because the earlier one is already in the log and nothing in this
+  module has the standing to take it back. A caller who needs several statements to
+  land together holds the connection instead: `async with writing(db)` is one
+  transaction, and that is the only thing here that is. Decided 2026-08-29; the last
+  scenario below is what holds it.
+
   These scenarios run against a real SQLite database. A claim about what an engine
   refuses can only be settled by asking it.
 
@@ -85,3 +93,10 @@ Feature: A write queue that hands failures back to whoever wrote them
     And the appender drains once
     Then collecting that ticket raises the engine's own error
     And the room is empty again
+
+  Scenario: a write that has landed is not undone when a later one fails
+    Given an empty write queue and a real database
+    And a row that already holds the only allowed primary key
+    When a caller deposits a good write and then a doomed one
+    And the appender drains once
+    Then the earlier row stands even though the later ticket raises

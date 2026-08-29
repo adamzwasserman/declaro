@@ -34,14 +34,30 @@ so a caller can deposit several writes, keep working, and collect when it
 actually needs the answer. That is the difference between this and a lock: a
 lock makes you wait at the moment of writing.
 
-The ticket is also how a caller designs its own atomicity. A transaction is
-a boundary the library imposes -- everything inside it, all or nothing.
-Tickets put that choice with the caller, who draws the boundary by choosing
-when to collect: deposit three and collect all three, or collect the first
-before depositing the one that depends on it, or deposit three and collect
-only the one it actually needs. Failure is per ticket too, so a caller can
-retry one write and carry on with the rest instead of losing work that was
-independently fine.
+A DEPOSIT IS NOT A TRANSACTION AND WILL NOT BECOME ONE. Decided 2026-08-29.
+Two deposits are two independent writes: the second failing does not undo the
+first, because the first is already in the log and nothing here has the
+standing to take it back. A caller who needs several statements to land
+together holds the connection instead --
+
+    async with writing(db) as conn:    # ONE transaction
+        await conn.execute(...)
+        await conn.execute(...)
+
+-- and that is the only thing in this package that gives all-or-nothing.
+
+THIS PARAGRAPH USED TO SAY THE OPPOSITE. It read "the ticket is also how a
+caller designs its own atomicity", and went on to describe collecting in a
+chosen order. Ordering is not atomicity. A reader who took that at its word
+would deposit three writes believing the group was all-or-nothing, and would
+be wrong in the one case that matters. What tickets actually give is ORDER
+and PER-CALLER FAILURE: deposit three and collect all three, or collect the
+first before depositing the one that depends on it. Failure is per ticket, so
+a caller can retry one write and carry on with the rest instead of losing
+work that was independently fine.
+
+`tests/bdd/features/write_queue.feature` holds this shut: a good write and a
+doomed one, in that order, and the good row still stands.
 
 FAILURE ARRIVES IN TWO SHAPES, and telling them apart is the caller's whole
 reason for reading a receipt. `collect` RAISES the write's own exception for

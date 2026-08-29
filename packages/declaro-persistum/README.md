@@ -215,6 +215,8 @@ await stop_crew(crew)
 
 `deposit` returns a ticket immediately; `collect` waits for that write to land. Nothing is stored: the room is empty except during the microseconds when callers overlap, so there is no pending list to survive a failure and every write has a caller holding its ticket.
 
+A deposit is not a transaction. Two deposits are two independent writes, and the second failing does not undo the first. For all-or-nothing, hold the connection: `async with writing(db)` is one transaction.
+
 `migrating` is a context manager because the journal mode belongs to the FILE, not to a connection. It forces WAL for the DDL and gives the mode back on exit. Leaving the database in WAL used to undo the mode settled at open, silently.
 
 `start_crew` opens all `size` connections before it returns, so a connection that cannot open raises to you rather than killing one drainer quietly. On this laptop `size` above 1 opens cleanly but cannot write concurrently: pyturso is thread-per-connection with a blocking driver, and two drainers on one local file hit the engine's busy-wait inside a worker thread. The crew's throughput numbers were measured on Render.

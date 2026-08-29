@@ -410,3 +410,39 @@ def _then_appender_idle(ctx):
     assert drained["orphaned"] == [], drained
     cursor = ctx["conn"].execute(f"SELECT COUNT(*) FROM {TABLE}")
     assert cursor.fetchone()[0] == 0, "a refused deposit still reached the database"
+
+
+@when("a caller deposits a good write and then a doomed one")
+def _when_good_then_doomed(ctx):
+    """ORDER IS THE WHOLE POINT. The doomed-then-good scenario above asks
+    whether a failure leaks sideways. This asks whether it reaches BACKWARDS,
+    to a write that has already reached the log.
+    """
+    for key, body in ((40, "landed"), (1, "dup")):
+        ctx["tickets"].append(
+            _in_loop(
+                ctx,
+                lambda k=key, b=body: deposit(
+                    ctx["room"],
+                    {"sql": f"INSERT INTO {TABLE} VALUES (?, ?)", "params": (k, b)},
+                ),
+            )
+        )
+
+
+@then("the earlier row stands even though the later ticket raises")
+def _then_earlier_stands(ctx):
+    good, doomed = ctx["tickets"]
+
+    receipt = ctx["run"](collect(ctx["room"], good))
+    assert receipt["ok"] is True, f"the earlier write did not land at all: {receipt}"
+
+    with pytest.raises(sqlite3.IntegrityError):
+        ctx["run"](collect(ctx["room"], doomed))
+
+    cursor = ctx["conn"].execute(f"SELECT body FROM {TABLE} WHERE id = 40")
+    assert cursor.fetchone() == ("landed",), (
+        "a later failure rolled back a write that had already landed. A deposit "
+        "is not a transaction: a caller who needs several statements to land "
+        "together holds the connection with `async with writing(db)` instead."
+    )

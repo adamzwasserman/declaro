@@ -607,6 +607,14 @@ receipt = await collect(room, ticket)      # {"id": ticket, "ok": True, "error":
 
 Deposit order is preserved, so a write that depends on an earlier one — a foreign key, say — is safe to deposit straight after it.
 
+**A deposit is not a transaction.** Two deposits are two independent writes: if the second fails, the first has already landed and its receipt says so. Order is preserved; all-or-nothing is not offered. When you need several statements to land together, hold the connection instead — `async with writing(db)` is one transaction, and it is the only thing here that gives you rollback.
+
+```python
+async with writing(db) as conn:          # ONE transaction
+    await conn.execute("INSERT INTO orders ...")
+    await conn.execute("INSERT INTO order_lines ...")
+```
+
 ### You run the appender
 
 The library never starts a task. `drain` appends everything waiting, one at a time, and you decide when it runs:
