@@ -28,6 +28,7 @@ This file is byte-identical across all three example apps, and a test holds it
 that way.
 """
 
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, TypedDict
@@ -57,30 +58,41 @@ DEFAULT_SQLITE_PATH = str(Path(__file__).parent / "todos.db")
 DEFAULT_TURSO_EMBEDDED_PATH = str(Path(__file__).parent / "todos_turso.db")
 
 
-def get_sqlite_config(database_path: str) -> DatabaseConfig:
-    """SQLite at `database_path`.
-
-    THE PATH IS REQUIRED. It was `database_path: str | None = None`, falling
-    back to `DEFAULT_SQLITE_PATH`, so the function could not tell "I chose the
-    default" from "I forgot to pass one". A caller that wants the default says
-    so by name, and the reader of that call site can see which happened.
-    """
-    return DatabaseConfig(
-        dialect="sqlite",
-        auth_token=None,
-        connection_string=database_path,
-        display_name=f"SQLite ({Path(database_path).name})",
-    )
+# THE TWO ENGINES THAT WANT ONLY A PATH, one row each. Both builders returned
+# the same record and differed by the dialect and the word on screen, so those
+# are the row and the builder is written once.
+#
+# THE PATH IS REQUIRED, and that is the point of the shape rather than a
+# detail. It used to be `database_path: str | None = None` falling back to a
+# constant, so the function could not tell "I chose the default" from "I
+# forgot to pass one". A caller wanting the default says so by name.
+_FROM_A_PATH: dict[str, tuple[str, str]] = {
+    "get_sqlite_config": ("sqlite", "SQLite"),
+    "get_turso_embedded_config": ("turso_embedded", "Turso Embedded"),
+}
 
 
-def get_turso_embedded_config(database_path: str) -> DatabaseConfig:
-    """Turso Embedded at `database_path`. The path is required, as above."""
-    return DatabaseConfig(
-        dialect="turso_embedded",
-        auth_token=None,
-        connection_string=database_path,
-        display_name=f"Turso Embedded ({Path(database_path).name})",
-    )
+def _built_from_a_path(name: str) -> Callable[[str], DatabaseConfig]:
+    """Build the function that describes one path-based engine."""
+
+    dialect, shown = _FROM_A_PATH[name]
+
+    def build(database_path: str) -> DatabaseConfig:
+        return DatabaseConfig(
+            dialect=dialect,
+            auth_token=None,
+            connection_string=database_path,
+            display_name=f"{shown} ({Path(database_path).name})",
+        )
+
+    build.__name__ = name
+    build.__qualname__ = name
+    build.__doc__ = f"{shown} at `database_path`. The path is required."
+    return build
+
+
+get_sqlite_config = _built_from_a_path("get_sqlite_config")
+get_turso_embedded_config = _built_from_a_path("get_turso_embedded_config")
 
 
 def get_postgres_config(
