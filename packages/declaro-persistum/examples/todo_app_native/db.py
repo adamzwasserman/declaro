@@ -32,6 +32,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, TypedDict
 
+from declaro_persistum.boundary import boundary
+
 # ---------------------------------------------------------------------------
 # Configuration is data
 # ---------------------------------------------------------------------------
@@ -141,6 +143,12 @@ def _for_dialect(table: dict[str, Any], dialect: str, what: str) -> Any:
     raise ValueError(f"Unknown dialect {dialect!r}. {what} exist for: {', '.join(sorted(table))}")
 
 
+# WHERE THIS APP TOUCHES A DATABASE, marked as the package marks its own.
+# `@boundary` does nothing at runtime; it is a declaration, so a reader does
+# not have to work out for themselves which of these opens a socket. Every
+# function below it here either opens a connection, runs a statement or ends a
+# transaction, and nothing else in this file does.
+@boundary
 @asynccontextmanager
 async def _connect_sqlite(config: DatabaseConfig):
     import aiosqlite
@@ -149,6 +157,7 @@ async def _connect_sqlite(config: DatabaseConfig):
         yield conn
 
 
+@boundary
 @asynccontextmanager
 async def _connect_postgresql(config: DatabaseConfig):
     import asyncpg
@@ -160,6 +169,7 @@ async def _connect_postgresql(config: DatabaseConfig):
         await conn.close()
 
 
+@boundary
 @asynccontextmanager
 async def _connect_turso_embedded(config: DatabaseConfig):
     import turso
@@ -171,6 +181,7 @@ async def _connect_turso_embedded(config: DatabaseConfig):
         conn.close()
 
 
+@boundary
 @asynccontextmanager
 async def _connect_turso_cloud(config: DatabaseConfig):
     """pyturso with a remote url, which is what Turso Cloud is."""
@@ -250,6 +261,7 @@ async def get_connection():
         yield conn, config["dialect"]
 
 
+@boundary
 async def _run(conn: Any, sql: str, dialect: str) -> None:
     """Execute one statement on `conn`, then commit it."""
     if _for_dialect(AWAITS_EXECUTE, dialect, "Drivers"):
@@ -259,6 +271,7 @@ async def _run(conn: Any, sql: str, dialect: str) -> None:
     await commit(conn, dialect)
 
 
+@boundary
 async def commit(conn: Any, dialect: str) -> None:
     """End the transaction on the engine `conn` belongs to.
 
