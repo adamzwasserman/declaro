@@ -238,9 +238,12 @@ def test_every_write_route_still_commits(app: pathlib.Path) -> None:
     write routes has to end up committing through the shared helper.
     """
     source = app.read_text()
-    assert source.count("await commit(conn)") >= 3, (
+    # THE ENGINE TRAVELS WITH THE CONNECTION NOW, so the call carries it:
+    # `commit(conn, dialect)`. It used to read the engine off a module global,
+    # which meant a function's behaviour depended on state no caller could see.
+    assert source.count("await commit(conn, dialect)") >= 3, (
         f"{app.parent.name}/app.py commits at "
-        f"{source.count('await commit(conn)')} sites; create, toggle and "
+        f"{source.count('await commit(conn, dialect)')} sites; create, toggle and "
         f"delete each need one, or the write is dropped"
     )
 
@@ -329,14 +332,14 @@ async def test_a_write_through_the_example_lands(tmp_path: pathlib.Path) -> None
 
     await db.init_schema(config)
 
-    async with db.get_connection() as conn:
+    async with db.get_connection() as (conn, dialect):
         await conn.execute(
             "INSERT INTO todos (id, title, completed) VALUES (?, ?, ?)",
             ("1", "buy milk", 0),
         )
-        await db.commit(conn)
+        await db.commit(conn, dialect)
 
-    async with db.get_connection() as conn:
+    async with db.get_connection() as (conn, _dialect):
         cursor = await conn.execute("SELECT title FROM todos")
         rows = await cursor.fetchall()
 

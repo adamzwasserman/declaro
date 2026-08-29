@@ -234,27 +234,33 @@ NEEDS_COMMIT = {
 
 @asynccontextmanager
 async def get_connection():
-    """A connection to whatever `set_database` last chose.
+    """A connection to whatever `set_database` last chose, AND what engine it is.
+
+    THE ENGINE TRAVELS WITH THE CONNECTION, because it is true of the
+    connection. Every function that touched a connection used to ask
+    `get_database()` again for its dialect, so a function's behaviour depended
+    on module state no caller could see, and calling one with a connection
+    from a different engine would have read the wrong row.
 
     This is the ONLY place engine-specific code lives, and it is a lookup.
     """
     config = get_database()
     connector = _for_dialect(CONNECTORS, config["dialect"], "Connectors")
     async with connector(config) as conn:
-        yield conn
+        yield conn, config["dialect"]
 
 
-async def _run(conn: Any, sql: str) -> None:
-    """Execute one statement against the current database, then commit."""
-    if _for_dialect(AWAITS_EXECUTE, get_database()["dialect"], "Drivers"):
+async def _run(conn: Any, sql: str, dialect: str) -> None:
+    """Execute one statement on `conn`, then commit it."""
+    if _for_dialect(AWAITS_EXECUTE, dialect, "Drivers"):
         await conn.execute(sql)
     else:
         conn.execute(sql)
-    await commit(conn)
+    await commit(conn, dialect)
 
 
-async def commit(conn: Any) -> None:
-    """End the transaction on whichever engine `conn` belongs to.
+async def commit(conn: Any, dialect: str) -> None:
+    """End the transaction on the engine `conn` belongs to.
 
     THIS IS THE LADDER THE THREE EXAMPLE APPS EACH WROTE THREE TIMES:
 
@@ -273,9 +279,9 @@ async def commit(conn: Any) -> None:
     Here PostgreSQL is a row saying `False`, which is an answer rather than an
     absence, and an engine nobody thought about raises.
     """
-    if not _for_dialect(NEEDS_COMMIT, get_database()["dialect"], "Drivers"):
+    if not _for_dialect(NEEDS_COMMIT, dialect, "Drivers"):
         return
-    if _for_dialect(AWAITS_EXECUTE, get_database()["dialect"], "Drivers"):
+    if _for_dialect(AWAITS_EXECUTE, dialect, "Drivers"):
         await conn.commit()
     else:
         conn.commit()
@@ -297,8 +303,8 @@ def todos_table_sql(dialect: str) -> str:
 async def init_schema(config: DatabaseConfig) -> None:
     """Create the todos table on `config`'s engine."""
     set_database(config)
-    async with get_connection() as conn:
-        await _run(conn, todos_table_sql(config["dialect"]))
+    async with get_connection() as (conn, dialect):
+        await _run(conn, todos_table_sql(config["dialect"]), dialect)
 
 
 async def test_connection(config: DatabaseConfig) -> tuple[bool, str]:
@@ -317,8 +323,8 @@ async def test_connection(config: DatabaseConfig) -> tuple[bool, str]:
     previous = get_database()
     try:
         set_database(config)
-        async with get_connection() as conn:
-            await _run(conn, "SELECT 1")
+        async with get_connection() as (conn, dialect):
+            await _run(conn, "SELECT 1", dialect)
         return True, "Connection successful"
     except ImportError as exc:
         return False, f"Driver not installed: {exc}"

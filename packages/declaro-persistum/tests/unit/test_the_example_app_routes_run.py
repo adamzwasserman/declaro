@@ -89,7 +89,7 @@ async def test_creating_a_todo_stores_it(app_dir: str) -> None:
 
     await app.create_todo(_request(), title="buy milk")
 
-    async with db.get_connection() as conn:
+    async with db.get_connection() as (conn, dialect):
         cursor = await conn.execute("SELECT title FROM todos")
         assert await cursor.fetchall() == [("buy milk",)]
 
@@ -100,13 +100,13 @@ async def test_deleting_a_todo_removes_it(app_dir: str) -> None:
     app, db = await _ready(app_dir)
     await app.create_todo(_request(), title="buy milk")
 
-    async with db.get_connection() as conn:
+    async with db.get_connection() as (conn, dialect):
         cursor = await conn.execute("SELECT id FROM todos")
         todo_id = (await cursor.fetchone())[0]
 
     await app.delete_todo(todo_id)
 
-    async with db.get_connection() as conn:
+    async with db.get_connection() as (conn, dialect):
         cursor = await conn.execute("SELECT COUNT(*) FROM todos")
         assert (await cursor.fetchone())[0] == 0
 
@@ -117,18 +117,18 @@ async def test_toggling_a_todo_flips_it_and_flips_it_back(app_dir: str) -> None:
     app, db = await _ready(app_dir)
     await app.create_todo(_request(), title="buy milk")
 
-    async with db.get_connection() as conn:
+    async with db.get_connection() as (conn, dialect):
         cursor = await conn.execute("SELECT id, completed FROM todos")
         todo_id, completed = await cursor.fetchone()
     assert completed == 0
 
     await app.toggle_todo(_request(), todo_id)
-    async with db.get_connection() as conn:
+    async with db.get_connection() as (conn, dialect):
         cursor = await conn.execute("SELECT completed FROM todos")
         assert (await cursor.fetchone())[0] == 1
 
     await app.toggle_todo(_request(), todo_id)
-    async with db.get_connection() as conn:
+    async with db.get_connection() as (conn, dialect):
         cursor = await conn.execute("SELECT completed FROM todos")
         assert (await cursor.fetchone())[0] == 0
 
@@ -159,7 +159,7 @@ async def test_the_index_lists_the_newest_first(app_dir: str) -> None:
     """
     app, db = await _ready(app_dir)
 
-    async with db.get_connection() as conn:
+    async with db.get_connection() as (conn, dialect):
         await conn.execute(
             "INSERT INTO todos (id, title, completed, created_at) VALUES "
             "('1', 'older', 0, '2026-01-01 00:00:00'), "

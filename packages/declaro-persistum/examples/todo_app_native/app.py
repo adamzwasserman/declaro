@@ -116,12 +116,23 @@ async def db_settings(request: Request):
     )
 
 
-@app.post("/db/sqlite", response_class=HTMLResponse)
-async def use_sqlite(request: Request, database_path: str = Form(DEFAULT_SQLITE_PATH)):
-    """Switch to SQLite."""
-    config = get_sqlite_config(database_path)
-    success, message = await test_connection(config)
+async def _switch_to(request, config, fallback_name: str, said_on_success: str):
+    """Adopt a database if it answers, and say what happened either way.
 
+    FOUR ROUTES WROTE THESE SIX LINES EACH: build the config, test the
+    connection, adopt it and create the table if it answered, then render the
+    same template with the same four keys. The config and the words were the
+    only things that differed.
+
+    `fallback_name` is what to call the engine when the connection failed and
+    there is no display name to read off a config that never worked.
+
+    `said_on_success` HAS NO DEFAULT, and the empty string is a real value: it
+    means "report whatever the connection said". A default here would let a
+    caller who forgot look like one who chose, and two of these four routes do
+    want their own wording.
+    """
+    success, message = await test_connection(config)
     if success:
         set_database(config)
         await init_schema(config)
@@ -131,9 +142,20 @@ async def use_sqlite(request: Request, database_path: str = Form(DEFAULT_SQLITE_
         {
             "request": request,
             "success": success,
-            "message": message if not success else "Switched to SQLite",
-            "db_name": config["display_name"],
+            "message": (said_on_success or message) if success else message,
+            "db_name": config["display_name"] if success else fallback_name,
         },
+    )
+
+
+@app.post("/db/sqlite", response_class=HTMLResponse)
+async def use_sqlite(request: Request, database_path: str = Form(DEFAULT_SQLITE_PATH)):
+    """Switch to SQLite."""
+    return await _switch_to(
+        request,
+        get_sqlite_config(database_path),
+        "SQLite",
+        said_on_success="Switched to SQLite",
     )
 
 
@@ -147,21 +169,11 @@ async def use_postgres(
     database: str = Form("todos"),
 ):
     """Switch to PostgreSQL."""
-    config = get_postgres_config(host, port, user, password, database)
-    success, message = await test_connection(config)
-
-    if success:
-        set_database(config)
-        await init_schema(config)
-
-    return templates.TemplateResponse(
-        "db_status.html",
-        {
-            "request": request,
-            "success": success,
-            "message": message,
-            "db_name": config["display_name"] if success else "PostgreSQL",
-        },
+    return await _switch_to(
+        request,
+        get_postgres_config(host, port, user, password, database),
+        "PostgreSQL",
+        said_on_success="",
     )
 
 
@@ -177,21 +189,11 @@ async def use_turso_cloud(
     if auth_token:
         os.environ["TURSO_AUTH_TOKEN"] = auth_token
 
-    config = get_turso_cloud_config(url, auth_token)
-    success, message = await test_connection(config)
-
-    if success:
-        set_database(config)
-        await init_schema(config)
-
-    return templates.TemplateResponse(
-        "db_status.html",
-        {
-            "request": request,
-            "success": success,
-            "message": message,
-            "db_name": config["display_name"] if success else "Turso Cloud",
-        },
+    return await _switch_to(
+        request,
+        get_turso_cloud_config(url, auth_token),
+        "Turso Cloud",
+        said_on_success="",
     )
 
 
@@ -200,21 +202,11 @@ async def use_turso_embedded(
     request: Request, database_path: str = Form(DEFAULT_TURSO_EMBEDDED_PATH)
 ):
     """Switch to Turso Embedded (pyturso)."""
-    config = get_turso_embedded_config(database_path)
-    success, message = await test_connection(config)
-
-    if success:
-        set_database(config)
-        await init_schema(config)
-
-    return templates.TemplateResponse(
-        "db_status.html",
-        {
-            "request": request,
-            "success": success,
-            "message": message if not success else "Switched to Turso Embedded",
-            "db_name": config["display_name"],
-        },
+    return await _switch_to(
+        request,
+        get_turso_embedded_config(database_path),
+        "Turso Embedded",
+        said_on_success="Switched to Turso Embedded",
     )
 
 
@@ -226,7 +218,7 @@ async def use_turso_embedded(
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Render the main page with all todos."""
-    async with get_connection() as conn:
+    async with get_connection() as (conn, dialect):
         todos = await execute(
             select(
                 "id",
@@ -262,7 +254,7 @@ async def create_todo(request: Request, title: str = Form(...)):
     """Create a new todo."""
     todo_id = str(uuid.uuid4())
 
-    async with get_connection() as conn:
+    async with get_connection() as (conn, dialect):
         await execute(
             insert(
                 "todos",
@@ -273,7 +265,7 @@ async def create_todo(request: Request, title: str = Form(...)):
             conn,
             row_factory=NOTHING,
         )
-        await commit(conn)
+        await commit(conn, dialect)
 
         todo = await execute_one(
             select(
@@ -306,7 +298,7 @@ async def create_todo(request: Request, title: str = Form(...)):
 @app.put("/todos/{todo_id}/toggle", response_class=HTMLResponse)
 async def toggle_todo(request: Request, todo_id: str):
     """Toggle todo completion status."""
-    async with get_connection() as conn:
+    async with get_connection() as (conn, dialect):
         current = await execute_one(
             select(
                 "completed",
@@ -336,7 +328,7 @@ async def toggle_todo(request: Request, todo_id: str):
             conn,
             row_factory=NOTHING,
         )
-        await commit(conn)
+        await commit(conn, dialect)
 
         todo = await execute_one(
             select(
@@ -369,13 +361,13 @@ async def toggle_todo(request: Request, todo_id: str):
 @app.delete("/todos/{todo_id}", response_class=HTMLResponse)
 async def delete_todo(todo_id: str):
     """Delete a todo."""
-    async with get_connection() as conn:
+    async with get_connection() as (conn, dialect):
         await execute(
             delete("todos", where={"id": todo_id}, params=NOTHING, returning=NOTHING),
             conn,
             row_factory=NOTHING,
         )
-        await commit(conn)
+        await commit(conn, dialect)
 
     return ""
 
@@ -383,7 +375,7 @@ async def delete_todo(todo_id: str):
 @app.get("/todos/count", response_class=HTMLResponse)
 async def get_count(request: Request):
     """Get todo counts for the footer."""
-    async with get_connection() as conn:
+    async with get_connection() as (conn, dialect):
         active_count = await execute_scalar(
             select(
                 "COUNT(*) AS c",
