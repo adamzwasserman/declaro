@@ -217,6 +217,7 @@ def format_jsonl(record: LatencyRecord) -> str:
     return json.dumps(record)
 
 
+# honest-code-allow: L1.21.20 - the signature DOES admit it. `logger: logging.Logger` is the first parameter, so the caller chooses where the line lands and this writes where it was told. That is the other honest shape for I/O, taking the writer as an argument rather than returning the line for an edge to write, and it is the one place in this package where it is right: a latency record belongs to whichever logger the caller set up, not to the module that produced it. A blanket conversion to `say` broke exactly that and test_emitting_writes_one_line_to_the_logger caught it
 @boundary
 def emit_record(logger: logging.Logger, record: LatencyRecord) -> None:
     """Write a LatencyRecord to the logger the caller chose.

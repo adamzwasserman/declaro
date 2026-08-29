@@ -158,3 +158,30 @@ Feature: When a replica decides a replication pass is worth taking
     Given a database with no primary
     When nothing_happened is asked to run a pass
     Then it answers that no pass ran
+
+  # A HANDLER THAT WILL NOT COME OFF. Putting a signal handler back can be
+  # refused by the platform: off the main thread it raises, and that is the
+  # real case rather than an invented one.
+  #
+  # THE COUNT IS HOW ANYONE FINDS OUT. `restore` says how many it put back, and
+  # a caller comparing that against how many went on is the only way to learn
+  # that one is still installed. A handler left on after close is what drives a
+  # released database when a SIGTERM arrives later.
+
+  @precommit
+  Scenario: putting a handler back reports that it went back
+    Given a signal handler this module installed
+    When it is put back
+    Then it reports one handler restored
+
+  @precommit
+  Scenario: a platform that refuses says so rather than reporting success
+    Given a signal handler this module installed
+    When it is put back somewhere the platform refuses
+    Then it reports no handler restored
+
+  @precommit
+  Scenario: a handler that will not come off is not reported as closed cleanly
+    Given a database that trapped the shutdown signal
+    When the handlers are put back somewhere the platform refuses
+    Then it refuses, naming the handler still installed

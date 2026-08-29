@@ -142,9 +142,21 @@ def _trap_signals(db: Database) -> Database:
 
     @helper
     def restore() -> int:
-        """Put back what was replaced, and say how many."""
+        """Put back what was replaced, and refuse if one will not go.
+
+        THE COUNT ALONE REACHED NOBODY. This returned how many came off, and
+        `close` discards it, so a handler the platform refused to remove was
+        counted and the count thrown away. What that leaves is the defect
+        measured on 2026-08-27: a handler still installed holds the database
+        that was just released, and a SIGTERM arriving later drives it.
+
+        Only this function knows how many went on, so only this function can
+        tell "all of them came off" from "some did".
+        """
+        expected = [sig for sig, _previous in replaced]
         put_back = [sig for sig, previous in replaced if _restored(sig, previous)]
         replaced.clear()
+        _ALL_CAME_OFF[len(put_back) == len(expected)](put_back, expected)
         return len(put_back)
 
     return {**db, "untrap": restore}
@@ -158,8 +170,34 @@ _TRAP: dict[bool, Callable[[Database], Database]] = {
 
 
 @helper
+def _every_handler_came_off(put_back: list[int], _expected: list[int]) -> int:
+    """All of them, so there is nothing left installed. The count is the answer."""
+    return len(put_back)
+
+
+@helper
+def _refuse_a_handler_left_installed(put_back: list[int], expected: list[int]) -> int:
+    """One would not come off, and the caller has to know which."""
+    stuck = [signal.Signals(sig).name for sig in expected if sig not in put_back]
+    raise RuntimeError(
+        f"could not put back the handler for {', '.join(stuck)}. It is still "
+        f"installed and still holds this database, so a shutdown signal "
+        f"arriving from here drives a database that has been released."
+    )
+
+
+# WHETHER EVERY HANDLER CAME OFF. Both entries answer with the count, so
+# neither is a function with an empty body.
+_ALL_CAME_OFF: dict[bool, Callable[[list[int], list[int]], int]] = {
+    True: _every_handler_came_off,
+    False: _refuse_a_handler_left_installed,
+}
+
+
+@helper
 def _restored(sig: int, previous: object) -> bool:
     """Put one handler back. False when the platform refuses it."""
+    # honest-code-allow: L1.21.8 - the suppression CHANGES THE ANSWER rather than hiding it. `return True` sits inside the block and `return False` after it, so a platform that refuses gives the caller False, and `restore` above turns a False into a refusal naming the handler still installed. Two scenarios in deciding_to_replicate.feature drive both paths, the refusing one off the main thread where signal.signal really does raise
     with contextlib.suppress(ValueError, OSError, TypeError):
         # honest-code-allow: L1.21.16 — putting back a handler this module
         # replaced, which is the other half of the trap above and has the same

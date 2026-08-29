@@ -287,3 +287,96 @@ def _then_yes(ctx):
         f"everything vacuously, and saying otherwise makes flush loop forever "
         f"waiting for a delivery nothing will report"
     )
+
+
+@given("a signal handler this module installed")
+def _given_a_handler(ctx):
+    import signal
+
+    ctx["signal"] = signal.SIGTERM
+    ctx["previous"] = signal.getsignal(signal.SIGTERM)
+
+
+@when("it is put back")
+def _when_put_back(ctx):
+    from declaro_persistum.shutdown import _restored
+
+    ctx["answer"] = _restored(ctx["signal"], ctx["previous"])
+
+
+@when("it is put back somewhere the platform refuses")
+def _when_put_back_off_thread(ctx):
+    """OFF THE MAIN THREAD, WHICH IS A REAL REFUSAL, NOT AN INVENTED ONE.
+
+    `signal.signal` raises `ValueError: signal only works in main thread of
+    the main interpreter`. That is the case the suppression exists for.
+    """
+    import threading
+
+    from declaro_persistum.shutdown import _restored
+
+    answers: list[bool] = []
+
+    def _off_the_main_thread() -> None:
+        answers.append(_restored(ctx["signal"], ctx["previous"]))
+
+    thread = threading.Thread(target=_off_the_main_thread)
+    thread.start()
+    thread.join()
+    ctx["answer"] = answers[0]
+
+
+@then("it reports one handler restored")
+def _then_restored(ctx):
+    assert ctx["answer"] is True, ctx["answer"]
+
+
+@then("it reports no handler restored")
+def _then_not_restored(ctx):
+    assert ctx["answer"] is False, (
+        "the platform refused to put the handler back and this reported "
+        "success, so a caller counting them is told one came off that did not"
+    )
+
+
+@given("a database that trapped the shutdown signal")
+def _given_trapped(ctx):
+    import signal
+
+    from declaro_persistum.shutdown import trap_shutdown
+
+    ctx["previous"] = signal.getsignal(signal.SIGTERM)
+    ctx["db"] = trap_shutdown(
+        {**_a_database(ctx, primary="libsql://x", waiting=0, closed=False), "shutdown": "replicate"}
+    )
+
+
+@when("the handlers are put back somewhere the platform refuses")
+def _when_untrap_off_thread(ctx):
+    """Off the main thread, where `signal.signal` really does refuse."""
+    import signal
+    import threading
+
+    outcome: list[Any] = []
+
+    def _off_the_main_thread() -> None:
+        try:
+            outcome.append(("returned", ctx["db"]["untrap"]()))
+        except Exception as refused:  # noqa: BLE001 - the refusal is the answer
+            outcome.append(("refused", refused))
+
+    thread = threading.Thread(target=_off_the_main_thread)
+    thread.start()
+    thread.join()
+    ctx["outcome"] = outcome[0]
+    signal.signal(signal.SIGTERM, ctx["previous"])
+
+
+@then("it refuses, naming the handler still installed")
+def _then_refuses_naming(ctx):
+    kind, value = ctx["outcome"]
+    assert kind == "refused", (
+        f"it returned {value!r}. A handler left installed holds the database "
+        f"that was just released, and a SIGTERM arriving later drives it."
+    )
+    assert "SIGTERM" in str(value) or "handler" in str(value).lower(), value
