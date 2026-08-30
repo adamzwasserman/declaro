@@ -32,7 +32,6 @@ a different database than it thinks.
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any, TypedDict
@@ -224,53 +223,3 @@ def promote(m: Mirror) -> Mirror:
 def detach(m: Mirror) -> Database:
     """Phase 4: one database again. Returns the survivor."""
     return m["primary"]
-
-
-# The same policy again, for a write rather than a read. It is a separate
-# table because a write returns the Mirror alone.
-@helper
-def _write_kept_to_the_mirror(m: Mirror, sql: str, _error: Exception) -> Mirror:
-    """fail_open: the replica's failure becomes a divergence and nothing more."""
-    divergence: Divergence = {"sql": sql, "primary": "ok", "replica": "failed"}
-    return {**m, "divergences": [*m["divergences"], divergence]}
-
-
-@helper
-def _write_handed_to_the_caller(_m: Mirror, _sql: str, error: Exception) -> Mirror:
-    """fail_closed: the replica's failure is the caller's."""
-    raise error
-
-
-_WHEN_THE_WRITE_FAILS: dict[bool, Callable[[Mirror, str, Exception], Mirror]] = {
-    True: _write_kept_to_the_mirror,
-    False: _write_handed_to_the_caller,
-}
-
-
-@boundary
-async def parallel_write(m: Mirror, sql: str, params: Any) -> Mirror:
-    """Write to both, at the same time, and report a mirror failure per policy.
-
-    The two writes run concurrently rather than in sequence: a cutover's
-    latency is the caller's latency, and doing them one after the other would
-    double it for the whole duration of the migration.
-    """
-
-    @boundary
-    async def to(db: Database) -> None:
-        async with writing(db) as conn:
-            await conn.execute(sql, params)
-            await conn.commit()
-
-    primary_task = asyncio.create_task(to(m["primary"]))
-    replica_task = asyncio.create_task(to(m["replica"]))
-
-    # The primary's failure is always the caller's.
-    await primary_task
-
-    try:
-        await replica_task
-    except Exception as error:
-        return _WHEN_THE_WRITE_FAILS[m["fail_open"]](m, sql, error)
-
-    return m

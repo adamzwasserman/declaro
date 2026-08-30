@@ -484,30 +484,6 @@ def delete(
     }
 
 
-def raw(sql: str, params: dict[str, Any] | Nothing) -> Query:
-    """
-    Create a query from raw SQL.
-
-    Use this when the query builder doesn't support your use case,
-    but be careful about SQL injection.
-
-    Args:
-        sql: Raw SQL string
-        params: Parameters for the query
-
-    Returns:
-        Query dict
-    """
-    # A default in the signature would decide this where no reader
-    # sees it happen and no test reaches it.
-    the_params = resolved(params, None)
-    return {
-        "sql": sql,
-        "params": the_params or {},
-        "dialect": None,
-    }
-
-
 # What tells an EXPRESSION from a column name: parentheses, a comma, or an
 # ` AS ` alias. A bare word, even `count`, is a column.
 _EXPRESSION = re.compile(r"[(),]|\s+AS\s+", re.IGNORECASE)

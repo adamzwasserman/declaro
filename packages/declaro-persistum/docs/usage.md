@@ -466,16 +466,17 @@ A reader takes no lock and waits for nothing: the local file is a full copy, so 
 `mirror` pairs two databases so a write goes to both and a read can be compared. It is a value like everything else, and the functions over it return a new one.
 
 ```python
-from declaro_persistum import detach, mirror, parallel_write, promote
+from declaro_persistum import detach, mirror, promote
 
 m = mirror(primary, replica, fail_open=True, compare_on_read=True)
 
-m = await parallel_write(m, "INSERT INTO users (id, name) VALUES (?, ?)", ("u1", "Alice"))
 m["divergences"]        # [] when the two agreed
 
 m = promote(m)          # swap: the replica becomes the primary
 db = detach(m)          # done verifying; keep the primary alone
 ```
+
+**There is no way to write through a mirror.** `parallel_write(m, sql, params)` was that way and it is gone: it took the SQL text from the caller and executed it against both halves, which is the caller doing the library's work. The declared replacement does not exist yet, so a mirror can be compared, promoted and detached, and not written through.
 
 A `Divergence` records `sql`, `primary` and `replica`. `fail_open=True` continues on the primary when the replica fails; `compare_on_read=True` compares SELECT results.
 
