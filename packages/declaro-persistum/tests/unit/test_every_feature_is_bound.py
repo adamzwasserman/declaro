@@ -52,7 +52,32 @@ _FEATURES = _ROOT / "tests" / "bdd" / "features"
 _STEPS = _ROOT / "tests" / "bdd"
 
 # name -> why it ships unexecuted. Empty is the goal.
-KNOWN_UNBOUND: dict[str, str] = {}
+#
+# THE `declared/` FILES ARE A SPECIFICATION, NOT COVERAGE. They describe the
+# package HOW-IT-SHOULD-WORK.md says this is, and most of what they describe
+# does not exist yet: three of the four dialects, declared views, declared
+# constraints. Binding them today would turn 52 scenarios red and say nothing
+# a reader could act on, because the answer to every one of them is "not
+# built". They are here so the requirement is written down in the form the
+# tests will take, and they are listed here so nobody mistakes a green suite
+# for a package that meets them.
+#
+# EACH ONE COMES OFF THIS LIST WHEN ITS SECTION IS BUILT, not before.
+_SPEC = (
+    "the declarative surface HOW-IT-SHOULD-WORK.md describes; the code for it "
+    "does not exist yet, and binding it would assert nothing a reader can act on"
+)
+
+KNOWN_UNBOUND: dict[str, str] = {
+    "a_condition_is_data.feature": _SPEC,
+    "absence_is_an_answer.feature": _SPEC,
+    "everything_gets_declared.feature": _SPEC,
+    "four_dialects_one_meaning.feature": _SPEC,
+    "the_models_are_the_truth.feature": _SPEC,
+    "the_schema_is_declared.feature": _SPEC,
+    "the_test_for_any_function.feature": _SPEC,
+    "what_the_library_owns.feature": _SPEC,
+}
 
 # `scenarios("../features/x.feature")` and `scenarios("../features")` both bind.
 # The second form binds a whole DIRECTORY, which is why the resolver below has

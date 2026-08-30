@@ -8,11 +8,12 @@
 #   3 pure functions   data in, data out; the whole diff/plan/render core
 #   4 output boundary  writes the world: DDL, DML, replication, connections
 #
-# The shape this exposes: persistum's middle column is genuinely large and
-# genuinely pure — diffing, ordering, ambiguity detection, validation, SQL
-# rendering, the write queue and the retry policy are all functions over data.
-# The boundary columns are thin except for one place, and that place is the
-# pool. See the note at the foot of this file.
+# CORRECTED 2026-08-29, against the running package rather than from memory.
+# This file had drifted far enough to describe a package that no longer
+# exists, and it contradicted the first principle of the architecture doc
+# while doing so. Both faults are recorded at the foot of this file, because
+# a design document that was wrong once will be read by someone who does not
+# know which parts were fixed.
 
 module declaro-persistum
 
@@ -33,9 +34,9 @@ module declaro-persistum
     constraints: list<any>
   }
 
-  type Schema = {
-    tables: dict<str, Table>
-  }
+  # A Schema IS the mapping. It is not a record with a `tables` field, which
+  # is what this file said and what made every call written from it fail.
+  type Schema = dict<str, Table>
 
   type Operation = {
     kind: str
@@ -45,6 +46,8 @@ module declaro-persistum
 
   type DiffResult = {
     operations: list<Operation>
+    execution_order: list<int>
+    dependencies: dict<int, list<int>>
     ambiguities: list<any>
   }
 
@@ -53,25 +56,20 @@ module declaro-persistum
     skipped: list<Operation>
   }
 
-  type Query = {
-    sql: str
-    params: dict<str, any>
-  }
-
-  type PendingWrite = {
-    sql: str
-    params: dict<str, any>
+  # A Database is data carrying its own injected boundary. `dialect` is
+  # decided at open, which is why nothing downstream has to work out what
+  # engine it is talking to.
+  type Database = {
+    path: str
+    primary: str
+    dialect: str
+    serialise: any
   }
 
   type Receipt = {
     ticket: str
     ok: bool
     error: str
-  }
-
-  type Room = {
-    pending: list<PendingWrite>
-    receipts: dict<str, Receipt>
   }
 
   type Retry = {
@@ -82,60 +80,23 @@ module declaro-persistum
 
   # --- column 1: input boundary — reads the world ------------------------
 
-  boundary_in fn load_schema_from_models : (module: any) -> Schema side_effect reads "python_module"
+  boundary_in fn load_schema_from_models : (models_dir: str) -> Schema side_effect reads "filesystem"
 
-  boundary_in fn load_models_from_module : (module_path: str) -> list<any> side_effect reads "filesystem"
+  boundary_in fn load_models_from_module : (module_path: str) -> Schema side_effect reads "python_module"
 
-  boundary_in fn inspect_schema : (conn: any, dialect: str) -> Schema side_effect reads "database"
-
-  boundary_in fn stored_schema_hash : (conn: any, schema_name: str) -> str side_effect reads "database"
+  boundary_in fn introspect : (connection: any, dialect: str) -> Schema side_effect reads "database"
 
   # --- column 3: pure functions — the core -------------------------------
 
-  fn diff : (current: Schema, target: Schema) -> DiffResult
+  fn diff : (current: Schema, target: Schema, dialect: str, decisions: any) -> DiffResult
 
   fn build_dependency_graph : (operations: list<Operation>) -> dict<int, list<int>>
 
-  fn topological_sort : (operations: list<Operation>, graph: dict<int, list<int>>) -> list<Operation>
+  fn topological_sort : (operations: list<Operation>, dependencies: dict<int, list<int>>) -> list<int>
 
-  fn detect_ambiguities : (current: Schema, target: Schema) -> list<any>
+  fn detect_ambiguities : (current: Schema, target: Schema, dialect: str, decisions: any) -> list<any>
 
-
-  fn validate_schema : (schema: Schema) -> list<str>
-
-  fn fk_insert_order : (schema: Schema) -> list<str>
-
-  fn fk_delete_order : (schema: Schema) -> list<str>
-
-  fn strip_foreign_keys : (schema: Schema) -> Schema
-
-  fn sort_operations : (schema: Schema, ops: list<any>) -> list<any>
-
-  fn partition_replica_operations : (operations: list<Operation>) -> list<Operation>
-
-  fn compute_schema_hash : (source: str, version: str) -> str
-
-  fn select : (table: str, columns: list<str>, conditions: dict<str, any>) -> Query
-
-  fn insert : (table: str, values: dict<str, any>) -> Query
-
-  fn update : (table: str, values: dict<str, any>, conditions: dict<str, any>) -> Query
-
-  fn delete : (table: str, conditions: dict<str, any>) -> Query
-
-  fn render_condition : (column: str, operator: str, value: any, dialect: str, path: str) -> Query
-
-  fn render_order_term : (term: any, dialect: str, path: str) -> Query
-
-  fn render_subquery : (expr: any, dialect: str) -> Query
-
-  fn is_subquery : (value: any) -> bool
-
-  fn new_room : () -> Room
-
-  fn deposit : (room: Room, write: PendingWrite) -> str
-
-  fn collect : (room: Room, ticket: str) -> Receipt
+  fn validate_schema : (schema: Schema) -> any
 
   fn is_contention : (error: any) -> bool
 
@@ -143,42 +104,115 @@ module declaro-persistum
 
   fn is_literal_type : (annotation: any) -> bool
 
-  fn get_literal_columns : (schema: Schema) -> list<str>
+  fn get_literal_columns : (schema: Schema) -> dict<str, any>
 
   fn extract_literal_values : (annotation: any) -> list<str>
 
+  # --- the declared surface: a model in, rows out ------------------------
+  #
+  # THE CALLER DESCRIBES THE RESULT, NEVER THE SQL. That is the first
+  # principle of the architecture doc, and these are the functions that
+  # honour it. A caller names a Database it declared and a model carrying
+  # `@table`; the columns it may narrow on are the model's own fields, and
+  # a column the model does not declare is refused before any statement
+  # exists.
+  #
+  # The Pydantic models are the single source of truth for what is in the
+  # database. Nothing here introspects to find out what columns exist.
+
+  boundary_out fn rows : (db: Database, model: any, narrowed: dict<str, any>) -> list<any> side_effect reads "database"
+
+  boundary_out fn one : (db: Database, model: any, narrowed: dict<str, any>) -> any side_effect reads "database"
+
+  boundary_out fn added : (db: Database, declared: any) -> int side_effect writes "database"
+
   # --- column 2: orchestrators — coordinate, own no logic ----------------
 
-  orchestrator fn apply_migrations_async : (pool: any, dialect: str, schema_path: str) -> ApplyResult
+  orchestrator fn apply_migrations_async : (db: Database, dialect: str, schema_path: str) -> ApplyResult
 
-  orchestrator fn begin_cutover : (source: any, target: any, schema: Schema) -> ApplyResult
+  orchestrator fn begin_cutover : (source: Database, target: Database, schema_path: str) -> any
 
-  orchestrator fn bulk_transfer : (source: any, target: any, schema: Schema) -> any
-
-  orchestrator fn drain : (room: Room, execute: any, retry: Retry) -> list<Receipt>
+  orchestrator fn bulk_transfer : (source: Database, target: Database, schema_path: str) -> any
 
   # --- column 4: output boundary — writes the world ----------------------
 
-  boundary_out fn apply : (conn: any, operations: list<Operation>, dialect: str) -> ApplyResult side_effect writes "database"
+  boundary_out fn apply : (connection: any, operations: list<Operation>, execution_order: list<int>, dialect: str) -> ApplyResult side_effect writes "database"
 
-  boundary_out fn acquire : (pool: any) -> any side_effect reads "database"
+  boundary_out fn open_sqlite : (path: str, shutdown: str, busy_timeout_s: float) -> Database side_effect reads "filesystem"
 
-  boundary_out fn acquire_write : (pool: any) -> any side_effect writes "database"
+  boundary_out fn open_turso : (path: str, primary: str, token: str, shutdown: str) -> Database side_effect reads "network"
 
-  boundary_out fn push_once : (pool: any) -> bool side_effect writes "network"
+  boundary_out fn open_postgresql : (dsn: str, shutdown: str, busy_timeout_s: float) -> Database side_effect reads "network"
 
-  boundary_out fn push_loop : (pool: any) -> any side_effect writes "network"
+  boundary_out fn replicate : (db: Database) -> bool side_effect writes "network"
 
-  boundary_out fn initial_replication : (pool: any) -> any side_effect reads "network"
+  boundary_out fn flush : (db: Database) -> any side_effect writes "network"
 
-  boundary_out fn flush : (pool: any) -> any side_effect writes "network"
-
-  boundary_out fn close : (pool: any) -> any side_effect writes "network"
+  boundary_out fn close : (db: Database) -> Database side_effect writes "network"
 
   # --- the chain the whole library exists to run -------------------------
 
-  chain migrate = load_schema_from_models -> inspect_schema -> diff -> topological_sort -> apply
+  chain migrate = load_schema_from_models -> introspect -> diff -> topological_sort -> apply
 
-  chain query = select -> acquire -> render_condition
+  chain read = rows
 
-  chain write = deposit -> drain -> acquire_write -> push_once
+  chain write = added
+
+# ---------------------------------------------------------------------------
+# WHAT THIS FILE GOT WRONG, kept rather than quietly deleted.
+#
+# 1. IT CONTRADICTED THE FIRST PRINCIPLE. It declared
+#
+#        type Query = { sql: str, params: dict<str, any> }
+#        type PendingWrite = { sql: str, params: dict<str, any> }
+#
+#    and a column of functions returning Query. The architecture doc's first
+#    line says "the caller describes the result, not the SQL". A type whose
+#    body is an SQL string is the caller writing the SQL, so this document
+#    was the design authority for the thing the design forbids. Both types
+#    are gone from here. `PendingWrite` still exists in the code, carrying
+#    `sql` and `params`, and the write queue still takes it. That is
+#    outstanding work, not a shape this file endorses.
+#
+# 2. IT NAMED NINE FUNCTIONS THAT DO NOT EXIST. Measured 2026-08-29 by
+#    importing each one:
+#
+#        inspect_schema          renamed `introspect`
+#        stored_schema_hash      gone
+#        compute_schema_hash     internal, `_compute_schema_hash`
+#        validate_schema         moved to `validator`, returns ValidationResult
+#        acquire                 gone with the pool
+#        acquire_write           gone with the pool
+#        push_once               gone
+#        push_loop               gone
+#        initial_replication     gone
+#
+#    Seven more were named as though public and are internal: diff,
+#    build_dependency_graph, topological_sort, detect_ambiguities, apply,
+#    is_contention, delay_before.
+#
+# 3. IT DESCRIBED A CONNECTION POOL THAT WAS DELETED. Seven signatures took
+#    `pool: any`, and the foot of the file called the pool the one thick
+#    boundary. There is no pool. `open_sqlite` / `open_turso` /
+#    `open_postgresql` return a `Database` carrying its own injected
+#    callables, and that is the boundary now.
+#
+# 4. ITS Schema TYPE WAS THE WRONG SHAPE. It said `{ tables: dict<...> }`.
+#    A Schema is the mapping itself. Code written from this file failed at
+#    the first call.
+#
+# WHAT IS STILL UNRESOLVED, so nobody reads this file as a finished design:
+#
+#   - `select`, `insert`, `update` and `delete` still build a Query carrying
+#     SQL text, and `select` takes `where` as a string.
+#   - `execute`, `execute_one`, `execute_scalar` and `execute_many` still
+#     take a live connection the caller drives.
+#   - `writing`, `reading` and `migrating` hand out that connection, which is
+#     what makes the four above possible.
+#   - A `View` is declared as `{ name, query, materialized, refresh }` where
+#     `query` is a SELECT string. There is no declared form for a view, a
+#     materialized view, or a CHECK constraint.
+#   - Four query syntaxes are documented — native, Django, Prisma,
+#     SQLAlchemy — and one is implemented. `rows` / `one` / `added` are that
+#     one. The other three exist as example apps that call the same builder.
+# ---------------------------------------------------------------------------
