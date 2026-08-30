@@ -33,7 +33,7 @@ from typing import Any
 import pytest
 
 from declaro_persistum import close, open_sqlite, writing
-from declaro_persistum.mirror import compare, mirror, parallel_write
+from declaro_persistum.mirror import compare, mirror
 
 pytestmark = [pytest.mark.precommit, pytest.mark.sqlite]
 
@@ -159,81 +159,6 @@ async def test_the_replica_is_not_read_when_comparison_is_off() -> None:
 
         assert rows == [(1, "first")], rows
         assert after["divergences"] == []
-    finally:
-        await close(primary)
-        await close(replica)
-
-
-# ---------------------------------------------------------------------------
-# parallel_write: writing through a sick replica
-# ---------------------------------------------------------------------------
-
-
-async def test_a_write_raises_when_the_mirror_must_not_fail_open() -> None:
-    primary, replica = await _pair(replica_has_the_table=False)
-    try:
-        with pytest.raises(Exception) as caught:
-            await parallel_write(_mirror(primary, replica, fail_open=False), INSERT, (2, "second"))
-
-        assert "widgets" in str(caught.value), caught.value
-    finally:
-        await close(primary)
-        await close(replica)
-
-
-async def test_a_failed_replica_write_is_recorded_when_failing_open() -> None:
-    """The primary took it. The replica did not. Both facts are kept."""
-    primary, replica = await _pair(replica_has_the_table=False)
-    try:
-        after = await parallel_write(
-            _mirror(primary, replica, fail_open=True), INSERT, (2, "second")
-        )
-
-        assert len(after["divergences"]) == 1, after["divergences"]
-        assert after["divergences"][0] == {
-            "sql": INSERT,
-            "primary": "ok",
-            "replica": "failed",
-        }
-    finally:
-        await close(primary)
-        await close(replica)
-
-
-async def test_the_primary_keeps_the_write_the_replica_refused() -> None:
-    """The floor under failing open.
-
-    Swallowing the replica's failure is only acceptable if the primary really
-    has the row. Recording a divergence while losing the write would be the
-    worst of both.
-    """
-    primary, replica = await _pair(replica_has_the_table=False)
-    try:
-        await parallel_write(_mirror(primary, replica, fail_open=True), INSERT, (2, "second"))
-
-        async with writing(primary) as connection:
-            cursor = await connection.execute(SELECT)
-            rows = await cursor.fetchall()
-
-        assert rows == [(1, "first"), (2, "second")], rows
-    finally:
-        await close(primary)
-        await close(replica)
-
-
-async def test_a_healthy_pair_records_nothing_and_writes_both() -> None:
-    """The control. Both databases must actually receive the write."""
-    primary, replica = await _pair(replica_has_the_table=True)
-    try:
-        after = await parallel_write(
-            _mirror(primary, replica, fail_open=True), INSERT, (2, "second")
-        )
-
-        assert after["divergences"] == []
-        for database in (primary, replica):
-            async with writing(database) as connection:
-                cursor = await connection.execute(SELECT)
-                assert await cursor.fetchall() == [(1, "first"), (2, "second")]
     finally:
         await close(primary)
         await close(replica)

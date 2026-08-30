@@ -13,13 +13,13 @@ from __future__ import annotations
 
 import pytest
 
+from declaro_persistum.database import writing
 from declaro_persistum.mirror import (
     compare,
     detach,
     mirror,
     mirror_reading,
     mirror_writing,
-    parallel_write,
     promote,
 )
 from declaro_persistum.turso_database import migrating, open_turso
@@ -40,21 +40,6 @@ async def _pair(tmp_path):
             await conn.execute("CREATE TABLE t (v INTEGER)")
             await conn.commit()
     return a, b
-
-
-@pytest.mark.asyncio
-async def test_a_write_reaches_both(tmp_path):
-    a, b = await _pair(tmp_path)
-    m = mirror(primary=a, replica=b, fail_open=True, compare_on_read=True)
-
-    await parallel_write(m, "INSERT INTO t VALUES (?)", (1,))
-
-    for db in (a, b):
-        from declaro_persistum.database import reading
-
-        async with reading(db) as conn:
-            cur = await conn.execute("SELECT count(*) FROM t")
-            assert (await cur.fetchone())[0] == 1
 
 
 @pytest.mark.asyncio
@@ -82,8 +67,6 @@ async def test_a_divergence_is_recorded_not_raised(tmp_path):
     m = mirror(primary=a, replica=b, fail_open=True, compare_on_read=True)
 
     # Write to the primary only, so the two genuinely differ.
-    from declaro_persistum.database import writing
-
     async with writing(a) as conn:
         await conn.execute("INSERT INTO t VALUES (?)", (1,))
         await conn.commit()
@@ -100,7 +83,9 @@ async def test_agreement_records_nothing(tmp_path):
     a, b = await _pair(tmp_path)
     m = mirror(primary=a, replica=b, fail_open=True, compare_on_read=True)
 
-    await parallel_write(m, "INSERT INTO t VALUES (?)", (1,))
+    for db in (a, b):
+        async with writing(db) as conn:
+            await conn.execute("INSERT INTO t VALUES (?)", (1,))
     _rows, m2 = await compare(m, "SELECT v FROM t", ())
 
     assert m2["divergences"] == []
@@ -111,8 +96,6 @@ async def test_compare_off_never_reads_the_replica(tmp_path):
     """`compare_on_read=False` must not pay for a read it was told to skip."""
     a, b = await _pair(tmp_path)
     m = mirror(primary=a, replica=b, fail_open=True, compare_on_read=False)
-
-    from declaro_persistum.database import writing
 
     async with writing(a) as conn:
         await conn.execute("INSERT INTO t VALUES (?)", (1,))

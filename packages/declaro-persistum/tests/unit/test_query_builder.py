@@ -19,7 +19,6 @@ from declaro_persistum.query.builder import (
     _quote_column,
     delete,
     insert,
-    raw,
     select,
     update,
     with_limit,
@@ -461,20 +460,12 @@ class TestDelete:
         assert q["sql"].endswith('RETURNING "id"')
 
 
-class TestRaw:
-    def test_the_sql_is_passed_through_untouched(self):
-        assert raw("SELECT 1", params=NOTHING)["sql"] == "SELECT 1"
-
-    def test_params_default_to_an_empty_dict(self):
-        assert raw("SELECT 1", params=NOTHING)["params"] == {}
-
-    def test_params_are_carried(self):
-        assert raw("SELECT :x", {"x": 1})["params"] == {"x": 1}
-
-
 class TestComposition:
     def test_with_limit_appends_when_there_is_none(self):
-        assert with_limit(raw("SELECT 1", params=NOTHING), 5)["sql"] == "SELECT 1 LIMIT 5"
+        assert (
+            with_limit({"sql": "SELECT 1", "params": {}, "dialect": None}, 5)["sql"]
+            == "SELECT 1 LIMIT 5"
+        )
 
     def test_with_limit_replaces_an_existing_limit(self):
         q = with_limit(
@@ -495,7 +486,10 @@ class TestComposition:
         assert "LIMIT 10" not in q["sql"]
 
     def test_with_offset_appends_when_there_is_none(self):
-        assert with_offset(raw("SELECT 1", params=NOTHING), 5)["sql"] == "SELECT 1 OFFSET 5"
+        assert (
+            with_offset({"sql": "SELECT 1", "params": {}, "dialect": None}, 5)["sql"]
+            == "SELECT 1 OFFSET 5"
+        )
 
     def test_with_offset_replaces_an_existing_offset(self):
         q = with_offset(
@@ -541,17 +535,22 @@ class TestComposition:
         assert q["dialect"] == "sqlite"
 
     def test_with_params_merges_into_the_existing_params(self):
-        q = with_params(raw("SELECT :a, :b", {"a": 1}), b=2)
+        q = with_params({"sql": "SELECT :a, :b", "params": {"a": 1}, "dialect": None}, b=2)
         assert q["params"] == {"a": 1, "b": 2}
 
     def test_with_params_overwrites_a_colliding_key(self):
-        assert with_params(raw("q", {"a": 1}), a=2)["params"] == {"a": 2}
+        assert with_params({"sql": "q", "params": {"a": 1}, "dialect": None}, a=2)["params"] == {
+            "a": 2
+        }
 
     def test_with_params_leaves_the_sql_alone(self):
-        assert with_params(raw("SELECT 1", params=NOTHING), a=1)["sql"] == "SELECT 1"
+        assert (
+            with_params({"sql": "SELECT 1", "params": {}, "dialect": None}, a=1)["sql"]
+            == "SELECT 1"
+        )
 
     def test_the_original_query_is_not_mutated(self):
-        original = raw("SELECT 1", {"a": 1})
+        original = {"sql": "SELECT 1", "params": {"a": 1}, "dialect": None}
         with_params(original, b=2)
         with_limit(original, 5)
         assert original == {"sql": "SELECT 1", "params": {"a": 1}, "dialect": None}

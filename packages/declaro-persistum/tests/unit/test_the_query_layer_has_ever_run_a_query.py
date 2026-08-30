@@ -44,7 +44,7 @@ from typing import Any
 
 import pytest
 
-from declaro_persistum.query.builder import delete, insert, raw, select, update
+from declaro_persistum.query.builder import delete, insert, select, update
 from declaro_persistum.query.executor import (
     execute,
     execute_many,
@@ -386,20 +386,5 @@ async def test_a_delete_removes_only_the_matching_rows(dialect: str) -> None:
         )
 
         assert {r["name"] for r in rows} == {"alice", "carol"}, rows
-    finally:
-        await _done(connection, dialect)
-
-
-@pytest.mark.parametrize("dialect", DIALECTS)
-async def test_raw_sql_carries_its_parameters(dialect: str) -> None:
-    connection = await _seeded(dialect)
-    try:
-        rows = await execute(
-            raw('SELECT name FROM "people" WHERE age = :a', {"a": 25}),
-            connection,
-            row_factory=NOTHING,
-        )
-
-        assert [r["name"] for r in rows] == ["bob"], rows
     finally:
         await _done(connection, dialect)
