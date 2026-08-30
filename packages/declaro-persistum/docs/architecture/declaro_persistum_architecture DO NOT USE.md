@@ -87,23 +87,23 @@ graph TB
         ORM[ORM Layer]
         Core[SQLAlchemy Core]
         DB[(Database)]
-        
+
         App -->|"session.add(obj)"| Session
         Session -->|tracks| IdentityMap
         Session -->|manages| UnitOfWork
         Session -->|"session.commit()"| ORM
         ORM -->|generates SQL| Core
         Core -->|executes| DB
-        
+
         Alembic[Alembic]
         Revisions[Linear Revision Chain]
         OpScripts[op.add_column scripts]
-        
+
         Alembic -->|manages| Revisions
         Revisions -->|contains| OpScripts
         OpScripts -->|executes| DB
     end
-    
+
     style Session fill:#f66,stroke:#333
     style IdentityMap fill:#f66,stroke:#333
     style UnitOfWork fill:#f66,stroke:#333
@@ -120,29 +120,29 @@ graph TB
         App[Application Code]
         Schema[Schema Files<br/>Pydantic]
         Snapshot[Cached Snapshot<br/>repo]
-        
+
         subgraph "Pure Functions"
             Load[load_schema]
             Introspect[introspect_db]
             Diff[diff]
             Apply[apply]
         end
-        
+
         DB[(Database)]
-        
+
         App -->|"import"| Load
         Schema -->|"reads"| Load
         Load -->|"target: Schema"| Diff
-        
+
         DB -->|"query info_schema"| Introspect
         Introspect -->|"actual: Schema"| Diff
         Snapshot -->|"expected: Schema"| Diff
-        
+
         Diff -->|"ops: list[Operation]"| Apply
         Apply -->|"executes DDL"| DB
         Apply -->|"updates"| Snapshot
     end
-    
+
     style Load fill:#9f9,stroke:#333
     style Introspect fill:#9f9,stroke:#333
     style Diff fill:#9f9,stroke:#333
@@ -180,36 +180,36 @@ sequenceDiagram
     Dev->>CLI: declaro diff --interactive
     CLI->>Loader: load(models/*.py)
     Loader-->>CLI: target: Schema
-    
+
     CLI->>Inspector: introspect(connection)
     Inspector->>DB: SELECT FROM information_schema
     DB-->>Inspector: table/column metadata
     Inspector-->>CLI: actual: Schema
-    
+
     CLI->>Repo: read(schema/snapshot.toml)
     Repo-->>CLI: expected: Schema
-    
+
     alt actual != expected
         CLI->>Dev: ⚠️ Drift detected
         Dev->>CLI: --force or abort
     end
-    
+
     CLI->>Differ: diff(actual, target, dialect=NOTHING, decisions=NOTHING)
     Differ-->>CLI: DiffResult{ops, deps, order}
-    
+
     alt ambiguities exist
         CLI->>Dev: Prompt: rename or drop+add?
         Dev->>CLI: decision
         CLI->>Repo: write decision to TOML
     end
-    
+
     CLI->>Dev: Show proposed operations
     Dev->>CLI: confirm
-    
+
     CLI->>Applier: apply(ops, connection)
     Applier->>DB: BEGIN; DDL statements; COMMIT
     DB-->>Applier: success
-    
+
     Applier->>Repo: write(schema/snapshot.toml, target)
     CLI->>Dev: ✓ Migration complete
 ```
@@ -240,53 +240,53 @@ graph TB
             Loader[loader.py<br/>Pydantic model loading]
             Validator[validator.py<br/>Reference validation]
         end
-        
+
         subgraph "Introspection Layer"
             Inspector[inspector.py<br/>Protocol definition]
             PGInspector[pg_inspector.py<br/>PostgreSQL impl]
             SQLiteInspector[sqlite_inspector.py<br/>SQLite impl]
             TursoInspector[turso_inspector.py<br/>Turso impl]
         end
-        
+
         subgraph "Diff Engine"
             Differ[differ.py<br/>Core diff logic]
             Resolver[resolver.py<br/>Ambiguity resolution]
             Toposort[toposort.py<br/>Dependency ordering]
         end
-        
+
         subgraph "Execution Layer"
             Applier[applier.py<br/>Protocol definition]
             PGApplier[pg_applier.py<br/>PostgreSQL impl]
             SQLiteApplier[sqlite_applier.py<br/>SQLite impl]
             TursoApplier[turso_applier.py<br/>Turso impl]
         end
-        
+
         subgraph "Query Layer"
             Query[query.py<br/>Query building]
             Execute[execute.py<br/>Query execution]
         end
-        
+
         CLI[cli.py<br/>Command interface]
     end
-    
+
     Types --> Loader
     Loader --> Validator
-    
+
     Inspector --> PGInspector
     Inspector --> SQLiteInspector
     Inspector --> TursoInspector
-    
+
     Applier --> PGApplier
     Applier --> SQLiteApplier
     Applier --> TursoApplier
-    
+
     Validator --> Differ
     Inspector --> Differ
     Differ --> Resolver
     Differ --> Toposort
-    
+
     Toposort --> Applier
-    
+
     CLI --> Loader
     CLI --> Inspector
     CLI --> Differ
@@ -334,7 +334,7 @@ class Table(TypedDict, total=False):
     primary_key: list[str]             # Composite PK (if not in column)
     indexes: dict[str, Index]          # Named indexes
     constraints: dict[str, str]        # Named CHECK constraints
-    
+
 
 Schema = dict[str, Table]
 """Complete database schema as table name -> Table mapping."""
@@ -370,12 +370,12 @@ erDiagram
     TABLE ||--o{ INDEX : has
     TABLE ||--o{ CONSTRAINT : has
     COLUMN ||--o| FOREIGN_KEY : references
-    
+
     SCHEMA {
         string name PK
         dict tables
     }
-    
+
     TABLE {
         string name PK
         list primary_key
@@ -383,7 +383,7 @@ erDiagram
         dict indexes
         dict constraints
     }
-    
+
     COLUMN {
         string name PK
         string type
@@ -393,7 +393,7 @@ erDiagram
         bool unique
         string check
     }
-    
+
     INDEX {
         string name PK
         list columns
@@ -401,12 +401,12 @@ erDiagram
         string where
         string using
     }
-    
+
     CONSTRAINT {
         string name PK
         string expression
     }
-    
+
     FOREIGN_KEY {
         string column FK
         string references
@@ -560,7 +560,7 @@ from typing import Protocol
 
 class DatabaseInspector(Protocol):
     """Protocol for database schema introspection."""
-    
+
     def introspect(
         self,
         connection: Any,
@@ -569,20 +569,20 @@ class DatabaseInspector(Protocol):
     ) -> Schema:
         """
         Introspect database and return current schema state.
-        
+
         Args:
             connection: Database connection object
             schema_name: Database schema to introspect (PostgreSQL)
-            
+
         Returns:
             Schema dict representing current database state
-            
+
         Raises:
             ConnectionError: If database connection fails
             IntrospectionError: If schema cannot be read
         """
         ...
-    
+
     def get_dialect(self) -> str:
         """Return dialect identifier (postgresql, sqlite, turso)."""
         ...
@@ -596,7 +596,7 @@ from typing import Protocol
 
 class SchemaDiffer(Protocol):
     """Protocol for computing schema differences."""
-    
+
     def diff(
         self,
         current: Schema,
@@ -606,21 +606,21 @@ class SchemaDiffer(Protocol):
     ) -> DiffResult:
         """
         Compute operations needed to transform current to target.
-        
+
         Args:
             current: Current database schema state
             target: Desired schema state
             decisions: Pre-made decisions for ambiguous changes
-            
+
         Returns:
             DiffResult with operations, dependencies, and execution order
-            
+
         Raises:
             CycleError: If operation dependencies form a cycle
             AmbiguityError: If unresolved ambiguities exist (unattended mode)
         """
         ...
-    
+
     def detect_ambiguities(
         self,
         current: Schema,
@@ -628,7 +628,7 @@ class SchemaDiffer(Protocol):
     ) -> list[Ambiguity]:
         """
         Identify changes that require human decision.
-        
+
         Returns:
             List of ambiguous changes (renames vs drop+add, etc.)
         """
@@ -643,7 +643,7 @@ from typing import Protocol
 
 class MigrationApplier(Protocol):
     """Protocol for applying schema migrations."""
-    
+
     def apply(
         self,
         connection: Any,
@@ -654,22 +654,22 @@ class MigrationApplier(Protocol):
     ) -> ApplyResult:
         """
         Apply migration operations to database.
-        
+
         Args:
             connection: Database connection object
             operations: List of DDL operations
             execution_order: Topologically sorted operation IDs
             dry_run: If True, generate SQL without executing
-            
+
         Returns:
             ApplyResult with success status and executed SQL
-            
+
         Raises:
             MigrationError: If any operation fails
             RollbackError: If rollback after failure also fails
         """
         ...
-    
+
     def generate_sql(
         self,
         operations: list[Operation],
@@ -677,11 +677,11 @@ class MigrationApplier(Protocol):
     ) -> list[str]:
         """Generate SQL statements without executing."""
         ...
-    
+
     def get_transaction_mode(self) -> Literal["all_or_nothing", "per_operation"]:
         """
         Return transaction behavior for this dialect.
-        
+
         - all_or_nothing: Single transaction wraps all operations (PostgreSQL, SQLite)
         - per_operation: Each operation in separate transaction with checkpoints
         """
@@ -698,7 +698,7 @@ T = TypeVar('T')
 
 class QueryBuilder(Protocol[T]):
     """Protocol for building SQL queries functionally."""
-    
+
     def select(
         self,
         *columns: str,
@@ -711,7 +711,7 @@ class QueryBuilder(Protocol[T]):
     ) -> Query[T]:
         """
         Build a SELECT query.
-        
+
         Args:
             columns: Column names to select (* for all)
             from_table: Table name
@@ -720,12 +720,12 @@ class QueryBuilder(Protocol[T]):
             order_by: ORDER BY columns
             limit: LIMIT value
             offset: OFFSET value
-            
+
         Returns:
             Query object that can be executed or composed
         """
         ...
-    
+
     def insert(
         self,
         into_table: str,
@@ -735,7 +735,7 @@ class QueryBuilder(Protocol[T]):
     ) -> Query[T]:
         """Build an INSERT query."""
         ...
-    
+
     def update(
         self,
         table: str,
@@ -747,7 +747,7 @@ class QueryBuilder(Protocol[T]):
     ) -> Query[T]:
         """Build an UPDATE query."""
         ...
-    
+
     def delete(
         self,
         from_table: str,
@@ -762,23 +762,23 @@ class QueryBuilder(Protocol[T]):
 
 class Query(Protocol[T]):
     """An executable query."""
-    
+
     def sql(self) -> str:
         """Return the SQL string."""
         ...
-    
+
     def params(self) -> dict[str, Any]:
         """Return query parameters."""
         ...
-    
+
     async def execute(self, connection: Any) -> list[T]:
         """Execute query and return results."""
         ...
-    
+
     async def execute_one(self, connection: Any) -> T | None:
         """Execute query and return single result or None."""
         ...
-    
+
     async def execute_scalar(self, connection: Any) -> Any:
         """Execute query and return scalar value."""
         ...
@@ -792,36 +792,36 @@ class Query(Protocol[T]):
 flowchart TB
     Start([Start Diff]) --> LoadSchemas[Load current & target schemas]
     LoadSchemas --> CompareTables{Compare table sets}
-    
+
     CompareTables --> DroppedTables[Identify dropped tables]
     CompareTables --> AddedTables[Identify added tables]
     CompareTables --> ModifiedTables[Identify modified tables]
-    
+
     DroppedTables --> GenDropOps[Generate DROP TABLE ops]
     AddedTables --> GenCreateOps[Generate CREATE TABLE ops]
-    
+
     ModifiedTables --> CompareColumns{Compare columns}
     CompareColumns --> DroppedCols[Dropped columns]
     CompareColumns --> AddedCols[Added columns]
     CompareColumns --> ModifiedCols[Modified columns]
-    
+
     DroppedCols --> CheckAmbiguity{Possible rename?}
     AddedCols --> CheckAmbiguity
-    
+
     CheckAmbiguity -->|Yes| RecordAmbiguity[Record ambiguity]
     CheckAmbiguity -->|No| GenColOps[Generate column ops]
     RecordAmbiguity --> NeedsDecision[Requires human decision]
-    
+
     ModifiedCols --> GenAlterOps[Generate ALTER ops]
-    
+
     GenDropOps --> CollectOps[Collect all operations]
     GenCreateOps --> CollectOps
     GenColOps --> CollectOps
     GenAlterOps --> CollectOps
-    
+
     CollectOps --> BuildDepGraph[Build dependency graph]
     BuildDepGraph --> Toposort[Topological sort]
-    
+
     Toposort --> CycleCheck{Cycle detected?}
     CycleCheck -->|Yes| Error([CycleError])
     CycleCheck -->|No| Result([Return DiffResult])
@@ -855,21 +855,21 @@ def detect_column_ambiguity(
 ) -> list[Ambiguity]:
     """
     Detect potential renames vs drop+add.
-    
+
     Heuristics for likely rename:
     - Same type
-    - Same nullability  
+    - Same nullability
     - Similar position in column order
     - Similar name (edit distance)
     """
     ambiguities = []
-    
+
     for dropped_col in dropped:
         dropped_def = current_columns[dropped_col]
-        
+
         for added_col in added:
             added_def = target_columns[added_col]
-            
+
             # Check if types match
             if dropped_def.get("type") != added_def.get("type"):
     # NO SCORING, AND NO TYPE OR NULLABILITY FILTER. Both used to gate the
@@ -910,22 +910,22 @@ def introspect_postgresql(
 ) -> Schema:
     """
     Introspect PostgreSQL database schema.
-    
+
     Uses information_schema and pg_catalog for complete metadata.
     """
     tables = await connection.fetch("""
-        SELECT table_name 
-        FROM information_schema.tables 
+        SELECT table_name
+        FROM information_schema.tables
         WHERE table_schema = $1 AND table_type = 'BASE TABLE'
     """, schema_name)
-    
+
     schema: Schema = {}
-    
+
     for table_row in tables:
         table_name = table_row["table_name"]
-        
+
         columns = await connection.fetch("""
-            SELECT 
+            SELECT
                 column_name,
                 data_type,
                 is_nullable,
@@ -937,11 +937,11 @@ def introspect_postgresql(
             WHERE table_schema = $1 AND table_name = $2
             ORDER BY ordinal_position
         """, schema_name, table_name)
-        
+
         # ... build Column dicts
-        
+
         indexes = await connection.fetch("""
-            SELECT 
+            SELECT
                 i.relname as index_name,
                 array_agg(a.attname ORDER BY k.n) as columns,
                 ix.indisunique as is_unique,
@@ -955,9 +955,9 @@ def introspect_postgresql(
             WHERE n.nspname = $1 AND t.relname = $2
             GROUP BY i.relname, ix.indisunique, ix.indpred, ix.indrelid
         """, schema_name, table_name)
-        
+
         # ... build schema dict
-    
+
     return schema
 ```
 
@@ -1002,7 +1002,7 @@ EXAMPLES:
 
     # CI pipeline (unattended)
     declaro diff --unattended -c $DATABASE_URL
-    
+
     # Generate SQL for review
     declaro generate -c postgresql://localhost/mydb > migration.sql
 ```
@@ -1042,11 +1042,11 @@ SchemaError: Ambiguous column change in 'users' table
 DependencyError: Circular dependency detected in migration operations
 
   The following operations form a cycle:
-  
+
     1. add_foreign_key: orders.customer_id -> customers.id
        ↓ depends on
     2. create_table: customers
-       ↓ depends on  
+       ↓ depends on
     3. add_foreign_key: customers.primary_order_id -> orders.id
        ↓ depends on
     4. create_table: orders
@@ -1054,7 +1054,7 @@ DependencyError: Circular dependency detected in migration operations
     1. (cycle back to add_foreign_key)
 
   This usually indicates a circular reference in your schema.
-  
+
   To resolve:
     - Remove one of the foreign keys
     - Or use a deferred constraint (add manually after migration)
@@ -1071,11 +1071,11 @@ DriftError: Database schema has drifted from expected state
   Someone may have modified the database directly.
 
   Differences detected:
-  
+
     Table 'users':
       + Column 'temp_flag' exists in DB but not in snapshot
       ~ Column 'email' type differs: varchar(100) vs text
-    
+
     Table 'audit_log':
       - Entire table exists in DB but not in snapshot
 
@@ -1130,7 +1130,7 @@ def diff(
 class SchemaDiffer:
     def __init__(self):
         self._cache = {}  # Hidden state!
-    
+
     def diff(self, current, target, dialect=NOTHING, decisions=NOTHING):
         # Behavior depends on self._cache - not pure!
         ...
@@ -1188,22 +1188,22 @@ Document filtering and comparison operations using set theory notation:
 def diff_tables(current: Schema, target: Schema) -> tuple[set[str], set[str], set[str]]:
     """
     Compute table differences using set operations.
-    
+
     Let C = set of current table names
     Let T = set of target table names
-    
+
     Returns:
         dropped: C - T (tables to drop)
-        added: T - C (tables to create)  
+        added: T - C (tables to create)
         modified: C ∩ T (tables to compare for changes)
     """
     current_tables = set(current.keys())
     target_tables = set(target.keys())
-    
+
     dropped = current_tables - target_tables      # C - T
     added = target_tables - current_tables        # T - C
     modified = current_tables & target_tables     # C ∩ T
-    
+
     return dropped, added, modified
 ```
 
@@ -1270,7 +1270,7 @@ DATABASE_URL = "postgresql://user:password@host/db"  # Never!
 def parse_connection_string(url: str) -> ConnectionConfig:
     """
     Parse connection string, masking password in logs.
-    
+
     Supports:
         postgresql://user:pass@host:port/db?sslmode=require
         sqlite:///path/to/db.sqlite
@@ -1287,7 +1287,7 @@ def select_by_id(table: str, id_value: Any) -> Query:
     # Table names validated against schema, not interpolated from user input
     if table not in KNOWN_TABLES:
         raise ValueError(f"Unknown table: {table}")
-    
+
     return Query(
         sql=f"SELECT * FROM {table} WHERE id = :id",  # Table from whitelist
         params={"id": id_value}                        # Value parameterized
@@ -1421,7 +1421,7 @@ async def test_full_migration_cycle(pg_connection):
     # Start with empty schema
     initial = await introspect(pg_connection)
     assert initial == {}
-    
+
     # Define target schema
     target = {
         "users": {
@@ -1431,7 +1431,7 @@ async def test_full_migration_cycle(pg_connection):
             }
         }
     }
-    
+
     # Diff and apply
     diff_result = diff(current=initial, target=target, dialect="postgresql", decisions=NOTHING)
     await apply(
@@ -1440,7 +1440,7 @@ async def test_full_migration_cycle(pg_connection):
         diff_result["execution_order"],
         "postgresql",
     )
-    
+
     # Verify
     final = await introspect(pg_connection)
     assert "users" in final
@@ -1455,7 +1455,7 @@ def test_destructive_operation_requires_confirmation():
     """DROP operations require explicit confirmation in decisions."""
     current = {"users": {"columns": {"temp": {"type": "text"}}}}
     target = {"users": {"columns": {}}}  # Column removed
-    
+
     # Without decision, should raise or flag
     result = diff(current=current, target=target, dialect=NOTHING, decisions=NOTHING)
     assert any(a["type"] == "confirm_drop" for a in result["ambiguities"])
@@ -1464,10 +1464,10 @@ def test_rename_annotation_prevents_data_loss():
     """renamed_from annotation generates RENAME instead of DROP+ADD."""
     current = {"users": {"columns": {"name": {"type": "text"}}}}
     target = {"users": {"columns": {"full_name": {"type": "text", "renamed_from": "name"}}}}
-    
+
     result = diff(current=current, target=target, dialect=NOTHING, decisions=NOTHING)
     ops = result["operations"]
-    
+
     assert any(op["op"] == "rename_column" for op in ops)
     assert not any(op["op"] == "drop_column" for op in ops)
     assert not any(op["op"] == "add_column" for op in ops)
@@ -1583,27 +1583,27 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      
+
       - name: Install dependencies
         run: pip install -e ".[all,dev]"
-      
+
       - name: Type check
         run: mypy declaro_persistum
-      
+
       - name: Lint
         run: ruff check declaro_persistum
-      
+
       - name: Unit tests
         run: pytest tests/unit -v --cov=declaro_persistum
-      
+
       - name: Integration tests
         run: pytest tests/integration -v
         env:
@@ -1647,7 +1647,7 @@ jobs:
 
 **Decision**: Use TypedDict for all data structures.
 
-**Rationale**: 
+**Rationale**:
 - TypedDict is just a type annotation over plain dict - no class instantiation
 - Serializes directly to/from TOML/JSON
 - Compatible with the "no classes" philosophy

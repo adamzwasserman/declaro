@@ -67,15 +67,12 @@ DOCS = ROOT / "docs"
 # Names the docs mention ON PURPOSE that the package does not have. The list
 # went 41 -> 2 on 2026-08-14 by fixing the documents, not by widening this set.
 #
-# What is left is one anti-example. `declaro_persistum_architecture.md` shows a
-# FORBIDDEN shape — a function that reaches for a global connection and infers
-# its dialect — to say do not write this. Those two names are absent BECAUSE
-# the document is right, so they belong here permanently and the gate must not
-# be read as reporting debt when it prints them.
-DELIBERATELY_ABSENT = {
-    "get_global_connection",
-    "infer_dialect",
-}
+# It is empty now. It held two names, `get_global_connection` and
+# `infer_dialect`, from an anti-example in the architecture document: a
+# forbidden shape shown to say do not write this. That document was retired,
+# so the sample is no longer read and the two names no longer appear. The set
+# stays because the next anti-example will need it.
+DELIBERATELY_ABSENT: set[str] = set()
 
 
 def _package_names() -> set[str]:
@@ -173,23 +170,48 @@ def _is_historical(text: str) -> bool:
     return HISTORICAL in head or HISTORICAL_ALT in head
 
 
+# A DOCUMENT MARKED "DO NOT USE" IS NOT GUIDANCE, so its samples are not gated.
+# It is kept because it records what the package was, and gating it would
+# demand that a superseded document keep working.
+RETIRED = "DO NOT USE"
+
+# A RECORD IS NOT GUIDANCE. A changelog, a bug report and a feature request all
+# quote the package as it was on the day they were written, and gating them
+# would demand that history keep working.
+_RECORDS = ("CHANGELOG", "BUG_REPORT", "FEATURE_REQUEST", "TURSODB", "umbra-")
+
+
+def _is_guidance(path: pathlib.Path) -> bool:
+    """Whether a reader is meant to follow this document."""
+    return (
+        "standards" not in path.parts
+        and RETIRED not in path.name
+        and not path.name.startswith(_RECORDS)
+        and not _is_historical(path.read_text())
+    )
+
+
 def _documents() -> list[pathlib.Path]:
-    docs = [
-        p
-        for p in sorted(DOCS.rglob("*.md"))
-        if "standards" not in p.parts and not _is_historical(p.read_text())
-    ]
-    return [*docs, ROOT / "README.md"]
+    """Every document a reader is meant to follow."""
+    return [p for p in sorted(DOCS.rglob("*.md")) + sorted(ROOT.glob("*.md")) if _is_guidance(p)]
 
 
 def test_the_gate_can_see_the_samples_at_all() -> None:
     """A gate that parses nothing passes forever."""
-    blocks = sum(
-        len(re.findall(r"```python\n(.*?)```", p.read_text(), re.S))
-        for p in _documents()
-        if p.exists()
-    )
-    assert blocks > 60, f"found only {blocks} python blocks across the docs"
+    found = _documents()
+    # `if p.exists()` USED TO SIT HERE and hid a rename. The list named
+    # `README.md` by hand; when that file was renamed the gate skipped it in
+    # silence and still passed on the rest. The list is a glob now, so a
+    # document cannot fall out of it by being renamed.
+    missing = [p for p in found if not p.exists()]
+    assert not missing, f"these documents are named and absent: {missing}"
+
+    blocks = sum(len(re.findall(r"```python\n(.*?)```", p.read_text(), re.S)) for p in found)
+    # THE FLOOR FELL FROM 60 TO 15 when four documents were retired. `usage.md`
+    # alone held most of the samples in the package. Lowering a floor is how a
+    # gate goes blind, so the number is written beside the reason it moved, and
+    # the real count today is 19 across 12 documents.
+    assert blocks > 15, f"found only {blocks} python blocks across {len(found)} documents"
 
 
 def test_no_new_sample_calls_a_name_the_package_lacks() -> None:
