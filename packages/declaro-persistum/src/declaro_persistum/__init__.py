@@ -65,7 +65,6 @@ from declaro_persistum.query import (
     count_,
     delete,
     insert,
-    raw,
     render_condition,
     select,
     subquery,
@@ -81,12 +80,19 @@ from declaro_persistum.query import (
 # Opening a Turso database, and the crew that writes to a local one
 # concurrently. The reachability ratchet caught both of these unexported.
 from declaro_persistum.crew import Crew, start_crew, stop_crew
+
+# THE VOCABULARY, as a module rather than as loose names. HOW-IT-SHOULD-WORK.md
+# names what a caller can ask for, and `asking` is those things as signatures.
+# It is imported here rather than star-exported for two reasons: `all`, `sum`
+# and `one` would shadow builtins at the top level, and every one of them
+# raises today, so `asking.count(...)` reads as reaching for something declared
+# rather than as calling something that works.
+from declaro_persistum import asking as asking
 from declaro_persistum.mirror import (
     Divergence,
     Mirror,
     detach,
     mirror,
-    parallel_write,
     promote,
 )
 from declaro_persistum.turso_database import migrating, open_turso
@@ -145,7 +151,6 @@ __all__ = [
     "mirror",
     "promote",
     "detach",
-    "parallel_write",
     "open_turso",
     "migrating",
     # Working with an opened database. These were importable but absent from
@@ -172,7 +177,6 @@ __all__ = [
     "insert",
     "update",
     "delete",
-    "raw",
     "Query",
     "render_condition",
     "OPERATORS",

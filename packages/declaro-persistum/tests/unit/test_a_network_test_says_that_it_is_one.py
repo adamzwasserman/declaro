@@ -70,10 +70,23 @@ def _marked_network(path: pathlib.Path) -> bool:
         return True
 
     for match in re.finditer(r'scenarios\(\s*"([^"]+)"', source):
-        feature = (path.parent / match.group(1)).resolve()
-        if feature.exists() and "@network" in feature.read_text():
-            return True
+        named = (path.parent / match.group(1)).resolve()
+        # `scenarios()` TAKES A DIRECTORY AS WELL AS A FILE, and this read it
+        # as a file only: the first directory binding raised IsADirectoryError
+        # and took the gate down with it. `test_every_feature_is_bound.py`
+        # already handled both forms; this one did not.
+        for feature in _the_features_at(named):
+            if "@network" in feature.read_text():
+                return True
     return False
+
+
+def _the_features_at(named: pathlib.Path) -> list[pathlib.Path]:
+    """Whatever `scenarios()` named: one file, or every feature in a directory."""
+    return {
+        True: lambda p: sorted(p.rglob("*.feature")),
+        False: lambda p: [p] if p.is_file() else [],
+    }[named.is_dir()](named)
 
 
 def _test_files() -> list[pathlib.Path]:
