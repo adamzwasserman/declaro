@@ -14,8 +14,8 @@ Feature: first -- The first row in a stated order
     When a caller asks for the first person ordered by name
     Then it is given alice
 
-  Scenario: first, reversed
-    When a caller asks for the first person ordered by "-name"
+  Scenario: first, descending
+    When a caller asks for the first person ordered by name descending
     Then it is given carol
 
   Scenario: first, where nothing matches

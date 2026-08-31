@@ -29,6 +29,21 @@ V = TypeVar("V")
 # so the interior can trust the contract rather than re-check it.
 Dialect = Literal["postgresql", "sqlite", "turso"]
 
+# WHICH WAY AN ORDER RUNS, as a vocabulary rather than a mark on a name.
+#
+# An order used to be spelled `["-name"]`, a leading minus meaning reverse.
+# That is a column name with a directive stuck to the front, so it is neither
+# of the two things a string a caller passes is allowed to be: not a declared
+# name, because `-name` is not in `model_fields` and has to be cut apart before
+# it can be looked up, and not a value, because nothing binds it as a
+# parameter. It is the same hole as a WHERE clause given as text, in a smaller
+# costume, and this package deleted that one.
+#
+# An order is `{"name": "ascending"}` instead. Every key is a declared column
+# checked against the model, every value is one of two words, and the order the
+# keys were written in is the order they break ties in.
+Direction = Literal["ascending", "descending"]
+
 # =============================================================================
 # Extended Schema Objects (Addendum)
 # =============================================================================

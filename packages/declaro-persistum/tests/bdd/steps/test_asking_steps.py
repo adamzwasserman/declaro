@@ -39,7 +39,7 @@ from declaro_persistum.applier import apply
 from declaro_persistum.database import writing
 from declaro_persistum.differ.core import diff
 from declaro_persistum.pydantic_loader import pydantic_model_to_table
-from declaro_persistum.types import NOTHING, Nothing, is_nothing, resolved
+from declaro_persistum.types import NOTHING, Direction, Nothing, is_nothing, resolved
 
 scenarios("../features/asking")
 
@@ -247,10 +247,14 @@ _PHRASES: dict[str, dict[str, Any]] = {
     "over 18": {"age": {"gt": 18}},
 }
 
-_ORDERS: dict[str, list[str]] = {
-    '"-name"': ["-name"],
-    "by age then name": ["age", "name"],
-    "by name": ["name"],
+# AN ORDER IS A MAPPING, column to direction, and the keys break ties left to
+# right. MOST SPECIFIC PHRASE FIRST, because `_order` returns on the first
+# substring that matches and "by name" is inside "by name descending".
+_ORDERS: dict[str, dict[str, Direction]] = {
+    "by name descending": {"name": "descending"},
+    "by age then name": {"age": "ascending", "name": "ascending"},
+    "by name": {"name": "ascending"},
+    '"-name"': {"-name": "ascending"},
 }
 
 
@@ -261,11 +265,11 @@ def _narrowing(text: str) -> dict[str, Any]:
     return {}
 
 
-def _order(text: str) -> list[str]:
+def _order(text: str) -> dict[str, Direction]:
     for phrase, order in _ORDERS.items():
         if phrase in text:
             return order
-    return []
+    return {}
 
 
 def _person(ctx: Ctx, number: int, name: str, age: int) -> Any:

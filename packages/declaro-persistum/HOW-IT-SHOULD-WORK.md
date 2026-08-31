@@ -109,12 +109,16 @@ The vocabulary is small and every word means one thing. Each dialect spells thes
 | exactly one, or a named absence | `one` |
 | the first, in a stated order | `first` |
 | a page of them | `page(size, number)`, or `limit` and `offset` |
-| them in an order | `ordered_by("name")`, or `"-name"` to reverse |
+| them in an order | `ordered_by({"name": "ascending"})` |
 | only some columns | `values("id", "name")` |
 | no duplicates | `distinct` |
 | whether any exist at all | `exists`, which answers true or false and reads no rows |
 
 `page` is the one worth having over raw limit and offset. Paging is what people actually mean, and doing it by hand is where the off-by-one lives.
+
+An order is a mapping of declared columns to `"ascending"` or `"descending"`, and the keys break ties left to right: `{"age": "descending", "name": "ascending"}` sorts by age, then by name within each age. `first` requires one, because the first row in no order is whichever row the engine reached.
+
+This used to be `ordered_by("name")` with `"-name"` to reverse, and the minus is the reason it changed. Apply the test below to `"-name"` and it is neither of the two things it is allowed to be. It is not a declared name, because `-name` is not a column any model declares and something has to cut it apart before it can be looked up. It is not a value, because nothing binds it as a parameter. It is a column name carrying an instruction, which is the same hole as a WHERE clause given as text, and small enough that it survived two readings of this document.
 
 ### Numbers over rows
 
@@ -201,6 +205,12 @@ The same holds throughout. A function that cannot do its job returns that fact t
 
 ## The test for any function
 
-Read its arguments. If one is a string of SQL, a live connection, or the name of a database engine, the function does not belong here.
+Follow each argument to what it becomes. **Every string you pass is either checked against your declaration or bound as a parameter. Nothing is interpolated.**
 
-Not because it is ugly. Because each of those is the caller doing the library's work, and that is the one thing this library exists to prevent.
+`select("id", "name")` passes two strings, and both are looked up in the model and refused if it does not declare them. `where({"name": "bob"})` passes two more: the key is looked up the same way, and the value is bound. None of the four is ever pasted into a statement.
+
+`where("active = :x")` looks identical to a scanner and is the opposite. That string is neither a declared name nor a bound value, so the only thing left to do with it is paste it in.
+
+That is the whole test, and it does not need anyone to recognise SQL. A parameter that reaches string concatenation on its way to a statement is a hole whatever it happens to contain. It also catches `field(check="total >= 0")`, which no amount of looking for the word `SELECT` would.
+
+The same applies to a live connection and the name of an engine. Each is the caller doing the library's work, and that is the one thing this library exists to prevent.

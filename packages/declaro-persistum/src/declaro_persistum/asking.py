@@ -54,7 +54,7 @@ from collections.abc import Callable
 from typing import Any, NoReturn, TypedDict
 
 from declaro_persistum.database import Database
-from declaro_persistum.types import Answer, AnswerKey
+from declaro_persistum.types import Answer, AnswerKey, Direction
 
 __all__ = [
     "add",
@@ -164,14 +164,21 @@ all, one, exists, count = (_about_rows(word) for word in _ABOUT_ROWS)
 
 # TWO QUESTIONS THAT NEED AN ORDER, and it is required on both. "First" with no
 # order is whichever row the engine happened to reach, which is not an answer a
-# caller can rely on. A leading minus reverses.
+# caller can rely on.
+#
+# AN ORDER IS A MAPPING, `{"name": "ascending"}`, and the keys break ties left
+# to right. It was `["-name"]` until the audit noticed this function and
+# `_over_columns` were one shape, which they were: `list[str]` twice. They are
+# not one thing, and the reason they read alike is that `-name` is a column
+# name carrying a directive rather than a column name. Declaring the direction
+# separates them for the reason they are actually separate.
 _IN_A_STATED_ORDER: dict[str, _Word] = {
     "first": {
         "means": "The first row in a stated order, or a named absence.",
         "fills": "row",
     },
     "ordered_by": {
-        "means": "Every matching row, in the order named. A leading minus reverses.",
+        "means": "Every matching row, in the order named. Keys break ties left to right.",
         "fills": "rows",
     },
 }
@@ -180,7 +187,9 @@ _IN_A_STATED_ORDER: dict[str, _Word] = {
 def _in_a_stated_order(word: str) -> Callable[..., Any]:
     """One question whose answer depends on an order the caller states."""
 
-    async def asked(db: Database, model: type, order: list[str], **narrowed: Any) -> Answer:
+    async def asked(
+        db: Database, model: type, order: dict[str, Direction], **narrowed: Any
+    ) -> Answer:
         _unbuilt(word, db, model, order, narrowed)
 
     return _spelled(asked, word, _IN_A_STATED_ORDER[word])
