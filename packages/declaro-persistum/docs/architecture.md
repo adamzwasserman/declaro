@@ -97,6 +97,18 @@ Opening a database gives you a `Database`: data carrying its own injected callab
 
 **Never work the dialect out from a connection.** A driver connection doesn't tell you which engine it belongs to. The closest you can get is where its class happens to live, which means substring-matching module names, which makes the SQL you generate depend on somebody else's file layout. The driver reorganizes its own package and your placeholders change, silently, and nothing in your code moved.
 
+## Every string is checked or bound, never interpolated
+
+The surface takes strings. Column names are strings, and so are values. What makes the surface declarative is not their absence but their fate.
+
+**A string is one of exactly two things.** A declared name, looked up in `model_fields` and refused if the model does not declare it. Or a value, bound as a parameter by the driver. There is no third case, and nothing is pasted into a statement.
+
+That is the whole test for a new function, and it needs nobody to recognise SQL. Follow each argument to what it becomes: if it reaches string concatenation or an f-string on the way to a statement, it is a hole, whatever it happens to contain at the time.
+
+**Recognising SQL was the obvious approach and it does not work.** Every statement begins with one of about twenty verbs, so a word scan finds statements. It finds `created_at` and `update_count` too, and it misses every fragment, because `total >= 0` and `name ASC` contain no verb and parse as nothing. Those fragments are exactly the escape hatches. A gate that reads what a string looks like passes the ones that matter.
+
+Fate is also what separates the two forms that look identical. `where({"name": "bob"})` and `where("active = :x")` are both a string reaching a `where`, and one is a declared key with a bound value while the other has nowhere to go but into the statement.
+
 ## Failures and absence
 
 A failure comes back as a value, never as a log line. A function that logs an error and hands you something you can't tell from success has two outputs, and only one of them is in the signature. You can't see it, can't test for it without capturing output, and can't turn it down.

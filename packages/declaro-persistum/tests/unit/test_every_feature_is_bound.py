@@ -76,6 +76,14 @@ KNOWN_UNBOUND: dict[str, str] = {
     "the_models_are_the_truth.feature": _SPEC,
     "the_schema_is_declared.feature": _SPEC,
     "the_test_for_any_function.feature": _SPEC,
+    # The enforcement gates. Each describes a check that does not exist yet, and
+    # each one names what it would find today: 3 defaulted parameters, 12 modules
+    # importing `logging` directly, and a purity check that reads I/O only and
+    # lets a clock or a random source through.
+    "nothing_takes_a_default.feature": _SPEC,
+    "the_middle_is_pure.feature": _SPEC,
+    "one_function_says_things.feature": _SPEC,
+    "every_engine_is_in_every_table.feature": _SPEC,
     "what_the_library_owns.feature": _SPEC,
 }
 
