@@ -13,6 +13,7 @@ above that, so the declaration API is unchanged.
 from __future__ import annotations
 
 from collections.abc import Callable
+from types import SimpleNamespace
 from typing import Any, Literal, TypedDict, Unpack, get_args, get_origin
 
 from pydantic import BaseModel
@@ -251,9 +252,43 @@ def _refuse_a_class_pydantic_did_not_make(cls: type, name: str) -> type:
 
 @helper
 def _the_named_table(cls: type, name: str) -> type:
-    """A Pydantic model, carrying the name the loader looks for."""
+    """A Pydantic model, carrying the name the loader looks for.
+
+    It is checked for habits first. A model that also does something is
+    refused where it is written, which is the only place the writer still has
+    the reason in their head.
+    """
+    found = habits_in(cls)
+    return _WHEN_IT_ONLY_DECLARES[not found](cls, name, found)
+
+
+@helper
+def _only_declares(cls: type, name: str, _found: list[str]) -> type:
+    """Nothing here but a table name and columns."""
     cls.__tablename__ = name  # type: ignore[attr-defined]
     return cls
+
+
+@helper
+def _refuse_a_model_that_also_does_something(cls: type, name: str, found: list[str]) -> type:
+    """Refused with the declaration that replaces each habit.
+
+    EVERY HABIT IS REPORTED, not the first. A writer who fixes one and runs
+    again to find the next has been made to work for the checker.
+    """
+    listed = "\n\n  ".join(found)
+    raise TypeError(
+        f"@table('{name}'): {cls.__name__} declares a table and also does "
+        f"something, and the library reads only the table name and the "
+        f"columns. Everything else holds in Python and never reaches the "
+        f"database.\n\n  {listed}"
+    )
+
+
+_WHEN_IT_ONLY_DECLARES: dict[bool, Callable[[type, str, list[str]], type]] = {
+    True: _only_declares,
+    False: _refuse_a_model_that_also_does_something,
+}
 
 
 _WHEN_NOT_A_MODEL: dict[bool, Callable[[type, str], type]] = {
@@ -313,6 +348,130 @@ class ColumnFacets(TypedDict, total=False):
 
 
 _COLUMN_FACETS = frozenset(ColumnFacets.__annotations__)
+
+
+# ---------------------------------------------------------------------------
+# A MODEL DECLARES, AND DOES NOTHING ELSE.
+#
+# The loader reads two things off a model: the table name from `@table` and the
+# columns from `model_fields`. Everything else in the class is invisible to it,
+# so a rule written as a validator holds in Python and never reaches the
+# database. The constraint then exists in one of the two places it should, and
+# which one wins depends on whether the write came through your code or a psql
+# prompt. That is the two-descriptions bug hiding inside the one file that
+# exists to be the single description.
+#
+# EACH ROW CARRIES BOTH HALVES: how to find the habit on a class, and what to
+# say when it is there. Adding a habit is adding a row. `habits_in` reads the
+# table and names none of them, which is what keeps the table the rule rather
+# than a list the function happens to agree with.
+# ---------------------------------------------------------------------------
+
+
+# What a class with no Pydantic decorators holds: three empty mappings, which
+# is the same answer as a class carrying no validators.
+_NO_DECORATORS = SimpleNamespace(field_validators={}, validators={}, model_validators={})
+
+
+@helper
+def _validators_on(model: type) -> list[str]:
+    """Every validator Pydantic recorded on the class.
+
+    READ THROUGH `getattr`, the way `model_columns` reads `model_fields`.
+    `__pydantic_decorators__` is Pydantic's own private attribute and its stubs
+    do not declare it, so a direct access is an error mypy is right about.
+    """
+    written = getattr(model, "__pydantic_decorators__", _NO_DECORATORS)
+    return [
+        *written.field_validators,
+        *written.validators,
+        *written.model_validators,
+    ]
+
+
+@helper
+def _methods_on(model: type) -> list[str]:
+    """Callables written in the class body, which are behaviour and not data.
+
+    A NESTED CLASS IS NOT A METHOD, and this counted one because a class is
+    callable. `Meta` is a declaration the loader reads (`model_columns.py`
+    reads it for table-level constraints), so flagging it called a valid
+    declaration a habit and refused three real models.
+    """
+    return [
+        name
+        for name, value in vars(model).items()
+        if callable(value)
+        and not isinstance(value, type)
+        and not name.startswith("_")
+        and not isinstance(value, (property, classmethod, staticmethod))
+    ]
+
+
+@helper
+def _properties_on(model: type) -> list[str]:
+    return [name for name, value in vars(model).items() if isinstance(value, property)]
+
+
+# NOT A HABIT: a Python default. `field(default=...)` is one way to declare a
+# column default and `name: str = "unknown"` is the other, and the loader reads
+# BOTH -- it turns the Python value into a SQL default, correctly, including
+# the three shapes that are easy to get wrong (`0`, `False` and `""`). This
+# table listed it as a habit for one commit on the strength of an assumption,
+# and `test_a_pydantic_default_reaches_the_database.py` said otherwise.
+
+
+@helper
+def _inherited_by(model: type) -> list[str]:
+    """Bases other than BaseModel, which hide where a column came from."""
+    return [base.__name__ for base in model.__bases__ if base is not BaseModel]
+
+
+# name -> (how to find it on a class, what to say about one). THE WORDS ARE IN
+# THE ROW. They were three functions with one shape, differing only by the
+# sentence each pasted in, which is the thing this file's own table exists to
+# avoid. `{named}` is the name found on the class.
+HABITS: dict[str, tuple[Callable[[type], list[str]], str]] = {
+    "validator": (
+        _validators_on,
+        "{named!r} is a validator. It runs in Python and never reaches the "
+        "database, so the rule holds for writes through your code and not for "
+        "any other. Declare it instead: a range becomes "
+        'field(check="total >= 0"), "already used" becomes field(unique=True), '
+        "a rejected None becomes field(nullable=False), and a related row "
+        'becomes field(references="people.id").',
+    ),
+    "method": (
+        _methods_on,
+        "{named!r} computes a value from other columns, and a computed value "
+        "is not a column. Nothing about it reaches the schema, so the database "
+        "never has it. Declare a view if the database should hold it, or keep "
+        "the calculation in your own code if it should not.",
+    ),
+    "property": (
+        _properties_on,
+        "{named!r} computes a value from other columns, and a computed value "
+        "is not a column. Nothing about it reaches the schema, so the database "
+        "never has it. Declare a view if the database should hold it, or keep "
+        "the calculation in your own code if it should not.",
+    ),
+    "inheritance": (
+        _inherited_by,
+        "this model inherits from {named!r}. Columns arriving from somewhere "
+        "else are not visible in the file that declares the table, and this "
+        "file is meant to be the whole description. Write the columns here.",
+    ),
+}
+
+
+@helper
+def habits_in(model: type) -> list[str]:
+    """Everything in this class the library cannot read, said in full.
+
+    Pure: a class in, a list of sentences out. It reads the table and knows
+    nothing about what any row looks for, so a new rule is a new row.
+    """
+    return [says.format(named=found) for finds, says in HABITS.values() for found in finds(model)]
 
 
 @helper
