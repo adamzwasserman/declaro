@@ -52,7 +52,9 @@ await apply_migrations_async(db, "sqlite", "models.py", expand_enums=NOTHING, fo
 
 That creates the table. Add a column to the model and run it again, and the column appears. You never write a migration, and you never say "add a column" — you declare that the column exists and reaching that state is the library's problem.
 
-The same rule covers reading and writing. You name a model and the columns you care about, and you get back instances of that model. No SQL text, no connection to hold, no engine name anywhere in your code.
+The same rule covers reading and writing. You name a model and the columns you care about, and the rows come back as instances of that model. No SQL text, no connection to hold, no engine name anywhere in your code.
+
+Every question gives back an answer in one shape, and you read the key you asked for. `answer["rows"]` holds the instances, `answer["number"]` holds a count, `answer["row"]` holds one row or a named absence. `answer["failure"]` holds what went wrong, when something did. Every key a question did not fill is `NOTHING`, so a missing row and a failure are values you have to look at rather than things you can walk past.
 
 ## Why it is built this way
 

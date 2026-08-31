@@ -7,7 +7,7 @@ This ensures serialization to/from TOML/JSON and compatibility with pure functio
 
 from collections.abc import Callable
 from types import EllipsisType
-from typing import Any, Final, Literal, Protocol, TypedDict, TypeVar, runtime_checkable
+from typing import Any, Final, Literal, Protocol, TypedDict, TypeVar, cast, runtime_checkable
 
 # What a generic helper below carries through unchanged. Written down because
 # `Any` in and `Any` out says nothing, and these functions do say something:
@@ -218,6 +218,80 @@ _RESOLVED: dict[bool, Callable[[Any, Any], Any]] = {
     True: _the_other,
     False: _the_value,
 }
+
+
+# =============================================================================
+# What a word gives back
+# =============================================================================
+
+
+class Failure(TypedDict):
+    """What went wrong, as a value rather than a raise or a log line.
+
+    A function that logs an error and returns something you cannot tell from
+    success has two outputs and only one of them is in the signature. This is
+    the other one, written down. Whether anyone hears about it is the
+    orchestrator's call, because the function does not know whether it sits
+    inside a retry about to succeed, a dry run, or an incident at 3am.
+
+    `what` names the word that could not do its job. `because` carries the
+    reason, including the engine's own message when the engine gave one.
+    """
+
+    what: str
+    because: str
+
+
+class Answer(TypedDict):
+    """What every word in the vocabulary gives back. One shape, six keys.
+
+    THE KEY A WORD FILLS IS THE ONLY THING THAT VARIES, so it is data in the
+    table beside the word rather than a return type repeated twenty-three
+    times. `count` fills `number`, `exists` fills `truth`, `all` fills `rows`.
+
+    EVERY OTHER KEY IS `NOTHING`, which is what makes absence and failure
+    impossible to walk past. A caller reading `["row"]` gets the row or gets
+    `NOTHING`, and the two are different values rather than a row and a
+    silence. `None` cannot do this job here for the same reason it cannot
+    anywhere else in this package: a nullable column holds `None`, so "no such
+    row" and "a row whose name is null" would stop being distinguishable.
+
+    `failure` is a key like any other. A word that could not do its job fills
+    it and leaves the rest `NOTHING`, so a caller tells success from failure by
+    which key is not `NOTHING` rather than by catching something.
+    """
+
+    rows: list[Any] | Nothing
+    row: Any | Nothing
+    number: int | Nothing
+    truth: bool | Nothing
+    mappings: list[dict[str, Any]] | Nothing
+    failure: Failure | Nothing
+
+
+# The key a word fills. Six kinds of answer, named, so a table row saying
+# "count fills number" is checked rather than spelled.
+AnswerKey = Literal["rows", "row", "number", "truth", "mappings", "failure"]
+
+_NOTHING_ANSWERED: Final[Answer] = {
+    "rows": NOTHING,
+    "row": NOTHING,
+    "number": NOTHING,
+    "truth": NOTHING,
+    "mappings": NOTHING,
+    "failure": NOTHING,
+}
+
+
+def answered(key: AnswerKey, value: Any) -> Answer:
+    """One key filled, the other five left as the absence they are."""
+    filled: dict[str, Any] = {**_NOTHING_ANSWERED, key: value}
+    return cast(Answer, filled)
+
+
+def failed(what: str, because: str) -> Answer:
+    """A word that could not do its job, saying so as a value."""
+    return answered("failure", Failure(what=what, because=because))
 
 
 def type_of(value: Any) -> type:
