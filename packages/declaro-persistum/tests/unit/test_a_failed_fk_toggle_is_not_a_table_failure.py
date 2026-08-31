@@ -25,7 +25,8 @@ import pathlib
 import pytest
 
 import declaro_persistum.transfer as transfer_module
-from declaro_persistum import bulk_transfer, close, open_sqlite, writing
+from declaro_persistum import bulk_transfer, close, open_sqlite
+from declaro_persistum.database import writing
 from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.precommit, pytest.mark.sqlite]

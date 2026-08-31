@@ -34,7 +34,8 @@ import pathlib
 
 import pytest
 
-from declaro_persistum import bulk_transfer, close, open_sqlite, writing
+from declaro_persistum import bulk_transfer, close, open_sqlite
+from declaro_persistum.database import writing
 from declaro_persistum.exceptions import TransferError
 from declaro_persistum.types import NOTHING
 

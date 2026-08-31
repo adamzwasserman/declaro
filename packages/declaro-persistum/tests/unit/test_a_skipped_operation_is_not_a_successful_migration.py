@@ -38,8 +38,9 @@ import tempfile
 
 import pytest
 
-from declaro_persistum import close, open_turso, writing
+from declaro_persistum import close, open_turso
 from declaro_persistum.applier import apply as apply_operations
+from declaro_persistum.database import writing
 from declaro_persistum.types import NOTHING
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.precommit, pytest.mark.turso]

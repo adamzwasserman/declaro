@@ -16,7 +16,8 @@ from typing import Any, TypedDict
 import pytest
 from pytest_bdd import given, scenarios, then, when
 
-from declaro_persistum import close, is_replicated, open_sqlite, open_turso, reading
+from declaro_persistum import close, is_replicated, open_sqlite, open_turso
+from declaro_persistum.database import reading
 from declaro_persistum.exceptions import DatabaseClosedError
 from declaro_persistum.types import NOTHING
 

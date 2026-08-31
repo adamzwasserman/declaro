@@ -56,10 +56,6 @@ from declaro_persistum.write_queue import (
 # Nobody could `from declaro_persistum import select`.
 from declaro_persistum.query import (
     OPERATORS,
-    execute,
-    execute_many,
-    execute_one,
-    execute_scalar,
     Query,
     case_,
     count_,
@@ -95,17 +91,15 @@ from declaro_persistum.mirror import (
     mirror,
     promote,
 )
-from declaro_persistum.turso_database import migrating, open_turso
+from declaro_persistum.turso_database import open_turso
 from declaro_persistum.database import (
     Database,
     close,
     flush,
     is_replicated,
     nothing_was_trapped,
-    reading,
     refresh,
     replicate,
-    writing,
 )
 from declaro_persistum.types import (
     Ambiguity,
@@ -152,13 +146,10 @@ __all__ = [
     "promote",
     "detach",
     "open_turso",
-    "migrating",
     # Working with an opened database. These were importable but absent from
     # __all__, so the declared contract let a caller open a database and not
     # read or write it.
     "Database",
-    "reading",
-    "writing",
     "close",
     "flush",
     "replicate",
@@ -170,10 +161,6 @@ __all__ = [
     "Crew",
     # query — functions over data
     "select",
-    "execute",
-    "execute_one",
-    "execute_scalar",
-    "execute_many",
     "insert",
     "update",
     "delete",

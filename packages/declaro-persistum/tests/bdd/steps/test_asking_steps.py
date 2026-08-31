@@ -34,8 +34,9 @@ import pytest
 from pydantic import create_model
 from pytest_bdd import given, parsers, scenarios, then, when
 
-from declaro_persistum import asking, field, open_sqlite, table, writing
+from declaro_persistum import asking, field, open_sqlite, table
 from declaro_persistum.applier import apply
+from declaro_persistum.database import writing
 from declaro_persistum.differ.core import diff
 from declaro_persistum.pydantic_loader import pydantic_model_to_table
 from declaro_persistum.types import NOTHING, Nothing, is_nothing, resolved

@@ -37,7 +37,8 @@ from __future__ import annotations
 
 import pytest
 
-from declaro_persistum import close, open_sqlite, writing
+from declaro_persistum import close, open_sqlite
+from declaro_persistum.database import writing
 from declaro_persistum.exceptions import MigrationError
 from declaro_persistum.migrations import (
     META_TABLE,

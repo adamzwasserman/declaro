@@ -37,13 +37,14 @@ import pathlib
 
 import pytest
 
-from declaro_persistum import close, open_sqlite, open_turso, reading, writing
+from declaro_persistum import close, open_sqlite, open_turso
 from declaro_persistum.applier import apply
 from declaro_persistum.applier.shared import (
     generate_operation_sql,
     statements_for,
 )
 from declaro_persistum.applier.sqlite import generate_create_view
+from declaro_persistum.database import reading, writing
 from declaro_persistum.types import NOTHING
 
 _TRIGGERED = {

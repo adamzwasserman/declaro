@@ -37,7 +37,8 @@ import pytest
 # transfer.py was split for length. `bulk_transfer` binds them at import,
 # so a substitution on `transfer` is read by nothing and the test passes
 # while proving nothing. It names the module that owns them.
-from declaro_persistum import bulk_transfer, close, open_sqlite, writing
+from declaro_persistum import bulk_transfer, close, open_sqlite
+from declaro_persistum.database import writing
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE
 from declaro_persistum.types import NOTHING
 

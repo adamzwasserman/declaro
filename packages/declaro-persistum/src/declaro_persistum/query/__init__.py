@@ -34,10 +34,6 @@ from declaro_persistum.query.conditions import COMBINATORS, OPERATORS
 from declaro_persistum.query.conditions import render as render_condition
 from declaro_persistum.query.executor import (
     detect_dialect,
-    execute,
-    execute_many,
-    execute_one,
-    execute_scalar,
 )
 from declaro_persistum.query.expressions import (
     CaseOrderBy,
@@ -76,10 +72,6 @@ __all__ = [
     "with_offset",
     "with_params",
     # execution — the boundary
-    "execute",
-    "execute_one",
-    "execute_scalar",
-    "execute_many",
     "detect_dialect",
     # conditions, as data
     "render_condition",

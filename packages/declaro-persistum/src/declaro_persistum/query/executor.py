@@ -11,7 +11,7 @@ from typing import Any, TypeVar
 
 from declaro_persistum.boundary import boundary, helper
 from declaro_persistum.query.builder import Query
-from declaro_persistum.types import Nothing, resolved, written_as
+from declaro_persistum.types import written_as
 
 T = TypeVar("T")
 
@@ -187,134 +187,6 @@ def detect_dialect(connection: Any) -> str:
     return [
         _WHEN_ENGINE_UNNAMED[bool(keys)](conn_type, keys) for keys in [_recognised_keys(conn_type)]
     ][0]
-
-
-@helper
-async def execute(
-    query: Query,
-    connection: Any,
-    *,
-    row_factory: Callable[[dict[str, Any]], T] | None | Nothing,
-) -> list[T] | list[dict[str, Any]]:
-    """
-    Execute a query and return all results.
-
-    Args:
-        query: Query to execute
-        connection: Database connection (asyncpg, aiosqlite, or turso)
-        row_factory: Optional function to transform rows
-
-    Returns:
-        List of rows as dicts, or transformed by row_factory
-
-    Example:
-        >>> q = select("*", from_table="users", where="active = :active", params={"active": True}, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
-        >>> users = await execute(q, conn, row_factory=NOTHING)
-        >>> print(users[0]["email"])
-    """
-    # A default in the signature would decide this where no reader
-    # sees it happen and no test reaches it.
-    row_factory = resolved(row_factory, None)
-    sql, params = _prepare_query(query, connection)
-    rows = await _execute_fetch(connection, sql, params)
-
-    return _ALL_ROWS[bool(row_factory)](rows, row_factory)
-
-
-@helper
-async def execute_one(
-    query: Query,
-    connection: Any,
-    *,
-    row_factory: Callable[[dict[str, Any]], T] | None | Nothing,
-) -> T | dict[str, Any] | None:
-    """
-    Execute a query and return single result or None.
-
-    Args:
-        query: Query to execute
-        connection: Database connection
-        row_factory: Optional function to transform the row
-
-    Returns:
-        Single row as dict (or transformed), or None if no results
-
-    Example:
-        >>> q = select("*", from_table="users", where="id = :id", params={"id": 1}, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
-        >>> user = await execute_one(q, conn, row_factory=NOTHING)
-        >>> if user:
-        ...     print(user["email"])
-    """
-    # A default in the signature would decide this where no reader
-    # sees it happen and no test reaches it.
-    row_factory = resolved(row_factory, None)
-    sql, params = _prepare_query(query, connection)
-    row = await _execute_fetch_one(connection, sql, params)
-
-    return _ONE_ROW[row is not None and bool(row_factory)](row, row_factory)
-
-
-@helper
-async def execute_scalar(
-    query: Query,
-    connection: Any,
-) -> Any:
-    """
-    Execute a query and return scalar value.
-
-    Args:
-        query: Query to execute
-        connection: Database connection
-
-    Returns:
-        Single scalar value from first column of first row
-
-    Example:
-        >>> q = select("count(*)", from_table="users", where=NOTHING, params=NOTHING, order_by=NOTHING, limit=NOTHING, offset=NOTHING, joins=NOTHING, group_by=NOTHING, having=NOTHING)
-        >>> count = await execute_scalar(q, conn)
-        >>> print(f"Total users: {count}")
-    """
-    sql, params = _prepare_query(query, connection)
-    return await _execute_fetch_scalar(connection, sql, params)
-
-
-@helper
-async def execute_many(
-    query: Query,
-    connection: Any,
-    params_list: list[dict[str, Any]],
-) -> int:
-    """
-    Execute a query multiple times with different parameters.
-
-    Useful for bulk inserts or updates.
-
-    Args:
-        query: Query template to execute
-        connection: Database connection
-        params_list: List of parameter dicts
-
-    Returns:
-        Total number of rows affected
-
-    Example:
-        >>> q = insert("users", {"email": ":email", "name": ":name"}, returning=NOTHING, on_conflict=NOTHING)
-        >>> rows = await execute_many(q, conn, [
-        ...     {"email": "a@b.com", "name": "A"},
-        ...     {"email": "c@d.com", "name": "C"},
-        ... ])
-    """
-    total = 0
-    for params in params_list:
-        merged_query: Query = {
-            "sql": query["sql"],
-            "params": {**query["params"], **params},
-            "dialect": query["dialect"],
-        }
-        sql, bound_params = _prepare_query(merged_query, connection)
-        count = await _execute_update(connection, sql, bound_params)
-        total += count
-    return total
 
 
 @helper

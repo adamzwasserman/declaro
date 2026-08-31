@@ -45,7 +45,8 @@ from typing import Any
 
 import pytest
 
-from declaro_persistum import close, open_postgresql, open_sqlite, writing
+from declaro_persistum import close, open_postgresql, open_sqlite
+from declaro_persistum.database import writing
 from declaro_persistum.transfer import bulk_transfer
 from tests.conftest import probe_url, refuse_without_postgresql
 

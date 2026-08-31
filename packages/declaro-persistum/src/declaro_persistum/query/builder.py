@@ -38,9 +38,22 @@ def _no_clause(_where: Any, given: dict[str, Any], _path: str) -> tuple[str, dic
     return "", given
 
 
-def _written_clause(where: Any, given: dict[str, Any], _path: str) -> tuple[str, dict[str, Any]]:
-    """Raw SQL with `:name` placeholders. It brings no parameters of its own."""
-    return str(where), given
+def _refuse_written_sql(
+    where: Any, _given: dict[str, Any], _path: str
+) -> tuple[str, dict[str, Any]]:
+    """A WHERE given as text, which is the caller writing the SQL.
+
+    THIS USED TO PASS THE STRING STRAIGHT THROUGH. It is the escape hatch the
+    whole surface exists to remove: a string that is neither a declared name
+    nor a bound value has nowhere to go but into the statement.
+    """
+    raise TypeError(
+        f"a WHERE clause is a condition mapping, and {where!r} is text. "
+        f'Write {{"active": True}} rather than "active = :active", and '
+        f'{{"age": {{"gt": 18}}}} rather than "age > :age". Every string you '
+        f"pass is checked against your model or bound as a parameter, and text "
+        f"is neither."
+    )
 
 
 def _built_clause(where: Any, given: dict[str, Any], path: str) -> tuple[str, dict[str, Any]]:
@@ -57,10 +70,10 @@ def _built_clause(where: Any, given: dict[str, Any], path: str) -> tuple[str, di
 
 
 def _refuse_a_clause(where: Any, _given: dict[str, Any], _path: str) -> tuple[str, dict[str, Any]]:
-    """Anything else. A WHERE is text or a mapping and nothing third."""
+    """Anything else. A WHERE is a mapping and nothing else."""
     raise TypeError(
-        f"a WHERE clause is raw SQL text or a condition mapping, and "
-        f"{type_of(where).__name__} is neither: {where!r}"
+        f"a WHERE clause is a condition mapping, and "
+        f"{type_of(where).__name__} is not one: {where!r}"
     )
 
 
@@ -70,7 +83,7 @@ def _refuse_a_clause(where: Any, _given: dict[str, Any], _path: str) -> tuple[st
 # before it finds `object`.
 _CLAUSE_SHAPES: dict[type, Callable[[Any, dict[str, Any], str], tuple[str, dict[str, Any]]]] = {
     NoneType: _no_clause,
-    str: _written_clause,
+    str: _refuse_written_sql,
     dict: _built_clause,
     object: _refuse_a_clause,
 }

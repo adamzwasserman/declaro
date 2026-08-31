@@ -47,7 +47,8 @@ from typing import Any
 
 import pytest
 
-from declaro_persistum import close, open_sqlite, writing
+from declaro_persistum import close, open_sqlite
+from declaro_persistum.database import writing
 from declaro_persistum.transfer import TRANSFER_STATE_TABLE, bulk_transfer
 
 pytestmark = [pytest.mark.precommit, pytest.mark.sqlite]

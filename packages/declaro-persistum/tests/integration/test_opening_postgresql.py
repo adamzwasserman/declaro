@@ -18,7 +18,8 @@ import os
 
 import pytest
 
-from declaro_persistum import close, open_postgresql, reading, writing
+from declaro_persistum import close, open_postgresql
+from declaro_persistum.database import reading, writing
 from tests.conftest import probe_url, refuse_without_postgresql
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.postgresql, pytest.mark.integration]

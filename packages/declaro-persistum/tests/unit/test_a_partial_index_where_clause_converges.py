@@ -37,7 +37,8 @@ import pathlib
 
 import pytest
 
-from declaro_persistum import close, open_sqlite, reading, writing
+from declaro_persistum import close, open_sqlite
+from declaro_persistum.database import reading, writing
 from declaro_persistum.differ.core import diff
 from declaro_persistum.inspector import INSPECTORS
 from declaro_persistum.types import NOTHING

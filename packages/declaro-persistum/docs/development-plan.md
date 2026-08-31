@@ -8,6 +8,20 @@ Each stage names what it is, what makes it done, and what it unblocks. "Done" is
 
 The specification is already written. `tests/bdd/features/asking/` holds one feature file per function, 80 scenarios, all failing on `NotImplementedError`. Building a function means making its file pass, and nothing here asks anyone to invent an expected value that isn't already written down.
 
+## How to work
+
+**One function, one commit.** A feature file goes green, and that is a commit. Not a stage, not an afternoon's work, not "the row questions". A commit holding three functions cannot be reverted without losing two that were fine, and a commit holding half of one cannot be reverted at all.
+
+**Run the slop audit before every commit.** The audit reads the tree and reports what a scan could not clear: unexercised branches, loose parameters, silences. Run it on the work you are about to commit, not on a morning's worth.
+
+    uv run slop-audit-l1 --honest-code-clauses
+
+L1.21 is off unless you ask for it by name, so a plain run prints a complete-looking report with it silently absent.
+
+**Before rather than after, because before you can still act on it.** Run it after and a number that got worse is already in the history, and fixing it is a second commit that exists only to undo the first. Run it before and the fix is part of the same change. You still know which commit moved the number, because it is the one you have not made yet.
+
+**A worse number can still be right.** A new function has branches nothing exercises yet, and the test that clears them may honestly belong in the next commit. The rule is that you read the number and decide, not that the number never rises. What is forbidden is committing without looking.
+
 ## The order, and why
 
 **One path before many.** Every question in the vocabulary is a variation on turning a declared model plus a narrowing into a statement, running it, and building instances from what comes back. Build that path once, for the simplest question, and the rest are rows in a table. Build several at once and you get several paths that have to agree.
