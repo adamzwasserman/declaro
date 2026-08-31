@@ -75,7 +75,6 @@ KNOWN_UNBOUND: dict[str, str] = {
     "four_dialects_one_meaning.feature": _SPEC,
     "the_models_are_the_truth.feature": _SPEC,
     "the_schema_is_declared.feature": _SPEC,
-    "the_test_for_any_function.feature": _SPEC,
     # The decision the rest of the surface rests on: what a dialect produces.
     # A Query today is {sql, params, dialect} and carries SQL text, so four
     # dialects would be four ways of building a string.
