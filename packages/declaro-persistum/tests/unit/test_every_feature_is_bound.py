@@ -76,6 +76,32 @@ KNOWN_UNBOUND: dict[str, str] = {
     "the_models_are_the_truth.feature": _SPEC,
     "the_schema_is_declared.feature": _SPEC,
     "the_test_for_any_function.feature": _SPEC,
+    # The decision the rest of the surface rests on: what a dialect produces.
+    # A Query today is {sql, params, dialect} and carries SQL text, so four
+    # dialects would be four ways of building a string.
+    "a_question_is_data.feature": _SPEC,
+    # The schema axis: what a model may declare, what the library owns, what a
+    # change would do before it does it, and what a view and an index are.
+    "every_column_type_is_declarable.feature": _SPEC,
+    "a_name_the_library_owns_is_refused.feature": _SPEC,
+    "asking_what_would_change.feature": _SPEC,
+    "a_rename_is_asked_and_remembered.feature": _SPEC,
+    "losing_data_is_said_out_loud.feature": _SPEC,
+    "a_view_is_a_named_question.feature": _SPEC,
+    "freshness_is_declared_in_plain_words.feature": _SPEC,
+    "an_index_can_span_columns.feature": _SPEC,
+    "one_table_of_capabilities.feature": _SPEC,
+    # Running a question: what is held, what comes back, how many connections,
+    # and whose job retrying is.
+    "a_statement_is_built_once.feature": _SPEC,
+    "what_comes_back.feature": _SPEC,
+    "several_writes_travel_together.feature": _SPEC,
+    "how_many_connections_and_when.feature": _SPEC,
+    "retrying_is_the_librarys_job.feature": _SPEC,
+    # The rules, as gates.
+    "absence_survives_the_boundary.feature": _SPEC,
+    "a_failure_is_a_value.feature": _SPEC,
+    "nothing_reaches_past_the_surface.feature": _SPEC,
     # The enforcement gates. Each describes a check that does not exist yet, and
     # each one names what it would find today: 3 defaulted parameters, 12 modules
     # importing `logging` directly, and a purity check that reads I/O only and

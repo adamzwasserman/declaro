@@ -1,9 +1,11 @@
 # declaro_persistum Architecture Document
 
 ---
-**STATUS**: DESIGN
-**VERSION**: 0.1.0
-**DATE**: 2025-12-14
+
+- **STATUS**: DESIGN
+- **VERSION**: 0.1.0
+- **DATE**: 2025-12-14
+
 ---
 
 ## 1. Executive Summary
