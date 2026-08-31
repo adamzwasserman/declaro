@@ -99,8 +99,6 @@ async def _transfer(source: Any, target: Any, models: str, *, resume: bool) -> A
     return await bulk_transfer(
         source,
         target,
-        "sqlite",
-        "postgresql",
         models,
         batch_size=2,
         tables=["widgets"],

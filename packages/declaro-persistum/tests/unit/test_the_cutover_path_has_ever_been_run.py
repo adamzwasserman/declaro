@@ -101,8 +101,6 @@ async def _cutover(schema_path: str) -> Any:
     mirrored, result = await begin_cutover(
         source,
         target,
-        "sqlite",
-        "sqlite",
         schema_path,
         batch_size=2,
         tables=None,

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import pytest
 
-from declaro_persistum import delete, select, update
+from declaro_persistum.query.builder import delete, select, update
 from declaro_persistum.types import NOTHING
 
 BUILDERS = {

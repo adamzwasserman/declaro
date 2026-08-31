@@ -111,9 +111,7 @@ async def _database() -> Any:
 async def _seeded() -> Any:
     """A database at BEFORE, with a row whose `name` is worth keeping."""
     database = await _database()
-    await apply_migrations_async(
-        database, "sqlite", _models(BEFORE), expand_enums=NOTHING, force=NOTHING
-    )
+    await apply_migrations_async(database, _models(BEFORE), expand_enums=NOTHING, force=NOTHING)
     async with writing(database) as connection:
         await connection.execute('INSERT INTO "users" (id, name) VALUES (?, ?)', (1, "adam"))
         await connection.commit()
@@ -130,7 +128,7 @@ async def test_an_ambiguous_change_is_refused() -> None:
     database = await _seeded()
     try:
         result = await apply_migrations_async(
-            database, "sqlite", _models(AMBIGUOUS), expand_enums=NOTHING, force=NOTHING
+            database, _models(AMBIGUOUS), expand_enums=NOTHING, force=NOTHING
         )
 
         assert result["success"] is False, result
@@ -144,7 +142,7 @@ async def test_the_refusal_says_what_is_ambiguous() -> None:
     database = await _seeded()
     try:
         result = await apply_migrations_async(
-            database, "sqlite", _models(AMBIGUOUS), expand_enums=NOTHING, force=NOTHING
+            database, _models(AMBIGUOUS), expand_enums=NOTHING, force=NOTHING
         )
 
         assert "name" in result["error"] and "title" in result["error"], result
@@ -161,7 +159,7 @@ async def test_nothing_is_applied_when_the_change_is_refused() -> None:
     database = await _seeded()
     try:
         await apply_migrations_async(
-            database, "sqlite", _models(AMBIGUOUS), expand_enums=NOTHING, force=NOTHING
+            database, _models(AMBIGUOUS), expand_enums=NOTHING, force=NOTHING
         )
 
         assert await _columns(database) == ["id", "name"], await _columns(database)
@@ -173,7 +171,7 @@ async def test_the_row_is_still_there_afterwards() -> None:
     database = await _seeded()
     try:
         await apply_migrations_async(
-            database, "sqlite", _models(AMBIGUOUS), expand_enums=NOTHING, force=NOTHING
+            database, _models(AMBIGUOUS), expand_enums=NOTHING, force=NOTHING
         )
 
         async with writing(database) as connection:
@@ -193,7 +191,7 @@ async def test_the_same_change_declared_as_a_rename_is_applied() -> None:
     database = await _seeded()
     try:
         result = await apply_migrations_async(
-            database, "sqlite", _models(DECLARED_RENAME), expand_enums=NOTHING, force=NOTHING
+            database, _models(DECLARED_RENAME), expand_enums=NOTHING, force=NOTHING
         )
 
         assert result["success"] is True, result
@@ -207,7 +205,7 @@ async def test_a_declared_rename_keeps_the_rows() -> None:
     database = await _seeded()
     try:
         await apply_migrations_async(
-            database, "sqlite", _models(DECLARED_RENAME), expand_enums=NOTHING, force=NOTHING
+            database, _models(DECLARED_RENAME), expand_enums=NOTHING, force=NOTHING
         )
 
         async with writing(database) as connection:
@@ -222,7 +220,7 @@ async def test_an_added_column_is_not_ambiguous() -> None:
     database = await _seeded()
     try:
         result = await apply_migrations_async(
-            database, "sqlite", _models(UNAMBIGUOUS), expand_enums=NOTHING, force=NOTHING
+            database, _models(UNAMBIGUOUS), expand_enums=NOTHING, force=NOTHING
         )
 
         assert result["success"] is True, result

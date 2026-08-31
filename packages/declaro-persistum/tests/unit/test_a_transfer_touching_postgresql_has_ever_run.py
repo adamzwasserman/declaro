@@ -143,8 +143,6 @@ async def test_sqlite_to_postgresql_moves_the_rows(schema_path: str) -> None:
         result = await bulk_transfer(
             source,
             target,
-            "sqlite",
-            "postgresql",
             schema_path,
             batch_size=2,
             tables=["widgets"],
@@ -180,8 +178,6 @@ async def test_postgresql_to_sqlite_moves_the_rows(schema_path: str) -> None:
         result = await bulk_transfer(
             source,
             target,
-            "postgresql",
-            "sqlite",
             schema_path,
             batch_size=2,
             tables=["widgets"],
@@ -217,8 +213,6 @@ async def test_a_uuid_arrives_as_a_string_sqlite_can_hold(
         await bulk_transfer(
             source,
             target,
-            "postgresql",
-            "sqlite",
             schema_path,
             batch_size=10,
             tables=["widgets"],

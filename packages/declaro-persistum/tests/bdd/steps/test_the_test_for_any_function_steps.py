@@ -48,27 +48,15 @@ _GATE = pathlib.Path(__file__).resolve().parent / "following_an_argument.py"
 
 # WHAT THE GATE STILL FINDS, and why each one is still there. A RATCHET, not an
 # allowlist: a name comes off when it is fixed, and the count only goes down.
-# Stage 1 of docs/development-plan.md is done when this is empty.
 #
-# The two `bulk_transfer` dialects and the one on `apply_migrations_async` are a
-# second place to name an engine the `Database` already carries. Hand them a
-# database on one engine and the name of another and the wrong introspector
-# runs: measured 2026-08-31, a SQLite database with dialect="postgresql" raises
-# `'Connection' object has no attribute 'fetch'`, which reads as a driver bug.
+# IT IS EMPTY, and it was written holding seven. Three named an engine the
+# `Database` already carries, and they now read it instead. Four were `select`,
+# `insert`, `update` and `delete`, which took a table as a bare string with no
+# model to check it against, and they are no longer exported.
 #
-# The four builder functions take a table as a bare string and paste it into
-# the statement. Nothing checks it against a model, because no model is
-# involved. They are the pre-declarative surface and whether they stay public
-# at all is a decision, not a fix.
-STILL_FOUND: dict[tuple[str, str], str] = {
-    ("apply_migrations_async", "dialect"): "the Database already carries its dialect",
-    ("bulk_transfer", "source_dialect"): "the source Database already carries its dialect",
-    ("bulk_transfer", "target_dialect"): "the target Database already carries its dialect",
-    ("select", "from_table"): "takes a table as a string; no model is involved",
-    ("insert", "into_table"): "takes a table as a string; no model is involved",
-    ("update", "table"): "takes a table as a string; no model is involved",
-    ("delete", "from_table"): "takes a table as a string; no model is involved",
-}
+# An entry here is a decision to ship a function the document forbids, with the
+# reason written down. There is no such decision open.
+STILL_FOUND: dict[tuple[str, str], str] = {}
 
 # Named here so the assertion about the gate's own source has something to
 # assert. Every one of these is also a legal column name, which is the reason

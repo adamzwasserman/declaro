@@ -86,8 +86,6 @@ async def test_a_circular_schema_transfers(tmp_path) -> None:
         result = await bulk_transfer(
             source,
             target,
-            "sqlite",
-            "sqlite",
             str(models),
             tables=NOTHING,
             on_progress=NOTHING,
@@ -124,8 +122,6 @@ async def test_a_failed_re_enable_is_reported_loudly_but_does_not_mask(
         result = await bulk_transfer(
             source,
             target,
-            "sqlite",
-            "sqlite",
             str(models),
             tables=NOTHING,
             on_progress=NOTHING,

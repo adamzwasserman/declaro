@@ -97,8 +97,6 @@ async def test_a_clean_transfer_still_reports_success(tmp_path) -> None:
         result = await bulk_transfer(
             source,
             target,
-            "sqlite",
-            "sqlite",
             str(_models(tmp_path)),
             tables=NOTHING,
             on_progress=NOTHING,

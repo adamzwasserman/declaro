@@ -56,9 +56,7 @@ async def test_a_migration_runs_against_a_database(tmp_path):
         str(tmp_path / "app.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
     )
 
-    await apply_migrations_async(
-        db, "turso", _schema(tmp_path), expand_enums=NOTHING, force=NOTHING
-    )
+    await apply_migrations_async(db, _schema(tmp_path), expand_enums=NOTHING, force=NOTHING)
 
     from declaro_persistum.database import reading
 
@@ -77,8 +75,8 @@ async def test_running_it_twice_changes_nothing_the_second_time(tmp_path):
     )
     schema = _schema(tmp_path)
 
-    await apply_migrations_async(db, "turso", schema, expand_enums=NOTHING, force=NOTHING)
-    second = await apply_migrations_async(db, "turso", schema, expand_enums=NOTHING, force=NOTHING)
+    await apply_migrations_async(db, schema, expand_enums=NOTHING, force=NOTHING)
+    second = await apply_migrations_async(db, schema, expand_enums=NOTHING, force=NOTHING)
 
     applied = second.get("operations_applied", second.get("applied", 0))
     assert applied == 0, (

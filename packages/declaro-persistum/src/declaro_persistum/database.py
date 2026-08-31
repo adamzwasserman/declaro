@@ -64,6 +64,7 @@ from typing import Any, Literal, TypedDict, cast
 from declaro_persistum.boundary import helper
 from declaro_persistum.exceptions import DatabaseClosedError
 from declaro_persistum.reporting import say
+from declaro_persistum.types import Dialect
 from declaro_persistum.writers import TRANSACTIONS, WriteOne
 
 logger = logging.getLogger(__name__)
@@ -274,7 +275,10 @@ class Database(TypedDict):
     """
 
     path: str
-    dialect: str
+    # `Dialect`, not `str`. This field IS the one place the engine is decided,
+    # now that no public function takes it as an argument, so a loose type here
+    # would put every string back in play at the one place that matters.
+    dialect: Dialect
     journal_mode: str
     busy_timeout_s: float
     primary: str | None

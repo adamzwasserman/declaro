@@ -7,7 +7,6 @@ handling FK ordering, progress tracking, and resumability.
 Usage:
     result = await bulk_transfer(
         source, target,
-        "sqlite", "turso",
         schema_path="/path/to/models.py",
     )
 """
@@ -198,7 +197,7 @@ from declaro_persistum.types import (
 
 
 class BulkTransferResult(TypedDict):
-    """Result of a bulk_transfer(, source=NOTHING, target=NOTHING, source_dialect=NOTHING, target_dialect=NOTHING, schema_path=NOTHING, batch_size=NOTHING, tables=NOTHING, expand_enums=NOTHING, on_progress=NOTHING, resume=NOTHING) call."""
+    """Result of a `bulk_transfer` call."""
 
     success: bool
     tables_transferred: int
@@ -403,8 +402,6 @@ _UNENFORCED_ERROR: dict[bool, Callable[[Exception | Nothing], dict[str, str]]] =
 async def bulk_transfer(
     source: Database,
     target: Database,
-    source_dialect: Dialect,
-    target_dialect: Dialect,
     schema_path: str | Path,
     *,
     batch_size: int | Nothing,
@@ -425,10 +422,8 @@ async def bulk_transfer(
         6. Stream each table in FK order with batch commits
 
     Args:
-        source: Source database
-        target: Target database
-        source_dialect: Source database dialect
-        target_dialect: Target database dialect
+        source: Source database, which carries the engine it was opened on
+        target: Target database, which carries the engine it was opened on
         schema_path: Path to Python module with Pydantic models
         batch_size: Rows per batch (default 1000)
         tables: Specific tables to transfer (None = all user tables)
@@ -451,10 +446,16 @@ async def bulk_transfer(
     the_on_progress = resolved(on_progress, None)
     start = datetime.now(UTC)
 
+    # NEITHER ENGINE IS A PARAMETER. Each database carries the engine it was
+    # opened on, so asking for them again is two more things that can be wrong
+    # and two more ways for the wrong loader to run against the right database.
+    source_dialect: Dialect = source["dialect"]
+    target_dialect: Dialect = target["dialect"]
+
     # Step 1: Schema migration on target
     say(__name__, "info", "Applying schema migrations to target database")
     migration_result = await apply_migrations_async(
-        target, target_dialect, schema_path, expand_enums=expand_enums, force=NOTHING
+        target, schema_path, expand_enums=expand_enums, force=NOTHING
     )
     _WHEN_THE_TARGET_MIGRATED[migration_result["success"]](migration_result)
     say(

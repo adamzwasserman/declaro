@@ -92,7 +92,7 @@ async def test_the_second_migration_does_nothing(kind: str, tmp_path) -> None:
     db = await _open(kind, tmp_path)
 
     first = await apply_migrations_async(
-        db, dialect=kind, schema_path=str(models), expand_enums=NOTHING, force=NOTHING
+        db, schema_path=str(models), expand_enums=NOTHING, force=NOTHING
     )
     assert first["success"], first["error"]
     assert first["operations_applied"] > 0, "nothing was created to begin with"
@@ -100,7 +100,7 @@ async def test_the_second_migration_does_nothing(kind: str, tmp_path) -> None:
     # `force` skips the schema-hash cache, which would otherwise return before
     # diffing and hide every defect this file exists for.
     again = await apply_migrations_async(
-        db, dialect=kind, schema_path=str(models), force=True, expand_enums=NOTHING
+        db, schema_path=str(models), force=True, expand_enums=NOTHING
     )
     assert again["success"], again["error"]
     assert again["operations_applied"] == 0, (
@@ -122,9 +122,7 @@ async def test_a_materialized_view_is_not_reported_as_a_table(kind: str, tmp_pat
     models = tmp_path / "models.py"
     models.write_text(MODELS)
     db = await _open(kind, tmp_path)
-    await apply_migrations_async(
-        db, dialect=kind, schema_path=str(models), expand_enums=NOTHING, force=NOTHING
-    )
+    await apply_migrations_async(db, schema_path=str(models), expand_enums=NOTHING, force=NOTHING)
 
     async with reading(db) as conn:
         schema, views = await introspect_with_views(conn, kind)

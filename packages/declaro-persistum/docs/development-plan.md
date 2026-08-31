@@ -42,6 +42,10 @@ They do not stop existing. The internals still open connections and the applier 
 
 **Done when** the gate in `the_test_for_any_function.feature` passes: no public function takes a live connection, hands one back, or takes a string that is neither a declared name nor a bound value.
 
+The gate exists now, in `tests/bdd/steps/following_an_argument.py`. It reads source and follows each argument of a public function to what becomes of it, and it holds an empty ratchet: nothing on the surface takes a connection, hands one back, names an engine, or pastes an argument into a statement.
+
+**One thing is left, and the gate cannot see it.** `field(check="total >= 0")` takes a SQL fragment. `field` is declared `**declared: Unpack[ColumnFacets]`, so `check` is a key of a TypedDict rather than a parameter, and following arguments through a `**kwargs` is past the gate's horizon. Its scenario is red and says so. Closing it means deciding what a declared constraint is, which is on the schema axis below rather than here.
+
 **Why first:** a passing suite over a surface nobody wants tells you nothing. Deleting it first turns every place that depended on it into a question somebody has to answer, which is the only reliable way to find them all.
 
 ## Stage 2: one question, end to end

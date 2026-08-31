@@ -101,8 +101,6 @@ async def _transfer(
     return await bulk_transfer(
         source,
         target,
-        "sqlite",
-        "sqlite",
         schema_path,
         batch_size=2,
         tables=["widgets"],
@@ -213,8 +211,6 @@ async def _failed_once(schema_path: str) -> tuple[Any, Any]:
     result = await bulk_transfer(
         source,
         target,
-        "sqlite",
-        "sqlite",
         schema_path,
         batch_size=1,
         tables=["widgets"],
@@ -390,8 +386,6 @@ async def test_the_batches_before_a_failure_are_already_durable(
         result = await bulk_transfer(
             source,
             target,
-            "sqlite",
-            "sqlite",
             schema_path,
             batch_size=1,
             tables=["widgets"],

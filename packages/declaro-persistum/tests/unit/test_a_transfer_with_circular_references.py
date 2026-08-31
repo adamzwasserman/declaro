@@ -149,8 +149,6 @@ async def test_the_rows_land_despite_the_cycle(schema_path: str) -> None:
         result = await bulk_transfer(
             source,
             target,
-            "sqlite",
-            "postgresql",
             schema_path,
             batch_size=10,
             tables=["husbands", "wives"],
@@ -180,8 +178,6 @@ async def test_enforcement_is_restored_afterwards(schema_path: str) -> None:
         await bulk_transfer(
             source,
             target,
-            "sqlite",
-            "postgresql",
             schema_path,
             batch_size=10,
             tables=["husbands", "wives"],
@@ -214,8 +210,6 @@ async def test_a_violating_row_is_refused_after_the_transfer(
         await bulk_transfer(
             source,
             target,
-            "sqlite",
-            "postgresql",
             schema_path,
             batch_size=10,
             tables=["husbands", "wives"],

@@ -51,20 +51,20 @@ from declaro_persistum.write_queue import (
 )
 
 # TursoCloudManager — four classes, now deleted. `database.py` replaces them
-# The query API. This package was UNREACHABLE from here after the query
-# rewrite — the reachability ratchet caught it, which is what it exists for.
-# Nobody could `from declaro_persistum import select`.
+#
+# `select`, `insert`, `update` and `delete` ARE NOT HERE ANY MORE. Each took a
+# table as a bare string and pasted it into the statement, with no model
+# involved and so nothing to check the name against. They are the surface
+# HOW-IT-SHOULD-WORK.md was written to replace, and they were the last of it.
+# They still exist in `query/builder.py`, where the library uses them to do its
+# own job. What ended is a caller reaching them.
 from declaro_persistum.query import (
     OPERATORS,
     Query,
     case_,
     count_,
-    delete,
-    insert,
     render_condition,
-    select,
     subquery,
-    update,
 )
 
 # `table` is NOT re-exported from query. The root name is the schema decorator,
@@ -160,10 +160,6 @@ __all__ = [
     "stop_crew",
     "Crew",
     # query — functions over data
-    "select",
-    "insert",
-    "update",
-    "delete",
     "Query",
     "render_condition",
     "OPERATORS",

@@ -41,6 +41,10 @@ A_CONNECTION = ("DbapiConnection", "DbapiCursor", "FetchingConnection", "Replica
 # second place to name one is a second thing that can be wrong, and the two can
 # disagree without anything noticing until the wrong introspector runs.
 AN_ENGINE = ("Dialect",)
+# BY SUBSTRING, NOT BY EQUALITY. `begin_cutover(source_dialect: str, ...)` had
+# the offence and the loose type both, so an exact-name check missed it and the
+# annotation check missed it too. It stayed hidden until the two functions
+# either side of it were fixed.
 AN_ENGINE_BY_NAME = ("dialect", "engine", "backend")
 
 
@@ -105,7 +109,7 @@ def _takes_an_engine(node: ast.FunctionDef | ast.AsyncFunctionDef, where: str) -
     return [
         Offence(where, node.name, arg.arg, "names an engine the Database already carries")
         for arg in _arguments(node)
-        if arg.arg.lower() in AN_ENGINE_BY_NAME
+        if any(named in arg.arg.lower() for named in AN_ENGINE_BY_NAME)
         or any(named in _spelled(arg.annotation) for named in AN_ENGINE)
     ]
 

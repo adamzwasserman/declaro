@@ -916,7 +916,6 @@ _NOTHING_TO_VALIDATE: dict[str, list[str]] = {"errors": [], "warnings": []}
 @helper
 async def apply_migrations_async(
     db: Database,
-    dialect: Dialect,
     schema_path: str | Path,
     *,
     expand_enums: bool | Nothing,
@@ -931,9 +930,15 @@ async def apply_migrations_async(
     Uses a SHA-256 hash of the schema file to skip introspection when
     the schema hasn't changed since the last successful migration.
 
+    THE ENGINE IS NOT A PARAMETER. It used to be, and a caller could name one
+    engine while handing over a database on another. Do that and the wrong
+    introspector runs: a SQLite database with `dialect="postgresql"` raised
+    `'Connection' object has no attribute 'fetch'`, which reads as a driver
+    bug rather than as the caller naming the wrong engine. The database
+    already knows what it is, so it is read here rather than asked for.
+
     Args:
-        db: The database
-        dialect: Database dialect ('sqlite', 'turso', 'postgresql')
+        db: The database, which carries the engine it was opened on
         schema_path: Path to Python module containing Pydantic models
         expand_enums: Whether to expand Literal types to lookup tables (default True)
         force: Bypass the skip-if-clean check and always run full introspection
@@ -955,6 +960,7 @@ async def apply_migrations_async(
     expand_enums = resolved(expand_enums, True)
     force = resolved(force, False)
     file = Path(schema_path)
+    dialect: Dialect = db["dialect"]
 
     plan = await _WHEN_THE_SCHEMA_FILE_IS_THERE[file.exists()](
         db, dialect, file, expand_enums, force

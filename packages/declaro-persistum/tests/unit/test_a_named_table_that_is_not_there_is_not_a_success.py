@@ -81,8 +81,6 @@ async def test_naming_tables_that_exist_transfers_them(tmp_path) -> None:
         result = await bulk_transfer(
             source,
             target,
-            "sqlite",
-            "sqlite",
             str(models),
             tables=["users", "orders"],
             on_progress=NOTHING,
@@ -104,8 +102,6 @@ async def test_naming_a_subset_still_works(tmp_path) -> None:
         result = await bulk_transfer(
             source,
             target,
-            "sqlite",
-            "sqlite",
             str(models),
             tables=["users"],
             on_progress=NOTHING,
@@ -132,8 +128,6 @@ async def test_naming_a_table_that_is_not_there_raises(tmp_path) -> None:
             await bulk_transfer(
                 source,
                 target,
-                "sqlite",
-                "sqlite",
                 str(models),
                 tables=["users", "orders_typo"],
                 on_progress=NOTHING,
@@ -160,8 +154,6 @@ async def test_the_error_names_every_missing_table_not_just_the_first(
             await bulk_transfer(
                 source,
                 target,
-                "sqlite",
-                "sqlite",
                 str(models),
                 tables=["users", "gone_one", "gone_two"],
                 on_progress=NOTHING,
@@ -189,8 +181,6 @@ async def test_nothing_is_transferred_when_a_name_is_wrong(tmp_path) -> None:
             await bulk_transfer(
                 source,
                 target,
-                "sqlite",
-                "sqlite",
                 str(models),
                 tables=["users", "orders_typo"],
                 on_progress=NOTHING,
@@ -216,8 +206,6 @@ async def test_asking_for_everything_is_not_a_claim_about_any_table(
         result = await bulk_transfer(
             source,
             target,
-            "sqlite",
-            "sqlite",
             str(models),
             tables=None,
             on_progress=NOTHING,

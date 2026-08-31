@@ -8,13 +8,13 @@ Orchestrates a 4-phase cutover from a local database to a remote database:
     Phase 3: promote_mirror() — remote becomes primary
     Phase 4: detach_mirror() — run on remote alone
 
-begin_cutover(, source=NOTHING, target=NOTHING, source_dialect=NOTHING, target_dialect=NOTHING, schema_path=NOTHING, batch_size=NOTHING, tables=NOTHING, expand_enums=NOTHING, on_progress=NOTHING, resume=NOTHING, fail_open=NOTHING, compare_on_read=NOTHING) handles Phase 1 + 2 setup. Phase 3 + 4 are manual calls
+`begin_cutover` handles Phase 1 + 2 setup. Phase 3 + 4 are manual calls
 because the verification window has indeterminate duration — the caller
 decides when confidence is sufficient.
 
 Usage:
     m = await begin_cutover(
-            source, target, schema_path="models/", target_dialect="postgresql"
+            source, target, schema_path="models/"
         )
     # verify through the mirror, then:
     m = promote(m)
@@ -44,8 +44,6 @@ logger = logging.getLogger(__name__)
 async def begin_cutover(
     source: Database,
     target: Database,
-    source_dialect: str,
-    target_dialect: str,
     schema_path: str | Path,
     *,
     batch_size: int | Nothing,
@@ -65,8 +63,6 @@ async def begin_cutover(
     Args:
         source: Source (local) database — becomes the mirror's primary
         target: Target (remote) database — becomes the mirror's replica
-        source_dialect: Source database dialect
-        target_dialect: Target database dialect
         schema_path: Path to Python module with Pydantic models
         batch_size: Rows per batch during transfer
         tables: Specific tables to transfer (None = all)
@@ -100,8 +96,6 @@ async def begin_cutover(
     result = await bulk_transfer(
         source,
         target,
-        source_dialect,
-        target_dialect,
         schema_path,
         batch_size=batch_size,
         tables=the_tables,
