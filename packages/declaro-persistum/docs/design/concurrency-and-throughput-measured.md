@@ -1,5 +1,30 @@
 # Concurrency and throughput, measured
 
+> ## READ THESE FIRST. NOT OPTIONAL.
+>
+> Nothing in this document may be reasoned about, quoted or acted on until you have read all three, word for word:
+>
+> 1. [Concurrent writes on Turso Cloud](https://turso.tech/blog/concurrent-writes-on-turso-cloud)
+> 2. [Turso 0.7.0](https://turso.tech/blog/turso-0.7.0)
+> 3. [Concurrent writes in practice](https://turso.tech/blog/concurrent-writes-in-practice)
+>
+> ### A SYNC CONNECTION AND A WRITE TO THE JOURNAL ARE TWO DIFFERENT THINGS
+>
+> Every wrong answer this project has produced about concurrency came from treating them as one thing. Read this table before you write a sentence containing the word "concurrency".
+>
+> | | **a write to the journal** | **a sync connection** |
+> |---|---|---|
+> | what it is | one transaction appending to the local database file | the channel between this copy and the primary |
+> | how many at once | many, under MVCC with `BEGIN CONCURRENT` | exactly one |
+> | what limits it | row-level write conflicts, at commit | the engine: a second one answers `database tape error: database is busy` |
+> | when it happens | whenever a caller writes | on push and pull |
+> | does it bound writers | no | **NO** |
+>
+> **The one sync connection is not a writer and does not make writers wait.** It carries a log to and from the primary. Local writes go to the journal, concurrently, and the sync connection ships them later. A measurement that a second sync connection fails is a fact about the channel and says NOTHING about how many writes can be in flight.
+>
+> So: "a replica permits one connection" is false. "A replicated database serialises writers" is false. Turso's sync engine syncs MVCC databases, so replicated and concurrent are not opposites. If a sentence concludes something about concurrency from a count of connections, it is wrong.
+
+
 **Status: measurement record. 2026-08-11 / 2026-08-12.** Every number here carries the machine it came from. Where a number is wrong or contaminated, it says so rather than being deleted.
 
 ## The question

@@ -48,6 +48,37 @@ N drainers, each holding its own connection, and that reuse is the larger of
 the two levers. Do not read `writing(db)` as the concurrent path — it is the
 one-writer path, and reaching for it in a loop is how this package has
 arrived at connection-per-write three separate times.
+
+READ THESE BEFORE CHANGING ANYTHING HERE. NOT OPTIONAL.
+
+    https://turso.tech/blog/concurrent-writes-on-turso-cloud
+    https://turso.tech/blog/turso-0.7.0
+    https://turso.tech/blog/concurrent-writes-in-practice
+
+A SYNC CONNECTION AND A WRITE TO THE JOURNAL ARE TWO DIFFERENT THINGS, and
+every wrong answer this project has produced about concurrency came from
+treating them as one:
+
+                    a write to the journal      a sync connection
+    what it is      one transaction appending   the channel between this
+                    to the local file           copy and the primary
+    how many        MANY, under MVCC with       EXACTLY ONE
+                    BEGIN CONCURRENT
+    limited by      row conflicts, at commit    the engine: a second one is
+                                                "database tape error:
+                                                 database is busy"
+    when            whenever a caller writes    on push and pull
+    bounds writers  no                          NO
+
+THE ONE SYNC CONNECTION IS NOT A WRITER AND DOES NOT MAKE WRITERS WAIT. It
+carries a log to and from the primary. Local writes go to the journal,
+concurrently, and the sync connection ships them later. A measurement that a
+second sync connection fails is a fact about the channel and says NOTHING
+about how many writes can be in flight.
+
+So "a replica permits one connection" is false, and "a replicated database
+serialises writers" is false. If a sentence concludes something about
+concurrency from a count of connections, it is wrong.
 """
 
 from __future__ import annotations

@@ -22,9 +22,27 @@ on every connection:
     MVCC alone       1.70x
     both            18.87x   <- they COMPOUND
 
-Connection REUSE removes the per-write OS worker thread and is the bigger
-lever. MVCC and `BEGIN CONCURRENT` are what let a crew write in PARALLEL and
-are what make it correct. Neither alone gets there.
+A CREW DOES NOT DEPEND ON MVCC, and this said it did. Staggering is the async
+part: callers stop blocking, the queue keeps the writer fed, and the writer
+stops going idle between writes. That works on any journal mode. On WAL the
+engine permits one writer at a time, so the writes still serialise and what
+you get is a crew of one that is never idle, which is already the point.
+
+MVCC AND `BEGIN CONCURRENT` BUY THE CREW SIZE. They let drainers overlap
+inside the engine rather than queue behind one writer, so they raise the
+ceiling rather than make the thing work. Connection REUSE is the other lever
+and removes the per-write OS worker thread. They compound, which is what the
+18.87x above is.
+
+WHERE THE CEILING IS, from the spike in `docs/design/concurrency-and-
+throughput-measured.md`:
+
+    knee   32 on Render Pro, 64 on pro_ultra   (8x the CPU count, one data point)
+    peak   641/sec and 1,175/sec
+    cliff  512 on both, and steep: 512 workers deliver less than 16 do
+
+The band is wide. Crews of 16 to 256 on pro_ultra are within 10% of peak, so
+order of magnitude is what matters and precision is not.
 
 THOSE NUMBERS ARE FROM A RENDER INSTANCE, NOT A LAPTOP. macOS file locking
 behaves differently enough that a Mac measurement of concurrent local writers
@@ -40,6 +58,37 @@ DDL DOES NOT GO THROUGH THE CREW. A table created on an MVCC connection is
 invisible to every other connection (measured 2026-08-12: "Parse error: no
 such table"). Migration takes its own WAL connection — `turso_database
 .migrating` — and must complete before a crew starts.
+
+READ THESE BEFORE CHANGING ANYTHING HERE. NOT OPTIONAL.
+
+    https://turso.tech/blog/concurrent-writes-on-turso-cloud
+    https://turso.tech/blog/turso-0.7.0
+    https://turso.tech/blog/concurrent-writes-in-practice
+
+A SYNC CONNECTION AND A WRITE TO THE JOURNAL ARE TWO DIFFERENT THINGS, and
+every wrong answer this project has produced about concurrency came from
+treating them as one:
+
+                    a write to the journal      a sync connection
+    what it is      one transaction appending   the channel between this
+                    to the local file           copy and the primary
+    how many        MANY, under MVCC with       EXACTLY ONE
+                    BEGIN CONCURRENT
+    limited by      row conflicts, at commit    the engine: a second one is
+                                                "database tape error:
+                                                 database is busy"
+    when            whenever a caller writes    on push and pull
+    bounds writers  no                          NO
+
+THE ONE SYNC CONNECTION IS NOT A WRITER AND DOES NOT MAKE WRITERS WAIT. It
+carries a log to and from the primary. Local writes go to the journal,
+concurrently, and the sync connection ships them later. A measurement that a
+second sync connection fails is a fact about the channel and says NOTHING
+about how many writes can be in flight.
+
+So "a replica permits one connection" is false, and "a replicated database
+serialises writers" is false. If a sentence concludes something about
+concurrency from a count of connections, it is wrong.
 """
 
 from __future__ import annotations
