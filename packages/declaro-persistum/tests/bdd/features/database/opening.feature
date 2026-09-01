@@ -11,16 +11,24 @@ Feature: What a database is when you open it, and what that decides
   it is what the package does today. This file goes when that one passes.
 
   One predicate branches the rest of the library: whether the database has a primary.
-  A synced replica takes ONE connection, measured 2026-08-12 against a real replica on
-  pyturso 0.7.2:
+  It decides whether shutdown has anywhere to push, and it is derived from `primary`
+  rather than stored beside it, because a second flag could disagree with the first.
 
-    20 writes, sequential, 1 connection    20 local -> 20 on primary
-    8 writes over 8 connections             5 local ->  0 on primary, no convergence
-    opening a 2nd sync connection           "database is busy", 3 of 4 runs failed
+  IT DOES NOT DECIDE WHETHER WRITERS SERIALISE, and it used to. A replica holds ONE
+  connection, and one connection runs many writers under `BEGIN CONCURRENT`, so a
+  count of connections says nothing about how many writes can be in flight. The lock
+  built on that inference is gone. Measured 2026-09-01 against a real primary on
+  pyturso 0.7.2, 16 concurrent writers, one variable at a time:
 
-  So a replicated database serialises its writers and a local one does not, and that
-  choice is derived from the primary rather than stored beside it. A second flag could
-  disagree with the first; a derived answer cannot. This is declaro-eer and declaro-dna.
+    journal   lock     16 writes   blocked   durable   on primary
+    wal       held        5.7 ms        15     17/17        17/17
+    wal       none        2.4 ms         0     17/17        17/17
+    mvcc      held           --        --        --   sync refused
+    mvcc      none           --        --        --   sync refused
+
+  A replica stays on WAL, and not because writers need serialising. Under MVCC the
+  sync engine cannot pull: `conn.pull()` raises "Database is busy" at close, every
+  time, with or without the lock.
 
   Scenario: opening a local database does not connect to anything
     Given a temporary directory
@@ -59,12 +67,17 @@ Feature: What a database is when you open it, and what that decides
     Then it reports that it is not replicated
     And it carries no write lock, because nothing needs serialising
 
+  # THIS SCENARIO USED TO ASSERT THE OPPOSITE and it passed. It said a
+  # replicated database carries a write lock "because the replica takes one
+  # connection", which is the inference the README banner exists to refuse: a
+  # count of connections is a fact about the channel and says nothing about
+  # how many writes can be in flight.
   @network
-  Scenario: a replicated database serialises its writers
+  Scenario: a replicated database leaves its writers unserialised too
     Given a temporary directory
     When a Turso database is opened with a primary
     Then it reports that it is replicated
-    And it carries a write lock, because the replica takes one connection
+    And it carries no write lock, because one connection runs many writers
 
   @network
   Scenario: the answer comes from the primary, not from a flag beside it

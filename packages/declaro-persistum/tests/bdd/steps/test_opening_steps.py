@@ -231,26 +231,22 @@ def _then_replicated(ctx):
     assert is_replicated(ctx["db"]) is True, ctx["db"]["primary"]
 
 
-@then("it carries a write lock, because the replica takes one connection")
-def _then_has_lock(ctx):
-    """declaro-eer, in one assertion.
+@then("it carries no write lock, because one connection runs many writers")
+def _then_replica_has_no_lock(ctx):
+    """The reverse of what this step asserted until 2026-09-01.
 
-    Measured against a real replica: 8 writes over 8 connections reached the
-    primary 0 times, and opening a second sync connection failed 3 runs in 4.
-    persistum opens a connection per write, so on a replica the lock is the
-    only thing keeping that to one at a time. It is load-bearing for a reason
-    that went unrecorded until declaro-eer.
+    It required a lock, on the reading that a replica takes one connection so
+    writes must go one at a time. The connection count is right and the
+    conclusion is not: `BEGIN CONCURRENT` runs many writers on one connection.
+
+    Measured against a real primary, 16 concurrent writers with no lock:
+    nothing ever blocked, 17 of 17 durable locally and 17 of 17 on the
+    primary, over four runs and once at 64 writers.
     """
-    lock = ctx["db"]["serialise"]
-
-    assert lock is not None, (
-        "a replicated database carries no write lock. persistum opens a "
-        "connection per write, and a synced replica takes ONE: without this, "
-        "writes land locally and never reach the primary."
-    )
-    assert "waiting" in lock, (
-        f"the lock has no `waiting` count: {sorted(lock)}. Nothing can then "
-        f"report how many writers are queued behind it."
+    assert ctx["db"]["serialise"] is None, (
+        "a replicated database still carries a write lock. It serialises "
+        "writers that BEGIN CONCURRENT would have run at once, and it was "
+        "built on a count of connections rather than a count of writes."
     )
 
 

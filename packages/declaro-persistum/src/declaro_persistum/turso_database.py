@@ -5,38 +5,46 @@ injected. This is where they come from, which keeps the driver in one place
 and lets the rest of the package — and every test — work against a `Database`
 without importing an engine.
 
-THE ENGINE CHOICE IS MADE HERE AND NOWHERE ELSE, from one fact:
+THE JOURNAL MODE IS CHOSEN HERE AND NOWHERE ELSE, from one fact:
 
-    primary set  ->  replicated  ->  WAL,  writers serialised
-    no primary   ->  local       ->  MVCC, writers concurrent
+    primary set  ->  replicated  ->  WAL
+    no primary   ->  local       ->  MVCC
 
-WHY, MEASURED 2026-08-12 against a real replica, pyturso 0.7.2, one variable
-at a time — 2 journal modes x 4 preludes, every cell run:
+WRITERS ARE NOT SERIALISED ON EITHER. Both open with `serialise=None` and both
+write through `BEGIN CONCURRENT`.
 
-    does a SECOND connection open on the same replica?
-      wal  / nothing written    OPENED
-      wal  / after CREATE       OPENED
-      wal  / after commit       OPENED
-      wal  / after push         OPENED
-      mvcc / nothing written    OPENED
-      mvcc / after CREATE       REFUSED  "database tape error: database is busy"
-      mvcc / after commit       REFUSED
-      mvcc / after push         REFUSED
+WHY WAL ON A REPLICA, and it is NOT because writers need serialising. Under
+MVCC the sync engine cannot pull: `conn.pull()` raises `sync engine operation
+failed: database error: Database is busy`, at close, every time. Measured
+2026-09-01 against a real primary on pyturso 0.7.2, 16 concurrent writers, one
+variable at a time:
 
-Under MVCC on a replicated database, once anything has been written no second
-connection can open — persistent, not transient: 15 retries over ~35s did not
-get one. MVCC's whole benefit is concurrency ACROSS connections, so on a
-replicated database it delivers none while still carrying the stranding that
-got 0.1.29 yanked.
+    journal   lock     16 writes   blocked   durable   on primary
+    wal       held        5.7 ms        15     17/17        17/17
+    wal       none        2.4 ms         0     17/17        17/17
+    mvcc      held           --        --        --   sync refused
+    mvcc      none           --        --        --   sync refused
 
-Under WAL many connections open, but the engine rejects the second WRITER: 8
-open with no lock, 1 of 8 writes landed. That is what the serialisation lock
-is for, and it costs no concurrency MVCC could have recovered.
+The mode is the variable. The lock changes nothing about whether sync works,
+and removing it costs nothing: four runs at 16 writers and one at 64, every
+write durable locally and on the primary, nothing ever blocked.
 
-So neither mode gives a replicated database concurrent writers, and WAL is the
-one that fails safely. Earlier versions of this reasoning claimed MVCC "cannot
-run" on a replica (false — it runs) and blamed unreconcilable internal tables
-(never proven). Both retracted.
+WHAT THE LOCK WAS FOR, AND WHY IT WAS WRONG. An earlier measurement found that
+a second connection to a replica is refused under MVCC, and that under WAL the
+engine rejects a second WRITER across 8 open connections. Both readings are
+real. The conclusion drawn from them, that a replicated database must serialise
+its writers, does not follow: this module opens exactly ONE connection to a
+replica and hands it to every write, so the eight-connection measurement
+describes a situation the code never creates. `BEGIN CONCURRENT` runs many
+writers on one connection, and a crew staggers them there.
+
+A sync connection and a write to the journal are two different things. Every
+wrong answer this project has produced about concurrency, this lock included,
+came from treating them as one.
+
+Earlier versions of this reasoning also claimed MVCC "cannot run" on a replica
+(false — it runs, and only its sync does not) and blamed unreconcilable
+internal tables (never proven). Both retracted.
 
 A REPLICATED DATABASE HOLDS ONE CONNECTION. Opening one per write is
 declaro-dna, which took a consumer's box down at 20 concurrent signups where
@@ -97,7 +105,6 @@ from declaro_persistum.database import (
     ShutdownPolicy,
     already_delivered,
     check_shutdown,
-    new_write_lock,
     no_passes,
     nothing_was_trapped,
     writing,
@@ -565,7 +572,7 @@ async def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
 async def _open_replicated(
     path: str, primary: str, token: str | None, shutdown: ShutdownPolicy
 ) -> Database:
-    """A replicated database: WAL, serialised writers, ONE held connection.
+    """A replicated database: WAL, concurrent writers, ONE held connection.
 
     The connection is opened here and handed to every write, because opening
     one per write is declaro-dna — one sync handshake and one OS worker thread
@@ -659,7 +666,7 @@ async def _open_replicated(
         # the schema change would never leave this machine. A replica is on
         # WAL already, so there is no MVCC blind spot to avoid.
         for_ddl=writing,
-        serialise=new_write_lock(asyncio.Lock()),  # WAL: one writer
+        serialise=None,  # nothing to serialise: one connection, BEGIN CONCURRENT
         shutdown=shutdown,
         write_one=WRITERS[ENGINE],
         replicate_once=replicate_once,

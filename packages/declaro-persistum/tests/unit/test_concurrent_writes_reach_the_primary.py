@@ -53,8 +53,8 @@ def _a_fresh_replica_path() -> str:
 
 async def test_every_concurrent_write_crosses_to_the_primary() -> None:
     """Eight overlapping writes, and the primary ends up with all eight."""
-    from declaro_persistum import close, open_turso, writing
-    from declaro_persistum.database import writers_waiting
+    from declaro_persistum import close, open_turso
+    from declaro_persistum.database import writing
 
     url, token = _the_primary()
     db = await open_turso(
@@ -66,19 +66,24 @@ async def test_every_concurrent_write_crosses_to_the_primary() -> None:
             await conn.execute(f'DROP TABLE IF EXISTS "{TABLE}"')
             await conn.execute(f'CREATE TABLE "{TABLE}" (id INTEGER PRIMARY KEY)')
 
-        async def watch() -> None:
-            nonlocal peak
-            while True:
-                peak = max(peak, writers_waiting(db))
-                await asyncio.sleep(0)
+        # WRITERS IN FLIGHT, COUNTED BY THIS TEST. It used to count writers
+        # blocked on the serialise lock, which proved overlap only while the
+        # lock existed and made the test unable to survive its removal. A test
+        # that can only pass under the design it was written beside is pinning
+        # that design rather than measuring anything.
+        in_flight = 0
 
         async def one(i: int) -> None:
-            async with writing(db) as conn:
-                await conn.execute(f'INSERT INTO "{TABLE}" (id) VALUES (?)', (i,))
+            nonlocal in_flight, peak
+            in_flight += 1
+            peak = max(peak, in_flight)
+            try:
+                async with writing(db) as conn:
+                    await conn.execute(f'INSERT INTO "{TABLE}" (id) VALUES (?)', (i,))
+            finally:
+                in_flight -= 1
 
-        eye = asyncio.create_task(watch())
         await asyncio.gather(*(one(i) for i in range(WRITERS)))
-        eye.cancel()
 
         async with writing(db) as conn:
             cursor = await conn.execute(f'SELECT count(*) FROM "{TABLE}"')
@@ -90,9 +95,9 @@ async def test_every_concurrent_write_crosses_to_the_primary() -> None:
     # THE WRITES HAVE TO HAVE OVERLAPPED or this measures nothing. Eight
     # writes that politely queued would reach the primary under the broken
     # design too.
-    assert peak > 0, (
-        "no writer ever blocked on the serialise lock, so these eight writes "
-        "did not overlap and this test proves nothing about concurrency"
+    assert peak > 1, (
+        f"only {peak} write was ever in flight, so these {WRITERS} writes did "
+        f"not overlap and this test proves nothing about concurrency"
     )
     assert local == WRITERS, f"{local} of {WRITERS} writes were durable even locally"
 
@@ -127,7 +132,8 @@ async def test_a_replica_that_never_pushed_leaves_the_primary_empty() -> None:
     primary. That is the stranding shape declaro-p39 recorded, produced here
     on purpose.
     """
-    from declaro_persistum import close, open_turso, writing
+    from declaro_persistum import close, open_turso
+    from declaro_persistum.database import writing
 
     url, token = _the_primary()
     unpushed = "_test_never_pushed"

@@ -302,11 +302,17 @@ class Database(TypedDict):
 def is_replicated(db: Database) -> bool:
     """True when this database has a primary.
 
-    The one predicate the rest of the library branches on. Measured
-    2026-08-12: a replicated database takes ONE connection under MVCC once
-    anything has been written, and rejects the second writer under WAL. So
-    `is_replicated` is what decides whether writers must be serialised, and
-    it is derived from data rather than stored as a second flag that could
+    The one predicate the rest of the library branches on: whether there is
+    somewhere to replicate to, and so whether shutdown has anything to push.
+
+    IT DOES NOT DECIDE WHETHER WRITERS SERIALISE. It used to, and that was
+    wrong. A replica takes one connection, and one connection runs many
+    writers under `BEGIN CONCURRENT`, so a count of connections says nothing
+    about how many writes can be in flight. Measured 2026-09-01 against a real
+    primary: 16 concurrent writers with no lock, nothing blocked, 17 of 17
+    durable locally and 17 of 17 on the primary. See `turso_database.py`.
+
+    It is derived from data rather than stored as a second flag that could
     disagree with `primary`.
     """
     return db["primary"] is not None
