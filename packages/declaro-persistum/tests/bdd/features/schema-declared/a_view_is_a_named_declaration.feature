@@ -1,7 +1,7 @@
 @bdd @specification
-Feature: A view is a question with a name
+Feature: A view is a declaration with a name
   You declare a view against your models and the library writes the SELECT. That
-  sentence only means something if a view holds a question rather than a string, which
+  sentence only means something if a view holds a declaration rather than a string, which
   is the same object an engine produces.
 
   Scenario: a view is declared against models
@@ -24,9 +24,9 @@ Feature: A view is a question with a name
     When a view is declared as orders with the name of the person who placed them
     Then the library works out the join from the declared reference
 
-  Scenario: changing a view's question changes the database
+  Scenario: changing a view's declaration changes the database
     Given a declared view already in the database
-    When its question changes
+    When its declaration changes
     Then bringing the schema up to date replaces the view
     And it does not report success while changing nothing
 

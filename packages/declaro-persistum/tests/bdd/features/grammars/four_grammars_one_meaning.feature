@@ -49,6 +49,16 @@ Feature: Four grammars, one meaning
     When the same question is asked in all four grammars
     Then all four answers are equal
 
+  Scenario: the four declarations are equal, not merely the rows
+    When the same question is asked in all four grammars
+    Then the four declarations they built are equal
+    And a dictionary can hold one as a key
+
+  Scenario: a declaration is inspectable before it runs
+    When a caller writes a question and does not run it
+    Then what they hold can be read, compared and stored
+    And building it opened no connection
+
   Scenario: the pseudo-SQL grammar reads in SQL's word order
     When a caller writes select, then from, then where
     Then the library accepts it in that order
