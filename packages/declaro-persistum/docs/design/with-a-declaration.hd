@@ -1,0 +1,166 @@
+# DESIGN A — four grammars produce one declaration, and one function renders it.
+#
+# Read beside `straight-to-sql.hd`, the same surface with the middle value
+# removed. Neither is built. Both are drawn so the columns can be compared.
+#
+# TWO CHAINS, AND THEY MEET AT `render`. Asking a question runs left to right
+# through a grammar, a rendering and the database. Migrating a view runs from
+# the schema file, through the same rendering, to the database. That `render`
+# is one card serving both is the claim this design makes.
+
+module with-a-declaration
+
+  layer domain
+
+  # --- the value the four grammars agree on ------------------------------
+  #
+  # Read off the twenty-three vocabulary words in `asking.py` rather than
+  # invented: every field is an argument one of them already takes. `word` is
+  # the exception and has to be here, because `all` and `count` take identical
+  # arguments and differ only in what they want back.
+  #
+  # NO DATABASE FIELD, and a view is why. A view is declared in a schema file
+  # beside the models, with no database in sight, and it holds this value.
+
+  type Narrowing = {
+    column: str
+    operator: str
+    value: any
+  }
+
+  type Ordering = {
+    column: str
+    direction: str
+  }
+
+  type Declaration = {
+    word: str
+    model: any
+    columns: list<str>
+    narrowing: list<Narrowing>
+    order: list<Ordering>
+    measures: dict<str, str>
+    kept: dict<str, any>
+    values: dict<str, any>
+    related: any
+  }
+
+  # A view is a name and a freshness, which are schema, plus a Declaration,
+  # which is the SELECT. "The library writes the SELECT" is this type saying so.
+
+  type View = {
+    name: str
+    declaration: Declaration
+    materialized: bool
+    freshness: str
+  }
+
+  type Schema = {
+    models: dict<str, any>
+    views: dict<str, View>
+  }
+
+  # What rendering gives back: the statement, and the values it did NOT write
+  # into the statement, kept apart so the driver binds them.
+
+  type Statement = {
+    sql: str
+    parameters: dict<str, any>
+  }
+
+  type Answer = {
+    rows: list<any>
+    row: any
+    number: int
+    truth: bool
+    mappings: list<dict<str, any>>
+    failure: any
+  }
+
+  type Database = {
+    path: str
+    engine: str
+  }
+
+  # --- column 1: input I/O -----------------------------------------------
+  #
+  # The schema file is read once. The QUERY chain has no input boundary of its
+  # own, because a model is a Python class the caller already imported; the
+  # only thing that reads the world before a question is asked is this.
+
+  boundary_in fn load_declarations : (module_path: str) -> Schema side_effect reads "python_module"
+
+  # --- column 3: the four grammars ---------------------------------------
+  #
+  # Four functions into one type. A fifth grammar is a fifth card here and
+  # changes nothing to its right.
+
+  fn declared_in_pseudo_sql : (model: any, asked: dict<str, any>) -> Declaration
+
+  fn declared_in_django : (model: any, asked: dict<str, any>) -> Declaration
+
+  fn declared_in_prisma : (model: any, asked: dict<str, any>) -> Declaration
+
+  fn declared_in_sqlalchemy : (model: any, asked: dict<str, any>) -> Declaration
+
+  # --- column 3: the step both chains share ------------------------------
+
+  fn render : (declaration: Declaration, engine: str) -> Statement
+
+  fn answered : (declaration: Declaration, rows: list<any>) -> Answer
+
+  fn views_in : (schema: Schema) -> list<View>
+
+  fn declaration_of : (view: View) -> Declaration
+
+  # --- column 2: orchestrators -------------------------------------------
+  #
+  # ONE PER GRAMMAR, because the grammar is chosen by the name the caller
+  # reached for. Each owns the same sequence and none composes with another: a
+  # grammar is a way in, not a layer.
+
+  orchestrator fn ask_in_pseudo_sql : (db: Database, model: any, asked: dict<str, any>) -> Answer invokes declared_in_pseudo_sql, render, run, answered
+
+  orchestrator fn ask_in_django : (db: Database, model: any, asked: dict<str, any>) -> Answer invokes declared_in_django, render, run, answered
+
+  orchestrator fn ask_in_prisma : (db: Database, model: any, asked: dict<str, any>) -> Answer invokes declared_in_prisma, render, run, answered
+
+  orchestrator fn ask_in_sqlalchemy : (db: Database, model: any, asked: dict<str, any>) -> Answer invokes declared_in_sqlalchemy, render, run, answered
+
+  # The view chain, from the schema file to the database, through the same
+  # `render` the four grammars reach.
+  #
+  # IT TAKES THE SCHEMA, IT DOES NOT GO AND GET IT. The world enters at
+  # `load_declarations` and flows rightward; an orchestrator reaching back
+  # into column 1 would be an arrow INTO the input boundary, which is the one
+  # direction that cannot happen. The contract between them is the type:
+  # `load_declarations` hands back a Schema and this takes one.
+
+  orchestrator fn migrate_views : (db: Database, schema: Schema) -> int invokes views_in, declaration_of, render, apply
+
+  # --- column 4: output I/O ----------------------------------------------
+
+  boundary_out fn run : (db: Database, statement: Statement) -> list<any> side_effect reads "database"
+
+  boundary_out fn apply : (db: Database, statement: Statement) -> int side_effect writes "database"
+
+  # --- the chains: how the world reaches the work ------------------------
+  #
+  # A chain is the world's own path: it enters at an input boundary, passes
+  # through the orchestrator that owns the sequence, and leaves at an output
+  # boundary. The pure core is not on it; the orchestrator reaches that with
+  # `invokes`, which is why a pure function never touches the world.
+  #
+  # ONE CHAIN CARRIES THE SCHEMA FILE and four carry a question. The four begin
+  # at their orchestrator rather than at a boundary, because a model is a Python
+  # class the caller already imported rather than something read here.
+
+  chain migrating_views = load_declarations -> migrate_views -> apply
+
+  chain asking_in_pseudo_sql = ask_in_pseudo_sql -> run
+
+  chain asking_in_django = ask_in_django -> run
+
+  chain asking_in_prisma = ask_in_prisma -> run
+
+  chain asking_in_sqlalchemy = ask_in_sqlalchemy -> run

@@ -63,7 +63,7 @@ module declaro-persistum
     path: str
     primary: str
     engine: str
-    serialize: any
+    in_flight: any
   }
 
   type Receipt = {

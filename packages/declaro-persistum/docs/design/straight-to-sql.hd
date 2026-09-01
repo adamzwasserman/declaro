@@ -1,0 +1,147 @@
+# DESIGN B — each grammar writes the SQL, and no middle value exists.
+#
+# Read beside `with-a-declaration.hd`. Neither is built. Both are drawn so the
+# columns can be compared rather than argued about.
+#
+# THE CASE FOR IT, MEASURED. The query layer varies by engine in nine places
+# today, all in `executor.py`, and every one is about the driver rather than the
+# SQL text: placeholder style and fetch shape. So the SQL a query needs is close
+# to one target, and a middle value earns its keep only if it buys something
+# else.
+#
+# TWO CHAINS, AND THEY SHARE NOTHING. Asking runs through a grammar to the
+# database. Migrating a view runs from the schema file to the database and
+# passes through no shared step, because the view already holds finished SQL.
+# Compare that with the other file, where both chains meet at `render`.
+
+module straight-to-sql
+
+  layer domain
+
+  # --- the value the grammars produce ------------------------------------
+  #
+  # One type, and it is a statement. Note what that buys: the cache key is the
+  # output rather than a middle value, and there is one fewer type to declare.
+
+  type Statement = {
+    sql: str
+    parameters: dict<str, any>
+  }
+
+  # A view holds finished SQL. The library wrote it, so no caller wrote SQL and
+  # the escape hatch is not open. What it costs is that a declared view stops
+  # being data: changing one means comparing two strings.
+
+  type View = {
+    name: str
+    sql: str
+    materialized: bool
+    freshness: str
+  }
+
+  type Schema = {
+    models: dict<str, any>
+    views: dict<str, View>
+  }
+
+  type Answer = {
+    rows: list<any>
+    row: any
+    number: int
+    truth: bool
+    mappings: list<dict<str, any>>
+    failure: any
+  }
+
+  type Database = {
+    path: str
+    engine: str
+  }
+
+  # --- column 1: input I/O -----------------------------------------------
+
+  boundary_in fn load_declarations : (module_path: str) -> Schema side_effect reads "python_module"
+
+  # --- column 3: the four grammars, each writing SQL ---------------------
+  #
+  # Four functions, same count as the other design. What differs is not the
+  # count but what each contains: the whole of SQL writing, four times, and the
+  # four must agree character for character wherever a scenario compares them.
+  #
+  # A FIFTH GRAMMAR CARRIES A FIFTH COPY. In the other design a fifth grammar
+  # builds a value and stops.
+
+  fn sql_from_pseudo_sql : (model: any, asked: dict<str, any>) -> Statement invokes spliced
+
+  fn sql_from_django : (model: any, asked: dict<str, any>) -> Statement invokes spliced
+
+  fn sql_from_prisma : (model: any, asked: dict<str, any>) -> Statement invokes spliced
+
+  fn sql_from_sqlalchemy : (model: any, asked: dict<str, any>) -> Statement invokes spliced
+
+  # --- column 3: chaining, which is where this design pays ---------------
+  #
+  # `people.select("id").where({"name": "bob"})` arrives in two calls. With a
+  # value, the second call adds an entry. With text, the second call has to cut
+  # the first call's string open and write into it, knowing where the WHERE
+  # goes, whether one is already there, and what came after it.
+  #
+  # THIS CARD IS THE WHOLE ARGUMENT AGAINST THIS DESIGN. It takes a statement
+  # and a narrowing and returns a statement, which means it parses SQL to find
+  # out where to write. Its counterpart in the other design does not exist,
+  # because appending to a list needs no function. Four arrows arrive here.
+
+  fn spliced : (statement: Statement, narrowing: dict<str, any>) -> Statement
+
+  # --- column 3: shaping what came back ----------------------------------
+  #
+  # WITHOUT A DECLARATION THIS FUNCTION IS BLIND. Its counterpart is handed the
+  # declaration and reads the word off it, so it knows whether the caller wanted
+  # rows, one row, a number or a truth. Here there is no word to read, so the
+  # shape of the answer has to be carried alongside or guessed from the rows.
+
+  fn answered : (statement: Statement, rows: list<any>) -> Answer
+
+  fn views_in : (schema: Schema) -> list<View>
+
+  fn statement_of : (view: View) -> Statement
+
+  # --- column 2: orchestrators -------------------------------------------
+
+  orchestrator fn ask_in_pseudo_sql : (db: Database, model: any, asked: dict<str, any>) -> Answer invokes sql_from_pseudo_sql, run, answered
+
+  orchestrator fn ask_in_django : (db: Database, model: any, asked: dict<str, any>) -> Answer invokes sql_from_django, run, answered
+
+  orchestrator fn ask_in_prisma : (db: Database, model: any, asked: dict<str, any>) -> Answer invokes sql_from_prisma, run, answered
+
+  orchestrator fn ask_in_sqlalchemy : (db: Database, model: any, asked: dict<str, any>) -> Answer invokes sql_from_sqlalchemy, run, answered
+
+  # The view chain, and it touches nothing the query chain touches.
+  #
+  # IT TAKES THE SCHEMA, IT DOES NOT GO AND GET IT. The contract with the
+  # input boundary is the type it hands rightward, never a call reaching back
+  # into it.
+
+  orchestrator fn migrate_views : (db: Database, schema: Schema) -> int invokes views_in, statement_of, apply
+
+  # --- column 4: output I/O ----------------------------------------------
+
+  boundary_out fn run : (db: Database, statement: Statement) -> list<any> side_effect reads "database"
+
+  boundary_out fn apply : (db: Database, statement: Statement) -> int side_effect writes "database"
+
+  # --- the chains: how the world reaches the work ------------------------
+  #
+  # Same five paths as the other design, and the difference is not here. It is
+  # in what the orchestrators invoke: `migrate_views` reaches `render` there and
+  # nothing shared here, because the view already holds finished SQL.
+
+  chain migrating_views = load_declarations -> migrate_views -> apply
+
+  chain asking_in_pseudo_sql = ask_in_pseudo_sql -> run
+
+  chain asking_in_django = ask_in_django -> run
+
+  chain asking_in_prisma = ask_in_prisma -> run
+
+  chain asking_in_sqlalchemy = ask_in_sqlalchemy -> run
