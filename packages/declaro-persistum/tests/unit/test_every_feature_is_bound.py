@@ -72,7 +72,10 @@ KNOWN_UNBOUND: dict[str, str] = {
     "a_condition_is_data.feature": _SPEC,
     "absence_is_an_answer.feature": _SPEC,
     "everything_gets_declared.feature": _SPEC,
+    # The four grammars: what they mean, and how the library knows
+    # which one you used. Three of the four do not exist.
     "four_grammars_one_meaning.feature": _SPEC,
+    "the_grammar_is_recognized.feature": _SPEC,
     "the_models_are_the_truth.feature": _SPEC,
     "the_schema_is_declared.feature": _SPEC,
     # The decision the rest of the surface rests on: what an engine produces.
