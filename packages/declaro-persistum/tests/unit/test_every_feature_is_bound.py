@@ -90,7 +90,9 @@ KNOWN_UNBOUND: dict[str, str] = {
     "freshness_is_declared_in_plain_words.feature": _SPEC,
     "an_index_can_span_columns.feature": _SPEC,
     "one_table_of_capabilities.feature": _SPEC,
-    "the_engine_is_detected.feature": _SPEC,
+    # One door and the pure decision it rests on. Neither is built.
+    "open_database.feature": _SPEC,
+    "engine_of.feature": _SPEC,
     # Running a question: what is held, what comes back, how many connections,
     # and whose job retrying is.
     "a_statement_is_built_once.feature": _SPEC,

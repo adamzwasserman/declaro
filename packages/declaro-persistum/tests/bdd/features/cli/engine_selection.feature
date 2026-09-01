@@ -4,6 +4,12 @@ Feature: Which engine the command line decides to talk to
   I want the engine chosen from what I typed, or read off the URL when I said nothing
   So that a command never runs against an engine nobody picked
 
+  # THE OPERATOR MAY STILL NAME AN ENGINE HERE, and only here. This is the
+  # command line, which is a boundary: argparse's `choices=` admits one of
+  # three words from outside and the interior then trusts it. No library
+  # function takes one, and `tests/bdd/features/opening/engine_of.feature`
+  # specifies how the engine is worked out when nobody says.
+  #
   # ONE SCENARIO PER FUNCTION in the engine-selection path of `cli/main.py`.
   # Every one of these is pure: a value in, a value out.
   #

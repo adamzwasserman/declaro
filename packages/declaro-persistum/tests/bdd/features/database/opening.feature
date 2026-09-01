@@ -4,6 +4,12 @@ Feature: What a database is when you open it, and what that decides
   return the same `Database`, carrying the callables that engine needs. Everything the
   library does afterwards reads that value rather than asking what engine it is.
 
+  THESE THREE ARE WHAT EXISTS, AND ONE DOOR IS WHAT IS SPECIFIED.
+  `tests/bdd/features/opening/open_database.feature` describes a single
+  `open_database` that reads the target and works the engine out, so a caller
+  never picks a door by knowing the answer in advance. Nothing here is wrong;
+  it is what the package does today. This file goes when that one passes.
+
   One predicate branches the rest of the library: whether the database has a primary.
   A synced replica takes ONE connection, measured 2026-08-12 against a real replica on
   pyturso 0.7.2:

@@ -19,9 +19,9 @@ Feature: Naming the database the example app should talk to
     And it carries no auth token
 
     Examples:
-      | engine          | engine         | shown                     |
-      | sqlite          | sqlite          | SQLite (todos.db)         |
-      | turso_embedded  | turso_embedded  | Turso Embedded (todos.db) |
+      | engine          | shown                     |
+      | sqlite          | SQLite (todos.db)         |
+      | turso_embedded  | Turso Embedded (todos.db) |
 
   @precommit
   Scenario: PostgreSQL builds a URL from its five parts
