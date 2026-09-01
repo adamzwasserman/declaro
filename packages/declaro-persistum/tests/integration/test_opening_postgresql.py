@@ -7,7 +7,7 @@ PostgreSQL having had 2 marked tests in a suite of 1241 this morning.
 
 What an opener has to get right is not the connection -- asyncpg does that --
 but the `Database` it hands back. Every later call reads that record: which
-engine to spell SQL for, whether writers are serialised, what happens at
+engine to spell SQL for, which journal mode was granted, what happens at
 shutdown. A field that is wrong here is wrong everywhere afterwards, and
 silently, because nothing downstream re-derives it.
 """

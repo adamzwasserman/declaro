@@ -459,7 +459,7 @@ await close(db)   # replicate whatever is left, then release everything
 
 **`writing` is a transaction scope: it commits when the block ends cleanly and rolls back if it raises.** It did not until 2026-08-14. Before that it opened a connection, yielded it and closed it, so a block that forgot `await conn.commit()` had its writes discarded and reported nothing — `execute_fk_ordered` omitted the commit and every one of its writes was rolled back while `cursor.rowcount` still said success. Measured on both DB-API engines, two writes through two blocks with the second uncommitted, one row survived. A second commit is harmless, so code that commits explicitly is unaffected. Committing cannot be a call to `conn.commit()` in the general case, because asyncpg has none; the per-engine answer lives in `writers.COMMIT`.
 
-A reader takes no lock and waits for nothing: the local file is a full copy, so reads never touch the primary. On a replicated database writers are serialised, because the engine admits one.
+A reader takes no lock and waits for nothing: the local file is a full copy, so reads never touch the primary. Neither does a writer, on any engine. This sentence used to say that a replicated database serialises its writers because the engine admits one connection; the connection count is right and the conclusion was not, because `BEGIN CONCURRENT` carries many writers on one connection. Corrected 2026-09-01 after measuring 16 concurrent writers against a real primary: nothing blocked, and all of them durable locally and on the primary.
 
 ### Mirroring two databases
 
