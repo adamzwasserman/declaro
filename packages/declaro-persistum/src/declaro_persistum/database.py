@@ -479,14 +479,21 @@ async def nothing_happened(_db: Database) -> bool:
 async def writing(db: Database) -> AsyncIterator[Any]:
     """A connection for writing, for the span of the block.
 
-    On a replicated database the writers are serialised: the engine allows one
-    writer, and without the lock 1 of 8 concurrent writes landed and 7 errored
-    (measured, real replica, 2026-08-12). On a local database there is no lock
-    and no serialisation, because concurrency is the entire reason MVCC is on
-    there.
+    NO DATABASE SERIALISES ITS WRITERS, on any engine. `serialise` is None
+    everywhere, so `_WRITE_PATH` always takes the unserialised branch and the
+    other one is unreachable.
 
-    The block commits on a clean exit and rolls back on an exception, on both
-    paths. See `_write_connection`.
+    IT SAID THE OPPOSITE UNTIL 2026-09-01: that a replicated database
+    serialises its writers because the engine allows one, citing a run where
+    1 of 8 concurrent writes landed and 7 errored. That run opened eight
+    connections. A replica holds ONE and hands it to every write, so the run
+    described a situation this code never creates, and `BEGIN CONCURRENT`
+    carries many writers on one connection. Re-measured against a real
+    primary: 16 concurrent writers with no lock, nothing blocked, 17 of 17
+    durable locally and on the primary.
+
+    The block commits on a clean exit and rolls back on an exception. See
+    `_write_connection`.
     """
     _check_open(db)
     async with _WRITE_PATH[db["serialise"] is not None](db) as conn:
