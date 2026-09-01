@@ -293,7 +293,7 @@ async def _refuse_without_a_terminal(snapshot_path: Path, _rest: Rest) -> int:
         $ declaro ... snapshot < /dev/null
         Error: EOF when reading a line
 
-    `cmd_diff` and `cmd_apply` already derive their behaviour from
+    `cmd_diff` and `cmd_apply` already derive their behavior from
     `sys.stdin.isatty()`; this command was the one that did not. It refuses
     rather than overwriting, and names the flag that proceeds, because a
     snapshot is the record of what the database looked like and replacing it
@@ -738,7 +738,7 @@ def _print_drift_error(differences: list[dict[str, str]]) -> None:
 # READ BY SUBSCRIPT WITH A DECLARED FALLBACK. `_describe` asks the table and
 # falls back to naming the kind, because an operation this CLI has not learned
 # to phrase must still be PRINTED. That is a display default and not a
-# behavioural one: nothing is chosen for the operator, and the unknown kind
+# behavioral one: nothing is chosen for the operator, and the unknown kind
 # appears in the output rather than being skipped.
 _DESCRIBE: dict[str, Callable[[str, dict[str, Any]], str]] = {
     "create_table": lambda table, d: (

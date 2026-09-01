@@ -25,7 +25,7 @@ drift. Leaving one behind in `shared.py` re-creates the condition, silently
 this time: the old failure raised AttributeError, and this one would emit the
 wrong engine's SQL and exit 0.
 
-This is a gate, not a test of behaviour. It reads the package rather than
+This is a gate, not a test of behavior. It reads the package rather than
 asserting on any output, so it fails the day a second one appears.
 """
 

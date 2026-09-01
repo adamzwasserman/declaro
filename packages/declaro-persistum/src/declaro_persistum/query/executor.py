@@ -115,7 +115,7 @@ def _recognised_keys(conn_type: str) -> list[str]:
 def _refuse_unnamed_engine(conn_type: str, _keys: list[str]) -> str:
     """A driver nobody has taught this package about, refused by name."""
     raise ValueError(
-        f"cannot tell which engine {conn_type!r} belongs to. Recognised: "
+        f"cannot tell which engine {conn_type!r} belongs to. Recognized: "
         f"{', '.join(sorted(set(_ENGINE_MAP.values())))}."
     )
 
@@ -156,7 +156,7 @@ def _driver_key(conn_type: str) -> str:
 
     A CONNECTION NO TABLE HOLDS IS REFUSED, not defaulted. `_prepare_query`
     used to fall through to `return sql, params` under a comment reading
-    "assume named parameters work", which handed an unrecognised driver the
+    "assume named parameters work", which handed an unrecognized driver the
     statement unconverted and let it fail further downstream.
     """
     return [
@@ -168,11 +168,11 @@ def _driver_key(conn_type: str) -> str:
 @helper
 def detect_engine(connection: Any) -> str:
     """Which engine this connection belongs to, or a refusal naming the ones
-    that are recognised.
+    that are recognized.
 
     THE LAST LINE WAS `return "postgresql"  # Default`. Parameter binding is
     the thing this decides -- $1 for asyncpg, ? and :name for the others -- so
-    an unrecognised connection was handed PostgreSQL placeholders and failed
+    an unrecognized connection was handed PostgreSQL placeholders and failed
     somewhere downstream with a message about SQL syntax rather than about the
     connection. Measured 2026-08-17:
 

@@ -22,7 +22,7 @@
 >
 > **The one sync connection is not a writer and does not make writers wait.** It carries a log to and from the primary. Local writes go to the journal, concurrently, and the sync connection ships them later. A measurement that a second sync connection fails is a fact about the channel and says NOTHING about how many writes can be in flight.
 >
-> So: "a replica permits one connection" is false. "A replicated database serialises writers" is false. Turso's sync engine syncs MVCC databases, so replicated and concurrent are not opposites. If a sentence concludes something about concurrency from a count of connections, it is wrong.
+> So: "a replica permits one connection" is false. "A replicated database serializes writers" is false. Turso's sync engine syncs MVCC databases, so replicated and concurrent are not opposites. If a sentence concludes something about concurrency from a count of connections, it is wrong.
 
 
 
@@ -52,7 +52,7 @@
 >
 > Connection **reuse** removes the per-write OS thread and is the larger lever. **MVCC + `BEGIN CONCURRENT`** is what lets a crew write in parallel and is what makes it *correct*. Neither alone gets there; the 13,826/sec figure needs both.
 >
-> **WAL loses writes at crew 16 even after three retries. MVCC loses none.** WAL's safe crew is 1, or writers serialised behind a lock.
+> **WAL loses writes at crew 16 even after three retries. MVCC loses none.** WAL's safe crew is 1, or writers serialized behind a lock.
 >
 > **A replica takes ONE replica connection.** Measured 2026-08-12, pyturso 0.7.2, real replica: MVCC *does* run on a replica (`journal_mode = 'mvcc'`, 4 of 4 runs) and 20 sequential writes under it reached the primary intact. What fails is a *second* replica connection — `database tape error: database is busy`, 3 of 4 runs outright, one after 12 retries over 30s on an idle database. In the run where eight opened: 5 writes local, **0 on the primary**. This bounds CONNECTIONS and nothing else. Concurrent writers come from `BEGIN CONCURRENT` on one connection, so a replica running MVCC can write concurrently while still permitting only one sync connection.
 
@@ -210,16 +210,16 @@ Measured against a real Turso Cloud replica, concurrent writers to one replica, 
 
 | | K=2 | K=5 | K=10 | K=20 |
 |---|---|---|---|---|
-| **MVCC on**, no serialisation at all | 2/2 | 4/5 | 9/10 | 20/20 |
+| **MVCC on**, no serialization at all | 2/2 | 4/5 | 9/10 | 20/20 |
 | **MVCC off** (WAL) | 1/2 | 3/5 | 3/10 | 6/20 |
 
-Twenty concurrent writers land twenty writes with no lock anywhere. Single-writer is Turso's **documented default**, and MVCC is what lifts it — see [Concurrent Writes](https://docs.turso.tech/tursodb/concurrent-writes) and [Beyond the Single-Writer Limitation](https://turso.tech/blog/beyond-the-single-writer-limitation-with-tursos-concurrent-writes). MVCC is requested on every pool by default; pass `mvcc=False` to force WAL, and the pool then serialises writers so none are lost.
+Twenty concurrent writers land twenty writes with no lock anywhere. Single-writer is Turso's **documented default**, and MVCC is what lifts it — see [Concurrent Writes](https://docs.turso.tech/tursodb/concurrent-writes) and [Beyond the Single-Writer Limitation](https://turso.tech/blog/beyond-the-single-writer-limitation-with-tursos-concurrent-writes). MVCC is requested on every pool by default; pass `mvcc=False` to force WAL, and the pool then serializes writers so none are lost.
 
 ### Correction
 
 This section previously reported a "2–3 concurrent writer ceiling" and called it the engine at its limit, with advice to shard around it. **That was wrong, and the advice was wrong.**
 
-The original measurement is real — it is the MVCC-off row above. But it was taken with the engine running in WAL mode, where rejecting the second writer is documented default behaviour. It measured the absence of a feature, not a limit. The explanation later attached to it here — that the replication engine is a single-appender log — was invented and is not in any Turso documentation.
+The original measurement is real — it is the MVCC-off row above. But it was taken with the engine running in WAL mode, where rejecting the second writer is documented default behavior. It measured the absence of a feature, not a limit. The explanation later attached to it here — that the replication engine is a single-appender log — was invented and is not in any Turso documentation.
 
 If you were told to shard hot data because of this ceiling, that advice does not apply. Check that MVCC is active first: the pool logs it at startup, and `PRAGMA journal_mode` returns `mvcc` when it is.
 

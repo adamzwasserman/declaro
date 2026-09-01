@@ -87,9 +87,9 @@ Measured 2026-08-28 by `slop-audit-l1 1.0.0+g97fdc315` across 310 files. The cou
 | 51 | `todo_app_prisma_style/db.py` | 153 | `_connect_postgresql` | I/O reached from its own file | performs I/O (asyncpg.connect) and is reached by another function here | R3 |
 | 52 | `todo_app_prisma_style/db.py` | 247 | `_run` | I/O reached from its own file | performs I/O (commit, execute) and is reached by another function here | R3 |
 | 53 | `todo_app_prisma_style/db.py` | 256 | `commit` | I/O reached from its own file | performs I/O (commit) and is reached by another function here | R3 |
-| 54 | `todo_app_django_style/db.py` | 123 | `get_database(_current_db)` | Hidden state a caller cannot see | reads `_current_db`, which another function here writes, so its behaviour depends on something no caller can see | R5 |
-| 55 | `todo_app_native/db.py` | 123 | `get_database(_current_db)` | Hidden state a caller cannot see | reads `_current_db`, which another function here writes, so its behaviour depends on something no caller can see | R5 |
-| 56 | `todo_app_prisma_style/db.py` | 123 | `get_database(_current_db)` | Hidden state a caller cannot see | reads `_current_db`, which another function here writes, so its behaviour depends on something no caller can see | R5 |
+| 54 | `todo_app_django_style/db.py` | 123 | `get_database(_current_db)` | Hidden state a caller cannot see | reads `_current_db`, which another function here writes, so its behavior depends on something no caller can see | R5 |
+| 55 | `todo_app_native/db.py` | 123 | `get_database(_current_db)` | Hidden state a caller cannot see | reads `_current_db`, which another function here writes, so its behavior depends on something no caller can see | R5 |
+| 56 | `todo_app_prisma_style/db.py` | 123 | `get_database(_current_db)` | Hidden state a caller cannot see | reads `_current_db`, which another function here writes, so its behavior depends on something no caller can see | R5 |
 | 57 | `todo_app_django_style/templates/db_select.html` | 133 | `innerHTML` | Imperative JavaScript where an attribute would say it | innerHTML describes how, somewhere the reader has to go and find | R6 |
 | 58 | `todo_app_native/templates/db_select.html` | 133 | `innerHTML` | Imperative JavaScript where an attribute would say it | innerHTML describes how, somewhere the reader has to go and find | R6 |
 | 59 | `todo_app_prisma_style/templates/db_select.html` | 133 | `innerHTML` | Imperative JavaScript where an attribute would say it | innerHTML describes how, somewhere the reader has to go and find | R6 |

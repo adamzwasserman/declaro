@@ -18,7 +18,7 @@ it does.
 
 PostgreSQL's loader needs a server, so it is checked structurally here and
 exercised by `bulk_transfer`'s own PostgreSQL tests. That gap is stated rather
-than hidden — a structural check is not a behavioural one, and calling it one
+than hidden — a structural check is not a behavioral one, and calling it one
 would repeat the mistake this file exists to close.
 """
 

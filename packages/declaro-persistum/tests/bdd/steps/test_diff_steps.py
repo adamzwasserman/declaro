@@ -370,7 +370,7 @@ def _when_order(ctx):
     try:
         ctx["order"] = topological_sort(ctx["operations"], deps)
         ctx["error"] = None
-    except Exception as e:  # noqa: BLE001 - refusing IS the behaviour
+    except Exception as e:  # noqa: BLE001 - refusing IS the behavior
         ctx["error"] = e
         ctx["order"] = []
 

@@ -25,10 +25,10 @@ Feature: One table says what each engine can do
   Scenario: a cell covers writing and reading
     Given a capability that is built rather than native
     When its cell is read
-    Then it names what creates it, what removes it, and how the inspector recognises it
+    Then it names what creates it, what removes it, and how the inspector recognizes it
 
   Scenario: a built capability the inspector cannot see is refused
-    Given a cell naming what creates a capability and not how to recognise it
+    Given a cell naming what creates a capability and not how to recognize it
     When the table is checked
     Then it fails, because the next difference would propose dropping it
 

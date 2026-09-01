@@ -6,7 +6,7 @@ It is a working list, so unlike the architecture it is allowed to go stale. Each
 
 ## From "the models are the truth"
 
-**A model check.** "Everything reads those models" only holds if nothing else in the class carries behaviour the library cannot see. A validator, a method or a property is a rule that applies in Python and never reaches the database. Half-built and uncommitted.
+**A model check.** "Everything reads those models" only holds if nothing else in the class carries behavior the library cannot see. A validator, a method or a property is a rule that applies in Python and never reaches the database. Half-built and uncommitted.
 
 **Type coverage for every declarable column type.** "The library never asks the database what is there" means the loader must understand every type a model can declare. It refuses `tuple[int, int]` today. The set of types it accepts is not written down anywhere, so nobody can tell a gap from a decision.
 
@@ -40,7 +40,7 @@ It is a working list, so unlike the architecture it is allowed to go stale. Each
 
 **A declared view needs a query language that is not SQL.** "The library writes the SELECT" means a view has to be declared as something the library can render. That something does not exist, and it is the same object the grammars need.
 
-**Freshness as a declared word.** "You say how fresh you need it in plain terms" implies a bounded vocabulary of freshness. The current `refresh` field takes five engine-flavoured strings across three engines.
+**Freshness as a declared word.** "You say how fresh you need it in plain terms" implies a bounded vocabulary of freshness. The current `refresh` field takes five engine-flavored strings across three engines.
 
 **Index declaration on more than one column.** `field` is per column. A composite index has no home.
 

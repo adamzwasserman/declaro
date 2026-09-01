@@ -181,7 +181,7 @@ def test_a_primary_key_declared_nullable_is_still_a_contradiction() -> None:
     """The floor. Silencing the check entirely would pass the test above.
 
     An explicit `nullable: True` on a primary key is something the author
-    wrote down, and it cannot be honoured on any engine.
+    wrote down, and it cannot be honored on any engine.
     """
     from declaro_persistum.validator import validate_schema
 

@@ -68,7 +68,7 @@ async def test_the_pragma_is_ignored_inside_a_transaction(tmp_path) -> None:
         await conn.execute("PRAGMA foreign_keys = ON")
 
         assert await _enforcement(conn) == 0, (
-            "SQLite now honours the pragma inside a transaction. Every "
+            "SQLite now honors the pragma inside a transaction. Every "
             "restore in this package can be simplified; re-measure first."
         )
     finally:

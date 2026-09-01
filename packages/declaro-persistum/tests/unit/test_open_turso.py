@@ -10,7 +10,7 @@ caller to inject it into.
 
 THE ENGINE CHOICE IS MADE HERE AND NOWHERE ELSE, from one fact:
 
-    primary set  ->  replicated  ->  WAL,  writers serialised
+    primary set  ->  replicated  ->  WAL,  writers serialized
     no primary   ->  local       ->  MVCC, writers concurrent
 
 Measured 2026-08-12 against a real replica: under MVCC on a replicated
@@ -150,12 +150,12 @@ class TestTheEngineChoiceIsNotTheCallers:
         assert not params & {"mvcc", "journal_mode"}, params
 
     @pytest.mark.asyncio
-    async def test_a_local_database_gets_no_serialisation(self, tmp_path):
+    async def test_a_local_database_gets_no_serialization(self, tmp_path):
         db = await open_turso(
             str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
         )
         assert db["in_flight"]["count"] == 0, (
-            "a local database serialised its writers, which throws away the "
+            "a local database serialized its writers, which throws away the "
             "concurrency MVCC is enabled for"
         )
 

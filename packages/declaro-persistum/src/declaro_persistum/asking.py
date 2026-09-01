@@ -7,7 +7,7 @@ all four and there is one place that decides what it means.
 
 NOTHING HERE IS BUILT. Every function raises, deliberately and by name. A body
 that returned an empty list or a zero would make its feature green while the
-behaviour did not exist, which is the exact failure the feature files are there
+behavior did not exist, which is the exact failure the feature files are there
 to prevent. A red test is the honest state of unbuilt work.
 
 Each function has exactly one feature file under `tests/bdd/features/asking/`,
@@ -99,7 +99,7 @@ def _unbuilt(name: str, *given: Any) -> NoReturn:
     """Refuse by name, so a caller learns what is missing rather than a shape.
 
     NOT A STUB THAT PASSES. Returning `[]` or `0` here would turn every
-    feature green and assert that unbuilt behaviour works.
+    feature green and assert that unbuilt behavior works.
 
     IT TAKES THE CALL'S OWN ARGUMENTS, and not to suppress a lint rule. A
     declared signature nothing reads is a signature nobody has checked against

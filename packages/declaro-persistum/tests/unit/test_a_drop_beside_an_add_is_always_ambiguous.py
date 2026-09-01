@@ -1,4 +1,4 @@
-"""A rename the differ did not recognise dropped the table and said nothing.
+"""A rename the differ did not recognize dropped the table and said nothing.
 
 MEASURED 2026-08-21. `detect_ambiguities` decides whether a dropped table and
 an added table might be one rename by scoring them: Levenshtein distance on
@@ -14,7 +14,7 @@ is an ordinary migration, and there the score falls under the gate, so the
 operator is never asked. The drop runs and the rows are gone.
 
 A SIMILARITY SCORE WAS DECIDING WHETHER DATA LOSS GOT ANNOUNCED. That is not a
-judgement a heuristic is entitled to make. A drop beside an add is ambiguous
+judgment a heuristic is entitled to make. A drop beside an add is ambiguous
 by construction: the differ compares two schemas and cannot know whether the
 author moved a thing or replaced it. Nothing about the names or the columns
 changes that, so nothing should be measured.
@@ -97,7 +97,7 @@ def test_no_score_survives_in_what_is_reported() -> None:
 def test_a_declared_rename_is_not_ambiguous() -> None:
     """`renamed_from` is the answer, so there is no question to ask.
 
-    This is the behaviour that must survive: an author who says what they did
+    This is the behavior that must survive: an author who says what they did
     is never interrogated about it.
     """
     found = _ambiguities(

@@ -59,7 +59,7 @@ class TestColumnTypes:
         assert len(w) == 1
         # ASSERTED CASE-INSENSITIVELY AND BY SUBSTANCE. This pinned the
         # capital U of "Unknown type 'wat'", so rewriting the warning to say
-        # what an unrecognised name costs on SQLite failed it for the one
+        # what an unrecognized name costs on SQLite failed it for the one
         # reason that does not matter.
         assert "unknown type 'wat'" in _lower
 

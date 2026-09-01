@@ -304,7 +304,7 @@ _REFUSE_UNTYPED: dict[bool, Callable[[str, str, dict[str, Any]], dict[str, Any]]
 # THE TWO SPELLINGS OF A COLUMN, KEYED BY EXACT TYPE. TOML carries no schema,
 # so the loader is the only thing that can say which of the two an entry is.
 # Reading this by subscript is what makes a third spelling a refusal instead
-# of a silence: `.get` with a fallback would put the old behaviour back.
+# of a silence: `.get` with a fallback would put the old behavior back.
 _COLUMN_FROM: dict[type, Callable[[str, str, Any], Column]] = {
     dict: _column_from_table,
     str: _column_from_type_name,

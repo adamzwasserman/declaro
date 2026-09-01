@@ -41,7 +41,7 @@ def _schema_for(model: type) -> dict:
     from declaro_persistum.pydantic_loader import pydantic_model_to_table
 
     result = pydantic_model_to_table(model)
-    assert result is not None, f"{model.__name__} was not recognised as a table"
+    assert result is not None, f"{model.__name__} was not recognized as a table"
     return result[1]["columns"]
 
 

@@ -23,7 +23,7 @@ This is the third gate in this package found to gate nothing, after the
 modules. The pattern is a check written against a proxy — a driver import, a
 string's length, a marker's name — rather than against the thing it claims.
 
-So these tests assert the fixture's BEHAVIOUR, not its text: point it at an
+So these tests assert the fixture's BEHAVIOR, not its text: point it at an
 unreachable server and it must fail. A fixture that passes against a database
 that is not there is not requiring anything.
 """

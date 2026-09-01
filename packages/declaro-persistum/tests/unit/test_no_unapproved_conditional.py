@@ -11,7 +11,7 @@ in a comment carrying the date and time he gave it:
 WHY IT IS A RULE AND NOT A PREFERENCE. `umbra audit` on 2026-08-21 located
 1721 silences in this package. 267 are unexercised branches, and
 `cli/commands.py` holds 73 of them against its 80 conditionals. A branch
-nothing takes is behaviour nobody has watched run, and it exists because the
+nothing takes is behavior nobody has watched run, and it exists because the
 code is deciding at runtime what should have been decided at declaration time.
 
 A CONDITIONAL IS USUALLY THE SYMPTOM RATHER THAN THE DISEASE. The same audit

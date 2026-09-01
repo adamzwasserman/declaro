@@ -14,7 +14,7 @@ Feature: What a database is when you open it, and what that decides
   It decides whether shutdown has anywhere to push, and it is derived from `primary`
   rather than stored beside it, because a second flag could disagree with the first.
 
-  IT DOES NOT DECIDE WHETHER WRITERS SERIALISE, and it used to. A replica holds ONE
+  IT DOES NOT DECIDE WHETHER WRITERS SERIALIZE, and it used to. A replica holds ONE
   connection, and one connection runs many writers under `BEGIN CONCURRENT`, so a
   count of connections says nothing about how many writes can be in flight. The lock
   built on that inference is gone. Measured 2026-09-01 against a real primary on
@@ -26,7 +26,7 @@ Feature: What a database is when you open it, and what that decides
     mvcc      held           --        --        --   sync refused
     mvcc      none           --        --        --   sync refused
 
-  A replica stays on WAL, and not because writers need serialising. Under MVCC the
+  A replica stays on WAL, and not because writers need serializing. Under MVCC the
   sync engine cannot pull: `conn.pull()` raises "Database is busy" at close, every
   time, with or without the lock.
 

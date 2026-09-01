@@ -250,7 +250,7 @@ async def test_the_old_reference_is_gone_not_merely_unreported() -> None:
     """One key on the column, not two.
 
     `references` is one value per column, so introspection cannot report a
-    stale key beside the new one. Counting them in the catalogue is the only
+    stale key beside the new one. Counting them in the catalog is the only
     way to see it, and a mutation dropping only the convention name passed
     every other test in this file.
     """
@@ -271,7 +271,7 @@ async def test_the_old_reference_is_gone_not_merely_unreported() -> None:
 
 @pytest.mark.parametrize("engine", ENGINE_NAMES)
 async def test_a_row_the_new_target_permits_is_accepted(engine: str) -> None:
-    """The floor, and it is the enforcement rather than the catalogue.
+    """The floor, and it is the enforcement rather than the catalog.
 
     A stale foreign key refuses rows the declaration allows. Here `others`
     has the row and `parents` does not, so anything still checking `parents`

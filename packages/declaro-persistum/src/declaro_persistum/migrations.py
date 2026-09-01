@@ -623,7 +623,7 @@ async def _apply_and_report(
 
     No pause. A migration is a write, and it is in flight for the whole of
     `_for_ddl`; opportunistic replication defers to a write in flight, so
-    nothing can push mid-transaction. It used to say "holds the serialise
+    nothing can push mid-transaction. It used to say "holds the serialize
     lock", which is the same guarantee resting on a lock that no longer
     exists.
     """

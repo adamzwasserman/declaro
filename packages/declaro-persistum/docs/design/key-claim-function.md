@@ -22,7 +22,7 @@
 >
 > **The one sync connection is not a writer and does not make writers wait.** It carries a log to and from the primary. Local writes go to the journal, concurrently, and the sync connection ships them later. A measurement that a second sync connection fails is a fact about the channel and says NOTHING about how many writes can be in flight.
 >
-> So: "a replica permits one connection" is false. "A replicated database serialises writers" is false. Turso's sync engine syncs MVCC databases, so replicated and concurrent are not opposites. If a sentence concludes something about concurrency from a count of connections, it is wrong.
+> So: "a replica permits one connection" is false. "A replicated database serializes writers" is false. Turso's sync engine syncs MVCC databases, so replicated and concurrent are not opposites. If a sentence concludes something about concurrency from a count of connections, it is wrong.
 
 
 **Status: designed 2026-08-11, measured, not yet implemented.** Design by Adam. The race and its fix are measured below.
@@ -40,7 +40,7 @@ claim(table, key, POP)   ->  "success"
 
 **It never blocks.** It answers. A semaphore makes the caller wait inside the library; this returns `"wait"` and hands the decision back, so nothing sleeps in code the caller cannot see. `"wait"` folds into the retry that already exists — it is the same "not now" as a busy database, absorbed by the same bounded policy.
 
-## The whole behaviour, four cases
+## The whole behavior, four cases
 
 | input | key present? | returns | memory after |
 |---|---|---|---|
@@ -98,7 +98,7 @@ A shared sentinel is not a fix. The first caller inserts it, every later caller 
 ## What it does not do
 
 - **It is in-process only.** A second process has its own memory and its own claims. Two services writing the same row collide exactly as they do today.
-- **It does not create throughput.** It converts conflicts into `"wait"`. At 20 writers on one row you currently get 14 landing and 6 refused quickly; with the gate you get more landing and more waiting. Whether that is better is the caller's judgement, and the ticket already lets them make it.
+- **It does not create throughput.** It converts conflicts into `"wait"`. At 20 writers on one row you currently get 14 landing and 6 refused quickly; with the gate you get more landing and more waiting. Whether that is better is the caller's judgment, and the ticket already lets them make it.
 - **It may not be needed below five writers per row.** Three retries already lands everything up to four concurrent writers per primary key, measured across five runs. The gate earns its place above that or not at all.
 
 ## Related

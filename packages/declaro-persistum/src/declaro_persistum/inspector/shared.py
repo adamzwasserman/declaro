@@ -665,14 +665,14 @@ def _before(clause: str, position: int) -> str:
 
 
 def _expression_at(clause: str, position: int) -> str:
-    """The CHECK expression starting at `position`, normalised.
+    """The CHECK expression starting at `position`, normalized.
 
     Empty when the clause holds none, because `_table_body` answers with an
     empty string rather than None.
     """
     rest = clause[position + 5 :].lstrip()
-    normalised: str = applied_to_text(normalize_check, _table_body(rest))
-    return normalised
+    normalized: str = applied_to_text(normalize_check, _table_body(rest))
+    return normalized
 
 
 def _check_in(clause: str) -> str | None:
@@ -747,7 +747,7 @@ def table_constraints_from_ddl(create_statement: str) -> dict[str, dict[str, str
 def checks_from_ddl(create_statement: str) -> dict[str, str]:
     """The column-level CHECK constraints a CREATE TABLE declares.
 
-    SQLite keeps no catalogue of these: the only record is the text of the
+    SQLite keeps no catalog of these: the only record is the text of the
     statement in `sqlite_master`, so this reads it. Without it a CHECK is
     created, enforced, and invisible to the differ, which is how comparing
     one produced a migration loop.

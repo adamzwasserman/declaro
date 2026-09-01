@@ -176,7 +176,7 @@ def test_an_explicit_null_default_is_still_null(engine: str) -> None:
 
 
 def test_sqlite_still_double_wraps_a_parenthesised_default() -> None:
-    """The round-trip behaviour the renderer already had, which must survive.
+    """The round-trip behavior the renderer already had, which must survive.
 
     PRAGMA table_info hands back `now()` for a column declared `DEFAULT
     (now())`, so the parens have to be doubled or the differ sees a change on

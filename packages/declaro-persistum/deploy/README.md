@@ -22,7 +22,7 @@
 >
 > **The one sync connection is not a writer and does not make writers wait.** It carries a log to and from the primary. Local writes go to the journal, concurrently, and the sync connection ships them later. A measurement that a second sync connection fails is a fact about the channel and says NOTHING about how many writes can be in flight.
 >
-> So: "a replica permits one connection" is false. "A replicated database serialises writers" is false. Turso's sync engine syncs MVCC databases, so replicated and concurrent are not opposites. If a sentence concludes something about concurrency from a count of connections, it is wrong.
+> So: "a replica permits one connection" is false. "A replicated database serializes writers" is false. Turso's sync engine syncs MVCC databases, so replicated and concurrent are not opposites. If a sentence concludes something about concurrency from a count of connections, it is wrong.
 
 
 This directory holds a patch to Turso, and the recipe to build a patched `pyturso` wheel with it.
@@ -72,7 +72,7 @@ It has **not** been tested against any released tag. Do not assume it applies to
 
 ## The version number does not identify this wheel
 
-The workspace version at `bc62e48` is `0.8.0-pre.2`. `maturin` normalises that to PEP 440, so the wheel this recipe produces reports:
+The workspace version at `bc62e48` is `0.8.0-pre.2`. `maturin` normalizes that to PEP 440, so the wheel this recipe produces reports:
 
     pyturso 0.8.0rc2
 

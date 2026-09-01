@@ -359,7 +359,7 @@ def test_the_expression_table_translates_only_what_needs_it() -> None:
         assert "true" not in table and "false" not in table, (
             f"{engine} still rewrites boolean defaults, so a declared "
             f"'false' is written as {table.get('false')!r} and read back as "
-            f"something the differ does not recognise as the same default"
+            f"something the differ does not recognize as the same default"
         )
 
 
@@ -418,7 +418,7 @@ def test_a_real_default_change_survives_the_translation() -> None:
     assert [o["op"] for o in ops] == ["alter_column"], ops
 
 
-def test_the_comparison_takes_a_engine_like_its_neighbour() -> None:
+def test_the_comparison_takes_an_engine_like_its_neighbor() -> None:
     """`same_type` and `same_default` answer the same kind of question.
 
     One took an engine and one did not, and the one that did not produced two

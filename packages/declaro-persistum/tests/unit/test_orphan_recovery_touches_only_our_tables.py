@@ -150,7 +150,7 @@ async def test_a_user_table_ending_in_new_is_not_dropped(tmp_path):
 
 @pytest.mark.asyncio
 async def test_our_own_orphan_is_still_recovered(tmp_path):
-    """The behaviour that must survive: a real orphan goes back."""
+    """The behavior that must survive: a real orphan goes back."""
     conn = _Conn(str(tmp_path / "c.db"))
     await conn.execute("CREATE TABLE _declaro_tmp_orders_a1b2c3d4 (id INTEGER PRIMARY KEY)")
     await conn.commit()

@@ -77,8 +77,8 @@ _SQLITE_BY_PREFIX: tuple[tuple[str, str], ...] = (
 def sqlite_type(type_str: str) -> str:
     """SQLite storage classes. Turso shares them.
 
-    Five classes, so uuid, every timestamp and every json flavour all land in
-    TEXT. A type the mapper does not recognise is passed through upper-cased
+    Five classes, so uuid, every timestamp and every json flavor all land in
+    TEXT. A type the mapper does not recognize is passed through upper-cased
     rather than guessed at, so an engine-specific spelling survives.
     """
     type_lower = type_str.lower()

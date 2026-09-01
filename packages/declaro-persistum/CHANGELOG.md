@@ -19,18 +19,18 @@ All notable changes to `declaro-persistum` are recorded here.
 
 ### Concurrent writers work. The lock that prevented them is conditional now.
 
-**Twenty concurrent writers to one Turso Cloud replica land twenty writes, with no serialisation at all.** Measured, on a real remote, distinct rows so there was no logical conflict:
+**Twenty concurrent writers to one Turso Cloud replica land twenty writes, with no serialization at all.** Measured, on a real remote, distinct rows so there was no logical conflict:
 
 | | K=2 | K=5 | K=10 | K=20 |
 |---|---|---|---|---|
 | **MVCC on**, no lock | 2/2 | 4/5 | 9/10 | 20/20 |
 | **MVCC off** (WAL) | 1/2 | 3/5 | 3/10 | 6/20 |
 
-0.1.22 added a lock that serialised every writer to a cloud replica, on a measurement of exactly the MVCC-off row above. That measurement was real. It was taken with the engine in WAL mode, where rejecting the second writer is Turso's **documented default** — so it measured the absence of a feature rather than a limit of the engine.
+0.1.22 added a lock that serialized every writer to a cloud replica, on a measurement of exactly the MVCC-off row above. That measurement was real. It was taken with the engine in WAL mode, where rejecting the second writer is Turso's **documented default** — so it measured the absence of a feature rather than a limit of the engine.
 
-`_write_serialisation()` now returns that lock only when MVCC is **not** active. With MVCC — the default — writers run concurrently, each on its own connection, using `BEGIN CONCURRENT`. Without it, they serialise, because otherwise the writes are genuinely lost.
+`_write_serialization()` now returns that lock only when MVCC is **not** active. With MVCC — the default — writers run concurrently, each on its own connection, using `BEGIN CONCURRENT`. Without it, they serialize, because otherwise the writes are genuinely lost.
 
-- `_is_busy` now recognises the full documented retryable set: `Error::Busy`, `Error::BusySnapshot`, and anything reporting a conflict.
+- `_is_busy` now recognizes the full documented retryable set: `Error::Busy`, `Error::BusySnapshot`, and anything reporting a conflict.
 - The background push no longer holds a connection of its own. It uses the write connection and **absorbs contention by retrying**, which is safe because a push ships frames — there are no caller statements to replay. No writer waits on a cloud round trip.
 
 ### Corrections to what this package published
@@ -47,7 +47,7 @@ Sources: [Concurrent Writes](https://docs.turso.tech/tursodb/concurrent-writes),
 
 ### Notes
 
-1222 tests pass. `test_same_replica_write_serialization.py` is rewritten: its fake previously rejected concurrent writers unconditionally, encoding WAL behaviour as universal. It now models what was measured — concurrency under MVCC, rejection without it — and asserts both.
+1222 tests pass. `test_same_replica_write_serialization.py` is rewritten: its fake previously rejected concurrent writers unconditionally, encoding WAL behavior as universal. It now models what was measured — concurrency under MVCC, rejection without it — and asserts both.
 
 ## 0.1.28 — 2026-08-10
 
@@ -57,7 +57,7 @@ Sources: [Concurrent Writes](https://docs.turso.tech/tursodb/concurrent-writes),
 
 So the only job left for this package is to buffer callers who arrive at the same instant and hand their writes to the log in order. That is what this now is, and it is all it is.
 
-It does **not** serialise the database. Turso supports concurrent writers through MVCC and `BEGIN CONCURRENT`, and the pool still opens a write connection per concurrent caller.
+It does **not** serialize the database. Turso supports concurrent writers through MVCC and `BEGIN CONCURRENT`, and the pool still opens a write connection per concurrent caller.
 
 ```python
 from declaro_persistum import new_room, deposit, collect, drain
@@ -154,7 +154,7 @@ Six parameters on `execute_with_pool` that existed only for the old queue and we
 
 Removed from the public surface: `WriteQueue`, `PendingEntry`, `WriteQueueError`, `pool.configure_write_queue()`, and the `write_queue_path` / `write_queue_threshold_ms` / `write_queue_concurrency` / `write_queue_max_attempts` parameters on `ConnectionPool.sqlite()`, `.postgresql()` and `.turso()`.
 
-**This is a breaking change only if you called one of those.** If you passed `write_queue_path=` to a factory or called `configure_write_queue()`, you now get a `TypeError` or `AttributeError`. Delete the call: it never did anything. Nothing in the package ever enqueued a write, so no behaviour is lost and no data path changes.
+**This is a breaking change only if you called one of those.** If you passed `write_queue_path=` to a factory or called `configure_write_queue()`, you now get a `TypeError` or `AttributeError`. Delete the call: it never did anything. Nothing in the package ever enqueued a write, so no behavior is lost and no data path changes.
 
 #### Why
 
@@ -188,7 +188,7 @@ PostgreSQL *can* exceed 50ms under a lock wait, a slow fsync, a vacuum storm or 
 
 ### Read this before assessing the write-queue fixes
 
-**The write queue currently has no producer.** Nothing in this package calls `WriteQueue.enqueue` — the only callers anywhere are its own tests. `threshold_ms`, and the "writes slower than the threshold are queued and the caller returns immediately" behaviour its module docstring describes, is stored at `write_queue.py:72` and never read. `pool._write_queue` is only assigned and then checked so `stop_supervisor()` can run at close; no read path and no write path consults it. `merge_pending_into_results` has no callers.
+**The write queue currently has no producer.** Nothing in this package calls `WriteQueue.enqueue` — the only callers anywhere are its own tests. `threshold_ms`, and the "writes slower than the threshold are queued and the caller returns immediately" behavior its module docstring describes, is stored at `write_queue.py:72` and never read. `pool._write_queue` is only assigned and then checked so `stop_supervisor()` can run at close; no read path and no write path consults it. `merge_pending_into_results` has no callers.
 
 `configure_write_queue()` therefore starts a supervisor that drains a queue nothing fills. It is Phase 3 infrastructure that was never connected (see the comment at `pool.py:286`).
 
@@ -214,7 +214,7 @@ The seven silent-swallow fixes further down are **not** affected by this. Those 
 
 ### Notes
 
-No API changed and no behaviour changed apart from the leak. Everything else in this release makes existing failures visible that were previously discarded. If you parse logs, expect new `WRITE_QUEUE_LOST` and `WRITE_QUEUE_FLUSH_FAILED` records, and new `ERROR` records about foreign key enforcement.
+No API changed and no behavior changed apart from the leak. Everything else in this release makes existing failures visible that were previously discarded. If you parse logs, expect new `WRITE_QUEUE_LOST` and `WRITE_QUEUE_FLUSH_FAILED` records, and new `ERROR` records about foreign key enforcement.
 
 1220 tests pass.
 
@@ -392,7 +392,7 @@ With this, no consumer operation on a Turso pool waits on the network: reads tak
 
 ### How this defect was found
 
-The contention was measured rather than argued, in `tests/unit/test_push_lock_contention.py`. Against a 0.30s push, a read arriving mid-push waited 0.280s, and five concurrent reads serialised completely behind it. Separately, five concurrent readers each doing 100ms of work took 0.505s at `max_size=5`.
+The contention was measured rather than argued, in `tests/unit/test_push_lock_contention.py`. Against a 0.30s push, a read arriving mid-push waited 0.280s, and five concurrent reads serialized completely behind it. Separately, five concurrent readers each doing 100ms of work took 0.505s at `max_size=5`.
 
 Those measurements were committed as `xfail(strict=True)` before the fix. When the read path was fixed they turned into XPASS and failed the suite, which forced this entry to be written rather than letting the tests quietly start passing. The write-versus-push case stayed `xfail(strict=True)` at this release and was fixed the same way in 0.1.14.
 
@@ -417,7 +417,7 @@ Durability on ephemeral disks (Render and similar), where the local file is wipe
 
 ### Features
 
-- **`TursoCloudManager.create_database(..., seed=...)`** — optional pass-through to the Turso create-database API's `seed` object, so a new database can be created as a copy of an existing one instead of empty. Provisioning a tenant from a pre-built template becomes a single copy rather than create-empty, then migrate, then insert rows, which matters under concurrent onboarding. Passed through as an opaque dict rather than modelled as named parameters, so seed variants the API grows are usable without a release here — and so the `timestamp` field, which selects an ISO 8601 recovery point rather than current state, is available for free. Requested downstream; thank you.
+- **`TursoCloudManager.create_database(..., seed=...)`** — optional pass-through to the Turso create-database API's `seed` object, so a new database can be created as a copy of an existing one instead of empty. Provisioning a tenant from a pre-built template becomes a single copy rather than create-empty, then migrate, then insert rows, which matters under concurrent onboarding. Passed through as an opaque dict rather than modeled as named parameters, so seed variants the API grows are usable without a release here — and so the `timestamp` field, which selects an ISO 8601 recovery point rather than current state, is available for free. Requested downstream; thank you.
 
 ## 0.1.10 — 2026-08-05
 

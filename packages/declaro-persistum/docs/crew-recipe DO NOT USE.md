@@ -14,9 +14,9 @@
 >
 > Connection **reuse** removes the per-write OS thread and is the larger lever. **MVCC + `BEGIN CONCURRENT`** is what lets a crew write in parallel and is what makes it *correct*. Neither alone gets there; the 13,826/sec figure needs both.
 >
-> **WAL loses writes at crew 16 even after three retries. MVCC loses none.** WAL's safe crew is 1, or writers serialised behind a lock.
+> **WAL loses writes at crew 16 even after three retries. MVCC loses none.** WAL's safe crew is 1, or writers serialized behind a lock.
 >
-> **A replica takes ONE replica connection.** Measured 2026-08-12, pyturso 0.7.2, real replica: MVCC *does* run on a replica (`journal_mode = 'mvcc'`, 4 of 4 runs) and 20 sequential writes under it reached the primary intact. What fails is a *second* replica connection — `database tape error: database is busy`, 3 of 4 runs outright, one after 12 retries over 30s on an idle database. In the run where eight opened: 5 writes local, **0 on the primary**. MVCC is incidental; it is the mode in which the pool stops serialising writers, and that serialisation is what keeps one replica connection alive at a time. **The earlier claim "MVCC is local only — it creates local-only internal tables the replication engine cannot reconcile" was wrong in both halves and is retracted.**
+> **A replica takes ONE replica connection.** Measured 2026-08-12, pyturso 0.7.2, real replica: MVCC *does* run on a replica (`journal_mode = 'mvcc'`, 4 of 4 runs) and 20 sequential writes under it reached the primary intact. What fails is a *second* replica connection — `database tape error: database is busy`, 3 of 4 runs outright, one after 12 retries over 30s on an idle database. In the run where eight opened: 5 writes local, **0 on the primary**. MVCC is incidental; it is the mode in which the pool stops serializing writers, and that serialization is what keeps one replica connection alive at a time. **The earlier claim "MVCC is local only — it creates local-only internal tables the replication engine cannot reconcile" was wrong in both halves and is retracted.**
 
 **For testing on a free-threaded build. 2026-08-12.**
 

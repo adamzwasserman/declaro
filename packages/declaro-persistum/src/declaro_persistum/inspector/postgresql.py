@@ -42,7 +42,7 @@ def _normalize_view_query(query: str) -> str:
     changed.
 
     It stays local to this module: both callers are here, and the sibling
-    inspectors do not normalise view text.
+    inspectors do not normalize view text.
     """
     return " ".join(query.split())
 
@@ -784,7 +784,7 @@ async def introspect_views(
 
 @helper
 def _view_from_row(row: dict[str, Any], materialized: bool) -> View:
-    """One view, from its catalogue row and which catalogue it came from."""
+    """One view, from its catalog row and which catalog it came from."""
     return {
         "name": row["name"],
         "query": _normalize_view_query(row["query"]),

@@ -391,7 +391,7 @@ def _validators_on(model: type) -> list[str]:
 
 @helper
 def _methods_on(model: type) -> list[str]:
-    """Callables written in the class body, which are behaviour and not data.
+    """Callables written in the class body, which are behavior and not data.
 
     A NESTED CLASS IS NOT A METHOD, and this counted one because a class is
     callable. `Meta` is a declaration the loader reads (`model_columns.py`

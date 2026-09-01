@@ -25,7 +25,7 @@ Feature: A failure is a value, everywhere
     Given a function that returns a failure
     Then a caller cannot mistake it for the answer
 
-  Scenario: a teardown failure rides out on the failure already travelling
+  Scenario: a teardown failure rides out on the failure already traveling
     Given work that failed, and a teardown that also failed
     Then the caller is told about both
     And the first failure is still the one it catches on

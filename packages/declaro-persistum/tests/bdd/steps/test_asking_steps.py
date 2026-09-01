@@ -4,7 +4,7 @@ WHY THESE ARE RED AND MUST STAY RED. Every function in `declaro_persistum
 .asking` raises `NotImplementedError` by name. These steps call the real
 function, so a scenario fails at its `When` with a message naming what is
 missing. A step that caught that and asserted something else would turn the
-suite green over unbuilt behaviour, which is the failure the feature files
+suite green over unbuilt behavior, which is the failure the feature files
 exist to prevent.
 
 EVERY STEP IS SYNCHRONOUS AND DRIVES A LOOP ITSELF. pytest-bdd does not await

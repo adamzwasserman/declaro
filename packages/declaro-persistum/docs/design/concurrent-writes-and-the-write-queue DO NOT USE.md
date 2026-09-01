@@ -22,7 +22,7 @@
 >
 > **The one sync connection is not a writer and does not make writers wait.** It carries a log to and from the primary. Local writes go to the journal, concurrently, and the sync connection ships them later. A measurement that a second sync connection fails is a fact about the channel and says NOTHING about how many writes can be in flight.
 >
-> So: "a replica permits one connection" is false. "A replicated database serialises writers" is false. Turso's sync engine syncs MVCC databases, so replicated and concurrent are not opposites. If a sentence concludes something about concurrency from a count of connections, it is wrong.
+> So: "a replica permits one connection" is false. "A replicated database serializes writers" is false. Turso's sync engine syncs MVCC databases, so replicated and concurrent are not opposites. If a sentence concludes something about concurrency from a count of connections, it is wrong.
 
 
 
@@ -52,21 +52,21 @@
 >
 > Connection **reuse** removes the per-write OS thread and is the larger lever. **MVCC + `BEGIN CONCURRENT`** is what lets a crew write in parallel and is what makes it *correct*. Neither alone gets there; the 13,826/sec figure needs both.
 >
-> **WAL loses writes at crew 16 even after three retries. MVCC loses none.** WAL's safe crew is 1, or writers serialised behind a lock.
+> **WAL loses writes at crew 16 even after three retries. MVCC loses none.** WAL's safe crew is 1, or writers serialized behind a lock.
 >
 > **A replica takes ONE replica connection.** Measured 2026-08-12, pyturso 0.7.2, real replica: MVCC *does* run on a replica (`journal_mode = 'mvcc'`, 4 of 4 runs) and 20 sequential writes under it reached the primary intact. What fails is a *second* replica connection — `database tape error: database is busy`, 3 of 4 runs outright, one after 12 retries over 30s on an idle database. In the run where eight opened: 5 writes local, **0 on the primary**. This bounds CONNECTIONS and nothing else. Concurrent writers come from `BEGIN CONCURRENT` on one connection, so a replica running MVCC can write concurrently while still permitting only one sync connection.
 
-Landed: stateless writes are the default for the Turso backend (`acquire_write` and `transaction()` open their own connection and close it), the pooled/serialised path survives behind `pooled_writes=True`, and `drain` takes a required `Retry` policy so contention is retried and constraint violations are not. The rationale for stateless-by-default — and the reasoning error that first argued against it — is recorded in `pool.py`'s module docstring so it is not re-derived.
+Landed: stateless writes are the default for the Turso backend (`acquire_write` and `transaction()` open their own connection and close it), the pooled/serialized path survives behind `pooled_writes=True`, and `drain` takes a required `Retry` policy so contention is retried and constraint violations are not. The rationale for stateless-by-default — and the reasoning error that first argued against it — is recorded in `pool.py`'s module docstring so it is not re-derived.
 
 Still open: the stranding defect in "The open defect" below. It was measured on the pooled code and is not caused by, or fixed by, statelessness.
 
 This is the next piece of work on declaro-persistum. The goal is performance: let writers run concurrently against the local replica, absorb contention with retries instead of a lock, and deliver to cloud opportunistically for eventual consistency.
 
-Everything below that states an engine behaviour carries the date it was measured. Nothing here is inferred. That distinction matters more than usual on this file — see "Beliefs to not re-derive" at the end.
+Everything below that states an engine behavior carries the date it was measured. Nothing here is inferred. That distinction matters more than usual on this file — see "Beliefs to not re-derive" at the end.
 
 ## The goal
 
-1. **Concurrent local writes.** Turso supports them through MVCC and `BEGIN CONCURRENT`. Use that rather than serialising writers behind a lock.
+1. **Concurrent local writes.** Turso supports them through MVCC and `BEGIN CONCURRENT`. Use that rather than serializing writers behind a lock.
 2. **A minimal queue.** The waiting room described below — deposit returns a ticket, the caller collects when it needs the answer.
 3. **Retries on busy.** A write-write conflict is the documented price of MVCC concurrency, and the documented handling is to roll back and retry. persistum must be able to retry, which means holding the statement.
 4. **Opportunistic push.** The local write is durable the moment it commits. Delivery to cloud is eventual, and nothing on a request path waits for it.
@@ -104,7 +104,7 @@ A real example: a signup writes a user row, claims a pooled database, and writes
 
 `acquire_write` cannot retry a failed write, because it cannot replay a caller's statements — the pool never sees them as data. **A deposited write holds its own SQL and parameters, so the drain loop can retry it.** That is the difference between the queue and `acquire_write`, and it is what makes MVCC concurrency usable: conflicts become retries rather than lost writes.
 
-Current `drain` does not retry. Adding it is part of this work. The retryable set is `Error::Busy`, `Error::BusySnapshot`, and anything reporting a conflict — `TursoPool._is_busy` already recognises all three.
+Current `drain` does not retry. Adding it is part of this work. The retryable set is `Error::Busy`, `Error::BusySnapshot`, and anything reporting a conflict — `TursoPool._is_busy` already recognizes all three.
 
 ## Measured facts
 

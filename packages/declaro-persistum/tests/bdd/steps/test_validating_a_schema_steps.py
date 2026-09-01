@@ -4,7 +4,7 @@ WHAT THIS REPLACES. Ten tests swapped out the schema reader for a fake that
 handed back a dictionary, so no file was ever opened and `load_schema` never
 ran. A schema is TOML on disk, and every case those tests wanted is something
 a real file can say: I checked that a bad reference gives an error and an
-unrecognised type gives a warning before writing any of this.
+unrecognized type gives a warning before writing any of this.
 
 `tmp_path` is a real directory pytest makes and removes. Writing files into it
 is not a stand-in for anything.
@@ -93,12 +93,12 @@ def _given_bad_ref(ctx, tmp_path):
     ctx["folder"] = _a_folder_holding(tmp_path, orders=_BAD_REFERENCE)
 
 
-@given("a folder holding a column whose type nobody recognises")
+@given("a folder holding a column whose type nobody recognizes")
 def _given_odd_type(ctx, tmp_path):
     ctx["folder"] = _a_folder_holding(tmp_path, gadgets=_ODD_TYPE)
 
 
-@given("a folder holding both a bad reference and an unrecognised type")
+@given("a folder holding both a bad reference and an unrecognized type")
 def _given_both(ctx, tmp_path):
     ctx["folder"] = _a_folder_holding(tmp_path, orders=_BAD_REFERENCE, gadgets=_ODD_TYPE)
 

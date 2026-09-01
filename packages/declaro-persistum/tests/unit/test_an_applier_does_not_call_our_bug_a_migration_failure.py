@@ -110,7 +110,7 @@ async def test_a_malformed_operation_is_not_reported_as_a_failed_migration(
 
 
 async def test_an_engine_refusal_is_still_a_migration_failure(tmp_path) -> None:
-    """The behaviour that must survive, and the reason the wrapper exists.
+    """The behavior that must survive, and the reason the wrapper exists.
 
     An unparseable type is a well-formed operation the engine refuses. That is
     a migration failure and the report should carry the operation and the

@@ -1,7 +1,7 @@
-"""An unrecognised type name silently changes the value SQLite stores.
+"""An unrecognized type name silently changes the value SQLite stores.
 
 MEASURED 2026-08-19. SQLite assigns column affinity by matching substrings of
-the declared type name, and a name it recognises nothing in gets NUMERIC:
+the declared type name, and a name it recognizes nothing in gets NUMERIC:
 
     CREATE TABLE t (a TEXT, b TXET, d GEOGRAPHY)
     INSERT INTO t VALUES ('007', '007', '007')

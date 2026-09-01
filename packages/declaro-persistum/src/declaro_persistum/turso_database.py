@@ -10,10 +10,10 @@ THE JOURNAL MODE IS CHOSEN HERE AND NOWHERE ELSE, from one fact:
     primary set  ->  replicated  ->  WAL
     no primary   ->  local       ->  MVCC
 
-WRITERS ARE NOT SERIALISED ON EITHER. Both open with `serialise=None` and both
+WRITERS ARE NOT SERIALIZED ON EITHER. Both open with `serialize=None` and both
 write through `BEGIN CONCURRENT`.
 
-WHY WAL ON A REPLICA, and it is NOT because writers need serialising. Under
+WHY WAL ON A REPLICA, and it is NOT because writers need serializing. Under
 MVCC the sync engine cannot pull: `conn.pull()` raises `sync engine operation
 failed: database error: Database is busy`, at close, every time. Measured
 2026-09-01 against a real primary on pyturso 0.7.2, 16 concurrent writers, one
@@ -32,7 +32,7 @@ write durable locally and on the primary, nothing ever blocked.
 WHAT THE LOCK WAS FOR, AND WHY IT WAS WRONG. An earlier measurement found that
 a second connection to a replica is refused under MVCC, and that under WAL the
 engine rejects a second WRITER across 8 open connections. Both readings are
-real. The conclusion drawn from them, that a replicated database must serialise
+real. The conclusion drawn from them, that a replicated database must serialize
 its writers, does not follow: this module opens exactly ONE connection to a
 replica and hands it to every write, so the eight-connection measurement
 describes a situation the code never creates. `BEGIN CONCURRENT` runs many
@@ -85,7 +85,7 @@ second sync connection fails is a fact about the channel and says NOTHING
 about how many writes can be in flight.
 
 So "a replica permits one connection" is false, and "a replicated database
-serialises writers" is false. If a sentence concludes something about
+serializes writers" is false. If a sentence concludes something about
 concurrency from a count of connections, it is wrong.
 """
 
@@ -141,7 +141,7 @@ _MAX_PULL_BATCHES = 64
 ENGINE: Engine = "turso"
 
 # How long a writer waits for the replica lock before failing. A property of
-# the engine's own retry behaviour, not of any caller.
+# the engine's own retry behavior, not of any caller.
 _BUSY_TIMEOUT_S = 5.0
 
 
@@ -292,7 +292,7 @@ def _nothing_to_carry(unclosed: Exception | Nothing) -> Exception | Nothing:
     return unclosed
 
 
-# WHETHER SOMETHING IS ALREADY TRAVELLING, AND WHETHER THE CLOSE FAILED.
+# WHETHER SOMETHING IS ALREADY TRAVELING, AND WHETHER THE CLOSE FAILED.
 _LEFT_OPEN: dict[tuple[bool, bool], Callable[[Exception | Nothing], Exception | Nothing]] = {
     (True, True): _rides_out_on_the_failure,
     (True, False): _nothing_to_carry,
@@ -525,7 +525,7 @@ async def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
     compounded with MVCC).
 
     There is no lock here because a local database is where MVCC actually
-    pays. A lock would serialise the crew and throw the reason for MVCC away.
+    pays. A lock would serialize the crew and throw the reason for MVCC away.
 
     Nothing to replicate, so the replication callables are inert rather than
     absent — `database.replicate` short-circuits on `is_replicated` before it

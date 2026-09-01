@@ -20,7 +20,7 @@ statements that this reported as reads. A consumer using `is_write_op` to
 decide what goes through the write queue would send those down the read path.
 
 `classify_sql` looks at the FIRST KEYWORD, which is the right shape -- it is a
-dict lookup, not a chain, and an unrecognised statement gets "other" rather
+dict lookup, not a chain, and an unrecognized statement gets "other" rather
 than a guess. The two rows were simply missing, and the CTE needs the keyword
 after the closing parenthesis rather than the one before it.
 """
@@ -105,7 +105,7 @@ def test_an_empty_statement_is_other_rather_than_a_crash(sql: str) -> None:
 def test_something_nobody_taught_it_is_other_not_a_guess() -> None:
     """A dict lookup with a fallback, which is the right shape here.
 
-    Unlike an engine or a column type, an unrecognised STATEMENT is not a
+    Unlike an engine or a column type, an unrecognized STATEMENT is not a
     caller error: SQL has more verbs than this table will ever hold, and
     "other" is an honest answer rather than a guess at one of the six.
     """

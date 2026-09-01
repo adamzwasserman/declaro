@@ -168,7 +168,7 @@ any test, and the first one written for `case_order_by` found it raising
 AttributeError on every call.
 
 Replaces `if hasattr(o, "to_sql_fragment"): ... else: ...` in select.py. A
-term carrying an unrecognised tag raises KeyError instead of falling through
+term carrying an unrecognized tag raises KeyError instead of falling through
 to whichever branch happened to be last.
 """
 
@@ -197,7 +197,7 @@ class SubqueryExpr(TypedDict):
 
 
 # THE ONE PLACE THE WORD IS WRITTEN. `SubqueryExpr` declares it and this
-# reads it back, so the type and the recogniser cannot disagree.
+# reads it back, so the type and the recognizer cannot disagree.
 SUBQUERY: Final[str] = get_args(get_type_hints(SubqueryExpr)["kind"])[0]
 
 
@@ -213,7 +213,7 @@ def is_subquery(value: Any) -> bool:
     THE TAG IS READ OFF THE DECLARATION, not typed out again. It used to be
     written in two places, `SubqueryExpr.kind` and here, and only the first is
     enforced by anything. Changing the `Literal` would leave this comparing
-    against the old word, so every subquery would stop being recognised and
+    against the old word, so every subquery would stop being recognized and
     nothing would raise: a value that is not a subquery is a legitimate case.
     """
     return kind_of(value) == SUBQUERY
@@ -242,7 +242,7 @@ def render_subquery(expr: SubqueryExpr, engine: Engine) -> tuple[str, dict[str, 
 
 
 class JoinClause(TypedDict):
-    """A JOIN clause. Data, not an object — there is no behaviour here.
+    """A JOIN clause. Data, not an object — there is no behavior here.
 
     This was a class whose whole body was an `__init__` assigning three
     fields. `query/builder.py` already rendered joins from plain dicts

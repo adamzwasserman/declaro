@@ -51,7 +51,7 @@ def test_the_table_holds_one_writer_per_engine() -> None:
 def test_each_engine_gets_its_own_writer() -> None:
     """Three engines, three transaction statements, three functions.
 
-    A table pointing two engines at one function would pass every behavioural
+    A table pointing two engines at one function would pass every behavioral
     test below on the engine that function was written for.
     """
     assert WRITERS["sqlite"] is sqlite_write_one

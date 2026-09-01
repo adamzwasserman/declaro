@@ -7,7 +7,7 @@ enforcement OFF was announced on a channel no caller can read and reported
 through a value nobody looked at.
 
 The reason none of them could simply raise is real: each runs in an `except`
-or a `finally`, where raising replaces the failure already travelling. A
+or a `finally`, where raising replaces the failure already traveling. A
 rebuild that failed on a bad column would be reported as "could not re-enable
 foreign keys", which is a report about the wrong thing.
 

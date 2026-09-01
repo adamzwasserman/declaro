@@ -22,8 +22,8 @@ holds `pragma_index_list` and `pragma_table_info`, and these are thin readers
 over exactly those. One definition there, imported by both.
 
 THE 84% PAIR IS LEFT ALONE. `generate_create_table_sql` and its twin differ in
-sixteen lines of real behaviour, so merging them is a decision about which
-behaviour is right rather than a deduplication. Recorded below so the number
+sixteen lines of real behavior, so merging them is a decision about which
+behavior is right rather than a deduplication. Recorded below so the number
 cannot drift unnoticed.
 """
 

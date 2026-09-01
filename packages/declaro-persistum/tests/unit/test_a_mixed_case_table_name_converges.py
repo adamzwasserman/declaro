@@ -20,8 +20,8 @@ WHERE THE CASE GOES. Turso folds `sqlite_master.name` and keeps the original
 in `sqlite_master.sql`, which is what makes this recoverable rather than
 merely reportable:
 
-    catalogue name: 'userprofile'
-    catalogue sql : 'CREATE TABLE "UserProfile" (id INTEGER PRIMARY KEY, ...)'
+    catalog name: 'userprofile'
+    catalog sql : 'CREATE TABLE "UserProfile" (id INTEGER PRIMARY KEY, ...)'
     PRAGMA columns: ['id', 'givenName']
 
 Column names are NOT folded, so this is a table-name defect only. SQLite
@@ -36,7 +36,7 @@ added column the original case is gone from `name` AND from `sql`:
     after ALTER TABLE ... ADD COLUMN         sql holds  mixedcase
 
 That one is held below as a strict xfail. Recovering the case from the
-catalogue cannot fix it, because the engine no longer holds it, and that
+catalog cannot fix it, because the engine no longer holds it, and that
 needs a decision about where the declared name is kept.
 
 Index and view names fold identically and ARE recoverable, because their own
@@ -212,10 +212,10 @@ def test_declared_name_recovers_every_spelling_the_grammar_allows(
 
 
 def test_a_ddl_that_names_a_different_table_is_not_believed() -> None:
-    """A qualified name folds to something the catalogue never held.
+    """A qualified name folds to something the catalog never held.
 
     `main.QualName` captures as `main.QualName`, which is not `qualname`, so
-    the parse and the catalogue disagree and the catalogue wins. Turso strips
+    the parse and the catalog disagree and the catalog wins. Turso strips
     the qualifier before storing, so this cannot arrive from this engine
     today. It is one version away, and the failure it would cause is a table
     introspected under a name no declaration can match.
@@ -240,7 +240,7 @@ def test_unparseable_ddl_keeps_the_catalogue_name() -> None:
 @pytest.mark.xfail(
     strict=True,
     reason="Turso rewrites stored DDL on ALTER and folds the name into it, "
-    "so the declared case is gone from the catalogue entirely",
+    "so the declared case is gone from the catalog entirely",
 )
 async def test_a_mixed_case_table_survives_being_altered() -> None:
     """The half of the defect the inspector cannot reach."""
@@ -314,7 +314,7 @@ async def test_the_reference_reads_back_as_it_was_declared(engine: str) -> None:
     """The cause, so a fix in the differ cannot mask it.
 
     `references` is a string this package writes into SQL. Introspection has
-    to hand back the name that was declared, not the name the catalogue holds.
+    to hand back the name that was declared, not the name the catalog holds.
     """
     connection = await ENGINES[engine]()
     try:

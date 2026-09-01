@@ -25,7 +25,7 @@ copied from what `diff()` returns rather than from the docstring.
 
 WHAT IS ASSERTED IS THE RELATION, NOT THE SEQUENCE. Pinning the exact output
 list would fail whenever an unrelated tie is broken differently, and would say
-nothing about whether the dependency was honoured. Each test says one
+nothing about whether the dependency was honored. Each test says one
 operation comes before another and nothing about the rest.
 """
 

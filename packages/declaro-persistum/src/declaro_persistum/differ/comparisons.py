@@ -122,7 +122,7 @@ _CONSTRAINT_COMPARISON: dict[str, Callable[[Any, Any], bool]] = {
 }
 
 
-# WHAT A NUMBER LOOKS LIKE WRITTEN DOWN, so that recognising one is a declared
+# WHAT A NUMBER LOOKS LIKE WRITTEN DOWN, so that recognizing one is a declared
 # pattern rather than an exception caught from `float()`. Optional sign, digits
 # either side of an optional point, optional exponent.
 _NUMERIC = re.compile(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?\Z")
@@ -538,7 +538,7 @@ def _same_constraint_definition(current: Any, target: Any) -> bool:
     Measured 2026-08-19 across four expression shapes; that was the only one
     that differed, and finding it took running all four rather than one.
     #
-    The same normalisation the column-level CHECK comparison uses, plus the
+    The same normalization the column-level CHECK comparison uses, plus the
     inequality fold. `_canonical_spacing` already strips the space-before-paren
     Turso adds and the redundant outer parens PostgreSQL adds.
     """

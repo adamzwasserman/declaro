@@ -401,7 +401,7 @@ def _the_declared_table(model_cls: type, table_name: Any) -> list[tuple[str, Tab
         # better than crashing during schema load."
         #
         # Two things moved under it. `declared_type` was taught on 2026-08-17
-        # to raise on an annotation it does not recognise rather than quietly
+        # to raise on an annotation it does not recognize rather than quietly
         # emitting `text`, so the load crashes anyway. And under
         # `from __future__ import annotations` the raw `__annotations__` holds
         # every annotation as a STRING, so the first field fails and the field
@@ -544,7 +544,7 @@ _WHEN_A_VIEW_KEY_IS_UNKNOWN: dict[bool, Callable[[dict[str, Any], list[str]], Vi
 #
 # MEASURED 2026-08-17: `{"name": 123, "query": None, "materialized": "yes"}`
 # has both required keys, passed, and came back keyed by the integer 123. It
-# would have travelled to an applier and rendered `CREATE VIEW 123 AS None`,
+# would have traveled to an applier and rendered `CREATE VIEW 123 AS None`,
 # and the failure would have arrived from a SQL parser with no idea which
 # models file wrote it.
 #

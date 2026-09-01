@@ -4,7 +4,7 @@ A WAL is already the queue: a write is durable once it is in the log, and
 the engine applies it later. So the only job left is to buffer callers who
 arrive at the same instant and hand them to the log in order.
 
-This does not serialise the database. Turso supports concurrent writers
+This does not serialize the database. Turso supports concurrent writers
 through MVCC and BEGIN CONCURRENT, and the pool still opens a write
 connection per concurrent caller.
 

@@ -9,7 +9,7 @@ it, by the file tree, or by a green suite — it simply never runs, and the suit
 reports success without it.
 
 That is worse than having no file. A missing feature announces itself the first
-time someone looks for it. An unbound one asserts that the behaviour is
+time someone looks for it. An unbound one asserts that the behavior is
 specified AND covered, and both halves are false.
 
 FOUND ON THIS BRANCH, 2026-08-13, by counting rather than by reading:

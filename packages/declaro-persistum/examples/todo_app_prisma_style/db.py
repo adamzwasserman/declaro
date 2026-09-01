@@ -43,7 +43,7 @@ from declaro_persistum.boundary import boundary
 class DatabaseConfig(TypedDict):
     """Which engine, where, and what to call it on screen.
 
-    A TypedDict rather than a dataclass: three fields, no behaviour, nothing to
+    A TypedDict rather than a dataclass: three fields, no behavior, nothing to
     attach a method to. It can be printed, compared with `==`, stored and sent
     over a wire, none of which is true of an object graph.
     """
@@ -260,7 +260,7 @@ async def get_connection(config: DatabaseConfig):
 
     THE ENGINE TRAVELS WITH THE CONNECTION, because it is true of the
     connection. Every function that touched a connection used to ask
-    `get_database()` again for its engine, so a function's behaviour depended
+    `get_database()` again for its engine, so a function's behavior depended
     on module state no caller could see, and calling one with a connection
     from a different engine would have read the wrong row.
 

@@ -459,7 +459,7 @@ await close(db)   # replicate whatever is left, then release everything
 
 **`writing` is a transaction scope: it commits when the block ends cleanly and rolls back if it raises.** It did not until 2026-08-14. Before that it opened a connection, yielded it and closed it, so a block that forgot `await conn.commit()` had its writes discarded and reported nothing — `execute_fk_ordered` omitted the commit and every one of its writes was rolled back while `cursor.rowcount` still said success. Measured on both DB-API engines, two writes through two blocks with the second uncommitted, one row survived. A second commit is harmless, so code that commits explicitly is unaffected. Committing cannot be a call to `conn.commit()` in the general case, because asyncpg has none; the per-engine answer lives in `writers.COMMIT`.
 
-A reader takes no lock and waits for nothing: the local file is a full copy, so reads never touch the primary. Neither does a writer, on any engine. This sentence used to say that a replicated database serialises its writers because the engine admits one connection; the connection count is right and the conclusion was not, because `BEGIN CONCURRENT` carries many writers on one connection. Corrected 2026-09-01 after measuring 16 concurrent writers against a real primary: nothing blocked, and all of them durable locally and on the primary.
+A reader takes no lock and waits for nothing: the local file is a full copy, so reads never touch the primary. Neither does a writer, on any engine. This sentence used to say that a replicated database serializes its writers because the engine admits one connection; the connection count is right and the conclusion was not, because `BEGIN CONCURRENT` carries many writers on one connection. Corrected 2026-09-01 after measuring 16 concurrent writers against a real primary: nothing blocked, and all of them durable locally and on the primary.
 
 ### Mirroring two databases
 
@@ -548,7 +548,7 @@ emits one JSONL line:
 {"ts": "2026-08-14T03:19:18.332541+00:00", "tier": "my-app", "op": "create", "duration_ms": 7.913, "success": true, "sql": "CREATE TABLE t (id INTEGER)", "error": ""}
 ```
 
-Where that line goes is the logger's business, which is why there is no `latency_sink` or `latency_path` argument: a `FileHandler` writes it to a file, a custom handler forwards it to a metrics system.
+Where that line goes is the logger's business, which is why there is no `latency_sink` or `latency_path` argument: a `FileHandler` writes it to a file, a custom handler forward it to a metrics system.
 
 ### The pieces
 
@@ -589,7 +589,7 @@ The WAL is already the queue. A write is durable once it is in the log, and the 
 
 So the only job left is to buffer callers who arrive at the same instant and hand their writes to the log in order. That is all this is: a waiting room.
 
-It does **not** serialise the database. Turso supports concurrent writers through MVCC and `BEGIN CONCURRENT`, and a crew opens one connection per drainer. The room buffers callers; the engine still writes them concurrently.
+It does **not** serialize the database. Turso supports concurrent writers through MVCC and `BEGIN CONCURRENT`, and a crew opens one connection per drainer. The room buffers callers; the engine still writes them concurrently.
 
 Nothing is stored in it. It is empty except during the microseconds when callers overlap. There is no persistence, no retry, and no pending list that survives a failure.
 
@@ -1262,7 +1262,7 @@ async def list_users(conn=Depends(get_tenant_conn)):
 
 `close` is what makes `shutdown="replicate"` mean anything: it is the call that waits. A process that exits without it drops whatever had not replicated, whatever the policy said.
 
-Writes go through `writing(db)`, which serialises. A replicated database gets no write concurrency from either journal mode, so `start_crew` refuses one outright — see [Write Queue](#write-queue) for the measurements.
+Writes go through `writing(db)`, which serializes. A replicated database gets no write concurrency from either journal mode, so `start_crew` refuses one outright — see [Write Queue](#write-queue) for the measurements.
 
 ### Database Credentials by Backend
 

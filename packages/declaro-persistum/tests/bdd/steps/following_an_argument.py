@@ -8,7 +8,7 @@ which is still there. Three of one thing is not three mistakes, it is a rule
 nobody checks, so this is the check.
 
 IT DECIDES BY FATE, NEVER BY APPEARANCE, and that is the whole design. The
-obvious approach is to recognise SQL, and it fails in both directions. Scanning
+obvious approach is to recognize SQL, and it fails in both directions. Scanning
 for the twenty-odd verbs finds every statement and also finds `created_at` and
 `update_count`, which are columns. It misses every fragment, because `total >=
 0` and `name ASC` contain no verb and parse as nothing, and the fragments are
@@ -42,13 +42,13 @@ A_CONNECTION = ("DbapiConnection", "DbapiCursor", "FetchingConnection", "Replica
 # disagree without anything noticing until the wrong introspector runs.
 AN_ENGINE = ("Engine",)
 # BY SUBSTRING, NOT BY EQUALITY. `begin_cutover(source_engine: str, ...)` had
-# the offence and the loose type both, so an exact-name check missed it and the
+# the offense and the loose type both, so an exact-name check missed it and the
 # annotation check missed it too. It stayed hidden until the two functions
 # either side of it were fixed.
 AN_ENGINE_BY_NAME = ("engine", "engine", "backend")
 
 
-class Offence(NamedTuple):
+class Offense(NamedTuple):
     """One argument whose fate is not one of the two it is allowed."""
 
     where: str
@@ -60,7 +60,7 @@ class Offence(NamedTuple):
         return f"{self.where}: {self.function}({self.argument}) {self.becomes}"
 
 
-Asked = Callable[[ast.FunctionDef | ast.AsyncFunctionDef, str], list[Offence]]
+Asked = Callable[[ast.FunctionDef | ast.AsyncFunctionDef, str], list[Offense]]
 
 
 def _public(tree: ast.AST) -> list[ast.FunctionDef | ast.AsyncFunctionDef]:
@@ -85,29 +85,29 @@ def _spelled(annotation: ast.expr | None) -> str:
     return "" if annotation is None else ast.unparse(annotation)
 
 
-def _takes_a_connection(node: ast.FunctionDef | ast.AsyncFunctionDef, where: str) -> list[Offence]:
+def _takes_a_connection(node: ast.FunctionDef | ast.AsyncFunctionDef, where: str) -> list[Offense]:
     """A caller who has to open and drive a connection is writing the library's half."""
     return [
-        Offence(where, node.name, arg.arg, f"is a connection, typed {_spelled(arg.annotation)}")
+        Offense(where, node.name, arg.arg, f"is a connection, typed {_spelled(arg.annotation)}")
         for arg in _arguments(node)
         if any(named in _spelled(arg.annotation) for named in A_CONNECTION)
     ]
 
 
-def _hands_one_back(node: ast.FunctionDef | ast.AsyncFunctionDef, where: str) -> list[Offence]:
+def _hands_one_back(node: ast.FunctionDef | ast.AsyncFunctionDef, where: str) -> list[Offense]:
     """Handing one out is the same hole facing the other way."""
     given = _spelled(node.returns)
     named = [one for one in A_CONNECTION if one in given]
     return [
-        Offence(where, node.name, "its return", f"hands back a connection, typed {given}")
+        Offense(where, node.name, "its return", f"hands back a connection, typed {given}")
         for _ in named[:1]
     ]
 
 
-def _takes_an_engine(node: ast.FunctionDef | ast.AsyncFunctionDef, where: str) -> list[Offence]:
+def _takes_an_engine(node: ast.FunctionDef | ast.AsyncFunctionDef, where: str) -> list[Offense]:
     """The engine is decided once, where the database is opened."""
     return [
-        Offence(where, node.name, arg.arg, "names an engine the Database already carries")
+        Offense(where, node.name, arg.arg, "names an engine the Database already carries")
         for arg in _arguments(node)
         if any(named in arg.arg.lower() for named in AN_ENGINE_BY_NAME)
         or any(named in _spelled(arg.annotation) for named in AN_ENGINE)
@@ -142,11 +142,11 @@ _PASTING: dict[Callable[[ast.AST], bool], str] = {
 
 def _pasted_into_a_string(
     node: ast.FunctionDef | ast.AsyncFunctionDef, where: str
-) -> list[Offence]:
+) -> list[Offense]:
     """An argument that reaches a string this function builds."""
     mine = {arg.arg for arg in _arguments(node)}
     found = [
-        Offence(where, node.name, read.id, becomes)
+        Offense(where, node.name, read.id, becomes)
         for builds, becomes in _PASTING.items()
         for spot in ast.walk(node)
         if builds(spot)
@@ -166,12 +166,12 @@ _ASKED: tuple[Asked, ...] = (
 )
 
 
-def offences_in_source(source: str, where: str) -> list[Offence]:
+def offenses_in_source(source: str, where: str) -> list[Offense]:
     """Every argument in this source whose fate is not one of the two allowed."""
     tree = ast.parse(source)
-    return [offence for node in _public(tree) for asks in _ASKED for offence in asks(node, where)]
+    return [offense for node in _public(tree) for asks in _ASKED for offense in asks(node, where)]
 
 
-def offences_in_file(path: pathlib.Path) -> list[Offence]:
+def offenses_in_file(path: pathlib.Path) -> list[Offense]:
     """The same question asked of a file on disk."""
-    return offences_in_source(path.read_text(), str(path))
+    return offenses_in_source(path.read_text(), str(path))

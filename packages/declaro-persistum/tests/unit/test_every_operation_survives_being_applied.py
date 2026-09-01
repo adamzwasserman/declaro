@@ -199,7 +199,7 @@ CASES: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
 # CONSTRAINT and this package does not yet rebuild a table to stand in for
 # one, so the applier raises and says which constraint on which table.
 #
-# A REFUSAL IS A BEHAVIOUR AND IS TESTED AS ONE. Leaving these out of the
+# A REFUSAL IS A BEHAVIOR AND IS TESTED AS ONE. Leaving these out of the
 # matrix would have said the cells were unreachable, which is what the gate
 # above claimed for two years and was wrong about: the differ emits them
 # perfectly well, and it is the applier that will not run them.
@@ -267,7 +267,7 @@ def test_the_cases_cover_the_operations_they_claim_to() -> None:
 async def test_what_sqlite_refuses_it_refuses_out_loud(
     label: str, current: Any, target: Any
 ) -> None:
-    """A refusal is a behaviour, so it is run rather than assumed.
+    """A refusal is a behavior, so it is run rather than assumed.
 
     These two were on the gate's out-of-reach list as though the differ could
     not emit them. It always could. What will not run them is the applier,

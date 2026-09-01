@@ -25,9 +25,9 @@ on every connection:
 A CREW DOES NOT DEPEND ON MVCC, and this said it did. Staggering is the async
 part: callers stop blocking, the queue keeps the writer fed, and the writer
 stops going idle between writes. That works on any journal mode. On WAL the
-engine permits one writer at a time, so the writes still serialise and what
+engine permits one writer at a time, so the writes still serialize and what
 you get is a crew of one that is never idle, which is already the point.
-Nothing serialises writers with a lock on any engine; what WAL serialises is
+Nothing serializes writers with a lock on any engine; what WAL serializes is
 inside the engine.
 
 MVCC AND `BEGIN CONCURRENT` BUY THE CREW SIZE. They let drainers overlap
@@ -89,7 +89,7 @@ second sync connection fails is a fact about the channel and says NOTHING
 about how many writes can be in flight.
 
 So "a replica permits one connection" is false, and "a replicated database
-serialises writers" is false. If a sentence concludes something about
+serializes writers" is false. If a sentence concludes something about
 concurrency from a count of connections, it is wrong.
 """
 
@@ -116,7 +116,7 @@ __all__ = ["Crew", "start_crew", "stop_crew", "drainer"]
 class Crew(TypedDict):
     """A running crew. Data plus the handles needed to stop it.
 
-    There is no behaviour here: the tasks and the stop signal are facts about
+    There is no behavior here: the tasks and the stop signal are facts about
     a running crew, and `stop_crew` is a function that takes them.
     """
 
@@ -224,7 +224,7 @@ async def drainer(
     async def take_the_room() -> None:
         """Writes are waiting, so hand them to the log and report the orphans."""
         drained = await drain(room, execute, retry)
-        # A failure whose depositor cancelled its `collect` has no ticket
+        # A failure whose depositor canceled its `collect` has no ticket
         # to raise on. `drain` hands it back rather than dropping it, and
         # this is the boundary, so this is where it becomes visible. The
         # write reached the database; that its caller stopped listening
@@ -243,7 +243,7 @@ async def drainer(
             # CLEAR BEFORE CHECKING. The reverse order is a lost wakeup: a
             # drainer finds the queue empty, `deposit` appends and sets
             # `arrived`, and then the drainer clears the flag it was just
-            # signalled with. Every drainer sleeps, `collect` waits on a
+            # signaled with. Every drainer sleeps, `collect` waits on a
             # future nobody will resolve, and the caller hangs.
             #
             # That is not hypothetical — it is the bug this loop had for one
@@ -350,7 +350,7 @@ def _the_first_of(unclosed: list[Exception | Nothing]) -> Exception | Nothing:
 async def stop_crew(crew: Crew) -> None:
     """Signal every drainer and wait for it to finish its current write.
 
-    Drainers are not cancelled. A cancelled drainer may be between `execute`
+    Drainers are not canceled. A canceled drainer may be between `execute`
     and `commit`, and the queue would have no way to tell whether that write
     landed — so the stop is cooperative and the wait is unbounded on purpose.
     """

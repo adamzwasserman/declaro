@@ -553,7 +553,7 @@ def also_failed(
 
     THIS IS WHAT A TEARDOWN DOES INSTEAD OF LOGGING. A restore step runs in a
     `finally` or an `except` and must not raise, because its own failure would
-    replace the one already travelling and the caller would never learn what
+    replace the one already traveling and the caller would never learn what
     actually went wrong. So four of them caught, wrote an error to a log and
     returned a count. The log was a channel no caller can read, and every one
     of those four callers threw the count away, so a connection left with

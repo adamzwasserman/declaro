@@ -90,7 +90,7 @@ def mirror(
 async def mirror_writing(m: Mirror) -> AsyncIterator[tuple[Any, Any]]:
     """Yield both write connections. The caller writes the same thing to each.
 
-    Both are yielded rather than one wrapper that forwards, because a caller
+    Both are yielded rather than one wrapper that forward, because a caller
     doing a multi-statement transaction needs to control the order and the
     commit on each side, and a forwarding wrapper would have to guess.
     """

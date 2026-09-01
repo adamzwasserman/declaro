@@ -327,7 +327,7 @@ def declared_name(stored: str, ddl: str | None) -> str:
     written = [*spellings, stored][0]
 
     # A DDL that names a different table is not this table's DDL. Fall back
-    # rather than trust a match that disagrees with the catalogue.
+    # rather than trust a match that disagrees with the catalog.
     return written if written.lower() == stored.lower() else stored
 
 
@@ -489,7 +489,7 @@ async def _get_indexes(
 
 @boundary
 async def _index_ddl(connection: DbapiConnection, index_name: str) -> str | None:
-    """The CREATE INDEX text the catalogue stored for one index.
+    """The CREATE INDEX text the catalog stored for one index.
 
     None for an index the engine made itself, which has no statement behind
     it. `indexes_from_rows` reads the text only to recover a partial index's

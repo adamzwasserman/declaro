@@ -79,7 +79,7 @@ def _declared(**fk: str) -> dict:
 async def test_declaring_no_action_migrates_nothing(tmp_path: pathlib.Path, clause: str) -> None:
     """Both spellings in the database are the same constraint the model names.
 
-    The parametrisation is the point. SQLite cannot tell the two apart, so a
+    The parameterization is the point. SQLite cannot tell the two apart, so a
     fix that only handled the explicit clause would still loop on the plain
     one, and a reader would have no way to see which case was covered.
     """

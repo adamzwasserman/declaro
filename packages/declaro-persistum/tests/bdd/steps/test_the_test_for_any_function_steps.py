@@ -32,9 +32,9 @@ from pytest_bdd import given, parsers, scenarios, then, when
 import declaro_persistum as dp
 from declaro_persistum import asking, field, table
 from tests.bdd.steps.following_an_argument import (
-    Offence,
-    offences_in_file,
-    offences_in_source,
+    Offense,
+    offenses_in_file,
+    offenses_in_source,
 )
 
 pytestmark = pytest.mark.bdd
@@ -67,7 +67,7 @@ _A_WORD_SCAN_WOULD_FIND = ("select", "insert", "update", "delete", "where", "fro
 class Ctx(TypedDict, total=False):
     """What one scenario carries from its When to its Then."""
 
-    found: list[Offence]
+    found: list[Offense]
     refusal: Exception | None
     answer: Any
     model: type
@@ -102,18 +102,18 @@ def _exported() -> set[tuple[str, str]]:
     return surface
 
 
-def _on_the_surface() -> list[Offence]:
-    """Every offence the gate finds in a function a caller can actually reach."""
+def _on_the_surface() -> list[Offense]:
+    """Every offense the gate finds in a function a caller can actually reach."""
     surface = _exported()
     return [
         found
         for path in sorted(_SRC.rglob("*.py"))
-        for found in offences_in_file(path)
+        for found in offenses_in_file(path)
         if (str(pathlib.Path(found.where).resolve()), found.function) in surface
     ]
 
 
-def _unratcheted(found: list[Offence]) -> list[Offence]:
+def _unratcheted(found: list[Offense]) -> list[Offense]:
     return [one for one in found if (one.function, one.argument) not in STILL_FOUND]
 
 
@@ -145,7 +145,7 @@ def _given_event(ctx: Ctx) -> None:
 # ------------------------------------------------- source written to be refused
 
 
-# TWO WAYS TO WRITE THE SAME OFFENCE, so the gate has something it must fail
+# TWO WAYS TO WRITE THE SAME OFFENSE, so the gate has something it must fail
 # on. A row each, because the only difference is the source string.
 _WRITTEN_TO_BE_REFUSED: dict[str, str] = {
     "concatenated into a statement": 'def rows_of(named: str) -> str:\n    return "a" + named\n',
@@ -223,7 +223,7 @@ def _when_written(ctx: Ctx, written: str) -> None:
 
 @when("the gate runs")
 def _when_the_gate_runs(ctx: Ctx) -> None:
-    ctx["found"] = offences_in_source(ctx.get("source", ""), "written for this scenario")
+    ctx["found"] = offenses_in_source(ctx.get("source", ""), "written for this scenario")
 
 
 @when("every string a caller can pass is followed")

@@ -79,7 +79,7 @@ CASES: dict[str, dict[str, Any]] = {
         }
     },
     "a varchar with a length": {
-        "labelled": {
+        "labeled": {
             "columns": {
                 "id": {"type": "integer", "primary_key": True},
                 "code": {"type": "varchar(12)"},

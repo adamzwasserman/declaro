@@ -5,7 +5,7 @@ A process that exits without replicating loses whatever it wrote since the last
 push, so `shutdown="replicate"` is the whole durability story and the signal
 handler is the whole of `shutdown="replicate"`.
 
-WHAT WAS TESTED BEFORE. That the openers refuse a policy they cannot honour,
+WHAT WAS TESTED BEFORE. That the openers refuse a policy they cannot honor,
 which is a different question. No test raised a signal, so no test ever ran the
 handler, and the handler carried a defect nobody could see:
 
@@ -26,7 +26,7 @@ the collector fired.
 THIS RAISES A REAL SIGNAL at the process running the tests. That is safe here
 and nowhere else: `trap_shutdown` installs our handler before the signal is
 sent and restores the previous one afterwards, so the default terminate
-behaviour is not in play. If the install ever fails the test kills its own
+behavior is not in play. If the install ever fails the test kills its own
 runner, which is a failure nobody could mistake for a pass.
 """
 

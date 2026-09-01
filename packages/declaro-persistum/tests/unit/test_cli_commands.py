@@ -162,7 +162,7 @@ class TestPrintDiffResult:
         _print_diff_result(_result(op), verbose=False)
         assert expected in capsys.readouterr().out
 
-    def test_an_unrecognised_operation_falls_through_to_a_generic_line(self, capsys):
+    def test_an_unrecognized_operation_falls_through_to_a_generic_line(self, capsys):
         _print_diff_result(_result(_op("teleport_table", "t")), verbose=False)
         assert "TELEPORT_TABLE on t" in capsys.readouterr().out
 

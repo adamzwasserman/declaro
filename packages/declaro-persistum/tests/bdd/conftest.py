@@ -21,7 +21,7 @@ from tests.bdd.factories.schema_factory import (
 # This was `BDDContext`, a class whose `__init__` assigned six fields and
 # whose only method was `reset()`. Gherkin steps genuinely do need somewhere
 # to put what the Given established so the Then can read it, but that is a
-# BAG OF FACTS, not an object: nothing about it has behaviour.
+# BAG OF FACTS, not an object: nothing about it has behavior.
 #
 # As a TypedDict the steps read `bdd_context["engine"]` instead of
 # `bdd_context["engine"]`, which is longer by two characters and honest about

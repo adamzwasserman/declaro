@@ -9,7 +9,7 @@ hand their writes to the log in order. That is all this module does.
 
 It is NOT a claim that the engine takes one writer. Turso supports concurrent
 writers through MVCC and BEGIN CONCURRENT, and a writer still opens a
-connection per concurrent caller. This buffers callers; it does not serialise
+connection per concurrent caller. This buffers callers; it does not serialize
 the database.
 
 Nothing is stored here. The room is empty except during the microseconds when
@@ -77,7 +77,7 @@ task of its own::
             await asyncio.sleep(0)
 
 `drained["orphaned"]` is not optional politeness. It holds the failures whose
-depositor cancelled its `collect`, so there is no ticket left to raise on and
+depositor canceled its `collect`, so there is no ticket left to raise on and
 this loop is the last place they can be seen. An appender that writes
 `await drain(...)` and discards the result is the silence this module spent a
 revision removing.
@@ -101,7 +101,7 @@ on pro_ultra requires BOTH.
 
 WAL LOSES WRITES at crew 16 even after three retries. MVCC loses none. So
 "WAL plus persistent connections" is not a cheaper safe option, it is a lossy
-one. WAL's safe crew is 1, or writers serialised behind a lock.
+one. WAL's safe crew is 1, or writers serialized behind a lock.
 
 A REPLICA TAKES ONE REPLICA CONNECTION. That is the constraint, and it
 is NOT about MVCC. Measured 2026-08-12 against a real replica, pyturso 0.7.2:
@@ -155,7 +155,7 @@ second sync connection fails is a fact about the channel and says NOTHING
 about how many writes can be in flight.
 
 So "a replica permits one connection" is false, and "a replicated database
-serialises writers" is false. If a sentence concludes something about
+serializes writers" is false. If a sentence concludes something about
 concurrency from a count of connections, it is wrong.
 """
 
@@ -194,7 +194,7 @@ class Receipt(TypedDict):
 class Drained(TypedDict):
     """What one pass of `drain` did, and what it could not hand to anyone.
 
-    `orphaned` is the failures with no living caller: the depositor cancelled
+    `orphaned` is the failures with no living caller: the depositor canceled
     its own `collect`, so its future is gone or already settled and there is
     no ticket left to raise on. The write still reached the database and its
     failure is still a fact about the system, so it leaves here as data.
@@ -328,7 +328,7 @@ async def collect(room: Room, ticket: str) -> Receipt:
 def _is_listening(waiter: asyncio.Future[Any] | None) -> bool:
     """Whether one ticket still has a caller who can be told the answer.
 
-    A depositor that cancelled its `collect` leaves either no future at all or
+    A depositor that canceled its `collect` leaves either no future at all or
     a settled one, and both mean the same thing here: nobody to hand this to.
     """
     return waiter is not None and not waiter.done()
@@ -410,7 +410,7 @@ async def drain(
 
     THE `except` BELOW IS A ROUTER, NOT A SWALLOW, and the difference is the
     whole of Rule 8. It does not decide anything about the failure, does not
-    read it, and does not summarise it. It carries the exception object
+    read it, and does not summarize it. It carries the exception object
     itself to the one future that owns it, so `collect` can raise it intact
     in the caller that deposited the write.
 
@@ -421,12 +421,12 @@ async def drain(
     shrinks by one for the life of the process.
 
     A FAILURE WITH NO LIVING CALLER LEAVES IN `orphaned`. The router above
-    can only route where someone is listening, and a depositor that cancelled
+    can only route where someone is listening, and a depositor that canceled
     its own `collect` has taken its future with it. That branch used to end
     at `if waiter is not None and not waiter.done():` and nothing else, so
     the exception fell off the end of the `if` and was gone.
 
-    Cancelling a `collect` says "I no longer need the answer". It does not
+    Canceling a `collect` says "I no longer need the answer". It does not
     say "do not tell anyone the database refused this write", and those are
     different sentences. The failure comes back as data, and the boundary
     that runs `drain` decides what to do with it. This module still logs

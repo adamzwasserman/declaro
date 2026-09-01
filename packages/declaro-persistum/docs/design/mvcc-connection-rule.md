@@ -22,7 +22,7 @@
 >
 > **The one sync connection is not a writer and does not make writers wait.** It carries a log to and from the primary. Local writes go to the journal, concurrently, and the sync connection ships them later. A measurement that a second sync connection fails is a fact about the channel and says NOTHING about how many writes can be in flight.
 >
-> So: "a replica permits one connection" is false. "A replicated database serialises writers" is false. Turso's sync engine syncs MVCC databases, so replicated and concurrent are not opposites. If a sentence concludes something about concurrency from a count of connections, it is wrong.
+> So: "a replica permits one connection" is false. "A replicated database serializes writers" is false. Turso's sync engine syncs MVCC databases, so replicated and concurrent are not opposites. If a sentence concludes something about concurrency from a count of connections, it is wrong.
 
 
 **Status: binding rule. 2026-08-12.**
@@ -41,7 +41,7 @@
 >
 > Connection **reuse** removes the per-write OS thread and is the larger lever. **MVCC + `BEGIN CONCURRENT`** is what lets a crew write in parallel and is what makes it *correct*. Neither alone gets there; the 13,826/sec figure needs both.
 >
-> **WAL loses writes at crew 16 even after three retries. MVCC loses none.** WAL's safe crew is 1, or writers serialised behind a lock.
+> **WAL loses writes at crew 16 even after three retries. MVCC loses none.** WAL's safe crew is 1, or writers serialized behind a lock.
 >
 > **A replica takes ONE replica connection.** Measured 2026-08-12, pyturso 0.7.2, real replica: MVCC *does* run on a replica (`journal_mode = 'mvcc'`, 4 of 4 runs) and 20 sequential writes under it reached the primary intact. What fails is a *second* replica connection — `database tape error: database is busy`, 3 of 4 runs outright, one after 12 retries over 30s on an idle database. In the run where eight opened: 5 writes local, **0 on the primary**. This bounds CONNECTIONS and nothing else. Concurrent writers come from `BEGIN CONCURRENT` on one connection, so a replica running MVCC can write concurrently while still permitting only one sync connection.
 
@@ -104,7 +104,7 @@ The documented loss case did not reproduce on 0.7.2. The engine source that expl
 
 ## Why we are not fixing this upstream or in a fork
 
-**Upstream knows and has pinned the current behaviour with tests.** A `FIXME` in `core/vdbe/execute.rs` on `main` describes the gap, and two tests assert the loss rather than a fix: `test_mvcc_completed_writer_changes_lost_when_last_reader_abandoned` and `test_mvcc_completed_writer_changes_lost_when_joining_writer_errors`. Still open in `v0.8.0-pre.4`.
+**Upstream knows and has pinned the current behavior with tests.** A `FIXME` in `core/vdbe/execute.rs` on `main` describes the gap, and two tests assert the loss rather than a fix: `test_mvcc_completed_writer_changes_lost_when_last_reader_abandoned` and `test_mvcc_completed_writer_changes_lost_when_joining_writer_errors`. Still open in `v0.8.0-pre.4`.
 
 The real fix is the one their own FIXME names — commit at the writer's own halt and downgrade remaining statements to read-only, as SQLite's `btreeEndTransaction` does. That is an engine change, it would require flipping their tests, building wheels for every platform we deploy on, hosting them, repinning `pyturso>=0.7.0` away from PyPI, and rebasing on a file they are actively changing.
 

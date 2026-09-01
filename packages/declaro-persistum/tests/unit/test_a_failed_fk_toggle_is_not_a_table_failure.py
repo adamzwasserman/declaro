@@ -15,7 +15,7 @@ RE-ENABLING IS TEARDOWN AND IS DIFFERENT. It runs in a `finally`, so raising
 there would replace whatever failure is already in flight with a second one.
 What it must not do is stay silent: the connection is left enforcing nothing,
 and a caller that reuses it writes against unchecked constraints. Measured
-behaviour is pinned rather than changed.
+behavior is pinned rather than changed.
 """
 
 from __future__ import annotations

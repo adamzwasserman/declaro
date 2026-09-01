@@ -68,7 +68,7 @@ def test_a_view_declared_as_postgresql_renders_it_converges() -> None:
 
 
 def test_an_edited_view_still_migrates() -> None:
-    """The behaviour that must survive whatever decision is taken.
+    """The behavior that must survive whatever decision is taken.
 
     Editing a view has to emit a drop and a create. A fix that quietened the
     loop by comparing less would take this with it, and a view edit that

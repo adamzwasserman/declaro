@@ -64,7 +64,7 @@ def test_the_table_is_a_plain_dict():
     """No wrapper class, so the table can be printed, merged and compared."""
     assert type(APPLIERS) is dict, (
         f"APPLIERS is {type(APPLIERS).__name__}; a subclass would mean the "
-        f"lookup behaviour crept back into the data"
+        f"lookup behavior crept back into the data"
     )
 
 

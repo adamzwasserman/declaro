@@ -1,4 +1,4 @@
-"""An opener must refuse a shutdown policy it cannot honour.
+"""An opener must refuse a shutdown policy it cannot honor.
 
 `shutdown` is required on all three openers and has no default, because the
 usual deployment has ephemeral disk and durability rests on replicating at
@@ -76,7 +76,7 @@ def test_the_vocabulary_is_the_one_the_type_declares() -> None:
 
 
 # ---------------------------------------------------------------------------
-# A policy this database cannot honour
+# A policy this database cannot honor
 # ---------------------------------------------------------------------------
 
 
@@ -102,7 +102,7 @@ async def test_turso_refuses_to_replicate_with_no_primary() -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_sqlite_opens_with_the_policy_it_can_honour() -> None:
+async def test_sqlite_opens_with_the_policy_it_can_honor() -> None:
     db = await open_sqlite(_path(), shutdown="exit_immediately", busy_timeout_s=5.0)
     try:
         assert db["shutdown"] == "exit_immediately"
@@ -130,7 +130,7 @@ def test_the_guard_permits_replicate_when_there_is_a_primary() -> None:
 
     Opening a replica reaches the remote. Asserting the guard directly keeps
     this a test of the policy check rather than of a network I would have to
-    fake, and the opener's own network behaviour is a separate question.
+    fake, and the opener's own network behavior is a separate question.
     """
     from declaro_persistum.database import check_shutdown
 

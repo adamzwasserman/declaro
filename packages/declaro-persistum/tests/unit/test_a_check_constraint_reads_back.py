@@ -15,7 +15,7 @@ THE TWO ENGINES SPELL IT DIFFERENTLY, measured:
     SQLite      CREATE TABLE a (id TEXT, n INTEGER CHECK (n > 0))
     PostgreSQL  pg_get_constraintdef -> CHECK ((n > 0))
 
-so both are normalised to the expression alone before anything compares them,
+so both are normalized to the expression alone before anything compares them,
 the same way a declared type is spelled per engine before `same_type` asks.
 
 THE FORMS SQLITE ACTUALLY PRODUCES, taken from a real database rather than
@@ -115,7 +115,7 @@ def test_a_default_string_containing_the_word_is_not_a_check() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Normalisation, because the two engines answer differently
+# Normalization, because the two engines answer differently
 # ---------------------------------------------------------------------------
 
 

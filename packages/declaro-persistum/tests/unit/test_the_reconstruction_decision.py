@@ -100,7 +100,7 @@ def test_a_bare_value_is_taken_as_it_is() -> None:
 
 
 def test_two_changes_take_the_general_path() -> None:
-    """A specialised ALTER handles one property. Two is a rebuild."""
+    """A specialized ALTER handles one property. Two is a rebuild."""
     assert single_change_property(_alter(type={"to": "integer"}, nullable={"to": True})) is None
 
 
@@ -117,7 +117,7 @@ def test_a_property_with_no_specialised_alter_takes_the_general_path(
 ) -> None:
     """`unique` and `check` joined the differ's comparison today.
 
-    Neither has a specialised ALTER, and SQLite cannot change either in place,
+    Neither has a specialized ALTER, and SQLite cannot change either in place,
     so both must fall through to a full rebuild. Returning a key here without
     a handler beside it would silently do nothing.
     """

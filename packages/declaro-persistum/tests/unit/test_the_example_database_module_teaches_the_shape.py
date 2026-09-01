@@ -77,7 +77,7 @@ def test_it_dispatches_on_a_table_not_a_chain(path: pathlib.Path) -> None:
 
 @pytest.mark.parametrize("path", DB_FILES, ids=lambda p: p.parent.name)
 def test_the_configuration_is_data(path: pathlib.Path) -> None:
-    """Rule 2. Three fields and no behaviour is a TypedDict."""
+    """Rule 2. Three fields and no behavior is a TypedDict."""
     classes = [
         n.name
         for n in ast.walk(_tree(path))
@@ -240,7 +240,7 @@ def test_every_write_route_still_commits(app: pathlib.Path) -> None:
     source = app.read_text()
     # THE ENGINE TRAVELS WITH THE CONNECTION NOW, so the call carries it:
     # `commit(conn, engine)`. It used to read the engine off a module global,
-    # which meant a function's behaviour depended on state no caller could see.
+    # which meant a function's behavior depended on state no caller could see.
     assert source.count("await commit(conn, engine)") >= 3, (
         f"{app.parent.name}/app.py commits at "
         f"{source.count('await commit(conn, engine)')} sites; create, toggle and "

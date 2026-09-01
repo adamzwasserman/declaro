@@ -122,7 +122,7 @@ second sync connection fails is a fact about the channel and says NOTHING
 about how many writes can be in flight.
 
 So "a replica permits one connection" is false, and "a replicated database
-serialises writers" is false. If a sentence concludes something about
+serializes writers" is false. If a sentence concludes something about
 concurrency from a count of connections, it is wrong.
 """
 
@@ -246,7 +246,7 @@ def is_contention(error: BaseException) -> bool:
 
     THE REST IS STILL TEXT, deliberately: the three supported drivers raise
     three unrelated types for the same condition, so a genuine engine error is
-    recognised by its message until that is narrowed per driver. What is fixed
+    recognized by its message until that is narrowed per driver. What is fixed
     here is the half that could never have been right.
 
     An earlier note here said this predicate was carried elsewhere too. It is

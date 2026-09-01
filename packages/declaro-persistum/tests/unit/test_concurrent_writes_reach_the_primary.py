@@ -11,7 +11,7 @@ experimental MVCC every statement on a connection shares one transaction, so
 a write that finishes while a sibling is still running defers its commit, and
 a write that reported success is silently rolled back if the transaction then
 ends abnormally. Concurrent writers are sibling statements. The package now
-opens one connection and serialises writes through it, and MVCC is local-only.
+opens one connection and serializes writes through it, and MVCC is local-only.
 
 NOTHING COVERED THIS AND THE SUITE WAS GREEN ANYWAY, which is declaro-06c:
 every remote_url in tests/ was the fake https://example.turso.io. A stranding
@@ -67,7 +67,7 @@ async def test_every_concurrent_write_crosses_to_the_primary() -> None:
             await conn.execute(f'CREATE TABLE "{TABLE}" (id INTEGER PRIMARY KEY)')
 
         # WRITERS IN FLIGHT, COUNTED BY THIS TEST. It used to count writers
-        # blocked on the serialise lock, which proved overlap only while the
+        # blocked on the serialize lock, which proved overlap only while the
         # lock existed and made the test unable to survive its removal. A test
         # that can only pass under the design it was written beside is pinning
         # that design rather than measuring anything.

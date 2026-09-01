@@ -14,7 +14,7 @@ documented and never written. Both names in that import line were wrong, in
 different ways, in the first example anyone read. Both work now.
 
 WHAT THIS GATE IS AND IS NOT. It does not run the samples — most are fragments
-that assume a database, an event loop, or names from a neighbouring block.
+that assume a database, an event loop, or names from a neighboring block.
 It asks the one question that needs no context: is this called name defined
 anywhere in the package, imported in this block, defined anywhere in this
 document, or a builtin? A name that is none of those cannot work for any
@@ -128,7 +128,7 @@ def _absent_names(source: str, known: set[str]) -> set[str]:
     primary case invisible: a sample that imports a nonexistent name from the
     package and calls it reported nothing, which is exactly the shape of the
     `field` example. It caught `field` only from some other block that used it
-    without importing it, so the number it produced was an artefact of where
+    without importing it, so the number it produced was an artifact of where
     the docs happen to break their code fences.
     """
     tree = ast.parse(source)

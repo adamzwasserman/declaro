@@ -19,7 +19,7 @@ not, and a reviewer will not notice from a diff.
 WHAT THIS READS is the source of each function, for a call to the validator.
 It is a coarse instrument and it says so: it cannot tell whether the call is
 reached, whether it acts on the result, or whether it happens before the DDL.
-Those are what the three behavioural files beside it assert. This one catches
+Those are what the three behavioral files beside it assert. This one catches
 the case none of them can, which is a fourth path nobody wrote a file for.
 """
 

@@ -22,7 +22,7 @@
 >
 > **The one sync connection is not a writer and does not make writers wait.** It carries a log to and from the primary. Local writes go to the journal, concurrently, and the sync connection ships them later. A measurement that a second sync connection fails is a fact about the channel and says NOTHING about how many writes can be in flight.
 >
-> So: "a replica permits one connection" is false. "A replicated database serialises writers" is false. Turso's sync engine syncs MVCC databases, so replicated and concurrent are not opposites. If a sentence concludes something about concurrency from a count of connections, it is wrong.
+> So: "a replica permits one connection" is false. "A replicated database serializes writers" is false. Turso's sync engine syncs MVCC databases, so replicated and concurrent are not opposites. If a sentence concludes something about concurrency from a count of connections, it is wrong.
 
 
 **Status: measurement record. 2026-08-11 / 2026-08-12.** Every number here carries the machine it came from. Where a number is wrong or contaminated, it says so rather than being deleted.
@@ -182,7 +182,7 @@ Zero failures at every level. The shape — flat then collapsing — is right, a
 
 ## 5b. Reuse and MVCC are separate levers, and they compound
 
-Written because the 14x reuse result was once asserted to carry over to WAL. **It does not.** WAL permits one writer at a time, so reuse removes the per-write thread but the writes still serialise.
+Written because the 14x reuse result was once asserted to carry over to WAL. **It does not.** WAL permits one writer at a time, so reuse removes the per-write thread but the writes still serialize.
 
 Four arms, one variable each. Mac, `TOTAL=2000`, crew 16, distinct keys, 3 retries so every arm can complete, journal mode read back and asserted on every connection. GIL on (importing `turso` disables free-threading locally).
 
@@ -201,7 +201,7 @@ both together             18.87x     <- they compound, not add
 
 **Reuse is the larger single lever. MVCC is what makes the crew correct.**
 
-**WAL LOSES WRITES AT CREW 16, even with three retries** — 371 and 216 of 2,000, to `database is locked`. MVCC loses none in either arm. So "WAL plus persistent connections" is not a cheaper safe option; it is a lossy one. **WAL's safe crew size is 1, or writers serialised behind a lock** — which is what a pooled WAL path with a write lock already does, and why a replicated target gets no write concurrency.
+**WAL LOSES WRITES AT CREW 16, even with three retries** — 371 and 216 of 2,000, to `database is locked`. MVCC loses none in either arm. So "WAL plus persistent connections" is not a cheaper safe option; it is a lossy one. **WAL's safe crew size is 1, or writers serialized behind a lock** — which is what a pooled WAL path with a write lock already does, and why a replicated target gets no write concurrency.
 
 **Do not re-derive:** the 13,826/sec figure requires reuse AND MVCC together. Neither alone approaches it, and reuse on WAL cannot even complete the work at crew 16.
 
@@ -236,7 +236,7 @@ The shape that reaches the target: the caller deposits a write and receives a pr
 - Whether the knee-at-8×-CPU rule holds, since Pro's CPU allocation was never captured.
 - Anything on real disk rather than tmpfs.
 - Crews below 16 with any confidence. Pro's 1 and 2 are identical at ~176/sec and pro_ultra's crew 4 came out *slower* than crew 2. That is noise, and it needs repeats.
-- More than one instance, or any cross-instance behaviour.
+- More than one instance, or any cross-instance behavior.
 - 10,000 concurrent in a single process anywhere. It was never reached: macOS caps at 6,144, and the Render container was killed above ~1,000 before the crew design removed the need.
 
 ## 9. Method errors made while producing this

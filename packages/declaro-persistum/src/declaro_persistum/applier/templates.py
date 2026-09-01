@@ -21,7 +21,7 @@ THE ENGINES DISAGREE IN FOUR PLACES and every one of them is visible below:
                      CREATE TABLE carries the engine's own name and one made
                      by us carries ours
 
-A constraint dropped on the floor by one engine and honoured by two is what
+A constraint dropped on the floor by one engine and honored by two is what
 this shape is meant to prevent. It had already happened: a table-level
 constraint was added to the shared renderer and PostgreSQL, which keeps its
 own copy, went on ignoring it.

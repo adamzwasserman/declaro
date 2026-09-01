@@ -1,4 +1,4 @@
-"""An unrecognised ON DELETE was accepted and rebuilt the table forever.
+"""An unrecognized ON DELETE was accepted and rebuilt the table forever.
 
 `types.py` declares the vocabulary:
 
@@ -7,10 +7,10 @@
 MEASURED 2026-08-19. Nothing enforced it. `validate_schema` accepted
 `set_null`, `CASCADE` and `nonsense` alike, with no error and no warning.
 
-WHAT AN UNRECOGNISED VALUE DOES. The renderer writes it out after
+WHAT AN UNRECOGNIZED VALUE DOES. The renderer writes it out after
 `.upper().replace("_", " ")`, so `set_null` reaches the engine as the correct
 `SET NULL` and the table is created properly. Introspection then reads the
-engine's `SET NULL` and normalises it to `set null`, which does not equal the
+engine's `SET NULL` and normalizes it to `set null`, which does not equal the
 declared `set_null`, so the differ sees a change:
 
     second deploy  drop_foreign_key pid, add_foreign_key pid

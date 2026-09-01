@@ -124,7 +124,7 @@ def test_no_caller_unpacks_it_positionally() -> None:
 
 
 def test_strict_validation_still_raises_on_an_error() -> None:
-    """The shape change must not lose the behaviour built on it."""
+    """The shape change must not lose the behavior built on it."""
     from declaro_persistum.exceptions import ValidationError
     from declaro_persistum.validator import validate_schema_strict
 

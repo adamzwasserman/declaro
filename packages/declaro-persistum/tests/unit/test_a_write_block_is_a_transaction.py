@@ -6,13 +6,13 @@ nothing. `execute_fk_ordered` omitted the commit and every one of its writes
 was rolled back while `cursor.rowcount` still said success.
 
 BOTH PATHS, WHICH IS THE POINT OF THIS FILE. `writing` branches: a local
-database returns early with no lock, a replicated one takes the serialise
+database returns early with no lock, a replicated one takes the serialize
 lock. The first version of the fix went into the second branch only. Every
 local write still vanished, the suite stayed green at 830 passing, and the
 probe that caught it read 0 rows where it had read 1 BEFORE the fix — the
 change made it worse and nothing said so.
 
-So these tests run against both branches. `serialise` is what selects one, and
+So these tests run against both branches. `serialize` is what selects one, and
 it is a field, so a test can set it.
 
 POSTGRESQL IS A DELIBERATE NO-OP. asyncpg has no `commit()`; `postgres_write_one`
@@ -48,12 +48,12 @@ async def _count(db) -> int:
         return (await cursor.fetchone())[0]
 
 
-@pytest.mark.parametrize("serialised", [False, True])
+@pytest.mark.parametrize("serialized", [False, True])
 @pytest.mark.asyncio
-async def test_a_clean_block_commits_on_both_paths(tmp_path, serialised: bool) -> None:
+async def test_a_clean_block_commits_on_both_paths(tmp_path, serialized: bool) -> None:
     """No explicit commit, and the write is still there."""
-    db = await _sqlite(tmp_path, f"c{serialised}.db")
-    if serialised:
+    db = await _sqlite(tmp_path, f"c{serialized}.db")
+    if serialized:
         db["in_flight"] = no_writes_in_flight()
 
     async with writing(db) as conn:
@@ -62,11 +62,11 @@ async def test_a_clean_block_commits_on_both_paths(tmp_path, serialised: bool) -
     assert await _count(db) == 1, "the block ended cleanly and its write was discarded"
 
 
-@pytest.mark.parametrize("serialised", [False, True])
+@pytest.mark.parametrize("serialized", [False, True])
 @pytest.mark.asyncio
-async def test_a_block_that_raises_rolls_back_on_both_paths(tmp_path, serialised: bool) -> None:
-    db = await _sqlite(tmp_path, f"r{serialised}.db")
-    if serialised:
+async def test_a_block_that_raises_rolls_back_on_both_paths(tmp_path, serialized: bool) -> None:
+    db = await _sqlite(tmp_path, f"r{serialized}.db")
+    if serialized:
         db["in_flight"] = no_writes_in_flight()
 
     with pytest.raises(RuntimeError):
@@ -77,12 +77,12 @@ async def test_a_block_that_raises_rolls_back_on_both_paths(tmp_path, serialised
     assert await _count(db) == 0, "a failed block left its write behind"
 
 
-@pytest.mark.parametrize("serialised", [False, True])
+@pytest.mark.parametrize("serialized", [False, True])
 @pytest.mark.asyncio
-async def test_an_explicit_commit_still_works(tmp_path, serialised: bool) -> None:
+async def test_an_explicit_commit_still_works(tmp_path, serialized: bool) -> None:
     """A second commit is harmless, so existing code is not broken by this."""
-    db = await _sqlite(tmp_path, f"e{serialised}.db")
-    if serialised:
+    db = await _sqlite(tmp_path, f"e{serialized}.db")
+    if serialized:
         db["in_flight"] = no_writes_in_flight()
 
     async with writing(db) as conn:
@@ -174,7 +174,7 @@ async def test_every_engine_scopes_a_block_the_same_way() -> None:
     to roll back. Two halves of one concept are now one entry.
 
     Asserted on the table rather than by driving a live PostgreSQL, so it runs
-    everywhere. The behaviour itself was measured on all three.
+    everywhere. The behavior itself was measured on all three.
     """
     from declaro_persistum.writers import TRANSACTIONS
 

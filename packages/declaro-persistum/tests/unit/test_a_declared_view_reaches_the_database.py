@@ -115,10 +115,16 @@ def test_the_loader_reads_views_and_tables_in_one_import(tmp_path) -> None:
 def test_a_misspelled_view_key_is_refused_at_load(tmp_path) -> None:
     """The same defect `index_from_meta` fixed, on the other declaration.
 
-    A plain dict silently drops an unknown key, so `materialised` would leave
-    a view that is quietly not materialized.
+    A plain dict silently drops an unknown key, so a misspelled one would
+    leave a view that is quietly not materialized.
+
+    THE MISSPELLING IS DELIBERATE AND MUST STAY MISSPELLED. `materialised` is
+    input, not prose: it is the key a British-spelling author types by habit,
+    which is the realistic way this typo arrives. A project-wide respelling
+    sweep on 2026-09-01 "corrected" it, made both sides of the replace
+    identical, and the test stopped introducing any typo at all.
     """
-    body = MODELS.replace('"materialized": False', '"materialised": False')
+    body = MODELS.replace('"materialized": False', '"materialised": False')  # noqa: RUF003
     with pytest.raises(LoaderError, match="materialised"):
         load_declarations(_models(tmp_path, body, "typo.py"))
 

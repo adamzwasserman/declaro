@@ -43,14 +43,14 @@ Feature: What `declaro validate` tells an operator about their schema files
 
   @precommit
   Scenario: an unknown column type is a warning and still exits zero
-    Given a folder holding a column whose type nobody recognises
+    Given a folder holding a column whose type nobody recognizes
     When validate runs on it
     Then the exit code is 0
     And it warns about the type
 
   @precommit
   Scenario: the same warning under --strict exits two
-    Given a folder holding a column whose type nobody recognises
+    Given a folder holding a column whose type nobody recognizes
     When validate runs on it in strict mode
     Then the exit code is 2
 
@@ -62,7 +62,7 @@ Feature: What `declaro validate` tells an operator about their schema files
 
   @precommit
   Scenario: an error beats a strict warning
-    Given a folder holding both a bad reference and an unrecognised type
+    Given a folder holding both a bad reference and an unrecognized type
     When validate runs on it in strict mode
     Then the exit code is 1
 

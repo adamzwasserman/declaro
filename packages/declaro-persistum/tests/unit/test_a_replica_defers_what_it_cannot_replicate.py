@@ -121,7 +121,7 @@ def test_an_empty_plan_defers_nothing() -> None:
 
 # THE RECORD BELOW IS BUILT FROM WHAT THE LOOP READS, not from what I first
 # assumed it reads. My first version gave it `stopping` and `replicate_once`,
-# and the loop reads `closed`, `primary` and `serialise` and calls
+# and the loop reads `closed`, `primary` and `serialize` and calls
 # `replicate`. It raised `KeyError: 'closed'`, which is the seventh time this
 # session that a hand-made input tested my idea of a shape.
 

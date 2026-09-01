@@ -280,7 +280,7 @@ def _then_orphaned(ctx):
     orphaned = ctx["drained"]["orphaned"]
 
     assert orphaned, (
-        "the appender was handed nothing. A write whose depositor cancelled "
+        "the appender was handed nothing. A write whose depositor canceled "
         "has no ticket left to raise on, so if `drain` does not report it the "
         "failure is gone."
     )
@@ -415,7 +415,7 @@ def _then_appender_idle(ctx):
 @when("a caller deposits a good write and then a doomed one")
 def _when_good_then_doomed(ctx):
     """ORDER IS THE WHOLE POINT. The doomed-then-good scenario above asks
-    whether a failure leaks sideways. This asks whether it reaches BACKWARDS,
+    whether a failure leaks sideways. This asks whether it reaches BACKWARD,
     to a write that has already reached the log.
     """
     for key, body in ((40, "landed"), (1, "dup")):

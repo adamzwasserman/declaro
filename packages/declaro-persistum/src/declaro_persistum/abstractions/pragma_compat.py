@@ -171,7 +171,7 @@ async def enforcement_restored(connection: Any) -> Exception | Nothing:
     which is what the `_map_type` crash cost this package three times over.
 
     IT DOES NOT RAISE AND IT DOES NOT LOG. It runs in an `except`, so raising
-    would replace the rebuild failure already travelling and the caller would
+    would replace the rebuild failure already traveling and the caller would
     never learn what actually went wrong. Both copies wrote an error to a log
     instead and returned a value every caller discarded, so a connection left
     with enforcement OFF reached nobody at all. The failure comes back as a

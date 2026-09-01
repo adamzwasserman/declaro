@@ -8,7 +8,7 @@ Each declares its own transaction mode and means it:
 
 MEASURED 2026-08-19 with `coverage json`. The Turso path was covered the day
 before this file; the SQLite and PostgreSQL `except` blocks had never run, so
-the behaviour that distinguishes them from Turso was asserted nowhere.
+the behavior that distinguishes them from Turso was asserted nowhere.
 
 WHY THEY DIFFER AT ALL, which is the part a reader needs. Turso is the engine
 that cannot do several things the differ emits -- no ADD CONSTRAINT, no DROP
@@ -112,7 +112,7 @@ async def _apply(connection: Any, engine: str, operations: list[dict]) -> Any:
 
 @pytest.mark.parametrize("engine", ENGINES)
 def test_each_module_declares_the_mode_it_behaves_as(engine: str) -> None:
-    """The declaration and the behaviour are checked together, below.
+    """The declaration and the behavior are checked together, below.
 
     A module whose declared mode disagreed with what it does would mislead
     every reader of the dispatch table.
@@ -181,7 +181,7 @@ async def test_an_all_or_nothing_applier_leaves_nothing_behind() -> None:
 
     The second operation of the batch fails, so the first must be gone too.
 
-    THIS DOES NOT DISTINGUISH THE ROLLBACK CALL FROM SQLITE'S OWN BEHAVIOUR,
+    THIS DOES NOT DISTINGUISH THE ROLLBACK CALL FROM SQLITE'S OWN BEHAVIOR,
     and the difference is worth stating rather than implying. Substituting
     `commit()` for `rollback()` in the applier's failure block leaves the
     outcome identical, measured directly: the table created before the

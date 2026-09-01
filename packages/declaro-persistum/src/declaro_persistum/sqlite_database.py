@@ -68,7 +68,7 @@ async def open_sqlite(
     A SQLite database has no primary, so it never replicates. `replicate(db)`
     raises on it rather than returning a success nobody earned.
 
-    Writers are NOT serialised by a lock here or on any other engine. SQLite
+    Writers are NOT serialized by a lock here or on any other engine. SQLite
     takes one writer and
     `BEGIN IMMEDIATE` fails at the start of a transaction rather than part-way
     through it; `busy_timeout_s` is how long a writer waits for the lock before

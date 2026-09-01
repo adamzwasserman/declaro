@@ -153,7 +153,7 @@ async def columns_of(connection: DbapiConnection, table: str) -> dict[str, Colum
     }
     unique = unique_cols_from_index_rows(index_rows, index_info)
 
-    # A CHECK IS IN NO PRAGMA. SQLite keeps no catalogue of them: the only
+    # A CHECK IS IN NO PRAGMA. SQLite keeps no catalog of them: the only
     # record is the text of the CREATE TABLE in `sqlite_master`, so it is read
     # and parsed. Without this a CHECK is created, enforced and invisible to
     # the differ, which is how comparing one produced a migration loop earlier

@@ -5,7 +5,7 @@ Feature: Every string is checked or bound, never interpolated
   it, or a value, bound as a parameter. There is no third case, and nothing is pasted
   into a statement.
 
-  THIS IS A TEST ABOUT FATE, NOT APPEARANCE, and that is the whole point. Recognising
+  THIS IS A TEST ABOUT FATE, NOT APPEARANCE, and that is the whole point. Recognizing
   SQL was the obvious approach and it does not work: a scan for the twenty-odd verbs
   finds every statement, finds `created_at` and `update_count` as well, and misses
   every fragment, because `total >= 0` and `name ASC` contain no verb and parse as

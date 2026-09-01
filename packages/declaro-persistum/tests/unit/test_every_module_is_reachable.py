@@ -45,7 +45,7 @@ WHAT THIS GATE CANNOT SEE, measured 2026-08-14 by building the case rather
 than reasoning about it. A module counts as reached if ANY name in it is
 imported. Add a module whose only imported name is a TypedDict, with a
 function nothing calls, import that one type into `__init__.py`, and this test
-passes. The module is reachable; its behaviour is not.
+passes. The module is reachable; its behavior is not.
 
 `instrumentation.py` is that shape today: `__init__.py` imports `LatencyRecord`
 and none of its five functions is called anywhere in src.

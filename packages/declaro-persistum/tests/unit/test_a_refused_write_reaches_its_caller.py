@@ -165,10 +165,10 @@ async def test_a_failure_with_no_living_caller_comes_back_as_data() -> None:
     """The last hole in the router, and the one that had no owner.
 
     `drain` can only route a failure where someone is listening. A depositor
-    that cancelled its own `collect` has taken its future with it, so the
+    that canceled its own `collect` has taken its future with it, so the
     branch ended at the `if` and the exception fell off the end.
 
-    Cancelling a collect says "I no longer need the answer". It does not say
+    Canceling a collect says "I no longer need the answer". It does not say
     "do not tell anyone the database refused this write". So the failure
     leaves as data and the crew logs it.
     """
@@ -179,7 +179,7 @@ async def test_a_failure_with_no_living_caller_comes_back_as_data() -> None:
 
     ticket = deposit(room, {"sql": "INSERT INTO t VALUES (1)", "params": ()})
 
-    # Exactly what a cancelled `collect` leaves behind: the ticket popped by
+    # Exactly what a canceled `collect` leaves behind: the ticket popped by
     # its `finally`, and a future already settled.
     room["waiting"][ticket].cancel()
     room["waiting"].pop(ticket, None)

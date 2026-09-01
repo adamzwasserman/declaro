@@ -62,7 +62,7 @@ async def never_used(*_args: object, **_kwargs: object) -> object:
 
 
 def _replicated(replicate_once, sleeps: list[float]):
-    """A replicated Database whose push behaviour is the argument.
+    """A replicated Database whose push behavior is the argument.
 
     `flush` only loops when `is_replicated` is true, which is derived from
     `primary`, so the primary has to be set. Nothing here dials it.
@@ -115,7 +115,7 @@ async def test_flush_returns_once_the_push_lands() -> None:
 
 
 async def test_flush_keeps_retrying_a_network_failure() -> None:
-    """The behaviour that must survive. A primary comes back; we wait for it."""
+    """The behavior that must survive. A primary comes back; we wait for it."""
     attempts = []
 
     async def offline(_db) -> bool:

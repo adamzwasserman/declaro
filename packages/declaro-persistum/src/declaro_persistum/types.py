@@ -363,10 +363,10 @@ def applied_to_text(rule: Callable[[str], Any], value: Any) -> Any:
     """Apply `rule` to a string; return anything else unchanged.
 
     Only a string can be written more than one way, so only a string needs
-    normalising. A number is the same number on every engine.
+    normalizing. A number is the same number on every engine.
 
     Five places wrote this as `if not isinstance(x, str): return x` ahead of
-    the normalising, and each was a separate chance to forget it. `_comparable`
+    the normalizing, and each was a separate chance to forget it. `_comparable`
     had four such guards, two per rule and one per argument. All three bugs
     `same_default` has been fixed for were a rule that reached one argument
     and not the other.
@@ -784,7 +784,7 @@ def for_engine(table: dict[str, V], engine: str, what: str) -> V:
 
     THIS WAS TWO CLASSES. `applier/__init__.py` and `inspector/__init__.py`
     each declared `class _Appliers(dict)` / `class _Inspectors(dict)` whose
-    only member was `__missing__`, subclassing `dict` to borrow its behaviour
+    only member was `__missing__`, subclassing `dict` to borrow its behavior
     and override one hook. A wrapper around a dict is allowed when it holds no
     methods; the method was the whole reason each class existed, so it was
     inheritance for code reuse and nothing else.

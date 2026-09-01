@@ -4,7 +4,7 @@ On Render and anything like it the process is ended by a signal, not by the
 application deciding to stop. Replication that only happens in `close(db)`
 happens when someone remembers to call it.
 
-Installing a signal handler changes the behaviour of the program persistum is a
+Installing a signal handler changes the behavior of the program persistum is a
 guest in, so it happens only when the database was opened with
 `shutdown="replicate"`. The host's own handler runs first, then replication:
 chaining rather than replacing is the difference between adding a guarantee and
@@ -130,7 +130,7 @@ def _trap_signals(db: Database) -> Database:
             # TRAPPING SIGTERM IS WHAT THIS MODULE IS FOR, and POSIX offers
             # no declarative equivalent. The deployment has ephemeral disk, so
             # a process that exits without replicating loses whatever it
-            # wrote. What the clause warns about is behaviour parked where a
+            # wrote. What the clause warns about is behavior parked where a
             # reader does not look, and a reader looking for what happens at
             # shutdown looks here.
             # honest-code-allow: L1.21.16 — no declarative equivalent exists

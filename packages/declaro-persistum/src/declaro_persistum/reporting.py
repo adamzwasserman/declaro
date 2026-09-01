@@ -104,7 +104,7 @@ def say_because(
 
 
 # The names the standard library's own `log` reads. A caller who passes one of
-# these as a fact means the standard library's behaviour and will not get it,
+# these as a fact means the standard library's behavior and will not get it,
 # so it is refused rather than rendered as text.
 _LOGGING_KEYWORDS: frozenset[str] = frozenset({"exc_info", "stack_info", "stacklevel", "extra"})
 

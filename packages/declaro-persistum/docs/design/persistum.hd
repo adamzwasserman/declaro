@@ -63,7 +63,7 @@ module declaro-persistum
     path: str
     primary: str
     engine: str
-    serialise: any
+    serialize: any
   }
 
   type Receipt = {
@@ -112,7 +112,7 @@ module declaro-persistum
   #
   # THE CALLER DESCRIBES THE RESULT, NEVER THE SQL. That is the first
   # principle of the architecture doc, and these are the functions that
-  # honour it. A caller names a Database it declared and a model carrying
+  # honor it. A caller names a Database it declared and a model carrying
   # `@table`; the columns it may narrow on are the model's own fields, and
   # a column the model does not declare is refused before any statement
   # exists.

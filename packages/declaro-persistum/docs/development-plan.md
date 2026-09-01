@@ -4,7 +4,7 @@ This is a plan, so unlike the architecture document it is allowed to go stale. I
 
 ## How to read it
 
-Each stage names what it is, what makes it done, and what it unblocks. "Done" is always a check somebody else can run, never a judgement. Most stages are done when a feature file that exists today goes from red to green and comes off the unbound list in `tests/unit/test_every_feature_is_bound.py`.
+Each stage names what it is, what makes it done, and what it unblocks. "Done" is always a check somebody else can run, never a judgment. Most stages are done when a feature file that exists today goes from red to green and comes off the unbound list in `tests/unit/test_every_feature_is_bound.py`.
 
 The specification is already written. `tests/bdd/features/asking/` holds one feature file per function, 80 scenarios, all failing on `NotImplementedError`. Building a function means making its file pass, and nothing here asks anyone to invent an expected value that isn't already written down.
 

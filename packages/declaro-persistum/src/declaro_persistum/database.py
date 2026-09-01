@@ -49,7 +49,7 @@ second sync connection fails is a fact about the channel and says NOTHING
 about how many writes can be in flight.
 
 So "a replica permits one connection" is false, and "a replicated database
-serialises writers" is false. If a sentence concludes something about
+serializes writers" is false. If a sentence concludes something about
 concurrency from a count of connections, it is wrong.
 """
 
@@ -90,7 +90,7 @@ __all__ = [
 ]
 
 
-# WHAT HAPPENS TO UNREPLICATED WRITES WHEN THE PROCESS IS SIGNALLED.
+# WHAT HAPPENS TO UNREPLICATED WRITES WHEN THE PROCESS IS SIGNALED.
 # No default, and not for symmetry with Rule 14 for its own sake. persistum's
 # usual home has ephemeral disk, where anything not replicated when the process
 # dies is gone — so a default would silently pick the losing side of the exact
@@ -157,7 +157,7 @@ _CAN_HONOUR_POLICY: dict[bool, Callable[[str, str], int]] = {
 
 @helper
 def check_shutdown(policy: str, *, can_replicate: bool, opener: str) -> None:
-    """Refuse a shutdown policy this database cannot honour.
+    """Refuse a shutdown policy this database cannot honor.
 
     `shutdown` is required on every opener and has no default, because the
     usual deployment has ephemeral disk and durability rests on replicating at
@@ -253,7 +253,7 @@ class Database(TypedDict):
     to, or None when there is none — and that single field decides everything
     else, which is why it is a field and not an argument anyone can pass.
 
-    `connect` and `close_connection` are the injected boundary. `serialise` is
+    `connect` and `close_connection` are the injected boundary. `serialize` is
     the lock a replicated database needs and a local one does not; it is None
     for local, which is the whole difference expressed as data rather than as
     a branch someone has to remember.
@@ -308,7 +308,7 @@ def is_replicated(db: Database) -> bool:
     The one predicate the rest of the library branches on: whether there is
     somewhere to replicate to, and so whether shutdown has anything to push.
 
-    IT DOES NOT DECIDE WHETHER WRITERS SERIALISE. It used to, and that was
+    IT DOES NOT DECIDE WHETHER WRITERS SERIALIZE. It used to, and that was
     wrong. A replica takes one connection, and one connection runs many
     writers under `BEGIN CONCURRENT`, so a count of connections says nothing
     about how many writes can be in flight. Measured 2026-09-01 against a real
@@ -376,13 +376,13 @@ async def _write_connection(db: Database) -> AsyncIterator[Any]:
 
     THIS IS A SEPARATE FUNCTION BECAUSE `writing` HAS TWO PATHS AND I FIXED
     ONE. A local database takes an early return with no lock; a replicated one
-    takes the serialised path. The commit went into the second only, so every
+    takes the serialized path. The commit went into the second only, so every
     local write still vanished, and the probe that caught it read 0 rows where
     it had read 1 before the "fix". Two paths that must agree are one function
     or they drift.
     """
     # COUNTED AROUND THE WRITE, not anywhere convenient. A counter that is
-    # initialised and never incremented satisfies every test that sets it by
+    # initialized and never incremented satisfies every test that sets it by
     # hand, which is how machinery that does nothing passes for healthy. Around
     # the write it means exactly: writes holding the connection replication
     # would take.
@@ -453,11 +453,11 @@ async def nothing_happened(_db: Database) -> bool:
 async def writing(db: Database) -> AsyncIterator[Any]:
     """A connection for writing, for the span of the block.
 
-    NO DATABASE SERIALISES ITS WRITERS, on any engine. There is one write path
+    NO DATABASE SERIALIZES ITS WRITERS, on any engine. There is one write path
     and it takes no lock.
 
     IT SAID THE OPPOSITE UNTIL 2026-09-01: that a replicated database
-    serialises its writers because the engine allows one, citing a run where
+    serializes its writers because the engine allows one, citing a run where
     1 of 8 concurrent writes landed and 7 errored. That run opened eight
     connections. A replica holds ONE and hands it to every write, so the run
     described a situation this code never creates, and `BEGIN CONCURRENT`

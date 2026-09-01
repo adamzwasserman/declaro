@@ -23,7 +23,7 @@ costs is that the correlation is asserted nowhere. A driver that grew a
 down the wrong branch, and every one of those branches writes to the table
 that decides whether a resumed transfer skips or repeats work.
 
-WHAT THIS FILE ASSERTS is the shape, not the behaviour. The three behavioural
+WHAT THIS FILE ASSERTS is the shape, not the behavior. The three behavioral
 files beside it already cover resume, progress and both transfer directions,
 and they pass either way. This one fails while the sniff exists.
 """

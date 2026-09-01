@@ -751,7 +751,7 @@ async def _turn_fk_checks_back_on(loader: BulkLoader, conn: Any) -> Exception | 
     who reuses it writes against unchecked constraints and never knows.
 
     The caller decides where the failure goes, because only the caller knows
-    whether the transfer itself failed. If something is already travelling
+    whether the transfer itself failed. If something is already traveling
     this rides out on it; if the transfer succeeded, this IS the failure.
     """
     try:

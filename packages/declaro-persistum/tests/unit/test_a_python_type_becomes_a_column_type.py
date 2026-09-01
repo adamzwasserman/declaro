@@ -18,17 +18,17 @@ EVERY EXPECTATION BELOW WAS MEASURED BY RUNNING THE FUNCTION over 23
 annotations, then written down. None was taken from the docstrings.
 
 THE SILENT FALLBACK IS RECORDED, NOT CHANGED. `declared_type` ends in
-`return "text"`, so an annotation it does not recognise becomes a text column
+`return "text"`, so an annotation it does not recognize becomes a text column
 and says nothing. Measured, these fall through:
 
     set[str]   tuple[int, int]   Any   complex   object   frozenset
 
 and `list[str]` becomes `jsonb` while `set[str]` becomes `text`, which is a
 difference a reader would not predict from the two declarations. The return
-value cannot distinguish "this maps to text" from "I did not recognise this and
+value cannot distinguish "this maps to text" from "I did not recognize this and
 guessed", because `str` also returns "text".
 
-Changing that is a behaviour change on the schema path -- a user with
+Changing that is a behavior change on the schema path -- a user with
 `tags: set[str]` has a text column in a live database today -- so this file
 pins what happens rather than deciding what should. The pin is what makes the
 decision visible when someone makes it.
@@ -108,7 +108,7 @@ def test_a_parameterised_container_still_maps(annotation, expected) -> None:
 
 # BOTH SPELLINGS ON PURPOSE. `Optional[int]` and `int | None` are the same
 # type to Python and different text to a reader, and `is_optional_type` has to
-# recognise either. Rewriting these to the modern form, as UP045 asks, would
+# recognize either. Rewriting these to the modern form, as UP045 asks, would
 # delete the coverage that says so.
 @pytest.mark.parametrize(
     "annotation",
@@ -317,7 +317,7 @@ def test_the_honest_name_does_the_work() -> None:
 
 
 @pytest.mark.parametrize("annotation", FALLS_THROUGH, ids=lambda v: str(v))
-def test_an_unrecognised_annotation_is_refused(annotation) -> None:
+def test_an_unrecognized_annotation_is_refused(annotation) -> None:
     """The six that used to become text columns without a word."""
     from declaro_persistum.exceptions import LoaderError
     from declaro_persistum.pydantic_loader import declared_type

@@ -63,7 +63,7 @@ def classify_sql(sql: str) -> str:
     Both are writes. A consumer using `is_write_op` to decide what goes
     through the write queue would have sent them down the read path.
 
-    An unrecognised statement is still "other" rather than a guess, and that
+    An unrecognized statement is still "other" rather than a guess, and that
     fallback is right here in a way it is not elsewhere in this package: SQL
     has more verbs than this table will ever hold, so an unknown one is not a
     caller error the way an unknown engine is.
@@ -77,15 +77,15 @@ def classify_sql(sql: str) -> str:
 
 
 @helper
-def _named_verb(word: str, _unrecognised: str) -> str:
+def _named_verb(word: str, _unrecognized: str) -> str:
     """A keyword this table names."""
     return _SQL_OP_MAP[word]
 
 
 @helper
-def _unnamed_verb(_word: str, unrecognised: str) -> str:
+def _unnamed_verb(_word: str, unrecognized: str) -> str:
     """A keyword it does not, which is an answer rather than a silence."""
-    return unrecognised
+    return unrecognized
 
 
 # WHETHER THE TABLE NAMES THIS KEYWORD, as a table rather than a `.get`
@@ -101,9 +101,9 @@ _KNOWN_VERB: dict[bool, Callable[[str, str], str]] = {
 
 
 @recognizer
-def _verb(word: str, unrecognised: str) -> str:
-    """The operation a keyword names, or `unrecognised` when it names none."""
-    return _KNOWN_VERB[word in _SQL_OP_MAP](word, unrecognised)
+def _verb(word: str, unrecognized: str) -> str:
+    """The operation a keyword names, or `unrecognized` when it names none."""
+    return _KNOWN_VERB[word in _SQL_OP_MAP](word, unrecognized)
 
 
 @helper

@@ -22,7 +22,7 @@
 >
 > **The one sync connection is not a writer and does not make writers wait.** It carries a log to and from the primary. Local writes go to the journal, concurrently, and the sync connection ships them later. A measurement that a second sync connection fails is a fact about the channel and says NOTHING about how many writes can be in flight.
 >
-> So: "a replica permits one connection" is false. "A replicated database serialises writers" is false. Turso's sync engine syncs MVCC databases, so replicated and concurrent are not opposites. If a sentence concludes something about concurrency from a count of connections, it is wrong.
+> So: "a replica permits one connection" is false. "A replicated database serializes writers" is false. Turso's sync engine syncs MVCC databases, so replicated and concurrent are not opposites. If a sentence concludes something about concurrency from a count of connections, it is wrong.
 
 
 **Status: RETRACTED the same day it was written, 2026-08-11. Do not build this.**
@@ -109,7 +109,7 @@ Turso Cloud accepts statements over plain HTTP at `/v2/pipeline`. Verified again
 
 Corroborated here, 2026-08-11: `flush()` — which is one push to the primary — returned in 1.7s and 1.5s on the two arms. A cloud round trip is three orders of magnitude off a local commit, which is 0.5ms on the same replica.
 
-So the replica is not an optimisation to be traded away. It is the reason the library is usable:
+So the replica is not an optimization to be traded away. It is the reason the library is usable:
 
 - a write commits **locally, sub-millisecond**
 - and is **immediately readable**, because the reader and the writer are the same store

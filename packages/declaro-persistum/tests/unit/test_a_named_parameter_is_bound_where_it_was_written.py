@@ -134,7 +134,7 @@ def test_an_unknown_name_is_left_alone(convert) -> None:
     """A `:name` with no value is not this function's error to raise.
 
     Turso already left one in place and asyncpg already ignored one, so the
-    behaviour predates the fix. It is written down because a scanner that
+    behavior predates the fix. It is written down because a scanner that
     replaced it would turn a missing parameter into a silently wrong query
     rather than the bind error the driver raises.
     """

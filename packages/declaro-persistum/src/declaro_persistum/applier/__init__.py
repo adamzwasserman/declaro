@@ -21,7 +21,7 @@ from declaro_persistum.boundary import helper
 from declaro_persistum.types import Engine, for_engine
 
 # A PLAIN DICT. This was `class _Appliers(dict)` with one method, `__missing__`,
-# subclassing dict to borrow its behaviour and override a hook. The lookup is
+# subclassing dict to borrow its behavior and override a hook. The lookup is
 # what varied, so the lookup is a function now: `for_engine` in `types.py`,
 # shared with the inspector table that had the identical class beside it.
 APPLIERS: dict[str, Any] = {

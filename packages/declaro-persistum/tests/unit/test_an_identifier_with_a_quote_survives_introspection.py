@@ -88,7 +88,7 @@ async def test_its_columns_come_back_too(engine: str, name: str) -> None:
     """The floor. A table reported with no columns is a table reported wrong.
 
     Every PRAGMA that reads a column, an index or a foreign key takes the
-    table name the same way, so a fix that only repaired the catalogue query
+    table name the same way, so a fix that only repaired the catalog query
     would leave the table present and empty.
     """
     connection = await ENGINES[engine]()

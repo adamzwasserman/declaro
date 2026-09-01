@@ -22,7 +22,7 @@
 >
 > **The one sync connection is not a writer and does not make writers wait.** It carries a log to and from the primary. Local writes go to the journal, concurrently, and the sync connection ships them later. A measurement that a second sync connection fails is a fact about the channel and says NOTHING about how many writes can be in flight.
 >
-> So: "a replica permits one connection" is false. "A replicated database serialises writers" is false. Turso's sync engine syncs MVCC databases, so replicated and concurrent are not opposites. If a sentence concludes something about concurrency from a count of connections, it is wrong.
+> So: "a replica permits one connection" is false. "A replicated database serializes writers" is false. Turso's sync engine syncs MVCC databases, so replicated and concurrent are not opposites. If a sentence concludes something about concurrency from a count of connections, it is wrong.
 
 
 You describe what you want. The library works out how to get it. The name says so: declaro means "I declare."
@@ -211,6 +211,6 @@ Follow each argument to what it becomes. **Every string you pass is either check
 
 `where("active = :x")` looks identical to a scanner and is the opposite. That string is neither a declared name nor a bound value, so the only thing left to do with it is paste it in.
 
-That is the whole test, and it does not need anyone to recognise SQL. A parameter that reaches string concatenation on its way to a statement is a hole whatever it happens to contain. It also catches `field(check="total >= 0")`, which no amount of looking for the word `SELECT` would.
+That is the whole test, and it does not need anyone to recognize SQL. A parameter that reaches string concatenation on its way to a statement is a hole whatever it happens to contain. It also catches `field(check="total >= 0")`, which no amount of looking for the word `SELECT` would.
 
 The same applies to a live connection and the name of an engine. Each is the caller doing the library's work, and that is the one thing this library exists to prevent.

@@ -1,4 +1,4 @@
-"""`same_default` normalised its two arguments in four separate places.
+"""`same_default` normalized its two arguments in four separate places.
 
 The function asks whether two spellings mean the same default. A default is a
 string on one side and often a value on the other, so each side has to be put
@@ -12,7 +12,7 @@ it has been fixed three times: booleans, then numbers, then `now()` against
 `(datetime('now'))`. Each fix added a guard. A rule applied to one argument
 and not the other is exactly the shape those bugs had.
 
-So the normalisation is one function now, called once per side, and these
+So the normalization is one function now, called once per side, and these
 tests say the two sides get the same treatment whichever way round they
 arrive.
 """

@@ -58,7 +58,7 @@ def _refusal(ctx, make):
     """Run an opener and record a refusal rather than letting it escape.
 
     Narrowed to `ValueError` and `TypeError`: those are the two ways an opener
-    says no to a policy it cannot honour or an argument it was not given. An
+    says no to a policy it cannot honor or an argument it was not given. An
     OSError would mean it dialled something, which is a different scenario and
     must not be recorded as a refusal.
     """
@@ -181,7 +181,7 @@ def _when_open_turso_local(ctx):
 
 @then("no write is in flight on it yet")
 def _then_nothing_in_flight(ctx):
-    """No engine serialises its writers, so there is no lock left to check for.
+    """No engine serializes its writers, so there is no lock left to check for.
 
     What a freshly opened database does carry is a count of writes in flight,
     which starts at zero and is what opportunistic replication yields to.

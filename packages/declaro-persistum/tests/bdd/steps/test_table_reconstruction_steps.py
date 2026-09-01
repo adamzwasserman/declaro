@@ -50,7 +50,7 @@ class ReconContext(TypedDict, total=False):
 
     Twelve data fields and a `run(coro)` wrapper, previously a `Context`
     class defined inside the fixture. Same treatment as `PragmaContext` and
-    `Backend`: the facts are data, and `run` is the one piece of behaviour,
+    `Backend`: the facts are data, and `run` is the one piece of behavior,
     injected.
 
     `schema_snapshot` and `rows_snapshot` start as None deliberately. None
@@ -207,7 +207,7 @@ def given_table_with_columns(recon_context, table_name, datatable):
     branch per column property: NOT NULL, UNIQUE, DEFAULT, REFERENCES, and two
     passes to work out the primary key. That is a second implementation of
     `column_definition`, which is the function these scenarios exist to test
-    the behaviour of, so a bug in the real one could be masked by the same bug
+    the behavior of, so a bug in the real one could be masked by the same bug
     written differently here.
 
     It builds the column DECLARATION now -- the same dict shape the schema
@@ -1411,7 +1411,7 @@ def then_indexes_functional(recon_context):
 
     assert "idx_email" in plan, (
         f"the planner does not reach for either index on `email`, so they "
-        f"survived reconstruction as entries in a catalogue and nothing more. "
+        f"survived reconstruction as entries in a catalog and nothing more. "
         f"Plan: {plan}"
     )
 
@@ -1495,9 +1495,9 @@ def then_only_explicit_indexes(recon_context):
             (recon_context["table_name"],),
         )
     )
-    catalogue = recon_context["run"](cursor.fetchall())
+    catalog = recon_context["run"](cursor.fetchall())
 
-    reissued = [name for name, sql in catalogue if name.startswith("sqlite_autoindex_") and sql]
+    reissued = [name for name, sql in catalog if name.startswith("sqlite_autoindex_") and sql]
     assert reissued == [], (
         f"these automatic indexes carry a CREATE INDEX statement: {reissued}. "
         f"SQLite records `sql = NULL` for the ones it owns, so a non-null "
@@ -1646,7 +1646,7 @@ def then_fk_checked(recon_context):
 
     assert enforcement == 0, (
         "foreign key enforcement is back ON after a reconstruction. That is "
-        "an improvement on the recorded behaviour and this note should go, but "
+        "an improvement on the recorded behavior and this note should go, but "
         "check `applier/sqlite.py` restores it too: the pragma is a no-op "
         "inside a transaction, so the fix belongs to whoever commits."
     )

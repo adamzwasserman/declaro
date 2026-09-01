@@ -19,7 +19,7 @@ THIS IS THE SYMPTOM `_first_value` WAS WRITTEN TO SURVIVE. Its docstring
 records `row[0]` raising `KeyError: 0` and explains that a row "arrives as a
 mapping from these drivers". It arrives as a mapping because of this line. On
 a fresh connection a row is a tuple and `row[0]` works; run one `execute_one`
-first and it is a dict and `row[0]` is a lookup for the key `0`. The behaviour
+first and it is a dict and `row[0]` is a lookup for the key `0`. The behavior
 depended on what had run before it, which is why it read as a driver quirk.
 
 THE FIX WAS ALREADY WRITTEN, THIRTY LINES ABOVE. `_fetch_aiosqlite` borrows

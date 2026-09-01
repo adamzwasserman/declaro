@@ -31,7 +31,7 @@ still emitted `add_constraint`. Both inspectors read the named table-level
 constraints out of the stored CREATE TABLE now, beside the column-level
 checks they already read from there.
 
-AND THE COMPARISON HAD TO BE NORMALISED. `_diff_constraints` compared the two
+AND THE COMPARISON HAD TO BE NORMALIZED. `_diff_constraints` compared the two
 definition dicts raw. Turso rewrites `<>` to `!=` in the DDL it stores, so a
 declared `lo <> hi` came back as `lo != hi` and every deploy proposed
 dropping and re-adding it. Measured across five expression shapes, and that
@@ -303,7 +303,7 @@ async def test_a_declared_constraint_converges(engine: str, expression: str) -> 
 
 @pytest.mark.parametrize("engine", sorted(ENGINES))
 async def test_a_changed_constraint_is_still_noticed(engine: str) -> None:
-    """The control on the normalisation.
+    """The control on the normalization.
 
     Folding `<>` to `!=` must not fold two genuinely different expressions
     together, or a real change would migrate nothing and report success.

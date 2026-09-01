@@ -24,7 +24,7 @@ THE FALLBACK'S OWN JUSTIFICATION NO LONGER HOLDS. Its comment reads: "Fall
 back if a forward reference is unresolvable. Caller will see the same
 wrong-but-consistent behavior as pre-0.1.3 -- better than crashing during
 schema load." Two things changed under it. `declared_type` was taught on
-2026-08-17 to raise on an annotation it does not recognise, rather than
+2026-08-17 to raise on an annotation it does not recognize, rather than
 quietly emitting `text`, so the load crashes regardless; and what it crashes
 with is a message about a field that is fine.
 

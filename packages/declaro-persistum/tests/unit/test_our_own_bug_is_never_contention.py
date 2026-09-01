@@ -23,7 +23,7 @@ NameError and TypeError, and five other places catch and re-raise it ahead of
 any broad handler. This is the sixth.
 
 WHAT REMAINS TEXT-BASED, stated so the fix is not read as bigger than it is: a
-genuine driver error is still recognised by its message, because the three
+genuine driver error is still recognized by its message, because the three
 drivers raise three unrelated types for the same condition and this package
 supports all three. Narrowing that is a separate job. What is fixed here is
 the half that could never be right: our own exception types are never the

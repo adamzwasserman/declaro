@@ -133,7 +133,7 @@ async def test_migrating_one_tenant_does_not_stop_another_from_serving(
 async def test_a_local_turso_database_sends_ddl_through_the_wal_door(
     tmp_path,
 ) -> None:
-    """The wiring, asserted on the value rather than on behaviour."""
+    """The wiring, asserted on the value rather than on behavior."""
     db = await open_turso(
         str(tmp_path / "local.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
     )
@@ -152,7 +152,7 @@ async def test_sqlite_uses_the_same_door_for_ddl_and_writes(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_ddl_still_runs_through_the_door_the_database_names(tmp_path) -> None:
-    """`_for_ddl` asks the value. It must not have kept a favourite."""
+    """`_for_ddl` asks the value. It must not have kept a favorite."""
     db = await open_turso(
         str(tmp_path / "asks.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
     )

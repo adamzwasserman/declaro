@@ -510,7 +510,7 @@ class TestComposition:
         assert "OFFSET 10" not in q["sql"]
 
     def test_with_limit_after_offset_truncates_the_offset(self):
-        """Documented behaviour worth pinning: LIMIT splits on ' LIMIT ' only,
+        """Documented behavior worth pinning: LIMIT splits on ' LIMIT ' only,
         so applying it to a query already carrying OFFSET keeps the OFFSET
         text ahead of the new LIMIT and produces invalid SQL ordering."""
         q = with_limit(

@@ -7,7 +7,7 @@ bound by no `scenarios()` call at all and have never executed. These run.
 The primary is an injected recorder rather than a live Turso Cloud database:
 what is under test is persistum's ordering, politeness, retry, trapping and
 logging. Routing it through the network would be measuring Turso instead. Where
-the ENGINE's behaviour is the claim — a cold open copying the whole database —
+the ENGINE's behavior is the claim — a cold open copying the whole database —
 the scenario says so, and the number in it came from a measurement against a
 real primary rather than from this file.
 """
@@ -263,7 +263,7 @@ def _when_local_only(ctx):
         try:
             await replicate(db)
             ctx["error"] = None
-        except Exception as e:  # noqa: BLE001 - raising IS the behaviour
+        except Exception as e:  # noqa: BLE001 - raising IS the behavior
             ctx["error"] = e
         try:
             await replicate_path(str(ctx["tmp_path"] / "x.db"), primary="", token=None)
@@ -538,7 +538,7 @@ def _when_opened_untrapped(ctx):
 
 
 @then(
-    "no signal handler is installed, because installing one behind a caller's back changes the behaviour of a program that never opted into it"
+    "no signal handler is installed, because installing one behind a caller's back changes the behavior of a program that never opted into it"
 )
 def _then_untrapped(ctx):
     assert ctx["unchanged"], 'a database asked for "exit_immediately" installed a handler anyway'

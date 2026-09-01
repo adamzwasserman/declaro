@@ -1,4 +1,4 @@
-"""An unrecognised engine must never quietly produce SQL for another engine.
+"""An unrecognized engine must never quietly produce SQL for another engine.
 
 WHAT THIS USED TO TEST. Two generators in `abstractions/arrays.py` and
 `abstractions/maps.py`, each of which took `engine="postgresql"` as a default,

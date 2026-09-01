@@ -85,7 +85,7 @@ Feature: Replication — one function, both directions, out of the way of real w
   Scenario: the shutdown policy is stated, never defaulted
     Given a caller that has not asked for shutdown replication
     When a database is opened
-    Then no signal handler is installed, because installing one behind a caller's back changes the behaviour of a program that never opted into it
+    Then no signal handler is installed, because installing one behind a caller's back changes the behavior of a program that never opted into it
     And the shutdown policy is a REQUIRED argument with no default, because a default cannot tell "chose this" from "never knew there was a choice" — and on ephemeral disk a default would silently pick the losing side of the exact failure it exists to prevent
 
   Scenario: shutdown replication blocks and stops being polite

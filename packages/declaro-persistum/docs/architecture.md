@@ -22,7 +22,7 @@
 >
 > **The one sync connection is not a writer and does not make writers wait.** It carries a log to and from the primary. Local writes go to the journal, concurrently, and the sync connection ships them later. A measurement that a second sync connection fails is a fact about the channel and says NOTHING about how many writes can be in flight.
 >
-> So: "a replica permits one connection" is false. "A replicated database serialises writers" is false. Turso's sync engine syncs MVCC databases, so replicated and concurrent are not opposites. If a sentence concludes something about concurrency from a count of connections, it is wrong.
+> So: "a replica permits one connection" is false. "A replicated database serializes writers" is false. Turso's sync engine syncs MVCC databases, so replicated and concurrent are not opposites. If a sentence concludes something about concurrency from a count of connections, it is wrong.
 
 
 One rule shapes all of this: you declare, the library decides. Every layer below moves a declaration one step closer to a statement, and soaks up an engine difference on the way instead of passing it up to you.
@@ -103,9 +103,9 @@ The surface takes strings. Column names are strings, and so are values. What mak
 
 **A string is one of exactly two things.** A declared name, looked up in `model_fields` and refused if the model does not declare it. Or a value, bound as a parameter by the driver. There is no third case, and nothing is pasted into a statement.
 
-That is the whole test for a new function, and it needs nobody to recognise SQL. Follow each argument to what it becomes: if it reaches string concatenation or an f-string on the way to a statement, it is a hole, whatever it happens to contain at the time.
+That is the whole test for a new function, and it needs nobody to recognize SQL. Follow each argument to what it becomes: if it reaches string concatenation or an f-string on the way to a statement, it is a hole, whatever it happens to contain at the time.
 
-**Recognising SQL was the obvious approach and it does not work.** Every statement begins with one of about twenty verbs, so a word scan finds statements. It finds `created_at` and `update_count` too, and it misses every fragment, because `total >= 0` and `name ASC` contain no verb and parse as nothing. Those fragments are exactly the escape hatches. A gate that reads what a string looks like passes the ones that matter.
+**Recognizing SQL was the obvious approach and it does not work.** Every statement begins with one of about twenty verbs, so a word scan finds statements. It finds `created_at` and `update_count` too, and it misses every fragment, because `total >= 0` and `name ASC` contain no verb and parse as nothing. Those fragments are exactly the escape hatches. A gate that reads what a string looks like passes the ones that matter.
 
 Fate is also what separates the two forms that look identical. `where({"name": "bob"})` and `where("active = :x")` are both a string reaching a `where`, and one is a declared key with a bound value while the other has nowhere to go but into the statement.
 
@@ -174,7 +174,7 @@ The rest of this section is the crew recipe as measured. **It is not to be chang
 >
 > Connection **reuse** removes the per-write OS thread and is the larger lever. **MVCC + `BEGIN CONCURRENT`** is what lets a crew write in parallel and is what makes it *correct*. Neither alone gets there; the 13,826/sec figure needs both.
 >
-> **WAL loses writes at crew 16 even after three retries. MVCC loses none.** WAL's safe crew is 1, or writers serialised behind a lock.
+> **WAL loses writes at crew 16 even after three retries. MVCC loses none.** WAL's safe crew is 1, or writers serialized behind a lock.
 >
 > **A replica takes ONE replica connection.** Measured 2026-08-12, pyturso 0.7.2, real replica, recorded in `docs/design/mvcc-connection-rule.md`: MVCC *does* run on a replica (`journal_mode = 'mvcc'`, 4 of 4 runs) and 20 sequential writes under it reached the primary intact. What fails is a *second* replica connection — `database tape error: database is busy`, 3 of 4 runs outright, one after 12 retries over 30s on an idle database. In the run where eight opened: 5 writes local, **0 on the primary**. This bounds CONNECTIONS and nothing else. Concurrent writers come from `BEGIN CONCURRENT` on one connection, so a replica running MVCC can write concurrently while still permitting only one sync connection.
 
@@ -188,13 +188,13 @@ Under MVCC, `BEGIN CONCURRENT` lets multiple writers proceed in parallel instead
 
 Retries do not disappear, they move. A conflict fires at commit time, on a row two transactions both wrote, rather than at transaction start on a locked database. So a writer still needs backoff with jitter, and two writers hammering one hot row still conflict by design.
 
-A replicated database can run MVCC. Turso's sync engine syncs MVCC databases: after an initial page bootstrap it pulls the MVCC logical log directly. So "replicated" does not imply "serialised", and a measurement about how many sync connections a replica permits says nothing about how many writers it can run.
+A replicated database can run MVCC. Turso's sync engine syncs MVCC databases: after an initial page bootstrap it pulls the MVCC logical log directly. So "replicated" does not imply "serialized", and a measurement about how many sync connections a replica permits says nothing about how many writers it can run.
 
 Sources, because none of this should be re-derived: [concurrent writes on Turso Cloud](https://turso.tech/blog/concurrent-writes-on-turso-cloud), [Turso 0.7.0](https://turso.tech/blog/turso-0.7.0), [concurrent writes in practice](https://turso.tech/blog/concurrent-writes-in-practice).
 
-**Do not read that as "replication means serialised".** It does not. A replicated database can run MVCC, its writes go to the journal concurrently, and the one sync connection ships them to the primary afterwards. A drainer's connection is a local connection to the file, not a sync connection, and the engine permits many of those. Whether a crew works over a replicated file has not been measured. Until it has, the numbers below are unverified there rather than unreachable there.
+**Do not read that as "replication means serialized".** It does not. A replicated database can run MVCC, its writes go to the journal concurrently, and the one sync connection ships them to the primary afterwards. A drainer's connection is a local connection to the file, not a sync connection, and the engine permits many of those. Whether a crew works over a replicated file has not been measured. Until it has, the numbers below are unverified there rather than unreachable there.
 
-This is built out of the public API, and that API is the whole vocabulary rather than a convenient subset of it. `deposit`, `collect`, `drain`, the retry policy and the query builder are what you may declare. N concurrent `drain()` coroutines over one room work as they are. If something you need is not here, that is a gap in the package and belongs in the tracker, not a licence to reach past it.
+This is built out of the public API, and that API is the whole vocabulary rather than a convenient subset of it. `deposit`, `collect`, `drain`, the retry policy and the query builder are what you may declare. N concurrent `drain()` coroutines over one room work as they are. If something you need is not here, that is a gap in the package and belongs in the tracker, not a license to reach past it.
 
 ### The shape
 

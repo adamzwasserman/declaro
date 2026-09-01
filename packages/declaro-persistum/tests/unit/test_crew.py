@@ -13,7 +13,7 @@ drainers. Size above 1 is `test_a_crew_opens_before_it_runs.py`.
 "TWO DOES NOT WORK ON A LAPTOP" WAS WRITTEN HERE AND IS FALSE. It said pyturso
 is thread-per-connection with a blocking driver, so two drainers writing one
 local file on macOS hit the engine's busy-wait inside a worker thread and the
-await never returns. That WAS the observed behaviour, and it was a symptom of
+await never returns. That WAS the observed behavior, and it was a symptom of
 a defect rather than a property of the machine: the journal mode was
 negotiated on every connect, so N drainers raced to bootstrap the MV store and
 the survivors ran on WAL. Two WAL writers on one file is the busy-wait. The

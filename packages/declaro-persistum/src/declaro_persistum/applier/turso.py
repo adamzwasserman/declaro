@@ -229,7 +229,7 @@ async def _rolled_back(connection: DbapiConnection) -> Exception | Nothing:
     which is the thing the next caller of that connection needs to know. It
     used to be written to a log as a warning and dropped, and the two places
     that wrapped this in `contextlib.suppress` said why: nothing here may
-    replace the exception already travelling.
+    replace the exception already traveling.
 
     That was true and it is no longer the only option. The failure comes back
     as a value and rides out as a note on whatever is being raised, so the
@@ -259,7 +259,7 @@ async def _enforcement_restored(
     back and the count is zero.
 
     RETURNS THE FAILURE RATHER THAN LOGGING IT. This cannot raise, because the
-    operation's own failure is already travelling and would be replaced. So it
+    operation's own failure is already traveling and would be replaced. So it
     used to log an error and return a count of 0, and the single caller
     discarded the count. Leaving enforcement off is worse than the original
     failure, since later writes are accepted against constraints nobody is

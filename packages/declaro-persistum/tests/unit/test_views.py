@@ -276,7 +276,7 @@ class TestViewIntrospection:
         This hand-wrote a connection whose `fetch` branched on whether the
         query mentioned `pg_views` or `pg_matviews`, and then asserted the
         rows it had just written. It could not fail for any reason connected
-        to PostgreSQL, and it encoded a belief about which catalogue the
+        to PostgreSQL, and it encoded a belief about which catalog the
         inspector reads.
         """
         conn = await _postgres()

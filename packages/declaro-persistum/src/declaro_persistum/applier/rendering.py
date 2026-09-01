@@ -138,7 +138,7 @@ def _alter_unique(table: str, column: str, change: Any, engine: Engine) -> list[
 
     The constraint is named for the table and the column so that dropping it
     later can find it. Before this was handled at all, making a column unique
-    produced an alter_column nothing recognised, which rendered an empty
+    produced an alter_column nothing recognized, which rendered an empty
     string, which asyncpg failed on deep inside its own protocol.
     """
     row = _UNIQUE_CHANGE[bool(_changed_to(change))]

@@ -13,7 +13,7 @@ apart. `render` looks the row up and fills it. That is the whole renderer.
 
 WHY THE NAMES ARE ON THE SAME LINE AS THE TEXT. `Operation.details` was typed
 `dict[str, Any]`, so nothing recorded what any operation carried. One part of
-the package filled those bags and three parts read them, on the honour system.
+the package filled those bags and three parts read them, on the honor system.
 A row's names ARE that record, and they are checked on every render:
 a template asking for a name the row does not declare fails here, at the table,
 rather than as a KeyError inside a migration.

@@ -10,11 +10,11 @@ and `is_subquery` wrote the same word out again:
 
 Two copies of one word, and only one of them is enforced by anything. Change
 the `Literal` and the check keeps comparing against the old word: every
-subquery stops being recognised, `in_` stops rendering a subquery, and nothing
+subquery stops being recognized, `in_` stops rendering a subquery, and nothing
 raises, because a value that is not a subquery is a legitimate case.
 
 THIS TEST READS THE DECLARATION, so it cannot pass by holding the same copy.
-It asks the type what its tag is and requires the recogniser to agree.
+It asks the type what its tag is and requires the recognizer to agree.
 """
 
 from __future__ import annotations
@@ -36,19 +36,19 @@ def _the_declared_tag() -> str:
     return tags[0]
 
 
-def test_the_recogniser_agrees_with_the_declaration() -> None:
-    """Build one from the declared tag and require the recogniser to know it."""
+def test_the_recognizer_agrees_with_the_declaration() -> None:
+    """Build one from the declared tag and require the recognizer to know it."""
     tag = _the_declared_tag()
 
     assert is_subquery({"kind": tag, "query": None}), (
         f"`SubqueryExpr` declares its tag is {tag!r} and `is_subquery` does not "
-        f"recognise a value carrying it. The word is written in two places and "
+        f"recognize a value carrying it. The word is written in two places and "
         f"they have drifted."
     )
 
 
 def test_a_value_carrying_another_tag_is_not_a_subquery() -> None:
-    """The floor. A recogniser that says yes to everything passes the test above."""
+    """The floor. A recognizer that says yes to everything passes the test above."""
     assert not is_subquery({"kind": "case", "query": None})
     assert not is_subquery({"kind": "order_by"})
     assert not is_subquery({"no": "kind at all"})

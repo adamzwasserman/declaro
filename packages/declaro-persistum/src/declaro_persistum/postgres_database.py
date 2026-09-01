@@ -65,7 +65,7 @@ async def open_postgresql(
     and the field is required, so it says what is true rather than borrowing
     SQLite's vocabulary.
 
-    Writers are not serialised. PostgreSQL does multi-writer MVCC server-side,
+    Writers are not serialized. PostgreSQL does multi-writer MVCC server-side,
     so a lock here would take away what the server provides.
     """
     check_shutdown(shutdown, can_replicate=False, opener="open_postgresql")

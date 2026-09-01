@@ -10,7 +10,7 @@ Feature: Diffing two schemas into an ordered list of operations
   of a mistaken `drop_table` is the table.
 
   These scenarios describe what the code DOES, read out of the code and confirmed by
-  running it. Where the behaviour looks surprising the scenario says so rather than
+  running it. Where the behavior looks surprising the scenario says so rather than
   quietly describing what it ought to be — a specification written from intention rather
   than from the code is how a test suite comes to agree with a bug.
 

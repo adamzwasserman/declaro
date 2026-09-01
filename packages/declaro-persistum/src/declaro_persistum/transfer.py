@@ -309,7 +309,7 @@ async def _transfer_one_table(run: _Run, source_schema: Schema, table: str) -> _
 
 @helper
 def _rides_out_on_the_failure(unenforced: Exception | Nothing) -> Exception | Nothing:
-    """Something is already travelling, so the note goes on that."""
+    """Something is already traveling, so the note goes on that."""
     also_failed(
         cast(BaseException, sys.exception()),
         "turning foreign key checks back on at the target",
@@ -342,7 +342,7 @@ def _nothing_to_carry(unenforced: Exception | Nothing) -> Exception | Nothing:
     return unenforced
 
 
-# WHETHER SOMETHING IS ALREADY TRAVELLING, AND WHETHER THE RESTORE FAILED.
+# WHETHER SOMETHING IS ALREADY TRAVELING, AND WHETHER THE RESTORE FAILED.
 # Between them the two questions have four answers and each is written out,
 # because the pair decides whether the failure is carried out on another
 # exception, raised as its own, or absent.
@@ -523,7 +523,7 @@ async def bulk_transfer(
             # Re-enable FK checks. A failure DOING that leaves the target
             # accepting writes against constraints nobody is checking, so it
             # is never dropped: it rides out on whatever is already
-            # travelling, and becomes the failure when nothing else is.
+            # traveling, and becomes the failure when nothing else is.
             unenforced = _left_unenforced(
                 await _WHEN_THE_CHECKS_WERE_TURNED_OFF[bool(turned_off)](target_loader, target_conn)
             )

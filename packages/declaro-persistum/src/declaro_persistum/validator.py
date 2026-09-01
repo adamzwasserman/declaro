@@ -284,11 +284,11 @@ def _the_typed_column(
     # It said "may be custom type or enum" and stopped there. It is still a
     # warning rather than an error, because a custom PostgreSQL type is
     # legitimate and this function is not told which engine it is validating
-    # for. What it did not say is what an unrecognised name costs on the
+    # for. What it did not say is what an unrecognized name costs on the
     # other two.
     #
     # SQLite assigns column affinity by matching substrings of the declared
-    # name, and a name it recognises nothing in gets NUMERIC. Measured
+    # name, and a name it recognizes nothing in gets NUMERIC. Measured
     # 2026-08-19 with `text` mistyped as `txet`:
     #
     #     CREATE TABLE t (good TEXT, typo TXET)
@@ -307,7 +307,7 @@ def _the_typed_column(
     )
 
     # A PRIMARY KEY that was DECLARED nullable is a contradiction the author
-    # wrote down, and no engine can honour it. An omitted `nullable` is not:
+    # wrote down, and no engine can honor it. An omitted `nullable` is not:
     # declaring the key has already said NOT NULL. This used to read
     # `col_def.get("nullable", True)` and so warned about the schema this
     # package ships, telling the author to repeat themselves.
@@ -328,10 +328,10 @@ def _the_typed_column(
     # "no action"], and `validate_schema` accepted `set_null`, `CASCADE` and
     # `nonsense` alike, with no error and no warning.
     #
-    # An unrecognised value does not fail. The renderer writes it out after
+    # An unrecognized value does not fail. The renderer writes it out after
     # `.upper().replace("_", " ")`, so `set_null` reaches the engine as the
     # correct SET NULL and the table is created properly. Introspection reads
-    # the engine's SET NULL back and normalises it to `set null`, which does
+    # the engine's SET NULL back and normalizes it to `set null`, which does
     # not equal the declared `set_null`, so the differ sees a change:
     #
     #     second deploy  drop_foreign_key pid, add_foreign_key pid
@@ -346,7 +346,7 @@ def _the_typed_column(
     actions = [
         f"Table '{table_name}', column '{col_name}': {action_key} "
         f"{col_def[action_key]!r} is not one of {sorted(allowed)}. An "
-        f"unrecognised action still writes correct SQL and then never "
+        f"unrecognized action still writes correct SQL and then never "
         f"matches what is read back, so the table is rebuilt on every "
         f"deploy."
         for action_key in ("on_delete", "on_update")

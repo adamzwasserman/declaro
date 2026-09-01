@@ -35,7 +35,7 @@ pytestmark = pytest.mark.precommit
 def _schema(tmp_path: pathlib.Path) -> str:
     """A Python module of Pydantic models, which is what the entry point loads.
 
-    `load_models_from_module` recognises a model by `__tablename__`.
+    `load_models_from_module` recognizes a model by `__tablename__`.
     """
     f = tmp_path / "models.py"
     f.write_text(

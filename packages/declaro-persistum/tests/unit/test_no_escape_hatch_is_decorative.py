@@ -6,7 +6,7 @@ ELEVEN OF THE TWENTY IN src SUPPRESSED NOTHING. mypy reports each one as
 An escape that suppresses nothing is worse than no escape, because it is a sign
 that lies. It tells the next reader "this line is hard, the type system cannot
 express it, do not go poking" about a line the type system is perfectly happy
-with. Four of them sat on `columns[x]["unique"] = True` and its neighbours,
+with. Four of them sat on `columns[x]["unique"] = True` and its neighbors,
 which type-check cleanly.
 
 THIS IS HOW THE bulk_loader BUG STAYED HIDDEN. `create_bulk_loader` carried

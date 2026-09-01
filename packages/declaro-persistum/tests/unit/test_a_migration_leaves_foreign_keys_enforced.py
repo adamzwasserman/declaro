@@ -125,7 +125,7 @@ async def test_the_data_survives_the_migration(tmp_path) -> None:
 
 
 async def test_enforcement_is_real_after_the_migration(tmp_path) -> None:
-    """Reading the pragma is not the same as the engine honouring it.
+    """Reading the pragma is not the same as the engine honoring it.
 
     A restore that sets the flag without the engine acting on it would satisfy
     the test above and nothing else. This writes a row whose parent does not
@@ -223,7 +223,7 @@ async def test_a_failed_migration_also_leaves_enforcement_as_it_found_it(
 #     started 1 -> success=True -> ended 1
 #     started 0 -> success=True -> ended 1   <- not what the caller had
 #
-# Less dangerous than sqlite's old behaviour, which ended at 0 and accepted
+# Less dangerous than sqlite's old behavior, which ended at 0 and accepted
 # unchecked writes. Still wrong: a caller who disabled enforcement to do a bulk
 # load finds it back on underneath them.
 
