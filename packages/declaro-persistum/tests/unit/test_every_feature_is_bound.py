@@ -81,7 +81,6 @@ KNOWN_UNBOUND: dict[str, str] = {
     # The decision the rest of the surface rests on: what an engine produces.
     # A Query today is {sql, params, engine} and carries SQL text, so four
     # engines would be four ways of building a string.
-    "a_question_is_data.feature": _SPEC,
     # The schema axis: what a model may declare, what the library owns, what a
     # change would do before it does it, and what a view and an index are.
     "every_column_type_is_declarable.feature": _SPEC,
