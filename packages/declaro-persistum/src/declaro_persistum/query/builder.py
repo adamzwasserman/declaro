@@ -20,12 +20,12 @@ class Query(TypedDict):
     Attributes:
         sql: The SQL string with parameter placeholders
         params: Parameter values keyed by name
-        dialect: Optional dialect hint for execution
+        engine: Optional engine hint for execution
     """
 
     sql: str
     params: dict[str, Any]
-    dialect: str | None
+    engine: str | None
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +230,7 @@ def select(
     return {
         "sql": " ".join(sql_parts),
         "params": the_params,
-        "dialect": None,
+        "engine": None,
     }
 
 
@@ -342,7 +342,7 @@ def insert(
     return {
         "sql": " ".join(sql_parts),
         "params": params,
-        "dialect": None,
+        "engine": None,
     }
 
 
@@ -449,7 +449,7 @@ def update(
     return {
         "sql": " ".join(sql_parts),
         "params": all_params,
-        "dialect": None,
+        "engine": None,
     }
 
 
@@ -493,7 +493,7 @@ def delete(
     return {
         "sql": " ".join(sql_parts),
         "params": the_params,
-        "dialect": None,
+        "engine": None,
     }
 
 
@@ -612,7 +612,7 @@ def _pages_by(name: str) -> Callable[[Query, int], Query]:
         return {
             "sql": f"{query['sql'].split(keyword)[0]}{keyword}{value}",
             "params": query["params"],
-            "dialect": query["dialect"],
+            "engine": query["engine"],
         }
 
     page.__name__ = name
@@ -630,5 +630,5 @@ def with_params(query: Query, **new_params: Any) -> Query:
     return {
         "sql": query["sql"],
         "params": {**query["params"], **new_params},
-        "dialect": query["dialect"],
+        "engine": query["engine"],
     }

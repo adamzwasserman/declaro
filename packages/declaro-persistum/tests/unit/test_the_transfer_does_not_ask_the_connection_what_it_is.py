@@ -13,7 +13,7 @@ file did not know about: it named three and the scan found five.
 
 That is a dispatch on type, in a package whose stated shape is dispatch
 tables, and the answer was already in the room: `bulk_transfer` resolves a
-`BulkLoader` per dialect and passes it into the first of the three, which
+`BulkLoader` per engine and passes it into the first of the three, which
 ignored it.
 
 IT IS NOT A DEFECT, WHICH IS WHY IT SAT. The sniff gives the right answer on
@@ -55,7 +55,7 @@ def test_no_function_asks_a_connection_what_it_is() -> None:
     ]
 
     assert sniffs == [], (
-        f"{len(sniffs)} connection-type checks remain: {sniffs}. The dialect "
+        f"{len(sniffs)} connection-type checks remain: {sniffs}. The engine "
         f"is known at the top of `bulk_transfer` and the loader is already "
         f"passed in."
     )
@@ -66,10 +66,10 @@ def test_every_loader_carries_the_progress_operations() -> None:
     leave the module unable to do the work at all."""
     required = ("commit", "ensure_progress", "read_progress", "write_progress")
 
-    for dialect, loader in BULK_LOADERS.items():
+    for engine, loader in BULK_LOADERS.items():
         for operation in required:
-            assert operation in loader, f"{dialect} loader has no {operation!r}"
-            assert callable(loader[operation]), f"{dialect}.{operation}"
+            assert operation in loader, f"{engine} loader has no {operation!r}"
+            assert callable(loader[operation]), f"{engine}.{operation}"
 
 
 def test_the_two_families_use_different_functions() -> None:

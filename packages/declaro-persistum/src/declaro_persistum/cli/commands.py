@@ -304,7 +304,7 @@ from declaro_persistum.cli.parts import (
 )
 from declaro_persistum.types import (
     NOTHING,
-    Dialect,
+    Engine,
     Schema,
 )
 
@@ -314,7 +314,7 @@ async def cmd_diff(
     *,
     connection_string: str,
     schema_dir: str,
-    dialect: Dialect,
+    engine: Engine,
     interactive: bool,
     unattended: bool,
     force: bool,
@@ -345,23 +345,23 @@ async def cmd_diff(
     _note(verbose, f"Loaded {len(target)} tables from schema files", sys.stdout)
 
     # Connect and introspect database
-    connection = await _connect(connection_string, dialect)
+    connection = await _connect(connection_string, engine)
     try:
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
 
         _note(verbose, f"Introspected {len(actual)} tables from database", sys.stdout)
 
         @helper
         async def show_the_diff() -> int:
             """Diff, settle anything ambiguous, and print what would happen."""
-            result = diff(actual, target, dialect=dialect, decisions=load_decisions(schema_dir))
+            result = diff(actual, target, engine=engine, decisions=load_decisions(schema_dir))
             _print_diff_result(
                 await _settled(
                     result,
                     schema_dir,
                     unattended,
                     interactive,
-                    lambda made: diff(actual, target, dialect=dialect, decisions=made),
+                    lambda made: diff(actual, target, engine=engine, decisions=made),
                 ),
                 verbose,
             )
@@ -372,7 +372,7 @@ async def cmd_diff(
         return await _WHEN_DRIFTED[bool(drift)](drift, show_the_diff)
 
     finally:
-        await _disconnect(connection, dialect)
+        await _disconnect(connection, engine)
 
 
 @boundary
@@ -380,7 +380,7 @@ async def cmd_apply(
     *,
     connection_string: str,
     schema_dir: str,
-    dialect: Dialect,
+    engine: Engine,
     interactive: bool,
     unattended: bool,
     dry_run: bool,
@@ -441,10 +441,10 @@ async def cmd_apply(
         """The schema passed the validator, so the database is opened."""
         _note(verbose, f"Loaded {len(target)} tables from schema files", sys.stderr)
 
-        connection = await _connect(connection_string, dialect)
+        connection = await _connect(connection_string, engine)
 
         try:
-            actual = await introspect(connection, dialect)
+            actual = await introspect(connection, engine)
 
             _note(
                 verbose,
@@ -459,13 +459,13 @@ async def cmd_apply(
                     diff(
                         actual,
                         target,
-                        dialect=dialect,
+                        engine=engine,
                         decisions=load_decisions(schema_dir),
                     ),
                     schema_dir,
                     unattended,
                     interactive,
-                    lambda made: diff(actual, target, dialect=dialect, decisions=made),
+                    lambda made: diff(actual, target, engine=engine, decisions=made),
                 )
 
                 @boundary
@@ -475,7 +475,7 @@ async def cmd_apply(
                         connection,
                         result["operations"],
                         result["execution_order"],
-                        dialect,
+                        engine,
                         dry_run=False,
                     )
 
@@ -488,7 +488,7 @@ async def cmd_apply(
                         )
 
                         # Update snapshot
-                        save_snapshot(schema_dir, target, dialect, applied_by=NOTHING)
+                        save_snapshot(schema_dir, target, engine, applied_by=NOTHING)
                         _note(
                             verbose,
                             f"Updated snapshot at {schema_dir}/snapshot.toml",
@@ -535,7 +535,7 @@ async def cmd_apply(
             return await _WHEN_DRIFTED[bool(drift)](drift, apply_the_diff)
 
         finally:
-            await _disconnect(connection, dialect)
+            await _disconnect(connection, engine)
 
     return await _WHEN_SETTLED[bool(invalid)](
         _refusal_lines("Schema is not valid, and nothing has been applied:", invalid),
@@ -550,7 +550,7 @@ async def cmd_snapshot(
     *,
     connection_string: str,
     schema_dir: str,
-    dialect: Dialect,
+    engine: Engine,
     force: bool,
     verbose: bool,
 ) -> int:
@@ -569,11 +569,11 @@ async def cmd_snapshot(
     @boundary
     async def write_the_snapshot() -> int:
         """Read the database and write down what is there."""
-        connection = await _connect(connection_string, dialect)
+        connection = await _connect(connection_string, engine)
         try:
-            actual = await introspect(connection, dialect)
+            actual = await introspect(connection, engine)
 
-            save_snapshot(schema_dir, actual, dialect, applied_by=NOTHING)
+            save_snapshot(schema_dir, actual, engine, applied_by=NOTHING)
             print(f"✓ Snapshot saved to {snapshot_path}")
 
             _note(
@@ -591,7 +591,7 @@ async def cmd_snapshot(
             return 0
 
         finally:
-            await _disconnect(connection, dialect)
+            await _disconnect(connection, engine)
 
     # BOTH READS HAPPEN HERE, at the command, which is the edge. Whether a
     # snapshot is in the way and whether anybody is at the terminal are both
@@ -637,7 +637,7 @@ async def cmd_migrate_remote(
     remote_url: str,
     auth_token: str | None,
     schema_path: str,
-    dialect: Dialect,
+    engine: Engine,
     expand_enums: bool,
     init: bool,
     dry_run: bool,
@@ -751,7 +751,7 @@ async def cmd_migrate_remote(
                     _note(verbose, "Replicated current schema from cloud", sys.stdout)
 
                     # Introspect cloud DB (via local replica)
-                    current_schema = await introspect(conn, dialect)
+                    current_schema = await introspect(conn, engine)
 
                     _note(
                         verbose,
@@ -763,7 +763,7 @@ async def cmd_migrate_remote(
                     diff_result = diff(
                         current_schema,
                         target_schema,
-                        dialect=dialect,
+                        engine=engine,
                         decisions=NOTHING,
                     )
 
@@ -784,7 +784,7 @@ async def cmd_migrate_remote(
                             conn,
                             diff_result["operations"],
                             diff_result["execution_order"],
-                            dialect,
+                            engine,
                             dry_run=False,
                         )
                         return await _WHEN_PUSHED[result["success"]](conn, result)
@@ -883,7 +883,7 @@ async def cmd_generate(
     *,
     connection_string: str,
     schema_dir: str,
-    dialect: Dialect,
+    engine: Engine,
     output: str | None,
     force: bool,
     verbose: bool,
@@ -906,17 +906,17 @@ async def cmd_generate(
 
     _note(verbose, f"Loaded {len(target)} tables from schema files", sys.stderr)
 
-    connection = await _connect(connection_string, dialect)
+    connection = await _connect(connection_string, engine)
 
     try:
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
 
         _note(verbose, f"Introspected {len(actual)} tables from database", sys.stderr)
 
         @helper
         async def write_the_sql() -> int:
             """Diff, then render the operations as statements."""
-            result = diff(actual, target, dialect=dialect, decisions=load_decisions(schema_dir))
+            result = diff(actual, target, engine=engine, decisions=load_decisions(schema_dir))
 
             # Nothing here can answer an ambiguity, so the command refuses.
             _WHEN_UNANSWERABLE[bool(result["ambiguities"])](result["ambiguities"])
@@ -927,7 +927,7 @@ async def cmd_generate(
                 sql_statements = generate_sql(
                     result["operations"],
                     result["execution_order"],
-                    dialect,
+                    engine,
                 )
 
                 # Output
@@ -948,4 +948,4 @@ async def cmd_generate(
         return await _WHEN_DRIFTED[bool(drift)](drift, write_the_sql)
 
     finally:
-        await _disconnect(connection, dialect)
+        await _disconnect(connection, engine)

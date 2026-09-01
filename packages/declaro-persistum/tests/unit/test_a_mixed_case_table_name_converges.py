@@ -79,20 +79,20 @@ DECLARED = {
 }
 
 
-async def _deploy(connection: Any, dialect: str, declared: dict) -> dict:
+async def _deploy(connection: Any, engine: str, declared: dict) -> dict:
     """One deploy: introspect what is there, diff, apply."""
-    actual = await introspect(connection, dialect)
+    actual = await introspect(connection, engine)
     plan = diff(
         {name: actual[name] for name in declared if name in actual},
         declared,
-        dialect=dialect,
+        engine=engine,
         decisions=NOTHING,
     )
     return await apply(
         connection,
         plan["operations"],
         plan["execution_order"],
-        dialect,
+        engine,
         dry_run=False,
     )
 
@@ -113,30 +113,30 @@ ENGINES = {"turso": _turso_connection, "sqlite": _sqlite_connection}
 
 
 @pytest.mark.parametrize("table_name", MIXED_CASE)
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
+@pytest.mark.parametrize("engine", sorted(ENGINES))
 async def test_the_second_deploy_of_a_mixed_case_table_does_nothing(
-    dialect: str, table_name: str
+    engine: str, table_name: str
 ) -> None:
     """Convergence is the whole requirement. A second deploy has no work."""
     declared = {table_name: DECLARED}
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
-        first = await _deploy(connection, dialect, declared)
+        first = await _deploy(connection, engine, declared)
         assert first["success"], first
 
-        second = await _deploy(connection, dialect, declared)
+        second = await _deploy(connection, engine, declared)
 
         assert second["success"], (
-            f"the second deploy of {table_name!r} on {dialect} failed: {second}"
+            f"the second deploy of {table_name!r} on {engine} failed: {second}"
         )
     finally:
         await connection.close()
 
 
 @pytest.mark.parametrize("table_name", MIXED_CASE)
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
+@pytest.mark.parametrize("engine", sorted(ENGINES))
 async def test_introspection_returns_the_name_that_was_declared(
-    dialect: str, table_name: str
+    engine: str, table_name: str
 ) -> None:
     """The cause, asserted on its own so a fix elsewhere cannot mask it.
 
@@ -146,29 +146,29 @@ async def test_introspection_returns_the_name_that_was_declared(
     introspection has to give it back unchanged.
     """
     declared = {table_name: DECLARED}
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
-        await _deploy(connection, dialect, declared)
+        await _deploy(connection, engine, declared)
 
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
 
         assert table_name in actual, (
-            f"{dialect} introspected {sorted(actual)}, and {table_name!r} is not among them"
+            f"{engine} introspected {sorted(actual)}, and {table_name!r} is not among them"
         )
     finally:
         await connection.close()
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_a_lower_case_table_is_unaffected(dialect: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_a_lower_case_table_is_unaffected(engine: str) -> None:
     """The control. Whatever the fix does, it must not disturb the common case."""
     declared = {"users": DECLARED}
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
-        await _deploy(connection, dialect, declared)
-        second = await _deploy(connection, dialect, declared)
+        await _deploy(connection, engine, declared)
+        second = await _deploy(connection, engine, declared)
 
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
 
         assert second["success"] and "users" in actual, (second, sorted(actual))
     finally:
@@ -287,48 +287,48 @@ FK_SCHEMA = {
 }
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_a_reference_to_a_capitalised_table_converges(dialect: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_a_reference_to_a_capitalised_table_converges(engine: str) -> None:
     """A rebuild of the whole table on every deploy, reported as success."""
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
-        await _deploy(connection, dialect, FK_SCHEMA)
+        await _deploy(connection, engine, FK_SCHEMA)
 
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
         remaining = diff(
             {n: actual[n] for n in FK_SCHEMA if n in actual},
             FK_SCHEMA,
-            dialect=dialect,
+            engine=engine,
             decisions=NOTHING,
         )["operations"]
 
         assert remaining == [], (
-            f"{dialect} rebuilds Post on every deploy: {[(o['op'], o['table']) for o in remaining]}"
+            f"{engine} rebuilds Post on every deploy: {[(o['op'], o['table']) for o in remaining]}"
         )
     finally:
         await connection.close()
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_the_reference_reads_back_as_it_was_declared(dialect: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_the_reference_reads_back_as_it_was_declared(engine: str) -> None:
     """The cause, so a fix in the differ cannot mask it.
 
     `references` is a string this package writes into SQL. Introspection has
     to hand back the name that was declared, not the name the catalogue holds.
     """
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
-        await _deploy(connection, dialect, FK_SCHEMA)
+        await _deploy(connection, engine, FK_SCHEMA)
 
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
 
         assert actual["Post"]["columns"]["uid"]["references"] == "UserProfile.id"
     finally:
         await connection.close()
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_a_lower_case_reference_is_unaffected(dialect: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_a_lower_case_reference_is_unaffected(engine: str) -> None:
     """The control."""
     schema = {
         "users": DECLARED,
@@ -339,11 +339,11 @@ async def test_a_lower_case_reference_is_unaffected(dialect: str) -> None:
             }
         },
     }
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
-        await _deploy(connection, dialect, schema)
+        await _deploy(connection, engine, schema)
 
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
 
         assert actual["posts"]["columns"]["uid"]["references"] == "users.id"
     finally:
@@ -382,35 +382,35 @@ INDEXED = {
 }
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
+@pytest.mark.parametrize("engine", sorted(ENGINES))
 async def test_an_index_reads_back_under_the_name_it_was_given(
-    dialect: str,
+    engine: str,
 ) -> None:
     """The silent loop: drop_index then add_index forever, reporting success."""
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
-        await _deploy(connection, dialect, INDEXED)
+        await _deploy(connection, engine, INDEXED)
 
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
 
         assert "IxUserName" in actual["users"].get("indexes", {}), (
-            f"{dialect} introspected {sorted(actual['users'].get('indexes', {}))}"
+            f"{engine} introspected {sorted(actual['users'].get('indexes', {}))}"
         )
     finally:
         await connection.close()
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_a_capitalised_index_converges(dialect: str) -> None:
-    connection = await ENGINES[dialect]()
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_a_capitalised_index_converges(engine: str) -> None:
+    connection = await ENGINES[engine]()
     try:
-        await _deploy(connection, dialect, INDEXED)
+        await _deploy(connection, engine, INDEXED)
 
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
         remaining = diff(
             {n: actual[n] for n in INDEXED if n in actual},
             INDEXED,
-            dialect=dialect,
+            engine=engine,
             decisions=NOTHING,
         )["operations"]
 
@@ -419,21 +419,21 @@ async def test_a_capitalised_index_converges(dialect: str) -> None:
         await connection.close()
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
+@pytest.mark.parametrize("engine", sorted(ENGINES))
 async def test_a_view_reads_back_under_the_name_it_was_given(
-    dialect: str,
+    engine: str,
 ) -> None:
     """Views are the fifth site and nothing had asked what folding costs there."""
     from declaro_persistum.inspector import introspect_with_views
 
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
-        await _deploy(connection, dialect, {"users": DECLARED})
+        await _deploy(connection, engine, {"users": DECLARED})
         await connection.execute('CREATE VIEW "ActiveUsers" AS SELECT id FROM "users"')
         await connection.commit()
 
-        _tables, views = await introspect_with_views(connection, dialect)
+        _tables, views = await introspect_with_views(connection, engine)
 
-        assert "ActiveUsers" in views, f"{dialect} introspected {sorted(views)}"
+        assert "ActiveUsers" in views, f"{engine} introspected {sorted(views)}"
     finally:
         await connection.close()

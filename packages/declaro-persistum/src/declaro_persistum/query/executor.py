@@ -2,7 +2,7 @@
 Query execution functions.
 
 Executes Query objects against database connections.
-Handles parameter binding for different dialects.
+Handles parameter binding for different engines.
 """
 
 import re
@@ -72,7 +72,7 @@ _ONE_ROW: dict[bool, Callable[..., Row | Any | None]] = {
     False: _row_as_the_driver_wrote_it,
 }
 
-_DIALECT_MAP = {
+_ENGINE_MAP = {
     "asyncpg": "postgresql",
     "aiosqlite": "sqlite",
     "turso": "turso",
@@ -82,7 +82,7 @@ _DIALECT_MAP = {
 def _conn_module(conn: Any) -> str:
     """Where this connection's class lives, which is the only marker it has.
 
-    IT USED TO READ AN ATTRIBUTE FIRST. `getattr(conn, "_declaro_dialect",
+    IT USED TO READ AN ATTRIBUTE FIRST. `getattr(conn, "_declaro_engine",
     type(conn).__module__)`, with a docstring promising the attribute is "set
     on driver-owned async wrappers like TursoAsyncConnection". Nothing set it:
     zero occurrences in the package outside this line, zero in any installed
@@ -101,14 +101,14 @@ def _conn_module(conn: Any) -> str:
 
 @helper
 def _recognised_keys(conn_type: str) -> list[str]:
-    """Which driver names in `_DIALECT_MAP` appear in this module path.
+    """Which driver names in `_ENGINE_MAP` appear in this module path.
 
     The scan is by substring because a driver keeps its connection in a
-    submodule: `asyncpg.connection`, `aiosqlite.core`. `_DIALECT_MAP` is
+    submodule: `asyncpg.connection`, `aiosqlite.core`. `_ENGINE_MAP` is
     ordered, so the first name that appears is the answer, which is what the
     loop with a `return` inside it used to give.
     """
-    return [key for key in _DIALECT_MAP if key in conn_type]
+    return [key for key in _ENGINE_MAP if key in conn_type]
 
 
 @helper
@@ -116,14 +116,14 @@ def _refuse_unnamed_engine(conn_type: str, _keys: list[str]) -> str:
     """A driver nobody has taught this package about, refused by name."""
     raise ValueError(
         f"cannot tell which engine {conn_type!r} belongs to. Recognised: "
-        f"{', '.join(sorted(set(_DIALECT_MAP.values())))}."
+        f"{', '.join(sorted(set(_ENGINE_MAP.values())))}."
     )
 
 
 @helper
 def _the_named_engine(_conn_type: str, keys: list[str]) -> str:
-    """The module path names a driver, so its dialect is the answer."""
-    return _DIALECT_MAP[keys[0]]
+    """The module path names a driver, so its engine is the answer."""
+    return _ENGINE_MAP[keys[0]]
 
 
 _WHEN_ENGINE_UNNAMED: dict[bool, Callable[[str, list[str]], str]] = {
@@ -140,7 +140,7 @@ def _refuse_unsupported_connection(conn_type: str, _keys: list[str]) -> str:
 
 @helper
 def _the_supported_key(_conn_type: str, keys: list[str]) -> str:
-    """The driver name the per-dialect tables are keyed on."""
+    """The driver name the per-engine tables are keyed on."""
     return keys[0]
 
 
@@ -152,7 +152,7 @@ _WHEN_CONNECTION_UNSUPPORTED: dict[bool, Callable[[str, list[str]], str]] = {
 
 @helper
 def _driver_key(conn_type: str) -> str:
-    """The key every per-dialect table in this module is read with.
+    """The key every per-engine table in this module is read with.
 
     A CONNECTION NO TABLE HOLDS IS REFUSED, not defaulted. `_prepare_query`
     used to fall through to `return sql, params` under a comment reading
@@ -166,7 +166,7 @@ def _driver_key(conn_type: str) -> str:
 
 
 @helper
-def detect_dialect(connection: Any) -> str:
+def detect_engine(connection: Any) -> str:
     """Which engine this connection belongs to, or a refusal naming the ones
     that are recognised.
 
@@ -176,8 +176,8 @@ def detect_dialect(connection: Any) -> str:
     somewhere downstream with a message about SQL syntax rather than about the
     connection. Measured 2026-08-17:
 
-        detect_dialect(SomeOtherDriver()) -> 'postgresql'
-        detect_dialect(None)              -> 'postgresql'
+        detect_engine(SomeOtherDriver()) -> 'postgresql'
+        detect_engine(None)              -> 'postgresql'
 
     A driver nobody has taught this package about is not PostgreSQL, and
     saying so is the difference between a clear error here and a confusing one

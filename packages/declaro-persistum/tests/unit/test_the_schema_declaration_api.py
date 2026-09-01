@@ -1,8 +1,8 @@
 """`@table` and `field()` — the half of the surface that names intent.
 
 `map_type` decides how a column is SPELLED per engine. These decide what it
-MEANS. Together they are the multi-dialect surface: one declaration, three
-dialects, and no engine word anywhere in the model.
+MEANS. Together they are the multi-engine surface: one declaration, three
+engines, and no engine word anywhere in the model.
 
 BOTH WERE DOCUMENTED AND NEVER WRITTEN. `git log -S"def field("` over the whole
 history of the package returns nothing. `usage.md` and `README.md` have opened
@@ -141,7 +141,7 @@ def test_a_field_with_nothing_to_declare_is_still_a_column() -> None:
     assert _schema_for(User)["name"]["type"] == "text"
 
 
-def test_the_declaration_reaches_every_dialect() -> None:
+def test_the_declaration_reaches_every_engine() -> None:
     """One model, three engines, no engine word in the model."""
     from declaro_persistum import field, table
     from declaro_persistum.applier.shared import column_definition

@@ -30,21 +30,21 @@ _PAIRS = [
 ]
 
 
-@pytest.mark.parametrize("left,right,dialect", _PAIRS)
-def test_two_spellings_of_one_default_agree(left, right, dialect) -> None:
+@pytest.mark.parametrize("left,right,engine", _PAIRS)
+def test_two_spellings_of_one_default_agree(left, right, engine) -> None:
     """Each of these was a migration loop before it was folded."""
-    assert same_default(left, right, dialect=dialect)
+    assert same_default(left, right, engine=engine)
 
 
-@pytest.mark.parametrize("left,right,dialect", _PAIRS)
-def test_the_answer_does_not_depend_on_the_order(left, right, dialect) -> None:
+@pytest.mark.parametrize("left,right,engine", _PAIRS)
+def test_the_answer_does_not_depend_on_the_order(left, right, engine) -> None:
     """The rule must reach both arguments.
 
     This is the test the four inline guards could not fail: each was written
     twice, once per side, and a fifth fix adding a guard to only one of them
     would still pass every other test in the suite.
     """
-    assert same_default(left, right, dialect=dialect) == same_default(right, left, dialect=dialect)
+    assert same_default(left, right, engine=engine) == same_default(right, left, engine=engine)
 
 
 @pytest.mark.parametrize(
@@ -58,11 +58,11 @@ def test_two_different_defaults_still_differ(left, right) -> None:
     A change of default has to migrate. Folding these would report a schema
     that changed its mind as unchanged.
     """
-    assert not same_default(left, right, dialect="postgresql")
+    assert not same_default(left, right, engine="postgresql")
 
 
 def test_absence_is_not_a_value() -> None:
     """None on one side and a default on the other is a real change."""
-    assert same_default(None, None, dialect="sqlite")
-    assert not same_default(None, "0", dialect="sqlite")
-    assert not same_default("0", None, dialect="sqlite")
+    assert same_default(None, None, engine="sqlite")
+    assert not same_default(None, "0", engine="sqlite")
+    assert not same_default("0", None, engine="sqlite")

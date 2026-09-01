@@ -65,7 +65,7 @@ def _a_database(ctx: Ctx, *, primary: str | None, waiting: int, closed: bool) ->
 
     return Database(
         path="x.db",
-        dialect="turso",
+        engine="turso",
         journal_mode="wal",
         busy_timeout_s=5.0,
         primary=primary,

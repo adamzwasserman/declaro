@@ -134,7 +134,7 @@ async def _deploy(connection: Any, declared: dict[str, Any]) -> None:
     plan = diff(
         {n: actual[n] for n in declared if n in actual},
         declared,
-        dialect="postgresql",
+        engine="postgresql",
         decisions=NOTHING,
     )
     await apply(
@@ -173,7 +173,7 @@ async def test_it_reads_back_and_converges(label: str) -> None:
         remaining = diff(
             {n: actual[n] for n in declared if n in actual},
             declared,
-            dialect="postgresql",
+            engine="postgresql",
             decisions=NOTHING,
         )["operations"]
 

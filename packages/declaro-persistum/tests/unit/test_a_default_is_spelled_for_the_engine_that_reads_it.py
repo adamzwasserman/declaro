@@ -48,7 +48,7 @@ from declaro_persistum.applier.shared import column_definition
 
 pytestmark = pytest.mark.precommit
 
-DIALECTS = ["sqlite", "turso", "postgresql"]
+ENGINES = ["sqlite", "turso", "postgresql"]
 
 # The vocabulary a portable schema may use. Taken from the shipped example
 # schema, which is where the defect was measured, rather than invented.
@@ -56,10 +56,10 @@ PORTABLE = ["now()", "true", "false", "CURRENT_TIMESTAMP"]
 
 
 @pytest.mark.parametrize("default", PORTABLE)
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_a_portable_default_is_accepted_by_every_engine(default: str, dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_portable_default_is_accepted_by_every_engine(default: str, engine: str) -> None:
     """It must render, whichever engine is the target."""
-    rendered = column_definition("c", {"type": "text", "default": default}, dialect)
+    rendered = column_definition("c", {"type": "text", "default": default}, engine)
 
     assert "DEFAULT" in rendered, rendered
 
@@ -145,32 +145,32 @@ def test_postgresql_still_accepts_what_only_it_can_spell() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_a_literal_default_is_untouched(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_literal_default_is_untouched(engine: str) -> None:
     """Translation applies to the expression vocabulary, not to every string."""
-    rendered = column_definition("c", {"type": "text", "default": "'pending'"}, dialect)
+    rendered = column_definition("c", {"type": "text", "default": "'pending'"}, engine)
 
     assert "'pending'" in rendered, rendered
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_a_numeric_default_is_untouched(dialect: str) -> None:
-    rendered = column_definition("c", {"type": "integer", "default": 0}, dialect)
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_numeric_default_is_untouched(engine: str) -> None:
+    rendered = column_definition("c", {"type": "integer", "default": 0}, engine)
 
     assert "DEFAULT 0" in rendered, rendered
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_an_absent_default_renders_no_clause(dialect: str) -> None:
-    rendered = column_definition("c", {"type": "text"}, dialect)
+@pytest.mark.parametrize("engine", ENGINES)
+def test_an_absent_default_renders_no_clause(engine: str) -> None:
+    rendered = column_definition("c", {"type": "text"}, engine)
 
     assert "DEFAULT" not in rendered, rendered
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_an_explicit_null_default_is_still_null(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_an_explicit_null_default_is_still_null(engine: str) -> None:
     """`default = None` is a declared default of NULL, not an absent one."""
-    rendered = column_definition("c", {"type": "text", "default": None}, dialect)
+    rendered = column_definition("c", {"type": "text", "default": None}, engine)
 
     assert "DEFAULT NULL" in rendered, rendered
 

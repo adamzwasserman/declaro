@@ -244,7 +244,7 @@ def _the_typeless_column(
 
     It read `col_def.get("type", "text")`, so the validator answered a
     typeless column with the same guess every renderer makes and reported
-    nothing. Measured 2026-08-19: `column_definition("c", {}, dialect)`
+    nothing. Measured 2026-08-19: `column_definition("c", {}, engine)`
     returns TEXT on all three engines and the reconstruction renderer does
     too, so a schema built through the API produced a TEXT column everywhere
     and validated clean.

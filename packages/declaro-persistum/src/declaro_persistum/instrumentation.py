@@ -66,7 +66,7 @@ def classify_sql(sql: str) -> str:
     An unrecognised statement is still "other" rather than a guess, and that
     fallback is right here in a way it is not elsewhere in this package: SQL
     has more verbs than this table will ever hold, so an unknown one is not a
-    caller error the way an unknown dialect is.
+    caller error the way an unknown engine is.
     """
     stripped = sql.strip()
     # A STATEMENT WITH NO WORDS HAS NO FIRST KEYWORD, and the empty string is
@@ -91,7 +91,7 @@ def _unnamed_verb(_word: str, unrecognised: str) -> str:
 # WHETHER THE TABLE NAMES THIS KEYWORD, as a table rather than a `.get`
 # fallback. THE OPEN SPACE IS REAL HERE, unlike everywhere else in this
 # package: SQL has more verbs than this will ever hold, so an unknown one is
-# not a caller error the way an unknown dialect is. Writing the two cases out
+# not a caller error the way an unknown engine is. Writing the two cases out
 # is what tells a reader that, where a second argument to `.get` reads the
 # same as the fallbacks this package has spent the day removing.
 _KNOWN_VERB: dict[bool, Callable[[str, str], str]] = {

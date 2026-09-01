@@ -1,19 +1,19 @@
-"""Introspection: one function per dialect, chosen by a dispatch table.
+"""Introspection: one function per engine, chosen by a dispatch table.
 
-`create_inspector(dialect)` was already a dispatch table. It dispatched on
+`create_inspector(engine)` was already a dispatch table. It dispatched on
 CLASSES and instantiated the winner on the way out:
 
     INSPECTORS = {"postgresql": PostgreSQLInspector, ...}
-    return INSPECTORS[dialect]()
+    return INSPECTORS[engine]()
 
 Every class in it was stateless — no `__init__`, no fields, methods taking a
-connection and returning data, and a `get_dialect()` returning a string
+connection and returning data, and a `get_engine()` returning a string
 literal. So the table is unchanged and the values are now the functions the
 table should always have held.
 
     schema = await introspect(conn, "sqlite")
 
-An unknown dialect raises `ValueError` naming the ones that exist, rather than
+An unknown engine raises `ValueError` naming the ones that exist, rather than
 returning None and failing later somewhere that cannot say why.
 """
 
@@ -23,10 +23,10 @@ from typing import Any, cast
 
 from declaro_persistum.boundary import helper
 from declaro_persistum.inspector import postgresql, sqlite, turso
-from declaro_persistum.types import NOTHING, Dialect, Schema, View, for_dialect
+from declaro_persistum.types import NOTHING, Engine, Schema, View, for_engine
 
 # PLAIN DICTS. Both tables were `_Inspectors(dict)`, a class whose only member
-# was `__missing__`. See `for_dialect` in `types.py`: the lookup is the thing
+# was `__missing__`. See `for_engine` in `types.py`: the lookup is the thing
 # that varied, so the lookup is a function and the tables are data.
 INSPECTORS: dict[str, Any] = {
     "postgresql": postgresql.introspect,
@@ -42,20 +42,18 @@ TABLE_EXISTS: dict[str, Any] = {
 
 
 @helper
-async def introspect(connection: Any, dialect: Dialect) -> Schema:
+async def introspect(connection: Any, engine: Engine) -> Schema:
     """Read a database's tables back out of it."""
-    inspector = for_dialect(INSPECTORS, dialect, "Inspectors")
+    inspector = for_engine(INSPECTORS, engine, "Inspectors")
     result = await inspector(connection, schema_name=NOTHING, include_views=False)
     return cast(Schema, result)
 
 
 @helper
-async def introspect_with_views(
-    connection: Any, dialect: Dialect
-) -> tuple[Schema, dict[str, View]]:
+async def introspect_with_views(connection: Any, engine: Engine) -> tuple[Schema, dict[str, View]]:
     """Read a database's tables AND its views back out of it.
 
-    TWO FUNCTIONS, NOT A FLAG. This was `introspect(conn, dialect,
+    TWO FUNCTIONS, NOT A FLAG. This was `introspect(conn, engine,
     include_views=False)` returning `Schema | tuple[Schema, dict[str, View]]`,
     and the union is what makes it two functions wearing one name: the caller
     cannot know which shape it holds without knowing the argument it passed.
@@ -63,13 +61,13 @@ async def introspect_with_views(
     That is not theoretical. `migrations.py` unpacks the pair, and a union of
     "a dict" and "a pair" unpacks silently as the dict's KEYS, so mypy read
     the schema as `str` and reported four errors downstream that all traced
-    back here. A caller writing `schema = await introspect(conn, dialect,
+    back here. A caller writing `schema = await introspect(conn, engine,
     include_views=True)` gets a tuple and no complaint at all.
 
     The flag was also an implicit default (Rule 14): `False` decided for every
     caller who never knew there was a choice.
     """
-    inspector = for_dialect(INSPECTORS, dialect, "Inspectors")
+    inspector = for_engine(INSPECTORS, engine, "Inspectors")
     result = await inspector(connection, schema_name=NOTHING, include_views=True)
     return cast(tuple[Schema, dict[str, View]], result)
 
@@ -87,15 +85,15 @@ TABLE_COLUMNS: dict[str, Any] = {
 
 
 @helper
-async def get_table_columns(connection: Any, dialect: Dialect, table: str) -> dict[str, Any]:
+async def get_table_columns(connection: Any, engine: Engine, table: str) -> dict[str, Any]:
     """One table's columns, or a refusal naming the table."""
-    reader = for_dialect(TABLE_COLUMNS, dialect, "Table-column readers")
+    reader = for_engine(TABLE_COLUMNS, engine, "Table-column readers")
     return cast(dict[str, Any], await reader(connection, table))
 
 
 @helper
-async def table_exists(connection: Any, dialect: Dialect, table: str) -> bool:
-    exists = for_dialect(TABLE_EXISTS, dialect, "Table-exists checks")
+async def table_exists(connection: Any, engine: Engine, table: str) -> bool:
+    exists = for_engine(TABLE_EXISTS, engine, "Table-exists checks")
     return cast(bool, await exists(connection, table, schema_name=NOTHING))
 
 

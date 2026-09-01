@@ -33,7 +33,7 @@ from declaro_persistum.query.builder import (
 from declaro_persistum.query.conditions import COMBINATORS, OPERATORS
 from declaro_persistum.query.conditions import render as render_condition
 from declaro_persistum.query.executor import (
-    detect_dialect,
+    detect_engine,
 )
 from declaro_persistum.query.expressions import (
     CaseOrderBy,
@@ -72,7 +72,7 @@ __all__ = [
     "with_offset",
     "with_params",
     # execution — the boundary
-    "detect_dialect",
+    "detect_engine",
     # conditions, as data
     "render_condition",
     "OPERATORS",

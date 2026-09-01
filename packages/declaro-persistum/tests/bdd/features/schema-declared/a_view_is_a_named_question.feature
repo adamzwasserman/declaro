@@ -2,7 +2,7 @@
 Feature: A view is a question with a name
   You declare a view against your models and the library writes the SELECT. That
   sentence only means something if a view holds a question rather than a string, which
-  is the same object a dialect produces.
+  is the same object an engine produces.
 
   Scenario: a view is declared against models
     Given a model Order declaring orders with columns id, status and total

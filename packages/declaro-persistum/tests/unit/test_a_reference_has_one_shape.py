@@ -55,7 +55,7 @@ def test_the_differ_emits_that_shape() -> None:
                 }
             },
         },
-        dialect="sqlite",
+        engine="sqlite",
         decisions=NOTHING,
     )
 

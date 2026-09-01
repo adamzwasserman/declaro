@@ -1,7 +1,7 @@
 """
 Core diff logic for schema comparison.
 
-Implements the main diff(, current=NOTHING, target=NOTHING, dialect=NOTHING, decisions=NOTHING) function that computes operations needed
+Implements the main diff(, current=NOTHING, target=NOTHING, engine=NOTHING, decisions=NOTHING) function that computes operations needed
 to transform current schema to target schema.
 """
 
@@ -219,8 +219,8 @@ from declaro_persistum.differ.comparisons import (
 from declaro_persistum.differ.toposort import build_dependency_graph, topological_sort
 from declaro_persistum.types import (
     Decision,
-    Dialect,
     DiffResult,
+    Engine,
     Index,
     Nothing,
     Operation,
@@ -236,7 +236,7 @@ def diff(
     current: Schema,
     target: Schema,
     *,
-    dialect: Dialect,
+    engine: Engine,
     decisions: dict[str, Decision] | None | Nothing,
 ) -> DiffResult:
     """
@@ -253,7 +253,7 @@ def diff(
         added = T - C (tables to create)
         modified = C ∩ T (tables to compare for changes)
 
-    THE DIALECT IS REQUIRED, AND WITHOUT IT THIS WAS NOT IDEMPOTENT.
+    THE ENGINE IS REQUIRED, AND WITHOUT IT THIS WAS NOT IDEMPOTENT.
     A declared type and an introspected type are the same fact in two
     spellings: `uuid` is stored as TEXT on SQLite and Turso, so introspection
     returns "text" and a plain string comparison saw text -> uuid on every
@@ -271,7 +271,7 @@ def diff(
     Args:
         current: Current database schema state
         target: Desired schema state
-        dialect: The engine, because a type comparison is meaningless without
+        engine: The engine, because a type comparison is meaningless without
             one. Required for the same reason `map_type` requires it (Rule 14)
         decisions: Pre-made decisions for ambiguous changes (from pending.toml)
 
@@ -284,7 +284,7 @@ def diff(
     Example:
         >>> current = {"users": {"columns": {"id": {"type": "integer"}}}}
         >>> target = {"users": {"columns": {"id": {"type": "integer"}, "email": {"type": "text"}}}}
-        >>> result = diff(current, target, dialect="postgresql", decisions=NOTHING)
+        >>> result = diff(current, target, engine="postgresql", decisions=NOTHING)
         >>> print(result["operations"][0]["op"])
         'add_column'
     """
@@ -392,12 +392,12 @@ def diff(
             table_name,
             current[table_name],
             target[table_name],
-            dialect,
+            engine,
         )
     )
 
     # Detect ambiguities
-    ambiguities = detect_ambiguities(current, target, dialect, decisions)
+    ambiguities = detect_ambiguities(current, target, engine, decisions)
 
     # Build dependency graph and sort
     dependencies = build_dependency_graph(operations)
@@ -470,7 +470,7 @@ def _diff_table(
     table_name: str,
     current: Table,
     target: Table,
-    dialect: Dialect,
+    engine: Engine,
 ) -> list[Operation]:
     """
     Compute operations to transform a single table.
@@ -487,7 +487,7 @@ def _diff_table(
     operations: list[Operation] = []
 
     # Diff columns
-    column_ops = _diff_columns(table_name, current, target, dialect)
+    column_ops = _diff_columns(table_name, current, target, engine)
     operations.extend(column_ops)
 
     # AN INDEX A COLUMN DROP ALREADY TAKES IS NOT THE INDEX DIFF'S BUSINESS.
@@ -501,7 +501,7 @@ def _diff_table(
     operations.extend(index_ops)
 
     # Diff constraints
-    constraint_ops = _diff_constraints(table_name, current, target, dialect)
+    constraint_ops = _diff_constraints(table_name, current, target, engine)
     operations.extend(constraint_ops)
 
     return operations
@@ -621,7 +621,7 @@ def _diff_constraints(
     table_name: str,
     current: Table,
     target: Table,
-    dialect: Dialect,
+    engine: Engine,
 ) -> list[Operation]:
     """Diff named constraints.
 
@@ -649,4 +649,4 @@ def _diff_constraints(
     on PostgreSQL, which is the same standing limitation a changed column CHECK
     has there.
     """
-    return _CONSTRAINTS_ON[dialect](table_name, current, target)
+    return _CONSTRAINTS_ON[engine](table_name, current, target)

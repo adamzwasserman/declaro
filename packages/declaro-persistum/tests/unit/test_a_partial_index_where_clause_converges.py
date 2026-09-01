@@ -102,7 +102,7 @@ async def test_the_engines_rendering_is_the_declared_clause(
     live["pw_users"]["indexes"]["ix_live"]["where"] = rendered
 
     result = diff(
-        live, _declaring('"deleted_at" IS NULL', live), dialect="postgresql", decisions=NOTHING
+        live, _declaring('"deleted_at" IS NULL', live), engine="postgresql", decisions=NOTHING
     )
 
     assert result["operations"] == []
@@ -115,7 +115,7 @@ async def test_a_genuinely_different_clause_still_migrates(
     live = await _live(tmp_path)
 
     result = diff(
-        live, _declaring('"deleted_at" IS NOT NULL', live), dialect="postgresql", decisions=NOTHING
+        live, _declaring('"deleted_at" IS NOT NULL', live), engine="postgresql", decisions=NOTHING
     )
 
     assert [op["op"] for op in result["operations"]] == ["drop_index", "add_index"]
@@ -135,7 +135,7 @@ async def test_a_quoted_name_that_needs_its_quotes_is_not_folded(
     live["pw_users"]["indexes"]["ix_live"]["where"] = "deleted_at IS NULL"
 
     result = diff(
-        live, _declaring('"Deleted_At" IS NULL', live), dialect="postgresql", decisions=NOTHING
+        live, _declaring('"Deleted_At" IS NULL', live), engine="postgresql", decisions=NOTHING
     )
 
     assert [op["op"] for op in result["operations"]] == ["drop_index", "add_index"]
@@ -158,7 +158,7 @@ async def test_a_mixed_case_name_is_not_the_lower_case_one(
     live["pw_users"]["indexes"]["ix_live"]["where"] = '"Deleted_At" IS NULL'
 
     result = diff(
-        live, _declaring("Deleted_At IS NULL", live), dialect="postgresql", decisions=NOTHING
+        live, _declaring("Deleted_At IS NULL", live), engine="postgresql", decisions=NOTHING
     )
 
     assert [op["op"] for op in result["operations"]] == ["drop_index", "add_index"]

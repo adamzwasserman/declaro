@@ -23,8 +23,8 @@ from tests.bdd.factories.schema_factory import (
 # to put what the Given established so the Then can read it, but that is a
 # BAG OF FACTS, not an object: nothing about it has behaviour.
 #
-# As a TypedDict the steps read `bdd_context["dialect"]` instead of
-# `bdd_context["dialect"]`, which is longer by two characters and honest about
+# As a TypedDict the steps read `bdd_context["engine"]` instead of
+# `bdd_context["engine"]`, which is longer by two characters and honest about
 # what it is. `reset()` is gone — pytest builds a fresh one per scenario, so
 # a method that re-blanks three of six fields was a second, partial way to do
 # what the fixture already does completely.
@@ -38,7 +38,7 @@ class ScenarioContext(TypedDict, total=False):
     error: Exception | None
     connection: Any
     backend: Any
-    dialect: str
+    engine: str
     sql: str
     last_inserted_id: Any
 
@@ -46,7 +46,7 @@ class ScenarioContext(TypedDict, total=False):
 def new_context() -> ScenarioContext:
     """A context with nothing established yet.
 
-    `dialect` is the one field with a starting value, because a scenario that
+    `engine` is the one field with a starting value, because a scenario that
     never names a backend is running on SQLite by the feature files' own
     convention.
     """
@@ -56,7 +56,7 @@ def new_context() -> ScenarioContext:
         "error": None,
         "connection": None,
         "backend": None,
-        "dialect": "sqlite",
+        "engine": "sqlite",
         "sql": "",
         "last_inserted_id": None,
     }

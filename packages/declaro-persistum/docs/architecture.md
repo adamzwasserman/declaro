@@ -51,7 +51,7 @@ Ambiguity comes back instead of getting guessed. A column gone and another one s
 
 Reads and writes take the same path from the same models. One path, not two: a second route to the database is a second place a column name gets written down.
 
-## Dialects are data, not branches
+## Engines are data, not branches
 
 Three engines, and what differs between them lives in tables instead of branches, as per Honest Code Principles. Each engine is a row. The table is read by subscript, so an engine nobody declared blows up at the lookup instead of getting handled as something else.
 
@@ -93,9 +93,9 @@ I/O happens at named edges, and each one carries a `@boundary` marker so you can
 
 **Why a marker and not a convention.** Business logic that reaches the network can't be tested without the network behind it, can't be reused where that system is missing, and gives you nowhere single to change how the program talks outward. Those costs show up quietly, one function at a time. A marker turns the edge into something countable, so "how many places touch the outside" has an answer instead of an opinion, and a function that claims to be pure and isn't gets caught by a test rather than by a reader.
 
-Opening a database gives you a `Database`: data carrying its own injected callables and its dialect, decided once. Nothing downstream figures out what engine it's talking to, because the answer came with the value.
+Opening a database gives you a `Database`: data carrying its own injected callables and its engine, decided once. Nothing downstream figures out what engine it's talking to, because the answer came with the value.
 
-**Never work the dialect out from a connection.** A driver connection doesn't tell you which engine it belongs to. The closest you can get is where its class happens to live, which means substring-matching module names, which makes the SQL you generate depend on somebody else's file layout. The driver reorganizes its own package and your placeholders change, silently, and nothing in your code moved.
+**Never work the engine out from a connection.** A driver connection doesn't tell you which engine it belongs to. The closest you can get is where its class happens to live, which means substring-matching module names, which makes the SQL you generate depend on somebody else's file layout. The driver reorganizes its own package and your placeholders change, silently, and nothing in your code moved.
 
 ## Every string is checked or bound, never interpolated
 

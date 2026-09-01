@@ -43,15 +43,15 @@ PROBE_URL = probe_url()
 CREATE = 'CREATE TABLE "widgets" (id INTEGER PRIMARY KEY, name TEXT)'
 
 
-def test_the_table_holds_one_writer_per_dialect() -> None:
+def test_the_table_holds_one_writer_per_engine() -> None:
     """The floor. A missing entry would make a whole engine unwritable."""
     assert set(WRITERS) == {"sqlite", "turso", "postgresql"}, sorted(WRITERS)
 
 
-def test_each_dialect_gets_its_own_writer() -> None:
+def test_each_engine_gets_its_own_writer() -> None:
     """Three engines, three transaction statements, three functions.
 
-    A table pointing two dialects at one function would pass every behavioural
+    A table pointing two engines at one function would pass every behavioural
     test below on the engine that function was written for.
     """
     assert WRITERS["sqlite"] is sqlite_write_one

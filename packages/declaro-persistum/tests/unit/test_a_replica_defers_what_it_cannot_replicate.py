@@ -30,7 +30,7 @@ pytestmark = pytest.mark.precommit
 
 
 def _plan(current: dict, target: dict):
-    plan = diff(current, target, dialect="turso", decisions=NOTHING)
+    plan = diff(current, target, engine="turso", decisions=NOTHING)
     return plan["operations"], plan["execution_order"]
 
 

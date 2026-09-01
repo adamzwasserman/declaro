@@ -126,8 +126,8 @@ def test_the_primary_key_renders_without_a_default() -> None:
     assert "DEFAULT" not in rendered, rendered
 
 
-@pytest.mark.parametrize("dialect", ["sqlite", "turso"])
-async def test_the_defaults_survive_a_round_trip(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ["sqlite", "turso"])
+async def test_the_defaults_survive_a_round_trip(engine: str) -> None:
     """The real test. A default that renders is not one the engine keeps.
 
     Every default defect this package has shipped passed a rendering check
@@ -138,7 +138,7 @@ async def test_the_defaults_survive_a_round_trip(dialect: str) -> None:
     (directory / "models.py").write_text(MODELS)
     declared = load_schema_from_models(str(directory))
 
-    if dialect == "turso":
+    if engine == "turso":
         import turso.aio
 
         connection = await turso.aio.connect(os.path.join(tempfile.mkdtemp(), "d.db"))
@@ -148,20 +148,20 @@ async def test_the_defaults_survive_a_round_trip(dialect: str) -> None:
         connection = await aiosqlite.connect(os.path.join(tempfile.mkdtemp(), "d.db"))
 
     try:
-        plan = diff({}, declared, dialect=dialect, decisions=NOTHING)
+        plan = diff({}, declared, engine=engine, decisions=NOTHING)
         await apply(
             connection,
             plan["operations"],
             plan["execution_order"],
-            dialect,
+            engine,
             dry_run=False,
         )
 
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
         remaining = diff(
             {n: actual[n] for n in declared if n in actual},
             declared,
-            dialect=dialect,
+            engine=engine,
             decisions=NOTHING,
         )["operations"]
 
@@ -173,8 +173,8 @@ async def test_the_defaults_survive_a_round_trip(dialect: str) -> None:
         await connection.close()
 
 
-@pytest.mark.parametrize("dialect", ["sqlite", "turso"])
-async def test_the_defaults_actually_apply_to_a_row(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ["sqlite", "turso"])
+async def test_the_defaults_actually_apply_to_a_row(engine: str) -> None:
     """The floor under convergence.
 
     `DEFAULT NULL` parses for every one of these and means none of them, and
@@ -184,7 +184,7 @@ async def test_the_defaults_actually_apply_to_a_row(dialect: str) -> None:
     (directory / "models.py").write_text(MODELS)
     declared = load_schema_from_models(str(directory))
 
-    if dialect == "turso":
+    if engine == "turso":
         import turso.aio
 
         connection = await turso.aio.connect(os.path.join(tempfile.mkdtemp(), "r.db"))
@@ -194,12 +194,12 @@ async def test_the_defaults_actually_apply_to_a_row(dialect: str) -> None:
         connection = await aiosqlite.connect(os.path.join(tempfile.mkdtemp(), "r.db"))
 
     try:
-        plan = diff({}, declared, dialect=dialect, decisions=NOTHING)
+        plan = diff({}, declared, engine=engine, decisions=NOTHING)
         await apply(
             connection,
             plan["operations"],
             plan["execution_order"],
-            dialect,
+            engine,
             dry_run=False,
         )
         # TWO DRIVERS, TWO CURSOR SHAPES. pyturso hands back a cursor object
@@ -207,7 +207,7 @@ async def test_the_defaults_actually_apply_to_a_row(dialect: str) -> None:
         # Passing the connection for both got `'Connection' object has no
         # attribute 'fetchall'`.
         select = 'SELECT name, count, ratio, active, hidden, blank FROM "widgets"'
-        if dialect == "turso":
+        if engine == "turso":
             cursor = connection.cursor()
             await cursor.execute('INSERT INTO "widgets" (id) VALUES (1)')
             await connection.commit()

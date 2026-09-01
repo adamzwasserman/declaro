@@ -279,12 +279,12 @@ def test_the_string_match_is_recorded_as_the_blunt_instrument_it_is() -> None:
 #
 # `python_type_to_sql` produced no SQL. It returned the CANONICAL column type
 # that goes into the schema dict -- "text", "integer", "timestamptz", "jsonb"
-# -- and a second function turns that into a dialect's spelling:
+# -- and a second function turns that into an engine's spelling:
 #
 #     datetime  ->  timestamptz  ->  sqlite=TEXT  postgresql=timestamptz
 #     dict      ->  jsonb        ->  sqlite=TEXT  postgresql=jsonb
 #
-# So the pipeline is annotation -> declared type -> dialect SQL, and this
+# So the pipeline is annotation -> declared type -> engine SQL, and this
 # function is only the first arrow. `to_sql` named the last one, which is the
 # arrow it has nothing to do with.
 #
@@ -296,7 +296,7 @@ def test_the_string_match_is_recorded_as_the_blunt_instrument_it_is() -> None:
 # AND IT NO LONGER GUESSES. The old last line was `return "text"`, so six
 # annotation forms became text columns in silence, and the value could not be
 # told apart from a declared `str`. It refuses now and names what it maps,
-# which is what `for_dialect` does for an unknown dialect everywhere else.
+# which is what `for_engine` does for an unknown engine everywhere else.
 
 
 def test_the_dishonest_name_is_gone() -> None:

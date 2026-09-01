@@ -57,7 +57,7 @@ def test_a_table_whose_columns_are_empty_raises() -> None:
         create_table_sql("orders", {"columns": {}}, "sqlite")
 
 
-def test_an_unknown_dialect_raises_and_names_the_ones_that_exist() -> None:
+def test_an_unknown_engine_raises_and_names_the_ones_that_exist() -> None:
     with pytest.raises(ValueError, match="mysql"):
         column_sql("id", {"type": "uuid"}, "mysql")
 
@@ -233,10 +233,10 @@ def test_the_real_fixture_schemas_all_render() -> None:
 
     schemas = [simple_todos_schema(), simple_users_schema(), complex_ecommerce_schema()]
     rendered = [
-        create_table_sql(name, table, dialect)
+        create_table_sql(name, table, engine)
         for schema in schemas
         for name, table in schema.items()
-        for dialect in ("sqlite", "turso", "postgresql")
+        for engine in ("sqlite", "turso", "postgresql")
     ]
 
     assert len(rendered) >= 15, (

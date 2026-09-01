@@ -70,9 +70,9 @@ def _when_no_path(ctx, engine):
         ctx["refusal"] = refused
 
 
-@then(parsers.parse('its dialect is "{dialect}"'))
-def _then_dialect(ctx, dialect):
-    assert ctx["config"]["dialect"] == dialect, ctx["config"]
+@then(parsers.parse('its engine is "{engine}"'))
+def _then_engine(ctx, engine):
+    assert ctx["config"]["engine"] == engine, ctx["config"]
 
 
 @then(parsers.parse('it is shown as "{shown}"'))

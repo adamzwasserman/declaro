@@ -1,7 +1,7 @@
 """`table_exists` must answer the question the engine would answer.
 
 WRITTEN BEFORE THE FIX. `table_exists` is public API with a dispatch table
-across all three dialects, and coverage over the whole suite showed every one
+across all three engines, and coverage over the whole suite showed every one
 of the three implementations dark. Two of them are wrong and the third is
 the only one that binds its parameter.
 
@@ -83,85 +83,85 @@ async def _postgresql() -> Any:
 
 
 CONNECT = {"sqlite": _sqlite, "turso": _turso, "postgresql": _postgresql}
-DIALECTS = sorted(CONNECT)
+ENGINES = sorted(CONNECT)
 
 
-async def _execute(connection: Any, dialect: str, sql: str) -> None:
-    if dialect == "postgresql":
+async def _execute(connection: Any, engine: str, sql: str) -> None:
+    if engine == "postgresql":
         await connection.execute(sql)
         return
     await connection.execute(sql)
     await connection.commit()
 
 
-async def _prepared(dialect: str, names: list[str]) -> Any:
-    connection = await CONNECT[dialect]()
+async def _prepared(engine: str, names: list[str]) -> Any:
+    connection = await CONNECT[engine]()
     for name in names:
-        if dialect == "postgresql":
-            await _execute(connection, dialect, f'DROP TABLE IF EXISTS "{name}" CASCADE')
-        await _execute(connection, dialect, f'CREATE TABLE "{name}" (id INTEGER)')
+        if engine == "postgresql":
+            await _execute(connection, engine, f'DROP TABLE IF EXISTS "{name}" CASCADE')
+        await _execute(connection, engine, f'CREATE TABLE "{name}" (id INTEGER)')
     return connection
 
 
-async def _done(connection: Any, dialect: str, names: list[str]) -> None:
-    if dialect == "postgresql":
+async def _done(connection: Any, engine: str, names: list[str]) -> None:
+    if engine == "postgresql":
         for name in names:
-            await _execute(connection, dialect, f'DROP TABLE IF EXISTS "{name}" CASCADE')
+            await _execute(connection, engine, f'DROP TABLE IF EXISTS "{name}" CASCADE')
     await connection.close()
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-async def test_a_table_that_is_there_answers_true(dialect: str) -> None:
-    connection = await _prepared(dialect, MADE)
+@pytest.mark.parametrize("engine", ENGINES)
+async def test_a_table_that_is_there_answers_true(engine: str) -> None:
+    connection = await _prepared(engine, MADE)
     try:
-        assert await table_exists(connection, dialect, "users") is True
+        assert await table_exists(connection, engine, "users") is True
     finally:
-        await _done(connection, dialect, MADE)
+        await _done(connection, engine, MADE)
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-async def test_a_table_that_is_not_there_answers_false(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+async def test_a_table_that_is_not_there_answers_false(engine: str) -> None:
     """The floor. A function that always says True would pass the test above."""
-    connection = await _prepared(dialect, MADE)
+    connection = await _prepared(engine, MADE)
     try:
-        assert await table_exists(connection, dialect, "no_such_table") is False
+        assert await table_exists(connection, engine, "no_such_table") is False
     finally:
-        await _done(connection, dialect, MADE)
+        await _done(connection, engine, MADE)
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
+@pytest.mark.parametrize("engine", ENGINES)
 async def test_a_capitalised_table_answers_true_for_its_own_spelling(
-    dialect: str,
+    engine: str,
 ) -> None:
     """The Turso defect. The table is there and it said it was not."""
-    connection = await _prepared(dialect, MADE)
+    connection = await _prepared(engine, MADE)
     try:
-        assert await table_exists(connection, dialect, "UserProfile") is True
+        assert await table_exists(connection, engine, "UserProfile") is True
     finally:
-        await _done(connection, dialect, MADE)
+        await _done(connection, engine, MADE)
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
+@pytest.mark.parametrize("engine", ENGINES)
 async def test_the_folded_spelling_answers_what_the_engine_would(
-    dialect: str,
+    engine: str,
 ) -> None:
     """Where the three engines genuinely differ, and the answer follows them."""
-    connection = await _prepared(dialect, MADE)
+    connection = await _prepared(engine, MADE)
     try:
-        answer = await table_exists(connection, dialect, "userprofile")
+        answer = await table_exists(connection, engine, "userprofile")
 
-        assert answer is FOLDS_NAMES[dialect], (
-            f"{dialect} answered {answer} for the folded spelling of a table "
+        assert answer is FOLDS_NAMES[engine], (
+            f"{engine} answered {answer} for the folded spelling of a table "
             f"created as UserProfile; the engine treats them as "
-            f"{'one table' if FOLDS_NAMES[dialect] else 'two tables'}"
+            f"{'one table' if FOLDS_NAMES[engine] else 'two tables'}"
         )
     finally:
-        await _done(connection, dialect, MADE)
+        await _done(connection, engine, MADE)
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
+@pytest.mark.parametrize("engine", ENGINES)
 async def test_a_name_with_an_apostrophe_is_answered_not_raised(
-    dialect: str,
+    engine: str,
 ) -> None:
     """A legal table name must not break the query that asks about it.
 
@@ -169,16 +169,16 @@ async def test_a_name_with_an_apostrophe_is_answered_not_raised(
     SQL as a value on two engines and as text on the third.
     """
     names = [*MADE, "od'd"]
-    connection = await _prepared(dialect, names)
+    connection = await _prepared(engine, names)
     try:
-        assert await table_exists(connection, dialect, "od'd") is True
+        assert await table_exists(connection, engine, "od'd") is True
     finally:
-        await _done(connection, dialect, names)
+        await _done(connection, engine, names)
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
+@pytest.mark.parametrize("engine", ENGINES)
 async def test_a_name_carrying_sql_is_a_name_and_nothing_else(
-    dialect: str,
+    engine: str,
 ) -> None:
     """The same hole seen from the other side.
 
@@ -186,13 +186,13 @@ async def test_a_name_carrying_sql_is_a_name_and_nothing_else(
     is answered at all: interpolating it closes the string literal and runs
     what follows.
     """
-    connection = await _prepared(dialect, MADE)
+    connection = await _prepared(engine, MADE)
     try:
-        answer = await table_exists(connection, dialect, "x' OR '1'='1")
+        answer = await table_exists(connection, engine, "x' OR '1'='1")
 
         assert answer is False, (
             "a name that closes the quote matched something, so it was "
             "interpolated rather than bound"
         )
     finally:
-        await _done(connection, dialect, MADE)
+        await _done(connection, engine, MADE)

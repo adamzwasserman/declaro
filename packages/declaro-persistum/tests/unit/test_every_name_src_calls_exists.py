@@ -8,7 +8,7 @@ TWO CLASS-DELETION SWEEPS EACH LEFT A CALL SITE BEHIND, and both survived.
     bf5f7d0  introspection is functions    removed _normalize_view_query, kept
                                            the two lines that call it
 
-Every supported dialect through `create_bulk_loader` raised NameError, and so
+Every supported engine through `create_bulk_loader` raised NameError, and so
 did PostgreSQL view introspection. Nothing failed, because nothing ran them: the
 bulk path has no test, and neither does the view path on a real PostgreSQL.
 

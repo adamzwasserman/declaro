@@ -219,13 +219,13 @@ class ConnectionError(DeclaroError):
     - Authentication fails
     """
 
-    def __init__(self, message: str, *, dialect: str | Nothing) -> None:
+    def __init__(self, message: str, *, engine: str | Nothing) -> None:
         # A default in the signature would decide this where no reader
         # sees it happen and no test reaches it.
-        the_dialect = resolved(dialect, None)
-        self.dialect = the_dialect
-        dialect_hint = f"\n\n  Dialect: {the_dialect}" if the_dialect else ""
-        super().__init__(f"{message}{dialect_hint}")
+        the_engine = resolved(engine, None)
+        self.engine = the_engine
+        engine_hint = f"\n\n  Engine: {the_engine}" if the_engine else ""
+        super().__init__(f"{message}{engine_hint}")
 
 
 class MigrationError(DeclaroError):

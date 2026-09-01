@@ -204,8 +204,8 @@ def declared_type(annotation: Any) -> str:
         datetime  ->  timestamptz  ->  sqlite=TEXT  postgresql=timestamptz
         dict      ->  jsonb        ->  sqlite=TEXT  postgresql=jsonb
 
-    So the pipeline is annotation -> declared type -> dialect SQL, and this is
-    only the first step. `map_type(declared, dialect)` is the one that writes
+    So the pipeline is annotation -> declared type -> engine SQL, and this is
+    only the first step. `map_type(declared, engine)` is the one that writes
     SQL, and it is documented as "Spell a declared type for one engine".
     `declared type` was already the package's word for this layer; only this
     function stood outside the vocabulary.

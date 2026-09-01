@@ -131,7 +131,7 @@ def _compared_properties() -> set[str]:
     found = {"type", "nullable", "default"}  # compared by name, not in a tuple
 
     # ONLY THE TUPLE ASSIGNED TO `compared`. My first version took every string
-    # tuple in the function and reported ('sqlite', 'turso') -- the dialect
+    # tuple in the function and reported ('sqlite', 'turso') -- the engine
     # test beside it -- as two properties nobody had given values to. An
     # instrument that reads too widely invents work.
     for node in ast.walk(ast.parse(source.lstrip())):
@@ -253,11 +253,11 @@ def test_every_compared_property_has_values_to_try() -> None:
     )
 
 
-async def _converges(connection, dialect: str, declared: dict) -> list:
-    plan = diff({}, declared, dialect=dialect, decisions=NOTHING)
-    await apply(connection, plan["operations"], plan["execution_order"], dialect, dry_run=False)
-    actual = await introspect(connection, dialect)
-    return diff({"t": actual["t"]}, declared, dialect=dialect, decisions=NOTHING)["operations"]
+async def _converges(connection, engine: str, declared: dict) -> list:
+    plan = diff({}, declared, engine=engine, decisions=NOTHING)
+    await apply(connection, plan["operations"], plan["execution_order"], engine, dry_run=False)
+    actual = await introspect(connection, engine)
+    return diff({"t": actual["t"]}, declared, engine=engine, decisions=NOTHING)["operations"]
 
 
 def _cases():
@@ -321,18 +321,18 @@ def _object_cases():
 _DECLARE = {"fk": _fk_declaration, "index": _index_declaration}
 
 
-async def _object_converges(connection, dialect: str, declared: dict) -> list:
+async def _object_converges(connection, engine: str, declared: dict) -> list:
     """The same trip as `_converges`, over every table the declaration names.
 
     `_converges` compares one table because a column case only ever declares
     one. A foreign key needs two, and comparing only `t` would miss a parent
     the migration got wrong.
     """
-    plan = diff({}, declared, dialect=dialect, decisions=NOTHING)
-    await apply(connection, plan["operations"], plan["execution_order"], dialect, dry_run=False)
-    actual = await introspect(connection, dialect)
+    plan = diff({}, declared, engine=engine, decisions=NOTHING)
+    await apply(connection, plan["operations"], plan["execution_order"], engine, dry_run=False)
+    actual = await introspect(connection, engine)
     current = {name: actual[name] for name in declared if name in actual}
-    return diff(current, declared, dialect=dialect, decisions=NOTHING)["operations"]
+    return diff(current, declared, engine=engine, decisions=NOTHING)["operations"]
 
 
 @pytest.mark.sqlite

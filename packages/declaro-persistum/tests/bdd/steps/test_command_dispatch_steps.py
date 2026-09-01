@@ -39,7 +39,7 @@ def ctx() -> Ctx:
 
 @given(parsers.parse("a command that returns {code:d}"))
 def _given_returns(ctx, code):
-    def _cmd(_args, _connection_string, _dialect):
+    def _cmd(_args, _connection_string, _engine):
         return code
 
     ctx["commands"] = {"diff": _cmd}
@@ -47,7 +47,7 @@ def _given_returns(ctx, code):
 
 @given("a command that raises KeyboardInterrupt")
 def _given_interrupt(ctx):
-    def _cmd(_args, _connection_string, _dialect):
+    def _cmd(_args, _connection_string, _engine):
         raise KeyboardInterrupt
 
     ctx["commands"] = {"diff": _cmd}
@@ -55,7 +55,7 @@ def _given_interrupt(ctx):
 
 @given(parsers.parse('a command that raises RuntimeError with "{message}"'))
 def _given_raises(ctx, message):
-    def _cmd(_args, _connection_string, _dialect):
+    def _cmd(_args, _connection_string, _engine):
         raise RuntimeError(message)
 
     ctx["commands"] = {"diff": _cmd}

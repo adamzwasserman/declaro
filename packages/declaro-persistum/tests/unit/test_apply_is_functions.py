@@ -1,6 +1,6 @@
-"""Applying migrations is functions dispatched on dialect, against a real database.
+"""Applying migrations is functions dispatched on engine, against a real database.
 
-`create_applier(dialect)` was the same shape as `create_inspector`: a dispatch
+`create_applier(engine)` was the same shape as `create_inspector`: a dispatch
 table over CLASSES that instantiated the winner on the way out. The classes
 were stateless, and the SQL GENERATORS beside them were already module-level
 functions — `generate_column_sql`, `generate_create_view`,
@@ -31,24 +31,24 @@ import pytest
 
 from declaro_persistum.applier import APPLIERS, apply
 from declaro_persistum.inspector import introspect
-from declaro_persistum.types import for_dialect
+from declaro_persistum.types import for_engine
 
-DIALECTS = ["postgresql", "sqlite", "turso"]
+ENGINES = ["postgresql", "sqlite", "turso"]
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_every_dialect_has_an_apply_function(dialect):
-    assert dialect in APPLIERS, f"no applier registered for {dialect}"
-    assert callable(APPLIERS[dialect]), (
-        f"{dialect} maps to {type(APPLIERS[dialect]).__name__}, not a function"
+@pytest.mark.parametrize("engine", ENGINES)
+def test_every_engine_has_an_apply_function(engine):
+    assert engine in APPLIERS, f"no applier registered for {engine}"
+    assert callable(APPLIERS[engine]), (
+        f"{engine} maps to {type(APPLIERS[engine]).__name__}, not a function"
     )
 
 
-def test_an_unknown_dialect_fails_loudly():
-    """The raise moved from `__missing__` to `for_dialect`, and this moved with it.
+def test_an_unknown_engine_fails_loudly():
+    """The raise moved from `__missing__` to `for_engine`, and this moved with it.
 
     `APPLIERS` was `class _Appliers(dict)` whose one method turned a KeyError
-    into a ValueError naming the supported dialects. A dict wrapper is allowed
+    into a ValueError naming the supported engines. A dict wrapper is allowed
     only with no methods, and that method was the reason the class existed, so
     the table is a plain dict and the lookup is a function.
 
@@ -57,7 +57,7 @@ def test_an_unknown_dialect_fails_loudly():
     KeyError names what was asked for and not what was available.
     """
     with pytest.raises(ValueError, match="postgres"):
-        for_dialect(APPLIERS, "mysql", "Appliers")
+        for_engine(APPLIERS, "mysql", "Appliers")
 
 
 def test_the_table_is_a_plain_dict():

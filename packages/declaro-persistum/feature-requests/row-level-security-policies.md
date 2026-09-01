@@ -167,6 +167,6 @@ Nested `without_policies()` blocks are legal (re-entrant). Outside this context,
 
 ## Open questions for the maintainer
 
-1. Should `row_filter` accept a `ConditionGroup` object instead of a SQL string? More type-safe but harder to express across dialects. Current proposal: string + named placeholder. Maintainer decision.
+1. Should `row_filter` accept a `ConditionGroup` object instead of a SQL string? More type-safe but harder to express across engines. Current proposal: string + named placeholder. Maintainer decision.
 2. Should `policy(...)` be applied at Pydantic model level (`__policy__`) or registered separately via `register_policy(table_name, policy)`? Model-level is more declarative; separate registration is more flexible for retrofit. Current proposal: model-level.
 3. Does `soft_delete` need to work with CASCADE / parent-child relationships? Current proposal: no, it's per-table. Cascading soft-deletes are the app's responsibility.

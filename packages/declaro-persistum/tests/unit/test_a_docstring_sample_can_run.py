@@ -10,16 +10,16 @@ IDE shows on hover and what `help()` prints.
 MEASURED 2026-08-17, over 38 resolvable call samples in `src/`:
 
     cutover.py           await begin_cutover(source, target, ...)
-                         missing schema_path, target_dialect
-    differ/ambiguity.py  detect_ambiguities(current, target)   missing dialect
-    differ/core.py       diff(current, target)                 missing dialect
+                         missing schema_path, target_engine
+    differ/ambiguity.py  detect_ambiguities(current, target)   missing engine
+    differ/core.py       diff(current, target)                 missing engine
 
 A FOURTH WAS INVISIBLE TO THE FIRST VERSION OF THIS SCANNER, and it is the more
 interesting one. `applier/__init__.py` opened with
 
     result = await apply(conn, operations, "sqlite")
 
-which binds `"sqlite"` to `execution_order` and never supplies `dialect`. The
+which binds `"sqlite"` to `execution_order` and never supplies `engine`. The
 scanner skipped it because `apply` took `**kwargs`, and a signature with
 `**kwargs` accepts any keyword, so nothing can be asserted about a call to it.
 That is the cost of `**kwargs` stated precisely: it does not merely lose type

@@ -80,7 +80,7 @@ def _every_operation() -> dict[str, dict]:
     }
 
     def ops(current, target):
-        return diff(current, target, dialect="sqlite", decisions=NOTHING)["operations"]
+        return diff(current, target, engine="sqlite", decisions=NOTHING)["operations"]
 
     produced = [
         *ops({}, {"users": USERS}),

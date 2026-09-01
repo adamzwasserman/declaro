@@ -70,7 +70,7 @@ def test_our_table_is_not_reported_as_dropped() -> None:
     current = {"_dp_transfer_state": {"columns": _ID}}
     target = {"orders": {"columns": _ID}}
 
-    result = diff(current, target, dialect="postgresql", decisions=NOTHING)
+    result = diff(current, target, engine="postgresql", decisions=NOTHING)
 
     assert [op["op"] for op in result["operations"]] == ["create_table"]
     assert result["operations"][0]["table"] == "orders"
@@ -86,7 +86,7 @@ def test_our_table_raises_no_ambiguity() -> None:
     current = {"_dp_transfer_state": {"columns": _ID}, "_declaro_meta": {"columns": _ID}}
     target = {"orders": {"columns": _ID}}
 
-    assert diff(current, target, dialect="postgresql", decisions=NOTHING)["ambiguities"] == []
+    assert diff(current, target, engine="postgresql", decisions=NOTHING)["ambiguities"] == []
 
 
 def test_a_real_dropped_table_is_still_reported() -> None:
@@ -98,6 +98,6 @@ def test_a_real_dropped_table_is_still_reported() -> None:
     current = {"users": {"columns": _ID}}
     target = {"orders": {"columns": _ID}}
 
-    result = diff(current, target, dialect="postgresql", decisions=NOTHING)
+    result = diff(current, target, engine="postgresql", decisions=NOTHING)
 
     assert len(result["ambiguities"]) == 1

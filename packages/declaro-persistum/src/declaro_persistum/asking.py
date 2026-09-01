@@ -1,9 +1,9 @@
-"""The vocabulary. One word, one meaning, spelled by every dialect.
+"""The vocabulary. One word, one meaning, spelled by every grammar.
 
 WHAT THIS IS. HOW-IT-SHOULD-WORK.md names the things a caller can ask for.
-This module is those things as signatures. Each dialect -- pseudo-SQL, Django,
-Prisma, SQLAlchemy -- is a grammar over these, so a word means the same in all
-four and there is one place that decides what it means.
+This module is those things as signatures. Each grammar -- pseudo-SQL, Django,
+Prisma, SQLAlchemy -- is a way of phrasing these, so a word means the same in
+all four and there is one place that decides what it means.
 
 NOTHING HERE IS BUILT. Every function raises, deliberately and by name. A body
 that returned an empty list or a zero would make its feature green while the

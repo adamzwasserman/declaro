@@ -24,9 +24,9 @@ from declaro_persistum.pydantic_loader import (
 from declaro_persistum.reporting import say
 from declaro_persistum.types import (
     NOTHING,
-    Dialect,
+    Engine,
     Nothing,
-    for_dialect,
+    for_engine,
 )
 
 META_TABLE = "_declaro_meta"
@@ -134,15 +134,15 @@ def _compute_schema_hash(schema_path: Path, version: str) -> str:
 
 
 @helper
-def _dialect_needs_orphan_recovery(dialect: Dialect) -> bool:
-    """True iff this dialect uses the sqlite_master-based temp-table scheme
+def _engine_needs_orphan_recovery(engine: Engine) -> bool:
+    """True iff this engine uses the sqlite_master-based temp-table scheme
     that `_recover_orphaned_tmp_tables` was written for.
 
     Postgres reconstruction does not produce ``_declaro_tmp_*`` tables and
     has no ``sqlite_master`` system table, so running the recovery scan on
     a Postgres database crashes startup with UndefinedTableError.
     """
-    return dialect in ("sqlite", "turso")
+    return engine in ("sqlite", "turso")
 
 
 @helper
@@ -195,7 +195,7 @@ def partition_replica_operations(
 # `applier/shared.py` has had this shape all along: fourteen functions that
 # return SQL, none that execute it, all tested by equality.
 #
-# THE DIALECT IS A TABLE, NOT `hasattr(conn, "fetch")`. Each function below
+# THE ENGINE IS A TABLE, NOT `hasattr(conn, "fetch")`. Each function below
 # used to carry that branch inline: one arm for asyncpg, one for everything
 # else. "Everything else" is not a decision, so a third engine took the SQLite
 # arm in silence. An engine that is not in the table now raises.
@@ -222,9 +222,9 @@ def meta_table_sql() -> str:
 
 # honest-code-allow: L1.21.1 - stored_hash_sql, _the_database_holds_tables and temp_table_name share a shape only once the names are erased: one builds SQL from a placeholder, one returns True as the do-nothing half of a pair, one makes a name with a random tail. They answer unrelated questions and one function over a table would need a row whose only column is the whole body
 @helper
-def stored_hash_sql(dialect: str) -> str:
+def stored_hash_sql(engine: str) -> str:
     """Read one stamp by key. The engines differ only in the placeholder."""
-    return f'SELECT value FROM "{META_TABLE}" WHERE key = {_placeholder(dialect)}'
+    return f'SELECT value FROM "{META_TABLE}" WHERE key = {_placeholder(engine)}'
 
 
 _STORE_HASH = {
@@ -255,14 +255,14 @@ _USER_TABLES = {
 }
 
 
-# THE TWO PER-DIALECT BUILDERS, one row each. Both had the same body -- look
-# the statement up in a per-dialect table and hand it back -- so the table was
+# THE TWO PER-ENGINE BUILDERS, one row each. Both had the same body -- look
+# the statement up in a per-engine table and hand it back -- so the table was
 # the only thing that differed, and it is data now.
 #
 # THE DOCSTRING IS IN THE ROW because it carried the reason, and the reason is
 # what a reader came for. `DO UPDATE` rather than `DO NOTHING` is the whole
 # point of the first one, and it would be lost in a shared body.
-_PER_DIALECT: dict[str, tuple[dict[str, str], str]] = {
+_PER_ENGINE: dict[str, tuple[dict[str, str], str]] = {
     "store_hash_sql": (
         _STORE_HASH,
         "Write one stamp, updating it if the key is already there.\n\n"
@@ -292,13 +292,13 @@ _PER_DIALECT: dict[str, tuple[dict[str, str], str]] = {
 
 
 def _looks_up(name: str) -> Callable[[str], str]:
-    """Build the function that reads one statement table by dialect."""
+    """Build the function that reads one statement table by engine."""
 
-    table, purpose = _PER_DIALECT[name]
+    table, purpose = _PER_ENGINE[name]
 
     @helper
-    def ask(dialect: str) -> str:
-        return cast(str, for_dialect(table, dialect, "Statement builders"))
+    def ask(engine: str) -> str:
+        return cast(str, for_engine(table, engine, "Statement builders"))
 
     ask.__name__ = name
     ask.__qualname__ = name
@@ -312,11 +312,11 @@ user_tables_sql = _looks_up("user_tables_sql")
 
 
 @helper
-def _dialect_of(conn: Any) -> str:
+def _engine_of(conn: Any) -> str:
     """asyncpg or not, decided once rather than in every statement.
 
-    This is still a shape check rather than a declared dialect, and it is the
-    boundary: `apply_migrations` is handed a connection and no dialect. What
+    This is still a shape check rather than a declared engine, and it is the
+    boundary: `apply_migrations` is handed a connection and no engine. What
     changed is that the answer is computed here, once, instead of inside each
     of five functions where a third engine would have taken the SQLite arm in
     silence.
@@ -352,7 +352,7 @@ _WRITERS: dict[str, Callable[[Any, str, tuple[Any, ...]], Awaitable[None]]] = {
 @helper
 async def _ensure_meta_table(conn: Any) -> None:
     """Run `meta_table_sql`. The statement is asserted in its own test."""
-    write = for_dialect(_WRITERS, _dialect_of(conn), "Statement writers")
+    write = for_engine(_WRITERS, _engine_of(conn), "Statement writers")
     await write(conn, meta_table_sql(), ())
 
 
@@ -404,22 +404,22 @@ _STAMP_READERS: dict[str, Callable[[Any, str, str], Awaitable[str | None]]] = {
 @helper
 async def _get_stored_hash(conn: Any, schema_name: str, schema_hash: str) -> str | None:
     """Return the stored stamp for this exact schema and version, else None."""
-    dialect = _dialect_of(conn)
-    read = for_dialect(_STAMP_READERS, dialect, "Stamp readers")
+    engine = _engine_of(conn)
+    read = for_engine(_STAMP_READERS, engine, "Stamp readers")
     return cast(
         str | None,
-        await read(conn, stored_hash_sql(dialect), _stamp_key(schema_name, schema_hash)),
+        await read(conn, stored_hash_sql(engine), _stamp_key(schema_name, schema_hash)),
     )
 
 
 @helper
 async def _store_hash(conn: Any, schema_name: str, schema_hash: str) -> None:
     """Store (upsert) the schema hash in _declaro_meta."""
-    dialect = _dialect_of(conn)
-    write = for_dialect(_WRITERS, dialect, "Statement writers")
+    engine = _engine_of(conn)
+    write = for_engine(_WRITERS, engine, "Statement writers")
     await write(
         conn,
-        store_hash_sql(dialect),
+        store_hash_sql(engine),
         (_stamp_key(schema_name, schema_hash), schema_hash, datetime.now(UTC).isoformat()),
     )
 
@@ -528,9 +528,9 @@ _TABLE_COUNTERS: dict[str, Callable[[Any, str], Awaitable[bool]]] = {
 @helper
 async def _has_user_tables(conn: Any) -> bool:
     """Return True if the database has at least one table besides _declaro_meta."""
-    dialect = _dialect_of(conn)
-    count = for_dialect(_TABLE_COUNTERS, dialect, "Table counters")
-    return cast(bool, await count(conn, user_tables_sql(dialect)))
+    engine = _engine_of(conn)
+    count = for_engine(_TABLE_COUNTERS, engine, "Table counters")
+    return cast(bool, await count(conn, user_tables_sql(engine)))
 
 
 # The prefix persistum owns. ONE definition, read by the generator and by the
@@ -817,7 +817,7 @@ class _Migration(TypedDict):
     """
 
     db: Database
-    dialect: Dialect
+    engine: Engine
     schema_path: Path
     schema_hash: str
     expand_enums: bool

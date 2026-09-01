@@ -7,7 +7,7 @@ one the package replaced.
 MEASURED 2026-08-17, one file of 307 lines, BYTE-IDENTICAL across all three
 example apps:
 
-    12  dispatch chains   `if config.dialect == "sqlite": ... elif ...`
+    12  dispatch chains   `if config.engine == "sqlite": ... elif ...`
      2  implicit defaults `get_sqlite_config(database_path=None)` and its twin
      2  broad handlers    any failure becomes `(False, "message")`
      1  data class        `@dataclass class DatabaseConfig`, three fields
@@ -65,11 +65,11 @@ def test_it_dispatches_on_a_table_not_a_chain(path: pathlib.Path) -> None:
         if isinstance(n, ast.If)
         and n.orelse
         and isinstance(n.orelse[0], ast.If)
-        and "dialect" in ast.unparse(n.test).lower()
+        and "engine" in ast.unparse(n.test).lower()
     ]
 
     assert chains == [], (
-        f"{path.parent.name}/db.py dispatches on dialect with if/elif at lines "
+        f"{path.parent.name}/db.py dispatches on engine with if/elif at lines "
         f"{chains}. A chain that runs out of branches does nothing and says "
         f"nothing; a table raises for an engine it does not know."
     )
@@ -143,7 +143,7 @@ def test_it_does_not_reach_for_libsql(path: pathlib.Path) -> None:
 
 
 @pytest.mark.parametrize("path", DB_FILES, ids=lambda p: p.parent.name)
-def test_an_unknown_dialect_raises_rather_than_returning_nothing(
+def test_an_unknown_engine_raises_rather_than_returning_nothing(
     path: pathlib.Path,
 ) -> None:
     """The whole reason a table beats a chain.
@@ -179,11 +179,11 @@ APPS = [d.parent / "app.py" for d in DB_FILES if (d.parent / "app.py").exists()]
 def test_no_app_reads_the_config_as_an_object(app: pathlib.Path) -> None:
     """A TypedDict is subscripted. `config.display_name` raises.
 
-    This is not style. `get_database().dialect` on a dict raises
+    This is not style. `get_database().engine` on a dict raises
     AttributeError at request time, on the route that renders the page.
     """
     tree = ast.parse(app.read_text())
-    fields = {"dialect", "connection_string", "display_name", "auth_token"}
+    fields = {"engine", "connection_string", "display_name", "auth_token"}
 
     reads = [
         f"line {node.lineno}: .{node.attr}"
@@ -198,15 +198,15 @@ def test_no_app_reads_the_config_as_an_object(app: pathlib.Path) -> None:
 
 
 @pytest.mark.parametrize("app", APPS, ids=lambda p: p.parent.name)
-def test_no_app_decides_how_to_commit_by_dialect(app: pathlib.Path) -> None:
+def test_no_app_decides_how_to_commit_by_engine(app: pathlib.Path) -> None:
     """The commit ladder was written out at every write site.
 
     Three routes per app, each carrying
 
-        dialect = get_database().dialect
-        if dialect == "sqlite":
+        engine = get_database().engine
+        if engine == "sqlite":
             await conn.commit()
-        elif dialect in ("turso_cloud", "turso_embedded"):
+        elif engine in ("turso_cloud", "turso_embedded"):
             conn.commit()
 
     and PostgreSQL is in none of them. It happens to work, because asyncpg
@@ -221,10 +221,10 @@ def test_no_app_decides_how_to_commit_by_dialect(app: pathlib.Path) -> None:
         for node in ast.walk(tree)
         if isinstance(node, ast.Compare)
         and isinstance(node.left, ast.Name)
-        and node.left.id == "dialect"
+        and node.left.id == "engine"
     ]
     assert not ladders, (
-        f"{app.parent.name}/app.py branches on the dialect at lines {ladders}. "
+        f"{app.parent.name}/app.py branches on the engine at lines {ladders}. "
         f"db.py knows which engines await and which need a commit; the app "
         f"should ask it rather than repeat the answer at every write site."
     )
@@ -239,11 +239,11 @@ def test_every_write_route_still_commits(app: pathlib.Path) -> None:
     """
     source = app.read_text()
     # THE ENGINE TRAVELS WITH THE CONNECTION NOW, so the call carries it:
-    # `commit(conn, dialect)`. It used to read the engine off a module global,
+    # `commit(conn, engine)`. It used to read the engine off a module global,
     # which meant a function's behaviour depended on state no caller could see.
-    assert source.count("await commit(conn, dialect)") >= 3, (
+    assert source.count("await commit(conn, engine)") >= 3, (
         f"{app.parent.name}/app.py commits at "
-        f"{source.count('await commit(conn, dialect)')} sites; create, toggle and "
+        f"{source.count('await commit(conn, engine)')} sites; create, toggle and "
         f"delete each need one, or the write is dropped"
     )
 
@@ -309,7 +309,7 @@ def test_an_engine_nobody_thought_about_raises() -> None:
     db = _load_example_db()
 
     with pytest.raises(ValueError) as caught:
-        db._for_dialect(db.CONNECTORS, "mysql", "Connectors")
+        db._for_engine(db.CONNECTORS, "mysql", "Connectors")
 
     message = str(caught.value)
     assert "mysql" in message
@@ -332,14 +332,14 @@ async def test_a_write_through_the_example_lands(tmp_path: pathlib.Path) -> None
 
     await db.init_schema(config)
 
-    async with db.get_connection(config) as (conn, dialect):
+    async with db.get_connection(config) as (conn, engine):
         await conn.execute(
             "INSERT INTO todos (id, title, completed) VALUES (?, ?, ?)",
             ("1", "buy milk", 0),
         )
-        await db.commit(conn, dialect)
+        await db.commit(conn, engine)
 
-    async with db.get_connection(config) as (conn, _dialect):
+    async with db.get_connection(config) as (conn, _engine):
         cursor = await conn.execute("SELECT title FROM todos")
         rows = await cursor.fetchall()
 

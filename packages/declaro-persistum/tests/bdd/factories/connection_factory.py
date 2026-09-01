@@ -212,7 +212,7 @@ DEFAULT_TRANSLATIONS: dict[str, dict[str, str]] = {
 }
 
 
-def column_sql(name: str, column: dict[str, Any], dialect: str) -> str:
+def column_sql(name: str, column: dict[str, Any], engine: str) -> str:
     """One column's DDL fragment. Pure.
 
     A COLUMN WITH NO TYPE RAISES. It used to become TEXT, which is the input
@@ -225,9 +225,9 @@ def column_sql(name: str, column: dict[str, Any], dialect: str) -> str:
     by rule, so "not translated" has a defined meaning here, unlike "not
     declared" above.
     """
-    if dialect not in TYPE_TRANSLATIONS:
+    if engine not in TYPE_TRANSLATIONS:
         raise ValueError(
-            f"Unsupported dialect: {dialect}. "
+            f"Unsupported engine: {engine}. "
             f"Builders exist for: {', '.join(sorted(TYPE_TRANSLATIONS))}"
         )
     if "type" not in column:
@@ -238,11 +238,11 @@ def column_sql(name: str, column: dict[str, Any], dialect: str) -> str:
         )
 
     declared = column["type"]
-    types = TYPE_TRANSLATIONS[dialect]
+    types = TYPE_TRANSLATIONS[engine]
     base = declared.lower().split("(")[0]
     if base in types:
         rendered = types[base]
-    elif dialect == "postgresql":
+    elif engine == "postgresql":
         rendered = declared
     else:
         rendered = declared.upper()
@@ -255,10 +255,10 @@ def column_sql(name: str, column: dict[str, Any], dialect: str) -> str:
     if column.get("unique"):
         parts.append("UNIQUE")
     if "default" in column:
-        defaults = DEFAULT_TRANSLATIONS[dialect]
+        defaults = DEFAULT_TRANSLATIONS[engine]
         value = column["default"]
         parts.append(f"DEFAULT {defaults.get(value, value)}")
-    if "references" in column and dialect == "postgresql":
+    if "references" in column and engine == "postgresql":
         target = column["references"].replace(".", "(") + ")"
         on_delete = column.get("on_delete")
         clause = f"REFERENCES {target}"
@@ -269,7 +269,7 @@ def column_sql(name: str, column: dict[str, Any], dialect: str) -> str:
     return " ".join(parts)
 
 
-def create_table_sql(name: str, table: dict[str, Any], dialect: str) -> str:
+def create_table_sql(name: str, table: dict[str, Any], engine: str) -> str:
     """One CREATE TABLE. Pure.
 
     A TABLE WITH NO COLUMNS RAISES, for the same reason a column with no type
@@ -280,7 +280,7 @@ def create_table_sql(name: str, table: dict[str, Any], dialect: str) -> str:
     if not columns:
         raise ValueError(f"table {name!r} declares no columns, so there is nothing to create")
 
-    parts = [column_sql(col, spec, dialect) for col, spec in columns.items()]
+    parts = [column_sql(col, spec, engine) for col, spec in columns.items()]
     if "primary_key" in table:
         parts.append(f"PRIMARY KEY ({', '.join(table['primary_key'])})")
 
@@ -328,7 +328,7 @@ async def setup_postgresql_schema(conn: Any, schema: Schema) -> None:
 class Backend(TypedDict):
     """One database backend, as the callables a scenario needs."""
 
-    dialect: str
+    engine: str
     connect: Any  # () -> async context manager yielding a connection
     setup: Any  # (conn, schema) -> None | awaitable
     teardown: Any  # (conn, schema) -> None | awaitable
@@ -353,7 +353,7 @@ async def get_turso_connection() -> AsyncGenerator[Any, None]:
 
 def sqlite_backend() -> Backend:
     return {
-        "dialect": "sqlite",
+        "engine": "sqlite",
         "connect": get_sqlite_connection,
         "setup": setup_sqlite_schema,
         "teardown": teardown_sqlite_schema,
@@ -362,7 +362,7 @@ def sqlite_backend() -> Backend:
 
 def postgresql_backend() -> Backend:
     return {
-        "dialect": "postgresql",
+        "engine": "postgresql",
         "connect": get_postgresql_connection,
         "setup": setup_postgresql_schema,
         "teardown": teardown_postgresql_schema,
@@ -371,7 +371,7 @@ def postgresql_backend() -> Backend:
 
 def turso_backend() -> Backend:
     return {
-        "dialect": "turso",
+        "engine": "turso",
         "connect": get_turso_connection,
         "setup": setup_turso_schema,
         "teardown": teardown_turso_schema,

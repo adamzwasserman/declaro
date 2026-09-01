@@ -90,28 +90,28 @@ async def _postgresql() -> Any:
 
 
 CONNECT = {"sqlite": _sqlite, "turso": _turso, "postgresql": _postgresql}
-DIALECTS = sorted(CONNECT)
+ENGINES = sorted(CONNECT)
 
 
-async def _done(connection: Any, dialect: str) -> None:
-    if dialect == "postgresql":
+async def _done(connection: Any, engine: str) -> None:
+    if engine == "postgresql":
         for table in ("first", "second"):
             await connection.execute(f'DROP TABLE IF EXISTS "{table}" CASCADE')
     await connection.close()
 
 
-async def _apply(connection: Any, dialect: str, operations: list[dict]) -> Any:
+async def _apply(connection: Any, engine: str, operations: list[dict]) -> Any:
     return await apply(
         connection,
         operations,
         list(range(len(operations))),
-        dialect,
+        engine,
         dry_run=False,
     )
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_each_module_declares_the_mode_it_behaves_as(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_each_module_declares_the_mode_it_behaves_as(engine: str) -> None:
     """The declaration and the behaviour are checked together, below.
 
     A module whose declared mode disagreed with what it does would mislead
@@ -121,59 +121,59 @@ def test_each_module_declares_the_mode_it_behaves_as(dialect: str) -> None:
         "sqlite": sqlite_applier,
         "turso": turso_applier,
         "postgresql": pg_applier,
-    }[dialect]
+    }[engine]
 
-    assert module.get_transaction_mode() == MODES[dialect]
-    assert module.get_dialect() == dialect
+    assert module.get_transaction_mode() == MODES[engine]
+    assert module.get_engine() == engine
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-async def test_a_batch_of_good_operations_succeeds(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+async def test_a_batch_of_good_operations_succeeds(engine: str) -> None:
     """The control on every test below."""
-    connection = await CONNECT[dialect]()
+    connection = await CONNECT[engine]()
     try:
-        result = await _apply(connection, dialect, [_create("first"), _create("second")])
+        result = await _apply(connection, engine, [_create("first"), _create("second")])
 
         assert result["success"] is True, result
     finally:
-        await _done(connection, dialect)
+        await _done(connection, engine)
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-async def test_a_failure_is_never_reported_as_success(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+async def test_a_failure_is_never_reported_as_success(engine: str) -> None:
     """The one thing all three must agree on.
 
     A caller reading `success` writes the schema hash, and a hash written over
     a migration that did not finish is never re-proposed.
     """
-    connection = await CONNECT[dialect]()
+    connection = await CONNECT[engine]()
     try:
-        await _apply(connection, dialect, [_create("first")])
+        await _apply(connection, engine, [_create("first")])
 
         # The same table again. Every engine refuses it.
         try:
-            result = await _apply(connection, dialect, [_create("first")])
+            result = await _apply(connection, engine, [_create("first")])
         except MigrationError:
             return
 
         assert result["success"] is False, result
     finally:
-        await _done(connection, dialect)
+        await _done(connection, engine)
 
 
-@pytest.mark.parametrize("dialect", ["sqlite", "postgresql"])
-async def test_an_all_or_nothing_applier_raises(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ["sqlite", "postgresql"])
+async def test_an_all_or_nothing_applier_raises(engine: str) -> None:
     """It does not hand back a result saying part of the batch worked."""
-    connection = await CONNECT[dialect]()
+    connection = await CONNECT[engine]()
     try:
-        await _apply(connection, dialect, [_create("first")])
+        await _apply(connection, engine, [_create("first")])
 
         with pytest.raises(MigrationError) as caught:
-            await _apply(connection, dialect, [_create("first")])
+            await _apply(connection, engine, [_create("first")])
 
         assert "first" in str(caught.value), caught.value
     finally:
-        await _done(connection, dialect)
+        await _done(connection, engine)
 
 
 async def test_an_all_or_nothing_applier_leaves_nothing_behind() -> None:

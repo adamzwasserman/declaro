@@ -120,10 +120,10 @@ def test_there_is_one_way_in_and_the_second_door_is_gone() -> None:
     """`create_applier` and `create_inspector` were a second dispatch table.
 
     THIS IS THE ARCHITECTURAL CAUSE OF THE TWO DEFECTS ABOVE, not a third
-    defect beside them. There were two ways to reach a dialect:
+    defect beside them. There were two ways to reach an engine:
 
-        declaro_persistum.applier.apply(conn, ops, order, dialect)   the package
-        applier.protocol.create_applier(dialect).apply(conn, ...)    the factory
+        declaro_persistum.applier.apply(conn, ops, order, engine)   the package
+        applier.protocol.create_applier(engine).apply(conn, ...)    the factory
 
     The factory returned the MODULE, annotated as a five-member Protocol that
     no module satisfied -- each was missing a different one:
@@ -169,8 +169,8 @@ def test_no_source_file_still_reaches_for_the_factories() -> None:
     assert not offenders, offenders
 
 
-@pytest.mark.parametrize("dialect", APPLIER_NAMES)
-def test_the_one_door_renders_sql_for_every_dialect(dialect: str) -> None:
+@pytest.mark.parametrize("engine", APPLIER_NAMES)
+def test_the_one_door_renders_sql_for_every_engine(engine: str) -> None:
     """The loop that only PostgreSQL had, exercised on all three.
 
     `generate_sql` was a member of one applier module out of three. It is one
@@ -181,7 +181,7 @@ def test_the_one_door_renders_sql_for_every_dialect(dialect: str) -> None:
     from declaro_persistum.differ import diff
 
     # FROM THE DIFFER, not from memory. My first version wrote
-    # `{"type": "create_table", ...}` and the key is `op`, so every dialect
+    # `{"type": "create_table", ...}` and the key is `op`, so every engine
     # raised KeyError and the test measured my spelling.
     plan = diff(
         {},
@@ -193,18 +193,18 @@ def test_the_one_door_renders_sql_for_every_dialect(dialect: str) -> None:
                 }
             }
         },
-        dialect=dialect,
+        engine=engine,
         decisions=NOTHING,
     )
 
-    statements = generate_sql(plan["operations"], plan["execution_order"], dialect)
+    statements = generate_sql(plan["operations"], plan["execution_order"], engine)
 
     assert len(statements) == 1, statements
     assert "CREATE TABLE" in statements[0].upper(), statements
     assert "widgets" in statements[0], statements
 
 
-def test_an_unknown_dialect_is_named_rather_than_a_key_error() -> None:
+def test_an_unknown_engine_is_named_rather_than_a_key_error() -> None:
     """The factory raised ValueError too. Deleting it must not lose that."""
     from declaro_persistum.applier import generate_sql
 
@@ -296,7 +296,7 @@ def test_generate_emits_sql_against_a_real_database(tmp_path: pathlib.Path) -> N
 # The third defect in the same command: the two halves of the URL disagree
 # ---------------------------------------------------------------------------
 #
-# MEASURED 2026-08-17. `detect_dialect` decides which engine a URL names, and
+# MEASURED 2026-08-17. `detect_engine` decides which engine a URL names, and
 # `_connect` turns that URL into something the driver can open. They accept
 # different vocabularies:
 #
@@ -304,7 +304,7 @@ def test_generate_emits_sql_against_a_real_database(tmp_path: pathlib.Path) -> N
 #     'sqlite:///rel/app.db'   detect='sqlite'   opens='rel/app.db'
 #     'sqlite:////abs/app.db'  detect='sqlite'   opens='/abs/app.db'
 #
-# The first row is the defect. `detect_dialect` says yes on a two-slash URL,
+# The first row is the defect. `detect_engine` says yes on a two-slash URL,
 # `_connect` strips a three-slash prefix that is not there, and aiosqlite is
 # handed the whole URL as a filename:
 #
@@ -363,11 +363,11 @@ def test_the_prefix_is_stripped_and_not_replaced() -> None:
 def test_the_detector_and_the_connector_accept_the_same_urls() -> None:
     """The property behind the defect, rather than the one case that showed it.
 
-    Anything `detect_dialect` calls SQLite must be something `sqlite_path` can
+    Anything `detect_engine` calls SQLite must be something `sqlite_path` can
     turn into a filename, or the CLI accepts input it cannot act on.
     """
     from declaro_persistum.cli.commands import sqlite_path
-    from declaro_persistum.cli.main import detect_dialect
+    from declaro_persistum.cli.main import detect_engine
 
     candidates = [
         "sqlite://foo.db",
@@ -378,7 +378,7 @@ def test_the_detector_and_the_connector_accept_the_same_urls() -> None:
     disagreements = []
     for url in candidates:
         try:
-            detected = detect_dialect(url)
+            detected = detect_engine(url)
         except ValueError:
             continue  # refused at the front door, which is an honest answer
         if detected != "sqlite":
@@ -389,7 +389,7 @@ def test_the_detector_and_the_connector_accept_the_same_urls() -> None:
             disagreements.append(url)
 
     assert not disagreements, (
-        f"detect_dialect calls {disagreements} SQLite and sqlite_path refuses "
+        f"detect_engine calls {disagreements} SQLite and sqlite_path refuses "
         f"them, so the CLI accepts a URL at the front door that it cannot open "
         f"at the back one"
     )

@@ -59,10 +59,10 @@ SCHEMA = {
 }
 
 
-def _plan(dialect: str):
+def _plan(engine: str):
     """Expansion and diff, from the functions that do them in production."""
     expanded = expand_schema_enums(SCHEMA)
-    return expanded, diff({}, expanded, dialect=dialect, decisions=NOTHING)
+    return expanded, diff({}, expanded, engine=engine, decisions=NOTHING)
 
 
 async def _migrated(path) -> aiosqlite.Connection:
@@ -166,7 +166,7 @@ async def test_a_value_with_a_quote_in_it_survives(tmp_path) -> None:
         }
     }
     expanded = expand_schema_enums(schema)
-    plan = diff({}, expanded, dialect="sqlite", decisions=NOTHING)
+    plan = diff({}, expanded, engine="sqlite", decisions=NOTHING)
 
     conn = await aiosqlite.connect(str(tmp_path / "quote.db"))
     try:
@@ -186,7 +186,7 @@ async def test_running_the_migration_twice_does_not_duplicate(tmp_path) -> None:
     expanded, _ = _plan("sqlite")
     conn = await aiosqlite.connect(str(path))
     try:
-        plan = diff(expanded, expanded, dialect="sqlite", decisions=NOTHING)
+        plan = diff(expanded, expanded, engine="sqlite", decisions=NOTHING)
         assert plan["operations"] == [], (
             f"an unchanged schema still emits operations: {plan['operations']}"
         )
@@ -230,21 +230,21 @@ def test_every_operation_the_differ_emits_can_be_rendered() -> None:
 # second one was invisible to any instrument because it was a local variable
 # inside a function rather than a module-level table.
 #
-# So the vocabulary is asserted per DIALECT, not per table. A sixteenth
+# So the vocabulary is asserted per ENGINE, not per table. A sixteenth
 # operation now has to reach all three or this fails.
 
 RENDERERS = ["postgresql", "sqlite", "turso"]
 
 
-@pytest.mark.parametrize("dialect", RENDERERS)
-def test_every_dialect_renders_every_operation_the_differ_emits(
-    dialect: str,
+@pytest.mark.parametrize("engine", RENDERERS)
+def test_every_engine_renders_every_operation_the_differ_emits(
+    engine: str,
 ) -> None:
     """One vocabulary, checked where each engine actually reads it."""
     from declaro_persistum.applier import SQL_GENERATORS
 
-    _, plan = _plan(dialect)
-    render = SQL_GENERATORS[dialect]
+    _, plan = _plan(engine)
+    render = SQL_GENERATORS[engine]
 
     unrenderable = []
     for index in plan["execution_order"]:
@@ -255,12 +255,12 @@ def test_every_dialect_renders_every_operation_the_differ_emits(
             unrenderable.append(f"{operation['op']}: {exc}")
 
     assert not unrenderable, (
-        f"the differ emits operations the {dialect} renderer refuses, so a "
+        f"the differ emits operations the {engine} renderer refuses, so a "
         f"migration dies partway through: {unrenderable}"
     )
 
 
-def test_every_dialect_holds_the_same_operation_vocabulary() -> None:
+def test_every_engine_holds_the_same_operation_vocabulary() -> None:
     """One vocabulary across three engines, asked of the tables themselves.
 
     THIS USED TO COMPARE TWO TABLES. `postgresql.OPERATION_SQL` and
@@ -280,15 +280,13 @@ def test_every_dialect_holds_the_same_operation_vocabulary() -> None:
 
     # A row whose name carries a colon is a piece of an operation, not an
     # operation. The supervisor picks between them; the differ never emits one.
-    def operations(dialect: str) -> set[str]:
-        return {
-            name for name in set(TEMPLATES[dialect]) | set(COMPOSERS[dialect]) if ":" not in name
-        }
+    def operations(engine: str) -> set[str]:
+        return {name for name in set(TEMPLATES[engine]) | set(COMPOSERS[engine]) if ":" not in name}
 
     disagreements = {
-        dialect: sorted(operations(dialect) ^ operations("sqlite"))
-        for dialect in ("postgresql", "turso")
-        if operations(dialect) != operations("sqlite")
+        engine: sorted(operations(engine) ^ operations("sqlite"))
+        for engine in ("postgresql", "turso")
+        if operations(engine) != operations("sqlite")
     }
 
     assert not disagreements, f"the engines do not answer for the same operations: {disagreements}"

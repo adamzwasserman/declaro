@@ -87,13 +87,13 @@ from declaro_persistum.migration_sql import (
     _count_tables_on_postgres as _count_tables_on_postgres,
 )
 from declaro_persistum.migration_sql import (
-    _dialect_needs_orphan_recovery as _dialect_needs_orphan_recovery,
-)
-from declaro_persistum.migration_sql import (
-    _dialect_of as _dialect_of,
-)
-from declaro_persistum.migration_sql import (
     _drop_the_leftover as _drop_the_leftover,
+)
+from declaro_persistum.migration_sql import (
+    _engine_needs_orphan_recovery as _engine_needs_orphan_recovery,
+)
+from declaro_persistum.migration_sql import (
+    _engine_of as _engine_of,
 )
 from declaro_persistum.migration_sql import (
     _ensure_meta_table as _ensure_meta_table,
@@ -209,7 +209,7 @@ from declaro_persistum.pydantic_loader import (
 from declaro_persistum.reporting import say
 from declaro_persistum.types import (
     NOTHING,
-    Dialect,
+    Engine,
     Nothing,
     Schema,
     View,
@@ -222,7 +222,7 @@ from declaro_persistum.validator import validate_schema
 @helper
 def _still_to_do(
     db: Database,
-    dialect: Dialect,
+    engine: Engine,
     schema_path: Path,
     expand_enums: bool,
     schema_hash: str,
@@ -230,7 +230,7 @@ def _still_to_do(
     """No answer yet, so the schema gets read and diffed."""
     return {
         "db": db,
-        "dialect": dialect,
+        "engine": engine,
         "schema_path": schema_path,
         "schema_hash": schema_hash,
         "expand_enums": expand_enums,
@@ -241,7 +241,7 @@ def _still_to_do(
 @helper
 async def _no_schema_file(
     db: Database,
-    dialect: Dialect,
+    engine: Engine,
     schema_path: Path,
     expand_enums: bool,
     _force: bool,
@@ -250,7 +250,7 @@ async def _no_schema_file(
     say(__name__, "warning", f"Schema file not found: {schema_path}")
     return {
         "db": db,
-        "dialect": dialect,
+        "engine": engine,
         "schema_path": schema_path,
         "schema_hash": "",
         "expand_enums": expand_enums,
@@ -267,7 +267,7 @@ async def _no_schema_file(
 
 @helper
 async def _no_orphan_recovery(_db: Database) -> int:
-    """This dialect writes no `_declaro_tmp_` tables and has no sqlite_master,
+    """This engine writes no `_declaro_tmp_` tables and has no sqlite_master,
     so there is nothing to scan for and nothing came back."""
     return 0
 
@@ -281,7 +281,7 @@ _ORPHAN_RECOVERY: dict[bool, Callable[[Database], Awaitable[int]]] = {
 @helper
 async def _read_the_schema_file(
     db: Database,
-    dialect: Dialect,
+    engine: Engine,
     schema_path: Path,
     expand_enums: bool,
     force: bool,
@@ -296,9 +296,9 @@ async def _read_the_schema_file(
     await refresh(db)
 
     # Pre-flight: recover orphaned tmp tables from a failed reconstruction.
-    # Which dialects have any lives in the pure helper so it can be tested
+    # Which engines have any lives in the pure helper so it can be tested
     # without a database.
-    await _ORPHAN_RECOVERY[_dialect_needs_orphan_recovery(dialect)](db)
+    await _ORPHAN_RECOVERY[_engine_needs_orphan_recovery(engine)](db)
 
     # Version is passed explicitly so _compute_schema_hash stays a pure
     # function of its arguments (Honest Code: configuration as parameters).
@@ -306,13 +306,13 @@ async def _read_the_schema_file(
 
     schema_hash = _compute_schema_hash(schema_path, __version__)
     return await _WHEN_THE_STAMP_IS_WORTH_READING[not force](
-        db, dialect, schema_path, expand_enums, schema_hash
+        db, engine, schema_path, expand_enums, schema_hash
     )
 
 
 _WHEN_THE_SCHEMA_FILE_IS_THERE: dict[
     bool,
-    Callable[[Database, Dialect, Path, bool, bool], Awaitable[_Migration]],
+    Callable[[Database, Engine, Path, bool, bool], Awaitable[_Migration]],
 ] = {
     True: _read_the_schema_file,
     False: _no_schema_file,
@@ -322,19 +322,19 @@ _WHEN_THE_SCHEMA_FILE_IS_THERE: dict[
 @helper
 async def _migrate_whatever_the_stamp_says(
     db: Database,
-    dialect: Dialect,
+    engine: Engine,
     schema_path: Path,
     expand_enums: bool,
     schema_hash: str,
 ) -> _Migration:
     """`force` was asked for, so the stamp is not read and the work goes on."""
-    return _still_to_do(db, dialect, schema_path, expand_enums, schema_hash)
+    return _still_to_do(db, engine, schema_path, expand_enums, schema_hash)
 
 
 @helper
 async def _nothing_has_changed(
     db: Database,
-    dialect: Dialect,
+    engine: Engine,
     schema_path: Path,
     expand_enums: bool,
     schema_hash: str,
@@ -343,7 +343,7 @@ async def _nothing_has_changed(
     say(__name__, "info", "Schema unchanged (hash match) — skipping migration")
     return {
         "db": db,
-        "dialect": dialect,
+        "engine": engine,
         "schema_path": schema_path,
         "schema_hash": schema_hash,
         "expand_enums": expand_enums,
@@ -360,7 +360,7 @@ async def _nothing_has_changed(
 
 _WHEN_THE_DATABASE_IS_CURRENT: dict[
     bool,
-    Callable[[Database, Dialect, Path, bool, str], Awaitable[_Migration]],
+    Callable[[Database, Engine, Path, bool, str], Awaitable[_Migration]],
 ] = {
     True: _nothing_has_changed,
     False: _migrate_whatever_the_stamp_says,
@@ -370,7 +370,7 @@ _WHEN_THE_DATABASE_IS_CURRENT: dict[
 @helper
 async def _consult_the_stamp(
     db: Database,
-    dialect: Dialect,
+    engine: Engine,
     schema_path: Path,
     expand_enums: bool,
     schema_hash: str,
@@ -379,13 +379,13 @@ async def _consult_the_stamp(
     async with reading(db) as conn:
         current = await _schema_is_clean(conn, schema_path, schema_hash)
     return await _WHEN_THE_DATABASE_IS_CURRENT[current](
-        db, dialect, schema_path, expand_enums, schema_hash
+        db, engine, schema_path, expand_enums, schema_hash
     )
 
 
 _WHEN_THE_STAMP_IS_WORTH_READING: dict[
     bool,
-    Callable[[Database, Dialect, Path, bool, str], Awaitable[_Migration]],
+    Callable[[Database, Engine, Path, bool, str], Awaitable[_Migration]],
 ] = {
     True: _consult_the_stamp,
     False: _migrate_whatever_the_stamp_says,
@@ -627,7 +627,7 @@ async def _apply_and_report(
     """
     async with _for_ddl(plan["db"]) as conn:
         result = await apply_operations(
-            conn, operations, execution_order, plan["dialect"], dry_run=False
+            conn, operations, execution_order, plan["engine"], dry_run=False
         )
     return await _WHEN_THE_OPERATIONS_LANDED[result["success"]](
         plan, target_schema, current_schema, skipped_operations, result
@@ -836,7 +836,7 @@ async def _migrate_the_tables(
     # is what made views unreachable: the inspectors, the differ and the
     # appliers all handled views, and the apply path never carried one.
     async with reading(plan["db"]) as conn:
-        current_schema, current_views = await introspect_with_views(conn, plan["dialect"])
+        current_schema, current_views = await introspect_with_views(conn, plan["engine"])
 
     say(
         __name__,
@@ -847,7 +847,7 @@ async def _migrate_the_tables(
     # Compute diff. Tables and views are diffed by different functions because
     # they are different things: a table is reconciled column by column, a view
     # is replaced whole when its query changes.
-    diff_result = diff(current_schema, expanded, dialect=plan["dialect"], decisions=NOTHING)
+    diff_result = diff(current_schema, expanded, engine=plan["engine"], decisions=NOTHING)
 
     # VIEWS GO LAST, AND THEIR INDICES GO INTO THE ORDER OR NOTHING RUNS THEM.
     # `execution_order` is the differ's topological sort over the TABLE
@@ -932,7 +932,7 @@ async def apply_migrations_async(
 
     THE ENGINE IS NOT A PARAMETER. It used to be, and a caller could name one
     engine while handing over a database on another. Do that and the wrong
-    introspector runs: a SQLite database with `dialect="postgresql"` raised
+    introspector runs: a SQLite database with `engine="postgresql"` raised
     `'Connection' object has no attribute 'fetch'`, which reads as a driver
     bug rather than as the caller naming the wrong engine. The database
     already knows what it is, so it is read here rather than asked for.
@@ -960,10 +960,10 @@ async def apply_migrations_async(
     expand_enums = resolved(expand_enums, True)
     force = resolved(force, False)
     file = Path(schema_path)
-    dialect: Dialect = db["dialect"]
+    engine: Engine = db["engine"]
 
     plan = await _WHEN_THE_SCHEMA_FILE_IS_THERE[file.exists()](
-        db, dialect, file, expand_enums, force
+        db, engine, file, expand_enums, force
     )
 
     # THE VALIDATOR IS ASKED HERE, AND WAS ASKED NOWHERE ON THIS PATH BEFORE.

@@ -110,31 +110,31 @@ async def _postgresql() -> Any:
 
 
 ENGINES = {"sqlite": _sqlite, "turso": _turso, "postgresql": _postgresql}
-DIALECTS = sorted(ENGINES)
+ENGINE_NAMES = sorted(ENGINES)
 
 
-async def _done(connection: Any, dialect: str) -> None:
-    if dialect == "postgresql":
+async def _done(connection: Any, engine: str) -> None:
+    if engine == "postgresql":
         for table in TOUCHED:
             await connection.execute(f'DROP TABLE IF EXISTS "{table}" CASCADE')
     await connection.close()
 
 
-async def _deploy(connection: Any, dialect: str, declared: dict) -> None:
-    actual = await introspect(connection, dialect)
+async def _deploy(connection: Any, engine: str, declared: dict) -> None:
+    actual = await introspect(connection, engine)
     plan = diff(
         {n: actual[n] for n in declared if n in actual},
         declared,
-        dialect=dialect,
+        engine=engine,
         decisions=NOTHING,
     )
-    await apply(connection, plan["operations"], plan["execution_order"], dialect, dry_run=False)
+    await apply(connection, plan["operations"], plan["execution_order"], engine, dry_run=False)
 
 
 def test_a_changed_reference_emits_a_drop_and_an_add() -> None:
     """The branch itself, before any engine sees it."""
     operations = diff(
-        _fk_schema("parents"), _fk_schema("others"), dialect="sqlite", decisions=NOTHING
+        _fk_schema("parents"), _fk_schema("others"), engine="sqlite", decisions=NOTHING
     )["operations"]
 
     assert [o["op"] for o in operations] == ["drop_foreign_key", "add_foreign_key"]
@@ -143,56 +143,56 @@ def test_a_changed_reference_emits_a_drop_and_an_add() -> None:
 def test_the_drop_names_the_reference_being_replaced() -> None:
     """Without it, a rebuild cannot tell which key it is removing."""
     operations = diff(
-        _fk_schema("parents"), _fk_schema("others"), dialect="sqlite", decisions=NOTHING
+        _fk_schema("parents"), _fk_schema("others"), engine="sqlite", decisions=NOTHING
     )["operations"]
 
     assert operations[0]["details"]["references"] == "parents.id", operations[0]
     assert operations[1]["details"]["references"] == "others.id", operations[1]
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-async def test_a_repointed_reference_applies_and_converges(dialect: str) -> None:
-    connection = await ENGINES[dialect]()
+@pytest.mark.parametrize("engine", ENGINE_NAMES)
+async def test_a_repointed_reference_applies_and_converges(engine: str) -> None:
+    connection = await ENGINES[engine]()
     try:
-        await _deploy(connection, dialect, _fk_schema("parents"))
+        await _deploy(connection, engine, _fk_schema("parents"))
 
-        await _deploy(connection, dialect, _fk_schema("others"))
+        await _deploy(connection, engine, _fk_schema("others"))
 
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
         declared = _fk_schema("others")
         remaining = diff(
             {n: actual[n] for n in declared if n in actual},
             declared,
-            dialect=dialect,
+            engine=engine,
             decisions=NOTHING,
         )["operations"]
 
         assert remaining == [], [(o["op"], o["table"]) for o in remaining]
     finally:
-        await _done(connection, dialect)
+        await _done(connection, engine)
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
+@pytest.mark.parametrize("engine", ENGINE_NAMES)
 async def test_the_repointed_reference_points_where_it_was_told(
-    dialect: str,
+    engine: str,
 ) -> None:
     """The floor. Converging on a key that still points at the old table
     would satisfy a diff that never looked at the target."""
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
-        await _deploy(connection, dialect, _fk_schema("parents"))
-        await _deploy(connection, dialect, _fk_schema("others"))
+        await _deploy(connection, engine, _fk_schema("parents"))
+        await _deploy(connection, engine, _fk_schema("others"))
 
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
 
         assert actual["children"]["columns"]["pid"]["references"] == "others.id"
     finally:
-        await _done(connection, dialect)
+        await _done(connection, engine)
 
 
 def test_a_changed_index_emits_a_drop_and_an_add() -> None:
     operations = diff(
-        _index_schema(["a"]), _index_schema(["a", "b"]), dialect="sqlite", decisions=NOTHING
+        _index_schema(["a"]), _index_schema(["a", "b"]), engine="sqlite", decisions=NOTHING
     )["operations"]
 
     assert [o["op"] for o in operations] == ["drop_index", "add_index"]
@@ -200,48 +200,46 @@ def test_a_changed_index_emits_a_drop_and_an_add() -> None:
 
 def test_the_drop_comes_before_the_add() -> None:
     """Creating the replacement first is a name collision, not a change."""
-    plan = diff(
-        _index_schema(["a"]), _index_schema(["a", "b"]), dialect="sqlite", decisions=NOTHING
-    )
+    plan = diff(_index_schema(["a"]), _index_schema(["a", "b"]), engine="sqlite", decisions=NOTHING)
     ordered = [plan["operations"][i]["op"] for i in plan["execution_order"]]
 
     assert ordered.index("drop_index") < ordered.index("add_index"), ordered
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-async def test_a_changed_index_applies_and_converges(dialect: str) -> None:
-    connection = await ENGINES[dialect]()
+@pytest.mark.parametrize("engine", ENGINE_NAMES)
+async def test_a_changed_index_applies_and_converges(engine: str) -> None:
+    connection = await ENGINES[engine]()
     try:
-        await _deploy(connection, dialect, _index_schema(["a"]))
+        await _deploy(connection, engine, _index_schema(["a"]))
 
-        await _deploy(connection, dialect, _index_schema(["a", "b"]))
+        await _deploy(connection, engine, _index_schema(["a", "b"]))
 
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
         declared = _index_schema(["a", "b"])
         remaining = diff(
             {n: actual[n] for n in declared if n in actual},
             declared,
-            dialect=dialect,
+            engine=engine,
             decisions=NOTHING,
         )["operations"]
 
         assert actual["widgets"]["indexes"]["ix"]["columns"] == ["a", "b"]
         assert remaining == [], [(o["op"], o["table"]) for o in remaining]
     finally:
-        await _done(connection, dialect)
+        await _done(connection, engine)
 
 
 def test_an_unchanged_index_emits_nothing() -> None:
     """The control on both. A differ emitting drop-and-add for everything
     would satisfy every test above."""
     assert (
-        diff(_index_schema(["a"]), _index_schema(["a"]), dialect="sqlite", decisions=NOTHING)[
+        diff(_index_schema(["a"]), _index_schema(["a"]), engine="sqlite", decisions=NOTHING)[
             "operations"
         ]
         == []
     )
     assert (
-        diff(_fk_schema("parents"), _fk_schema("parents"), dialect="sqlite", decisions=NOTHING)[
+        diff(_fk_schema("parents"), _fk_schema("parents"), engine="sqlite", decisions=NOTHING)[
             "operations"
         ]
         == []
@@ -271,30 +269,30 @@ async def test_the_old_reference_is_gone_not_merely_unreported() -> None:
         await _done(connection, "postgresql")
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-async def test_a_row_the_new_target_permits_is_accepted(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINE_NAMES)
+async def test_a_row_the_new_target_permits_is_accepted(engine: str) -> None:
     """The floor, and it is the enforcement rather than the catalogue.
 
     A stale foreign key refuses rows the declaration allows. Here `others`
     has the row and `parents` does not, so anything still checking `parents`
     rejects it.
     """
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
-        await _deploy(connection, dialect, _fk_schema("parents"))
-        await _deploy(connection, dialect, _fk_schema("others"))
+        await _deploy(connection, engine, _fk_schema("parents"))
+        await _deploy(connection, engine, _fk_schema("others"))
 
-        if dialect == "postgresql":
+        if engine == "postgresql":
             await connection.execute('INSERT INTO "others" (id) VALUES (7)')
             await connection.execute('INSERT INTO "children" (id, pid) VALUES (1, 7)')
         else:
-            cursor = connection.cursor() if dialect == "turso" else connection
+            cursor = connection.cursor() if engine == "turso" else connection
             await cursor.execute("PRAGMA foreign_keys = ON")
             await cursor.execute('INSERT INTO "others" (id) VALUES (7)')
             await cursor.execute('INSERT INTO "children" (id, pid) VALUES (1, 7)')
             await connection.commit()
     finally:
-        await _done(connection, dialect)
+        await _done(connection, engine)
 
 
 async def test_a_reference_repointed_twice_leaves_one_key() -> None:

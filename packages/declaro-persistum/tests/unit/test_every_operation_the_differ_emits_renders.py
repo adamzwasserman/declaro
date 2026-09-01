@@ -1,8 +1,8 @@
-"""Every operation the differ can emit must render on every dialect.
+"""Every operation the differ can emit must render on every engine.
 
 WRITTEN BEFORE ANY FIX, against a vocabulary measured rather than assumed.
 
-The differ emits 16 operation types. Three dialects render them, through two
+The differ emits 16 operation types. Three engines render them, through two
 dispatch tables: `postgresql.OPERATION_SQL` and `shared._SQL_GENERATORS`,
 the second serving both SQLite and Turso. All three tables hold 16 keys and
 the sets are equal, so nothing is missing by name.
@@ -49,7 +49,7 @@ from declaro_persistum.types import NOTHING, Operation
 
 pytestmark = pytest.mark.precommit
 
-DIALECTS = sorted(SQL_GENERATORS)
+ENGINES = sorted(SQL_GENERATORS)
 
 BASE: dict[str, Any] = {
     "users": {
@@ -62,7 +62,7 @@ BASE: dict[str, Any] = {
 
 
 def _ops(current: dict[str, Any], target: dict[str, Any]) -> list[Operation]:
-    return diff(current, target, dialect="sqlite", decisions=NOTHING)["operations"]
+    return diff(current, target, engine="sqlite", decisions=NOTHING)["operations"]
 
 
 def _corpus() -> dict[str, Operation]:
@@ -184,9 +184,9 @@ APPLY_RECONSTRUCTS = ("add_foreign_key", "drop_foreign_key", "alter_column")
 
 
 @pytest.mark.parametrize("operation_type", sorted(CORPUS))
-@pytest.mark.parametrize("dialect", DIALECTS)
+@pytest.mark.parametrize("engine", ENGINES)
 def test_every_operation_renders_or_refuses_in_words_a_reader_can_act_on(
-    operation_type: str, dialect: str
+    operation_type: str, engine: str
 ) -> None:
     """A key in the dispatch table is a promise the value behind it works.
 
@@ -196,10 +196,10 @@ def test_every_operation_renders_or_refuses_in_words_a_reader_can_act_on(
     reader nothing about what they asked for or what to do instead.
     """
     try:
-        rendered = generate_sql([CORPUS[operation_type]], [0], dialect)
+        rendered = generate_sql([CORPUS[operation_type]], [0], engine)
     except NotImplementedError as refusal:
         assert operation_type not in APPLY_RECONSTRUCTS, (
-            f"{operation_type} on {dialect} refuses to render, and apply() "
+            f"{operation_type} on {engine} refuses to render, and apply() "
             f"performs it by reconstruction: {refusal}"
         )
         message = str(refusal)
@@ -207,12 +207,12 @@ def test_every_operation_renders_or_refuses_in_words_a_reader_can_act_on(
         assert "CODE NOT WRITTEN" not in message, message
         return
 
-    assert rendered and rendered[0].strip(), f"{operation_type} on {dialect} rendered {rendered!r}"
+    assert rendered and rendered[0].strip(), f"{operation_type} on {engine} rendered {rendered!r}"
 
 
 @pytest.mark.parametrize("operation_type", APPLY_RECONSTRUCTS)
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_the_preview_does_not_refuse_what_apply_performs(operation_type: str, dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_the_preview_does_not_refuse_what_apply_performs(operation_type: str, engine: str) -> None:
     """The measured defect, stated on its own so it cannot be lost.
 
     `declaro apply` rebuilt the table and reported success. `declaro generate`,
@@ -220,14 +220,14 @@ def test_the_preview_does_not_refuse_what_apply_performs(operation_type: str, di
     WRITTEN`. Two preview paths asked whether an operation needs
     reconstruction and only `dry_run_preview` knew.
     """
-    rendered = generate_sql([CORPUS[operation_type]], [0], dialect)
+    rendered = generate_sql([CORPUS[operation_type]], [0], engine)
 
-    assert rendered and rendered[0].strip(), f"{operation_type} on {dialect} rendered {rendered!r}"
+    assert rendered and rendered[0].strip(), f"{operation_type} on {engine} rendered {rendered!r}"
 
 
 @pytest.mark.parametrize("operation_type", sorted(CORPUS))
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_no_rendered_operation_carries_a_python_repr(operation_type: str, dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_no_rendered_operation_carries_a_python_repr(operation_type: str, engine: str) -> None:
     """The failure that renders and is still wrong.
 
     A dict or a list interpolated into SQL produces text that passes every
@@ -236,13 +236,13 @@ def test_no_rendered_operation_carries_a_python_repr(operation_type: str, dialec
     definition and `_map_type` called `.lower()` on it.
     """
     try:
-        rendered = generate_sql([CORPUS[operation_type]], [0], dialect)[0]
+        rendered = generate_sql([CORPUS[operation_type]], [0], engine)[0]
     except NotImplementedError:
         return
 
     for tell in ("{'", "': ", "[{", "None", "True", "False"):
         assert tell not in rendered, (
-            f"{operation_type} on {dialect} rendered a Python value: {rendered!r}"
+            f"{operation_type} on {engine} rendered a Python value: {rendered!r}"
         )
 
 

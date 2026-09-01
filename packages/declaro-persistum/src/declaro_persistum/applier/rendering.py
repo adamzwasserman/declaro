@@ -29,9 +29,9 @@ from typing import Any
 from declaro_persistum.applier.statements import Rendering, render, rendered
 from declaro_persistum.applier.templates import TEMPLATES
 from declaro_persistum.boundary import helper
-from declaro_persistum.types import Dialect, Operation, written_as
+from declaro_persistum.types import Engine, Operation, written_as
 
-Composer = Callable[[Operation, Dialect], list[str]]
+Composer = Callable[[Operation, Engine], list[str]]
 
 
 # =============================================================================
@@ -72,11 +72,11 @@ def _changed_to(change: Any) -> Any:
 
 
 @helper
-def _alter_type(table: str, column: str, change: Any, dialect: Dialect) -> list[str]:
+def _alter_type(table: str, column: str, change: Any, engine: Engine) -> list[str]:
     """The column's new type, with a cast so the rows already there convert."""
     return render(
         "alter_column:type",
-        TEMPLATES[dialect]["alter_column:type"],
+        TEMPLATES[engine]["alter_column:type"],
         table=table,
         column=column,
         type=_changed_to(change),
@@ -84,10 +84,10 @@ def _alter_type(table: str, column: str, change: Any, dialect: Dialect) -> list[
 
 
 @helper
-def _alter_nullable(table: str, column: str, change: Any, dialect: Dialect) -> list[str]:
+def _alter_nullable(table: str, column: str, change: Any, engine: Engine) -> list[str]:
     """Whether the column accepts NULL, which is two different statements."""
     row = _NULLABILITY[bool(_changed_to(change))]
-    return render(row, TEMPLATES[dialect][row], table=table, column=column)
+    return render(row, TEMPLATES[engine][row], table=table, column=column)
 
 
 _NULLABILITY: dict[bool, str] = {
@@ -97,43 +97,43 @@ _NULLABILITY: dict[bool, str] = {
 
 
 @helper
-def _alter_default(table: str, column: str, change: Any, dialect: Dialect) -> list[str]:
+def _alter_default(table: str, column: str, change: Any, engine: Engine) -> list[str]:
     """A default set, or a default removed."""
     value = _changed_to(change)
-    return _DEFAULT_CHANGE[value is None](table, column, value, dialect)
+    return _DEFAULT_CHANGE[value is None](table, column, value, engine)
 
 
 @helper
-def _drop_the_default(table: str, column: str, _value: Any, dialect: Dialect) -> list[str]:
+def _drop_the_default(table: str, column: str, _value: Any, engine: Engine) -> list[str]:
     """The column has no default any more."""
     return render(
         "alter_column:no_default",
-        TEMPLATES[dialect]["alter_column:no_default"],
+        TEMPLATES[engine]["alter_column:no_default"],
         table=table,
         column=column,
     )
 
 
 @helper
-def _set_the_default(table: str, column: str, value: Any, dialect: Dialect) -> list[str]:
+def _set_the_default(table: str, column: str, value: Any, engine: Engine) -> list[str]:
     """The column's new default, written as the declaration spells it."""
     return render(
         "alter_column:default",
-        TEMPLATES[dialect]["alter_column:default"],
+        TEMPLATES[engine]["alter_column:default"],
         table=table,
         column=column,
         default=value,
     )
 
 
-_DEFAULT_CHANGE: dict[bool, Callable[[str, str, Any, Dialect], list[str]]] = {
+_DEFAULT_CHANGE: dict[bool, Callable[[str, str, Any, Engine], list[str]]] = {
     True: _drop_the_default,
     False: _set_the_default,
 }
 
 
 @helper
-def _alter_unique(table: str, column: str, change: Any, dialect: Dialect) -> list[str]:
+def _alter_unique(table: str, column: str, change: Any, engine: Engine) -> list[str]:
     """UNIQUE is a table constraint on this engine, not a column property.
 
     The constraint is named for the table and the column so that dropping it
@@ -144,7 +144,7 @@ def _alter_unique(table: str, column: str, change: Any, dialect: Dialect) -> lis
     row = _UNIQUE_CHANGE[bool(_changed_to(change))]
     return render(
         row,
-        TEMPLATES[dialect][row],
+        TEMPLATES[engine][row],
         table=table,
         column=column,
         constraint=f"{table}_{column}_key",
@@ -159,7 +159,7 @@ _UNIQUE_CHANGE: dict[bool, str] = {
 
 # The order is the order the statements run in, and it matters: a type change
 # has to land before a default that is spelled in the new type.
-_ALTER_COLUMN: dict[str, Callable[[str, str, Any, Dialect], list[str]]] = {
+_ALTER_COLUMN: dict[str, Callable[[str, str, Any, Engine], list[str]]] = {
     "type": _alter_type,
     "nullable": _alter_nullable,
     "default": _alter_default,
@@ -199,7 +199,7 @@ _WHEN_ALTERED: dict[bool, Callable[[str, str, dict[str, Any], list[str]], list[s
 
 
 @helper
-def _postgresql_alter_column(operation: Operation, dialect: Dialect) -> list[str]:
+def _postgresql_alter_column(operation: Operation, engine: Engine) -> list[str]:
     """Every property that changed, each as its own statement."""
     table = operation["table"]
     column = operation["details"]["column"]
@@ -209,7 +209,7 @@ def _postgresql_alter_column(operation: Operation, dialect: Dialect) -> list[str
         statement
         for prop, write in _ALTER_COLUMN.items()
         if prop in changes
-        for statement in write(table, column, changes[prop], dialect)
+        for statement in write(table, column, changes[prop], engine)
     ]
 
     return _WHEN_ALTERED[bool(statements)](table, column, changes, statements)
@@ -221,11 +221,11 @@ def _postgresql_alter_column(operation: Operation, dialect: Dialect) -> list[str
 
 
 @helper
-def _added_check(table: str, name: str, definition: dict[str, Any], dialect: Dialect) -> list[str]:
+def _added_check(table: str, name: str, definition: dict[str, Any], engine: Engine) -> list[str]:
     """A CHECK, added after the fact."""
     return render(
         "add_constraint:check",
-        TEMPLATES[dialect]["add_constraint:check"],
+        TEMPLATES[engine]["add_constraint:check"],
         table=table,
         constraint=name,
         expression=definition.get("expression", ""),
@@ -233,18 +233,18 @@ def _added_check(table: str, name: str, definition: dict[str, Any], dialect: Dia
 
 
 @helper
-def _added_unique(table: str, name: str, definition: dict[str, Any], dialect: Dialect) -> list[str]:
+def _added_unique(table: str, name: str, definition: dict[str, Any], engine: Engine) -> list[str]:
     """A UNIQUE over the columns the declaration names."""
     return render(
         "add_constraint:unique",
-        TEMPLATES[dialect]["add_constraint:unique"],
+        TEMPLATES[engine]["add_constraint:unique"],
         table=table,
         constraint=name,
         columns=", ".join(f'"{c}"' for c in definition.get("columns", [])),
     )
 
 
-_ADDED_CONSTRAINT: dict[str, Callable[[str, str, dict[str, Any], Dialect], list[str]]] = {
+_ADDED_CONSTRAINT: dict[str, Callable[[str, str, dict[str, Any], Engine], list[str]]] = {
     "check": _added_check,
     "unique": _added_unique,
 }
@@ -252,22 +252,22 @@ _ADDED_CONSTRAINT: dict[str, Callable[[str, str, dict[str, Any], Dialect], list[
 
 @helper
 def _the_added_constraint(
-    table: str, name: str, kind: Any, definition: dict[str, Any], dialect: Dialect
+    table: str, name: str, kind: Any, definition: dict[str, Any], engine: Engine
 ) -> list[str]:
     """A kind this engine writes, so the table names the writer."""
-    return _ADDED_CONSTRAINT[kind](table, name, definition, dialect)
+    return _ADDED_CONSTRAINT[kind](table, name, definition, engine)
 
 
 @helper
 def _refuse_added_constraint(
-    _table: str, _name: str, kind: Any, _definition: dict[str, Any], _dialect: Dialect
+    _table: str, _name: str, kind: Any, _definition: dict[str, Any], _engine: Engine
 ) -> list[str]:
     """A kind this engine does not write, named so the author finds it."""
     raise ValueError(f"Unknown constraint type: {kind}. Written here: {sorted(_ADDED_CONSTRAINT)}.")
 
 
 _KNOWN_ADDED_CONSTRAINT: dict[
-    bool, Callable[[str, str, Any, dict[str, Any], Dialect], list[str]]
+    bool, Callable[[str, str, Any, dict[str, Any], Engine], list[str]]
 ] = {
     True: _the_added_constraint,
     False: _refuse_added_constraint,
@@ -275,7 +275,7 @@ _KNOWN_ADDED_CONSTRAINT: dict[
 
 
 @helper
-def _postgresql_add_constraint(operation: Operation, dialect: Dialect) -> list[str]:
+def _postgresql_add_constraint(operation: Operation, engine: Engine) -> list[str]:
     """The kind of constraint picks the row that writes it."""
     definition = operation["details"]["definition"]
     kind = definition.get("type")
@@ -284,7 +284,7 @@ def _postgresql_add_constraint(operation: Operation, dialect: Dialect) -> list[s
         operation["details"]["constraint"],
         kind,
         definition,
-        dialect,
+        engine,
     )
 
 
@@ -294,7 +294,7 @@ def _postgresql_add_constraint(operation: Operation, dialect: Dialect) -> list[s
 
 
 @helper
-def _postgresql_drop_foreign_key(operation: Operation, dialect: Dialect) -> list[str]:
+def _postgresql_drop_foreign_key(operation: Operation, engine: Engine) -> list[str]:
     """THE CONVENTION NAME IS ONLY HALF OF WHAT EXISTS.
 
     A key we created carries `fk_{table}_{column}_{ref_table}`. A key created
@@ -317,7 +317,7 @@ def _postgresql_drop_foreign_key(operation: Operation, dialect: Dialect) -> list
         )
         for statement in render(
             "drop_foreign_key:one",
-            TEMPLATES[dialect]["drop_foreign_key:one"],
+            TEMPLATES[engine]["drop_foreign_key:one"],
             table=table,
             constraint=name,
         )
@@ -330,27 +330,27 @@ def _postgresql_drop_foreign_key(operation: Operation, dialect: Dialect) -> list
 
 
 @helper
-def _plain_view(operation: Operation, dialect: Dialect, verb: str) -> list[str]:
+def _plain_view(operation: Operation, engine: Engine, verb: str) -> list[str]:
     """A view that is only a query, which every engine writes in one
     statement."""
     row = f"{verb}:plain"
-    return rendered(row, TEMPLATES[dialect][row], operation)
+    return rendered(row, TEMPLATES[engine][row], operation)
 
 
 @helper
-def _create_plain_view(operation: Operation, dialect: Dialect) -> list[str]:
+def _create_plain_view(operation: Operation, engine: Engine) -> list[str]:
     """One statement, spelled as this engine spells a replaceable view."""
-    return _plain_view(operation, dialect, "create_view")
+    return _plain_view(operation, engine, "create_view")
 
 
 @helper
-def _drop_plain_view(operation: Operation, dialect: Dialect) -> list[str]:
+def _drop_plain_view(operation: Operation, engine: Engine) -> list[str]:
     """One statement, and IF EXISTS so a repeat is not an error."""
-    return _plain_view(operation, dialect, "drop_view")
+    return _plain_view(operation, engine, "drop_view")
 
 
 @helper
-def _create_materialized_view(operation: Operation, dialect: Dialect) -> list[str]:
+def _create_materialized_view(operation: Operation, engine: Engine) -> list[str]:
     """PostgreSQL has the statement; SQLite and Turso build a table.
 
     A MATERIALIZED VIEW ON SQLITE IS NOT A VIEW. The emulation creates a table,
@@ -358,17 +358,17 @@ def _create_materialized_view(operation: Operation, dialect: Dialect) -> list[st
     stands for. `DROP VIEW` could not remove it, which left the object behind
     and the schema reporting a view the database no longer had.
     """
-    return _MATERIALIZED_CREATE[dialect](operation, dialect)
+    return _MATERIALIZED_CREATE[engine](operation, engine)
 
 
 @helper
-def _drop_materialized_view(operation: Operation, dialect: Dialect) -> list[str]:
+def _drop_materialized_view(operation: Operation, engine: Engine) -> list[str]:
     """The same, in reverse."""
-    return _MATERIALIZED_DROP[dialect](operation, dialect)
+    return _MATERIALIZED_DROP[engine](operation, engine)
 
 
 @helper
-def _emulated_materialized_view(operation: Operation, _dialect: Dialect) -> list[str]:
+def _emulated_materialized_view(operation: Operation, _engine: Engine) -> list[str]:
     """The table, its triggers, and its registry row."""
     from declaro_persistum.applier.sqlite import generate_create_view
 
@@ -376,7 +376,7 @@ def _emulated_materialized_view(operation: Operation, _dialect: Dialect) -> list
 
 
 @helper
-def _drop_emulated_materialized_view(operation: Operation, _dialect: Dialect) -> list[str]:
+def _drop_emulated_materialized_view(operation: Operation, _engine: Engine) -> list[str]:
     """The table standing in for the view, and its registry row."""
     from declaro_persistum.applier.sqlite import generate_drop_view
 
@@ -384,21 +384,21 @@ def _drop_emulated_materialized_view(operation: Operation, _dialect: Dialect) ->
 
 
 @helper
-def _native_materialized_view(operation: Operation, dialect: Dialect) -> list[str]:
+def _native_materialized_view(operation: Operation, engine: Engine) -> list[str]:
     """PostgreSQL holds the rows itself, so it is one statement."""
     row = "create_view:materialized"
-    return rendered(row, TEMPLATES[dialect][row], operation)
+    return rendered(row, TEMPLATES[engine][row], operation)
 
 
 @helper
-def _drop_native_materialized_view(operation: Operation, dialect: Dialect) -> list[str]:
+def _drop_native_materialized_view(operation: Operation, engine: Engine) -> list[str]:
     """DROP MATERIALIZED VIEW, which is a different statement from DROP VIEW.
 
     Emitting DROP VIEW against a materialized one is refused with
     WrongObjectTypeError rather than ignored.
     """
     row = "drop_view:materialized"
-    return rendered(row, TEMPLATES[dialect][row], operation)
+    return rendered(row, TEMPLATES[engine][row], operation)
 
 
 _MATERIALIZED_CREATE: dict[str, Composer] = {
@@ -425,15 +425,15 @@ _DROP_VIEW: dict[bool, Composer] = {
 
 
 @helper
-def _create_view(operation: Operation, dialect: Dialect) -> list[str]:
+def _create_view(operation: Operation, engine: Engine) -> list[str]:
     """Whether the view holds its rows decides everything about it."""
-    return _CREATE_VIEW[bool(operation["details"].get("materialized"))](operation, dialect)
+    return _CREATE_VIEW[bool(operation["details"].get("materialized"))](operation, engine)
 
 
 @helper
-def _drop_view(operation: Operation, dialect: Dialect) -> list[str]:
+def _drop_view(operation: Operation, engine: Engine) -> list[str]:
     """The same question, asked again on the way out."""
-    return _DROP_VIEW[bool(operation["details"].get("materialized"))](operation, dialect)
+    return _DROP_VIEW[bool(operation["details"].get("materialized"))](operation, engine)
 
 
 # =============================================================================
@@ -442,7 +442,7 @@ def _drop_view(operation: Operation, dialect: Dialect) -> list[str]:
 
 
 @helper
-def _refuse_add_constraint(operation: Operation, _dialect: Dialect) -> list[str]:
+def _refuse_add_constraint(operation: Operation, _engine: Engine) -> list[str]:
     """No ADD CONSTRAINT on this engine, and no table rebuild for one yet."""
     raise NotImplementedError(
         f"Cannot add constraint {operation['details']['constraint']!r} to "
@@ -454,7 +454,7 @@ def _refuse_add_constraint(operation: Operation, _dialect: Dialect) -> list[str]
 
 
 @helper
-def _refuse_drop_constraint(operation: Operation, _dialect: Dialect) -> list[str]:
+def _refuse_drop_constraint(operation: Operation, _engine: Engine) -> list[str]:
     """No DROP CONSTRAINT on this engine either."""
     raise NotImplementedError(
         f"Cannot drop constraint {operation['details']['constraint']!r} from "
@@ -465,7 +465,7 @@ def _refuse_drop_constraint(operation: Operation, _dialect: Dialect) -> list[str
 
 
 # =============================================================================
-# The supervisors, by dialect
+# The supervisors, by engine
 # =============================================================================
 
 _SQLITE_COMPOSERS: dict[str, Composer] = {
@@ -494,28 +494,28 @@ COMPOSERS: dict[str, dict[str, Composer]] = {
 
 
 @helper
-def _composed(operation: Operation, dialect: Dialect) -> list[str]:
+def _composed(operation: Operation, engine: Engine) -> list[str]:
     """An operation whose statements depend on what it says."""
-    return COMPOSERS[dialect][operation["op"]](operation, dialect)
+    return COMPOSERS[engine][operation["op"]](operation, engine)
 
 
 @helper
-def _from_template(operation: Operation, dialect: Dialect) -> list[str]:
+def _from_template(operation: Operation, engine: Engine) -> list[str]:
     """An operation that is one row of the table, filled and rendered."""
     op_type = operation["op"]
-    return rendered(op_type, TEMPLATES[dialect][op_type], operation)
+    return rendered(op_type, TEMPLATES[engine][op_type], operation)
 
 
 @helper
-def _refuse_unknown_operation(operation: Operation, dialect: Dialect) -> list[str]:
+def _refuse_unknown_operation(operation: Operation, engine: Engine) -> list[str]:
     """An operation no engine row covers, named beside the ones that exist."""
     raise ValueError(
-        f"No {dialect} statement for operation {operation['op']!r}. "
-        f"Handled: {sorted(set(TEMPLATES[dialect]) | set(COMPOSERS[dialect]))}."
+        f"No {engine} statement for operation {operation['op']!r}. "
+        f"Handled: {sorted(set(TEMPLATES[engine]) | set(COMPOSERS[engine]))}."
     )
 
 
-_HOW_TO_RENDER: dict[str, Callable[[Operation, Dialect], list[str]]] = {
+_HOW_TO_RENDER: dict[str, Callable[[Operation, Engine], list[str]]] = {
     "composed": _composed,
     "template": _from_template,
     "unknown": _refuse_unknown_operation,
@@ -523,14 +523,14 @@ _HOW_TO_RENDER: dict[str, Callable[[Operation, Dialect], list[str]]] = {
 
 
 @helper
-def _which_way(operation: Operation, dialect: Dialect) -> str:
+def _which_way(operation: Operation, engine: Engine) -> str:
     """Composed, from a template, or neither."""
     op_type = operation["op"]
     return next(
         way
         for way, holds in (
-            ("composed", op_type in COMPOSERS[dialect]),
-            ("template", op_type in TEMPLATES[dialect]),
+            ("composed", op_type in COMPOSERS[engine]),
+            ("template", op_type in TEMPLATES[engine]),
             ("unknown", True),
         )
         if holds
@@ -538,7 +538,7 @@ def _which_way(operation: Operation, dialect: Dialect) -> str:
 
 
 @helper
-def statements_for(operation: Operation, dialect: Dialect) -> list[str]:
+def statements_for(operation: Operation, engine: Engine) -> list[str]:
     """The statements this operation runs on this engine, already separated.
 
     A LIST, NEVER A JOINED STRING. The appliers used to take a generated
@@ -546,17 +546,17 @@ def statements_for(operation: Operation, dialect: Dialect) -> list[str]:
     body carries semicolons between BEGIN and END, and so does any string
     literal holding one. Both arrived in real declarations.
     """
-    return _HOW_TO_RENDER[_which_way(operation, dialect)](operation, dialect)
+    return _HOW_TO_RENDER[_which_way(operation, engine)](operation, engine)
 
 
 @helper
-def generate_operation_sql(operation: Operation, dialect: Dialect) -> str:
+def generate_operation_sql(operation: Operation, engine: Engine) -> str:
     """The same statements as one block, for a person to read.
 
     Joining is safe here and was not safe on the execution path, because
     nothing parses this back. It is what `--dry-run` prints.
     """
-    return ";\n".join(statements_for(operation, dialect))
+    return ";\n".join(statements_for(operation, engine))
 
 
 __all__ = [

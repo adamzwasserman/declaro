@@ -160,7 +160,7 @@ _WHEN_DRY_RUN: dict[bool, Callable[..., Any]] = {
 
 # `generate_sql` was here and nowhere else, so `declaro generate` worked on
 # PostgreSQL and raised AttributeError on SQLite and Turso. The loop it ran is
-# dialect-independent, so it now lives once in `applier/__init__.py` beside the
+# engine-independent, so it now lives once in `applier/__init__.py` beside the
 # `SQL_GENERATORS` table, and this module keeps only what varies:
 # `generate_operation_sql`.
 
@@ -223,5 +223,5 @@ def _reads(fact: FactName) -> Callable[[], Any]:
 # runner reaches them off the module and `applier/__init__.py` re-exports them.
 _ENGINE = "postgresql"
 
-get_dialect = _reads("dialect")
+get_engine = _reads("engine")
 get_transaction_mode = _reads("transaction_mode")

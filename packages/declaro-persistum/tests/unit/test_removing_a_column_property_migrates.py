@@ -59,7 +59,7 @@ PLAIN = {
 # oversight. PostgreSQL and Turso both rewrite the expression they store --
 # `c <> ''` becomes `c != ''`, `length(name)` becomes `length (name)` -- so
 # comparing the text shipped a migration loop on each of them. The differ
-# reads `compared = ("unique", "check") if dialect == "sqlite" else
+# reads `compared = ("unique", "check") if engine == "sqlite" else
 # ("unique",)`.
 #
 # The consequence is real and is not this file's to fix: on Turso a removed
@@ -93,51 +93,51 @@ async def _turso() -> Any:
 ENGINES = {"sqlite": _sqlite, "turso": _turso}
 
 
-async def _migrate(connection: Any, dialect: str) -> None:
-    actual = await introspect(connection, dialect)
+async def _migrate(connection: Any, engine: str) -> None:
+    actual = await introspect(connection, engine)
     plan = diff(
-        {n: actual[n] for n in PLAIN if n in actual}, PLAIN, dialect=dialect, decisions=NOTHING
+        {n: actual[n] for n in PLAIN if n in actual}, PLAIN, engine=engine, decisions=NOTHING
     )
     await apply(
         connection,
         plan["operations"],
         plan["execution_order"],
-        dialect,
+        engine,
         dry_run=False,
     )
 
 
 @pytest.mark.parametrize("_prop,ddl", STORED, ids=[s[0] for s in STORED])
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_removing_it_from_the_model_migrates(dialect: str, _prop: str, ddl: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_removing_it_from_the_model_migrates(engine: str, _prop: str, ddl: str) -> None:
     """The measured crash, for every property that can be taken away."""
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
         await connection.execute(ddl)
         await connection.commit()
 
-        await _migrate(connection, dialect)
+        await _migrate(connection, engine)
     finally:
         await connection.close()
 
 
 @pytest.mark.parametrize("prop,ddl", STORED, ids=[s[0] for s in STORED])
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_the_property_is_actually_gone_afterwards(dialect: str, prop: str, ddl: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_the_property_is_actually_gone_afterwards(engine: str, prop: str, ddl: str) -> None:
     """The floor. A migration that ran and changed nothing is not a migration."""
-    if prop == "check" and not COMPARES_CHECK[dialect]:
+    if prop == "check" and not COMPARES_CHECK[engine]:
         pytest.skip(
-            f"{dialect} rewrites a stored CHECK, so the differ does not "
+            f"{engine} rewrites a stored CHECK, so the differ does not "
             f"compare one and a removal produces no operation"
         )
 
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
         await connection.execute(ddl)
         await connection.commit()
-        await _migrate(connection, dialect)
+        await _migrate(connection, engine)
 
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
 
         assert prop not in actual["widgets"]["columns"]["name"], (
             f"{prop} survived the migration that removed it: {actual['widgets']['columns']['name']}"
@@ -147,16 +147,16 @@ async def test_the_property_is_actually_gone_afterwards(dialect: str, prop: str,
 
 
 @pytest.mark.parametrize("_prop,ddl", STORED, ids=[s[0] for s in STORED])
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_the_rows_survive_the_rebuild(dialect: str, _prop: str, ddl: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_the_rows_survive_the_rebuild(engine: str, _prop: str, ddl: str) -> None:
     """Removing a constraint rebuilds the table, and a rebuild can lose rows."""
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
         await connection.execute(ddl)
         await connection.execute('INSERT INTO "widgets" (id, name) VALUES (1, ?)', ("ab",))
         await connection.commit()
 
-        await _migrate(connection, dialect)
+        await _migrate(connection, engine)
 
         cursor = await connection.execute('SELECT id, name FROM "widgets"')
         assert [tuple(r) for r in await cursor.fetchall()] == [(1, "ab")]
@@ -165,18 +165,18 @@ async def test_the_rows_survive_the_rebuild(dialect: str, _prop: str, ddl: str) 
 
 
 @pytest.mark.parametrize("_prop,ddl", STORED, ids=[s[0] for s in STORED])
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_the_removal_converges(dialect: str, _prop: str, ddl: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_the_removal_converges(engine: str, _prop: str, ddl: str) -> None:
     """A second deploy has no work left."""
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
         await connection.execute(ddl)
         await connection.commit()
-        await _migrate(connection, dialect)
+        await _migrate(connection, engine)
 
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
         remaining = diff(
-            {n: actual[n] for n in PLAIN if n in actual}, PLAIN, dialect=dialect, decisions=NOTHING
+            {n: actual[n] for n in PLAIN if n in actual}, PLAIN, engine=engine, decisions=NOTHING
         )["operations"]
 
         assert remaining == [], [(o["op"], o["details"]) for o in remaining]

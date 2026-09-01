@@ -22,7 +22,7 @@ It is a working list, so unlike the architecture it is allowed to go stale. Each
 
 ## From "the data is declared too"
 
-**A `Query` that is not SQL.** Every dialect produces something the runner takes. If that thing carries `sql` text, the dialects are four ways of building a string and the surface is imperative underneath. The shape of what a dialect produces is unnamed and it decides whether any of this works.
+**A `Query` that is not SQL.** Every grammar produces something the runner takes. If that thing carries `sql` text, the grammars are four ways of building a string and the surface is imperative underneath. The shape of what a grammar produces is unnamed and it decides whether any of this works.
 
 **Statement caching.** The library builds a statement from a declaration on every call. Whether the same declaration builds it once or every time is a real decision and appears nowhere.
 
@@ -38,7 +38,7 @@ It is a working list, so unlike the architecture it is allowed to go stale. Each
 
 ## From "everything gets declared"
 
-**A declared view needs a query language that is not SQL.** "The library writes the SELECT" means a view has to be declared as something the library can render. That something does not exist, and it is the same object the dialects need.
+**A declared view needs a query language that is not SQL.** "The library writes the SELECT" means a view has to be declared as something the library can render. That something does not exist, and it is the same object the grammars need.
 
 **Freshness as a declared word.** "You say how fresh you need it in plain terms" implies a bounded vocabulary of freshness. The current `refresh` field takes five engine-flavoured strings across three engines.
 

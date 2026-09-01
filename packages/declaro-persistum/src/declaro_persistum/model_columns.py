@@ -640,7 +640,7 @@ def _check_view(obj: dict[str, Any]) -> None:
 
     WHAT IS DELIBERATELY NOT CHECKED: whether the query is valid SQL. That
     needs an engine, the engine says so at apply time, and a loader guessing
-    at validity would reject dialect-specific syntax it does not know.
+    at validity would reject engine-specific syntax it does not know.
     """
     described = _VIEW_DESCRIBED[written_as(str, obj.get("name"))](obj.get("name"))
 

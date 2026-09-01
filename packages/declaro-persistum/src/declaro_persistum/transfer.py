@@ -187,7 +187,7 @@ from declaro_persistum.transfer_steps import (
 )
 from declaro_persistum.types import (
     NOTHING,
-    Dialect,
+    Engine,
     Nothing,
     Schema,
     Table,
@@ -282,7 +282,7 @@ async def _ensure_progress_table(conn: Any, loader: BulkLoader) -> None:
     THE LOADER ANSWERS THIS NOW, AND THE CONNECTION USED TO. All three of
     these functions asked `hasattr(conn, "fetch")` to decide between asyncpg
     and the DB-API drivers, which is a dispatch on type in a package built on
-    dispatch tables. The dialect is known at the top of `bulk_transfer`, the
+    dispatch tables. The engine is known at the top of `bulk_transfer`, the
     loader is resolved from it there, and it was passed into this function and
     ignored.
 
@@ -449,8 +449,8 @@ async def bulk_transfer(
     # NEITHER ENGINE IS A PARAMETER. Each database carries the engine it was
     # opened on, so asking for them again is two more things that can be wrong
     # and two more ways for the wrong loader to run against the right database.
-    source_dialect: Dialect = source["dialect"]
-    target_dialect: Dialect = target["dialect"]
+    source_engine: Engine = source["engine"]
+    target_engine: Engine = target["engine"]
 
     # Step 1: Schema migration on target
     say(__name__, "info", "Applying schema migrations to target database")
@@ -466,7 +466,7 @@ async def bulk_transfer(
 
     # Step 2: Introspect source
     async with reading(source) as source_conn:
-        source_schema = await introspect(source_conn, source_dialect)
+        source_schema = await introspect(source_conn, source_engine)
 
     all_tables = list(source_schema.keys())
     say(__name__, "info", f"Source has {len(all_tables)} tables")
@@ -487,8 +487,8 @@ async def bulk_transfer(
     say(__name__, "info", f"Transfer order: {transfer_order}")
 
     # Step 5+6: Transfer tables
-    source_loader = BULK_LOADERS[source_dialect]
-    target_loader = BULK_LOADERS[target_dialect]
+    source_loader = BULK_LOADERS[source_engine]
+    target_loader = BULK_LOADERS[target_engine]
 
     async with reading(source) as source_conn, reading(target) as target_conn:
         run: _Run = {

@@ -559,7 +559,7 @@ __all__ = [
     "generate_drop_view",
     # RE-EXPORTED, NOT UNUSED. `SQL_GENERATORS` in applier/__init__ reads
     # this name off this module, so nothing here calls it and removing it
-    # breaks `declaro generate` on this dialect.
+    # breaks `declaro generate` on this engine.
     "generate_operation_sql",
 ]
 
@@ -578,5 +578,5 @@ def _reads(fact: FactName) -> Callable[[], Any]:
 # runner reaches them off the module and `applier/__init__.py` re-exports them.
 _ENGINE = "turso"
 
-get_dialect = _reads("dialect")
+get_engine = _reads("engine")
 get_transaction_mode = _reads("transaction_mode")

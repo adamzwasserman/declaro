@@ -146,7 +146,7 @@ Both functions are deleted, and the live enum path is covered by
 THIS IS WHY THE LIST IS NOT A BACKLOG OF COPY JOBS. Restoring that file
 verbatim would have re-pinned an abandoned architecture and resurrected dead
 code to satisfy it. test_arrays.py and test_maps.py are no longer among them: their
-four failures all passed the abolished dialect "libsql" and were right that it
+four failures all passed the abolished engine "libsql" and were right that it
 must not yield PostgreSQL SQL. Fixing that in src (cfc0b1c) brought both files
 back, 43 tests.
 
@@ -162,7 +162,7 @@ A HOLLOW TEST FILE IS WORSE THAN A MISSING ONE. A missing file is an obvious
 gap. A file called `test_validator.py` sitting in a green suite reads as "the
 validator is tested", and every tool that counts files rather than tests agrees
 with it. That is how `create_bulk_loader` shipped raising NameError for every
-dialect it supported, and how `_normalize_view_query` shipped deleted with both
+engine it supported, and how `_normalize_view_query` shipped deleted with both
 its callers intact: the modules had test files.
 
 THIS RATCHETS, IT DOES NOT DEMAND. Pinned at zero it would fail the suite until

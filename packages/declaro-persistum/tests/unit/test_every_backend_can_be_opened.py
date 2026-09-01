@@ -19,13 +19,13 @@ import pytest
 pytestmark = pytest.mark.precommit
 
 
-def test_there_is_an_opener_for_every_dialect_in_the_writers_table() -> None:
+def test_there_is_an_opener_for_every_engine_in_the_writers_table() -> None:
     import declaro_persistum as pkg
     from declaro_persistum.writers import WRITERS
 
     openers = {n for n in pkg.__all__ if n.startswith("open_")}
     assert openers == {f"open_{d}" for d in WRITERS}, (
-        f"openers {sorted(openers)} do not cover {sorted(WRITERS)}; a dialect "
+        f"openers {sorted(openers)} do not cover {sorted(WRITERS)}; an engine "
         f"with a writer, an applier and an inspector but no opener cannot be "
         f"reached by any caller"
     )
@@ -39,7 +39,7 @@ async def test_a_sqlite_database_reads_back_what_it_wrote(tmp_path) -> None:
     db = await open_sqlite(
         str(tmp_path / "app.db"), shutdown="exit_immediately", busy_timeout_s=5.0
     )
-    assert db["dialect"] == "sqlite"
+    assert db["engine"] == "sqlite"
 
     async with writing(db) as conn:
         await conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)")
@@ -71,13 +71,13 @@ async def test_a_sqlite_database_holds_no_connection_between_blocks(
         )
 
 
-def test_the_openers_take_no_dialect_argument() -> None:
-    """The opener knows its own dialect; a caller cannot contradict it."""
+def test_the_openers_take_no_engine_argument() -> None:
+    """The opener knows its own engine; a caller cannot contradict it."""
     from declaro_persistum import open_sqlite
 
     params = inspect.signature(open_sqlite).parameters
-    assert "dialect" not in params, (
-        "open_sqlite takes a dialect, so a caller can ask for a sqlite "
+    assert "engine" not in params, (
+        "open_sqlite takes an engine, so a caller can ask for a sqlite "
         "database that claims to be something else"
     )
     assert params["shutdown"].default is inspect.Parameter.empty, "shutdown has a default"

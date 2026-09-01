@@ -47,7 +47,7 @@ from declaro_persistum import apply_migrations_async, open_sqlite
 from declaro_persistum.types import NOTHING
 
 db = await open_sqlite("app.db", shutdown="exit_immediately", busy_timeout_s=5.0)
-await apply_migrations_async(db, "sqlite", "models.py", expand_enums=NOTHING, force=NOTHING)
+await apply_migrations_async(db, "models.py", expand_enums=NOTHING, force=NOTHING)
 ```
 
 That creates the table. Add a column to the model and run it again, and the column appears. You never write a migration, and you never say "add a column" — you declare that the column exists and reaching that state is the library's problem.
@@ -72,7 +72,7 @@ Every rule here removes a kind of bug rather than making something read nicer.
 
 SQLite, PostgreSQL and Turso, local or replicated.
 
-One line changes between them, the one that opens the database. Which engine you are on decides nothing else in your code: the parameter style, the transaction boundaries and every difference in SQL dialect are the library's business.
+One line changes between them, the one that opens the database. Which engine you are on decides nothing else in your code: the parameter style, the transaction boundaries and every difference in the SQL each engine accepts are the library's business.
 
 ```python
 db = await open_sqlite("app.db", shutdown="exit_immediately", busy_timeout_s=5.0)

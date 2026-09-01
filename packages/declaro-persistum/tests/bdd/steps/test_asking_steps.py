@@ -89,7 +89,7 @@ async def _built(db: Any, models: tuple[type, ...]) -> None:
         made = pydantic_model_to_table(model)
         assert made is not None, f"{model.__name__} is not a declared table"
         target[made[0]] = made[1]
-    result = diff({}, target, dialect="sqlite", decisions=NOTHING)
+    result = diff({}, target, engine="sqlite", decisions=NOTHING)
     async with writing(db) as conn:
         await apply(conn, result["operations"], result["execution_order"], "sqlite", dry_run=False)
 

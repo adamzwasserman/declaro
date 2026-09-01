@@ -29,7 +29,7 @@ from declaro_persistum.cli.commands import (
     cmd_snapshot,
     cmd_validate,
 )
-from declaro_persistum.types import NOTHING, Dialect, Nothing, resolved
+from declaro_persistum.types import NOTHING, Engine, Nothing, resolved
 
 
 @helper
@@ -77,10 +77,10 @@ Examples:
         help="Schema directory (default: ./schema)",
     )
     parser.add_argument(
-        "-d",
-        "--dialect",
+        "-e",
+        "--engine",
         choices=["postgresql", "sqlite", "turso"],
-        help="Force dialect (auto-detected from connection if not specified)",
+        help="Force engine (auto-detected from connection if not specified)",
     )
     parser.add_argument(
         "-v",
@@ -245,7 +245,7 @@ def get_connection_string(args: argparse.Namespace) -> str | None:
 # accepted here and could not be opened by `_connect`, so the CLI said yes at
 # the front door and failed at the back one with an error about the database
 # rather than about the URL.
-_DIALECT_BY_PREFIX: dict[str, str] = {
+_ENGINE_BY_PREFIX: dict[str, str] = {
     "postgresql://": "postgresql",
     "postgres://": "postgresql",
     "sqlite:///": "sqlite",
@@ -255,7 +255,7 @@ _DIALECT_BY_PREFIX: dict[str, str] = {
 
 
 @helper
-def _the_named_dialect(named: list[str]) -> str:
+def _the_named_engine(named: list[str]) -> str:
     """The connection string carries a prefix this package knows."""
     return named[0]
 
@@ -264,25 +264,25 @@ def _the_named_dialect(named: list[str]) -> str:
 def _refuse_unknown_prefix(_named: list[str]) -> str:
     """No prefix matched, so nothing here can say which engine is meant."""
     raise ValueError(
-        "Cannot detect dialect from connection string. Use --dialect to specify explicitly."
+        "Cannot detect engine from connection string. Use --engine to specify explicitly."
     )
 
 
-_NAMES_A_DIALECT: dict[bool, Callable[[list[str]], str]] = {
-    True: _the_named_dialect,
+_NAMES_A_ENGINE: dict[bool, Callable[[list[str]], str]] = {
+    True: _the_named_engine,
     False: _refuse_unknown_prefix,
 }
 
 
 @helper
-def detect_dialect(connection_string: str) -> str:
-    """Detect dialect from connection string."""
+def detect_engine(connection_string: str) -> str:
+    """Detect engine from connection string."""
     named = [
-        dialect
-        for prefix, dialect in _DIALECT_BY_PREFIX.items()
+        engine
+        for prefix, engine in _ENGINE_BY_PREFIX.items()
         if connection_string.startswith(prefix)
     ]
-    return _NAMES_A_DIALECT[bool(named)](named)
+    return _NAMES_A_ENGINE[bool(named)](named)
 
 
 # ---------------------------------------------------------------------------
@@ -295,22 +295,22 @@ def detect_dialect(connection_string: str) -> str:
 # stays one shape.
 # ---------------------------------------------------------------------------
 
-Runner = Callable[[argparse.Namespace, "str | None", "Dialect | None"], int]
+Runner = Callable[[argparse.Namespace, "str | None", "Engine | None"], int]
 
 COMMANDS_NEEDING_CONNECTION = frozenset({"diff", "apply", "snapshot", "generate"})
 
 
 @helper
 def _run_diff(
-    args: argparse.Namespace, connection_string: str | None, dialect: Dialect | None
+    args: argparse.Namespace, connection_string: str | None, engine: Engine | None
 ) -> int:
     assert connection_string is not None
-    assert dialect is not None
+    assert engine is not None
     return asyncio.run(
         cmd_diff(
             connection_string=connection_string,
             schema_dir=args.schema_dir,
-            dialect=dialect,
+            engine=engine,
             interactive=args.interactive,
             unattended=args.unattended,
             force=args.force,
@@ -321,15 +321,15 @@ def _run_diff(
 
 @helper
 def _run_apply(
-    args: argparse.Namespace, connection_string: str | None, dialect: Dialect | None
+    args: argparse.Namespace, connection_string: str | None, engine: Engine | None
 ) -> int:
     assert connection_string is not None
-    assert dialect is not None
+    assert engine is not None
     return asyncio.run(
         cmd_apply(
             connection_string=connection_string,
             schema_dir=args.schema_dir,
-            dialect=dialect,
+            engine=engine,
             interactive=args.interactive,
             unattended=args.unattended,
             dry_run=args.dry_run,
@@ -341,15 +341,15 @@ def _run_apply(
 
 @helper
 def _run_snapshot(
-    args: argparse.Namespace, connection_string: str | None, dialect: Dialect | None
+    args: argparse.Namespace, connection_string: str | None, engine: Engine | None
 ) -> int:
     assert connection_string is not None
-    assert dialect is not None
+    assert engine is not None
     return asyncio.run(
         cmd_snapshot(
             connection_string=connection_string,
             schema_dir=args.schema_dir,
-            dialect=dialect,
+            engine=engine,
             force=args.force,
             verbose=args.verbose,
         )
@@ -359,7 +359,7 @@ def _run_snapshot(
 @boundary
 @boundary
 def _run_migrate_remote(
-    args: argparse.Namespace, _connection_string: str | None, _dialect: Dialect | None
+    args: argparse.Namespace, _connection_string: str | None, _engine: Engine | None
 ) -> int:
     token = getattr(args, "token", None) or os.environ.get("TURSO_AUTH_TOKEN")
     return asyncio.run(
@@ -367,7 +367,7 @@ def _run_migrate_remote(
             remote_url=args.remote,
             auth_token=token,
             schema_path=args.schema,
-            dialect="turso",
+            engine="turso",
             expand_enums=not getattr(args, "no_enums", False),
             init=getattr(args, "init", False),
             dry_run=getattr(args, "dry_run", False),
@@ -379,7 +379,7 @@ def _run_migrate_remote(
 
 @helper
 def _run_validate(
-    args: argparse.Namespace, _connection_string: str | None, _dialect: Dialect | None
+    args: argparse.Namespace, _connection_string: str | None, _engine: Engine | None
 ) -> int:
     return cmd_validate(
         schema_dir=args.schema_dir,
@@ -390,15 +390,15 @@ def _run_validate(
 
 @helper
 def _run_generate(
-    args: argparse.Namespace, connection_string: str | None, dialect: Dialect | None
+    args: argparse.Namespace, connection_string: str | None, engine: Engine | None
 ) -> int:
     assert connection_string is not None
-    assert dialect is not None
+    assert engine is not None
     return asyncio.run(
         cmd_generate(
             connection_string=connection_string,
             schema_dir=args.schema_dir,
-            dialect=dialect,
+            engine=engine,
             output=args.output,
             force=args.force,
             verbose=args.verbose,
@@ -441,7 +441,7 @@ _TRACEBACK: dict[bool, Callable[[], int]] = {
 def _dispatch(
     args: argparse.Namespace,
     connection_string: str | None,
-    dialect: Dialect | None,
+    engine: Engine | None,
     commands: dict[str, Callable[..., int]],
 ) -> int:
     """Run the named command and turn what it raises into an exit code.
@@ -454,7 +454,7 @@ def _dispatch(
     rather than reaching for them by name.
     """
     try:
-        return commands[args.command](args, connection_string, dialect)
+        return commands[args.command](args, connection_string, engine)
     except KeyboardInterrupt:
         print("\nAborted.", file=sys.stderr)
         return 130
@@ -465,42 +465,42 @@ def _dispatch(
 
 
 @helper
-def _keep_given_dialect(given: Dialect | None, _connection_string: str | None) -> Dialect | None:
-    """The operator passed --dialect, so nothing is guessed from the URL."""
+def _keep_given_engine(given: Engine | None, _connection_string: str | None) -> Engine | None:
+    """The operator passed --engine, so nothing is guessed from the URL."""
     return given
 
 
 @helper
-def _detect_from_url(_given: Dialect | None, connection_string: str | None) -> Dialect | None:
-    """No --dialect and a URL to read, so the URL says which engine."""
-    return cast("Dialect", detect_dialect(cast("str", connection_string)))
+def _detect_from_url(_given: Engine | None, connection_string: str | None) -> Engine | None:
+    """No --engine and a URL to read, so the URL says which engine."""
+    return cast("Engine", detect_engine(cast("str", connection_string)))
 
 
-_DIALECT_SOURCE: dict[bool, Callable[[Dialect | None, str | None], Dialect | None]] = {
+_ENGINE_SOURCE: dict[bool, Callable[[Engine | None, str | None], Engine | None]] = {
     True: _detect_from_url,
-    False: _keep_given_dialect,
+    False: _keep_given_engine,
 }
 
 
-def _chosen_dialect(args: argparse.Namespace, connection_string: str | None) -> Dialect | None:
-    """THE ONE PLACE A DIALECT ENTERS FROM OUTSIDE, so the one place the
-    vocabulary is enforced. argparse already restricts `--dialect` to
-    `choices=["postgresql", "sqlite", "turso"]` and `detect_dialect` returns
+def _chosen_engine(args: argparse.Namespace, connection_string: str | None) -> Engine | None:
+    """THE ONE PLACE An ENGINE ENTERS FROM OUTSIDE, so the one place the
+    vocabulary is enforced. argparse already restricts `--engine` to
+    `choices=["postgresql", "sqlite", "turso"]` and `detect_engine` returns
     only those three, so the narrowing is declared here rather than
     re-checked in each of the 44 signatures downstream (Rule 13).
     """
-    given: Dialect | None = cast("Dialect | None", args.dialect)
-    return _DIALECT_SOURCE[bool(connection_string) and not given](given, connection_string)
+    given: Engine | None = cast("Engine | None", args.engine)
+    return _ENGINE_SOURCE[bool(connection_string) and not given](given, connection_string)
 
 
 @boundary
 def _with_connection(args: argparse.Namespace, connection_string: str | None) -> int:
     try:
-        dialect = _chosen_dialect(args, connection_string)
+        engine = _chosen_engine(args, connection_string)
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
-    return _dispatch(args, connection_string, dialect, COMMANDS)
+    return _dispatch(args, connection_string, engine, COMMANDS)
 
 
 @boundary

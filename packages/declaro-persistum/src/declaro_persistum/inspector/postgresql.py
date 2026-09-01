@@ -48,8 +48,8 @@ def _normalize_view_query(query: str) -> str:
 
 
 @helper
-def get_dialect() -> str:
-    """Return dialect identifier."""
+def get_engine() -> str:
+    """Return engine identifier."""
     return "postgresql"
 
 
@@ -88,7 +88,7 @@ def _as_a_connection_failure(error: Exception) -> Schema:
     """The message names the connection, so the failure is reported as one."""
     raise DeclaroConnectionError(
         f"Failed to introspect database: {error}",
-        dialect="postgresql",
+        engine="postgresql",
     ) from error
 
 

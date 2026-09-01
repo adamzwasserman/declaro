@@ -186,7 +186,7 @@ async def test_every_engine_scopes_a_block_the_same_way() -> None:
     from declaro_persistum.writers import TRANSACTIONS
 
     assert set(TRANSACTIONS) == {"sqlite", "turso", "postgresql"}
-    assert all(TRANSACTIONS.values()), "a dialect has no transaction scope"
+    assert all(TRANSACTIONS.values()), "an engine has no transaction scope"
     # PostgreSQL must NOT be a no-op. That was the defect.
     from declaro_persistum.writers import postgres_transaction
 

@@ -5,7 +5,7 @@ The engines disagree about three things at once: the statement that opens a
 transaction, how parameters are passed, and whether there is a commit to call.
 Those differences live here, in the table, and nowhere else.
 
-`WRITERS[db["dialect"]]` is read ONCE, by the opener, and the result is carried
+`WRITERS[db["engine"]]` is read ONCE, by the opener, and the result is carried
 on the `Database`. Not per write: the write path runs on every request, and the
 engine cannot change while a database is open.
 
@@ -46,7 +46,7 @@ __all__ = [
 ]
 
 # "Scope a write block on this engine." Same shape as WriteOne and for the
-# same reason: the connection type and the dialect vary together.
+# same reason: the connection type and the engine vary together.
 Transaction = Callable[[Any], "AbstractAsyncContextManager[None]"]
 
 
@@ -67,7 +67,7 @@ class DbApiConnection(Protocol):
         # DECLARED BECAUSE `dbapi_transaction` DEPENDS ON IT. The Protocol
         # named `execute` and `commit` only, so the rollback half of the
         # transaction scope rested on a method no contract required. mypy
-        # caught it the moment the dialect vocabulary made these signatures
+        # caught it the moment the engine vocabulary made these signatures
         # precise enough to check.
         raise NotImplementedError("CODE NOT WRITTEN")
 
@@ -88,14 +88,14 @@ class WriteOne(Protocol):
     """Run one write in a transaction on this engine.
 
     `conn` is `Any` and that is the one place looseness is unavoidable, not an
-    oversight. The dialect key and the connection shape are correlated — the
+    oversight. The engine key and the connection shape are correlated — the
     Turso entry is only ever called with a `DbApiConnection`, the Postgres entry
     only ever with an `AsyncpgConnection` — and Python's type system cannot say
     "these two vary together". Narrowing it to either Protocol would reject the
     other writer at the table.
 
     What makes the correlation hold is not the type. It is that one opener binds
-    `dialect` and `write_one` from the same `DIALECT` constant, so the pair
+    `engine` and `write_one` from the same `ENGINE` constant, so the pair
     cannot disagree; `test_every_backend_can_be_opened` is what checks it.
     """
 

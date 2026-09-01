@@ -22,7 +22,7 @@ from collections.abc import Callable
 from typing import Any, Final, Literal, Protocol, TypedDict, get_args, get_type_hints
 
 from declaro_persistum.boundary import helper, recognizer
-from declaro_persistum.types import Dialect
+from declaro_persistum.types import Engine
 
 
 class RendersCondition(Protocol):
@@ -30,7 +30,7 @@ class RendersCondition(Protocol):
     names no class from `table.py` and the dependency stays one-way."""
 
     @helper
-    def to_sql(self, dialect: Dialect, path: str) -> tuple[str, dict[str, Any]]:
+    def to_sql(self, engine: Engine, path: str) -> tuple[str, dict[str, Any]]:
         raise NotImplementedError("CODE NOT WRITTEN")
 
 
@@ -83,11 +83,11 @@ written once.
 def render_case(expr: CaseExpression, path: str, *, with_alias: bool) -> tuple[str, dict[str, Any]]:
     """Render CASE WHEN ... THEN ... ELSE ... END.
 
-    NO DIALECT. It took one and read it zero times. The argument existed only
+    NO ENGINE. It took one and read it zero times. The argument existed only
     to be handed to `render_condition`, and that function no longer takes one
     either, for the same reason: a condition renders the same on every engine.
     Threading a value nobody reads is how `builder.py` came to pass the
-    literal "sql" as a dialect without anything noticing.
+    literal "sql" as an engine without anything noticing.
 
     `with_alias` is REQUIRED, not defaulted, because the two callers want
     opposite things and neither is the obvious one: a SELECT column wants the
@@ -142,14 +142,14 @@ class CaseOrderBy(TypedDict):
 
 
 @helper
-def _render_order_by(term: OrderBy, _dialect: str, _path: str) -> tuple[str, dict[str, Any]]:
+def _render_order_by(term: OrderBy, _engine: str, _path: str) -> tuple[str, dict[str, Any]]:
     """A plain column term takes no parameters."""
     return f"{term['column']} {term['direction']}", {}
 
 
 @helper
 def _render_case_order_by(
-    term: CaseOrderBy, _dialect: Dialect, path: str
+    term: CaseOrderBy, _engine: Engine, path: str
 ) -> tuple[str, dict[str, Any]]:
     """A CASE term emits the BARE expression — an alias is not valid here."""
     sql, params = render_case(term["expr"], path, with_alias=False)
@@ -175,10 +175,10 @@ to whichever branch happened to be last.
 
 @helper
 def render_order_term(
-    term: OrderBy | CaseOrderBy, dialect: Dialect, path: str
+    term: OrderBy | CaseOrderBy, engine: Engine, path: str
 ) -> tuple[str, dict[str, Any]]:
     """Render one ORDER BY term. Pure: term in, (sql, params) out."""
-    return ORDER_TERM_RENDERERS[term["kind"]](term, dialect, path)
+    return ORDER_TERM_RENDERERS[term["kind"]](term, engine, path)
 
 
 class SubqueryExpr(TypedDict):
@@ -236,9 +236,9 @@ def kind_of(value: Any) -> str | None:
 
 
 @helper
-def render_subquery(expr: SubqueryExpr, dialect: Dialect) -> tuple[str, dict[str, Any]]:
+def render_subquery(expr: SubqueryExpr, engine: Engine) -> tuple[str, dict[str, Any]]:
     """Render the inner SELECT."""
-    return expr["query"].to_sql(dialect)
+    return expr["query"].to_sql(engine)
 
 
 class JoinClause(TypedDict):

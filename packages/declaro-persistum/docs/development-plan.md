@@ -26,7 +26,7 @@ L1.21 is off unless you ask for it by name, so a plain run prints a complete-loo
 
 **One path before many.** Every question in the vocabulary is a variation on turning a declared model plus a narrowing into a statement, running it, and building instances from what comes back. Build that path once, for the simplest question, and the rest are rows in a table. Build several at once and you get several paths that have to agree.
 
-**The vocabulary before the dialects.** A dialect is a grammar over the vocabulary. Four grammars over an empty vocabulary is four skins over nothing, and each would grow its own machinery while waiting.
+**The vocabulary before the grammars.** A grammar is a way of phrasing the vocabulary. Four grammars over an empty vocabulary is four skins over nothing, and each would grow its own machinery while waiting.
 
 **Reads before writes.** A wrong read shows you the wrong answer. A wrong write changes the database. The read path exercises the whole spine, so take the cheaper failure first.
 
@@ -52,7 +52,7 @@ The gate exists now, in `tests/bdd/steps/following_an_argument.py`. It reads sou
 
 `all(db, Person)` returns instances of `Person`.
 
-That means: read the table name and the columns off the model, build a statement, pick the parameter style from the dialect the `Database` already carries, open and close a connection, and turn rows into model instances. It is the whole spine for the simplest possible question.
+That means: read the table name and the columns off the model, build a statement, pick the parameter style from the engine the `Database` already carries, open and close a connection, and turn rows into model instances. It is the whole spine for the simplest possible question.
 
 **Done when** `tests/bdd/features/asking/all.feature` passes, including the scenario where a column the model does not declare is refused in the caller's own process before a statement exists.
 
@@ -100,13 +100,13 @@ The foreign key already says two models are related. This stage works the join o
 
 **Done when** `of.feature` passes, including the scenario asserting the caller named no join and no key.
 
-## Stage 8: the four dialects
+## Stage 8: the four grammars
 
 Pseudo-SQL, Django, Prisma, SQLAlchemy, over the finished vocabulary.
 
-A dialect borrows the other tool's grammar and nothing else: no session holding state, no manager attached to a class, no second place a column can be named. Each is a thin skin, and none of them accepts a string.
+A grammar borrows the other tool's phrasing and nothing else: no session holding state, no manager attached to a class, no second place a column can be named. Each is a thin skin, and none of them accepts a string.
 
-**Done when** `four_dialects_one_meaning.feature` passes, including the scenario where the same question asked four ways gives four equal answers.
+**Done when** `four_grammars_one_meaning.feature` passes, including the scenario where the same question asked four ways gives four equal answers.
 
 ## The schema axis, in parallel
 

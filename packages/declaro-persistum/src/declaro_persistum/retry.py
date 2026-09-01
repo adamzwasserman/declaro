@@ -24,7 +24,7 @@ THERE ARE TWO RETRIES AND THEY ARE NOT THE SAME. They were conflated here on
 1. CONFLICT ABSORPTION. A commit-time conflict is re-run below BOTH the async
    and sync paths. It is NOT a caller argument — the application does not know
    the engine. Its bound and its retryable set are declared once, as data,
-   where the engine is known (the dialect layer). A query is already data, so
+   where the engine is known (the engine layer). A query is already data, so
    this works on the sync path with no queue in sight.
 
 2. DURABILITY RETRY, the `drain` policy below. How long the system keeps trying

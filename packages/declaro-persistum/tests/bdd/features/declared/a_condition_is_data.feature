@@ -1,6 +1,6 @@
 @bdd @specification
 Feature: A condition is data
-  A condition is data in every dialect, so it composes the same way everywhere. It is
+  A condition is data in every engine, so it composes the same way everywhere. It is
   never a Python expression the interpreter evaluates, and never a string.
 
   Section "The data is declared too" of HOW-IT-SHOULD-WORK.md.
@@ -25,8 +25,8 @@ Feature: A condition is data
     When a caller narrows by {"or": [{"name": "alice"}, {"name": "carol"}]}
     Then it is given alice and carol
 
-  Scenario: the same condition means the same thing in every dialect
-    When the condition {"age": {"gt": 18}} is used in all four dialects
+  Scenario: the same condition means the same thing in every engine
+    When the condition {"age": {"gt": 18}} is used in all four grammars
     Then all four answers are equal
 
   Scenario: an operator nobody declared is refused

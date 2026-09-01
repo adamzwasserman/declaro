@@ -105,28 +105,28 @@ async def _turso() -> Any:
 ENGINES = {"sqlite": _sqlite, "turso": _turso}
 
 
-async def _apply(connection: Any, dialect: str, current: dict, target: dict) -> None:
-    plan = diff(current, target, dialect=dialect, decisions=NOTHING)
-    await apply(connection, plan["operations"], plan["execution_order"], dialect, dry_run=False)
+async def _apply(connection: Any, engine: str, current: dict, target: dict) -> None:
+    plan = diff(current, target, engine=engine, decisions=NOTHING)
+    await apply(connection, plan["operations"], plan["execution_order"], engine, dry_run=False)
 
 
 @pytest.mark.parametrize("label,fk", ACTIONS, ids=[a[0].replace(" ", "_") for a in ACTIONS])
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
+@pytest.mark.parametrize("engine", sorted(ENGINES))
 async def test_the_actions_survive_a_rebuild(
-    dialect: str,
+    engine: str,
     label: str,  # noqa: ARG001 - parametrize unpacks it; it names the case
     fk: dict,
 ) -> None:
     """The rebuild is triggered by a column the foreign key has nothing to do
     with, which is what makes it a rebuild rather than a change to the key."""
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
-        await _apply(connection, dialect, {}, _schema("text", **fk))
-        actual = await introspect(connection, dialect)
+        await _apply(connection, engine, {}, _schema("text", **fk))
+        actual = await introspect(connection, engine)
 
-        await _apply(connection, dialect, actual, _schema("integer", **fk))
+        await _apply(connection, engine, actual, _schema("integer", **fk))
 
-        rebuilt = await introspect(connection, dialect)
+        rebuilt = await introspect(connection, engine)
         column = rebuilt["children"]["columns"]["pid"]
 
         assert column.get("references") == "parents.id", column
@@ -136,21 +136,21 @@ async def test_the_actions_survive_a_rebuild(
         await connection.close()
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_the_rebuild_converges(dialect: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_the_rebuild_converges(engine: str) -> None:
     """A rebuild that loses an action migrates forever afterwards."""
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
         declared = _schema("integer", on_delete="cascade")
-        await _apply(connection, dialect, {}, _schema("text", on_delete="cascade"))
-        actual = await introspect(connection, dialect)
-        await _apply(connection, dialect, actual, declared)
+        await _apply(connection, engine, {}, _schema("text", on_delete="cascade"))
+        actual = await introspect(connection, engine)
+        await _apply(connection, engine, actual, declared)
 
-        rebuilt = await introspect(connection, dialect)
+        rebuilt = await introspect(connection, engine)
         remaining = diff(
             {n: rebuilt[n] for n in declared if n in rebuilt},
             declared,
-            dialect=dialect,
+            engine=engine,
             decisions=NOTHING,
         )["operations"]
 
@@ -191,16 +191,16 @@ async def test_the_cascade_is_still_enforced_after_a_rebuild() -> None:
         await connection.close()
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_a_unique_survives_a_rebuild(dialect: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_a_unique_survives_a_rebuild(engine: str) -> None:
     """Turso reconstructed from `PRAGMA table_info`, which does not report it."""
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
-        await _apply(connection, dialect, {}, _schema("text", on_delete="cascade"))
-        actual = await introspect(connection, dialect)
-        await _apply(connection, dialect, actual, _schema("integer", on_delete="cascade"))
+        await _apply(connection, engine, {}, _schema("text", on_delete="cascade"))
+        actual = await introspect(connection, engine)
+        await _apply(connection, engine, actual, _schema("integer", on_delete="cascade"))
 
-        rebuilt = await introspect(connection, dialect)
+        rebuilt = await introspect(connection, engine)
 
         assert rebuilt["children"]["columns"]["email"].get("unique") is True, rebuilt["children"][
             "columns"
@@ -209,16 +209,16 @@ async def test_a_unique_survives_a_rebuild(dialect: str) -> None:
         await connection.close()
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_a_check_survives_a_rebuild(dialect: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_a_check_survives_a_rebuild(engine: str) -> None:
     """A CHECK is in no PRAGMA, so neither path read one before this."""
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
-        await _apply(connection, dialect, {}, _schema("text", on_delete="cascade"))
-        actual = await introspect(connection, dialect)
-        await _apply(connection, dialect, actual, _schema("integer", on_delete="cascade"))
+        await _apply(connection, engine, {}, _schema("text", on_delete="cascade"))
+        actual = await introspect(connection, engine)
+        await _apply(connection, engine, actual, _schema("integer", on_delete="cascade"))
 
-        rebuilt = await introspect(connection, dialect)
+        rebuilt = await introspect(connection, engine)
 
         assert rebuilt["children"]["columns"]["age"].get("check"), rebuilt["children"]["columns"][
             "age"
@@ -253,32 +253,32 @@ async def test_the_unique_is_still_enforced_after_a_rebuild() -> None:
         await connection.close()
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_a_table_level_constraint_survives_a_rebuild(dialect: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_a_table_level_constraint_survives_a_rebuild(engine: str) -> None:
     """The third kind. The rebuild reads the whole table now, not part of it."""
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
-        await _apply(connection, dialect, {}, _schema("text", on_delete="cascade"))
-        actual = await introspect(connection, dialect)
-        await _apply(connection, dialect, actual, _schema("integer", on_delete="cascade"))
+        await _apply(connection, engine, {}, _schema("text", on_delete="cascade"))
+        actual = await introspect(connection, engine)
+        await _apply(connection, engine, actual, _schema("integer", on_delete="cascade"))
 
-        rebuilt = await introspect(connection, dialect)
+        rebuilt = await introspect(connection, engine)
 
         assert rebuilt["children"].get("constraints", {}).get("ck_age"), rebuilt["children"]
     finally:
         await connection.close()
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_the_table_level_constraint_is_still_enforced(dialect: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_the_table_level_constraint_is_still_enforced(engine: str) -> None:
     """Declared is not enforced, the same floor the cascade and unique have."""
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
-        await _apply(connection, dialect, {}, _schema("text", on_delete="cascade"))
-        actual = await introspect(connection, dialect)
-        await _apply(connection, dialect, actual, _schema("integer", on_delete="cascade"))
+        await _apply(connection, engine, {}, _schema("text", on_delete="cascade"))
+        actual = await introspect(connection, engine)
+        await _apply(connection, engine, actual, _schema("integer", on_delete="cascade"))
 
-        cursor = connection.cursor() if dialect == "turso" else connection
+        cursor = connection.cursor() if engine == "turso" else connection
         # NOT `pytest.raises(Exception)` ALONE. That passes on a bug of ours
         # as readily as on the engine refusing, which is the misattribution
         # `A_BUG_IN_THIS_PACKAGE` exists to name. The type cannot be pinned

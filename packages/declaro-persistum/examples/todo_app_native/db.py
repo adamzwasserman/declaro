@@ -9,7 +9,7 @@ ships. A reader opens it before the README and long before `src/`, and whatever
 shape it uses becomes the shape of their application. This file used to teach
 the shape declaro-persistum exists to replace:
 
-    12  dispatch chains   `if config.dialect == "sqlite": ... elif ...`
+    12  dispatch chains   `if config.engine == "sqlite": ... elif ...`
      2  implicit defaults `get_sqlite_config(database_path=None)`
      2  broad handlers    every failure flattened to `(False, "message")`
      1  data class        `@dataclass class DatabaseConfig`, three fields
@@ -48,7 +48,7 @@ class DatabaseConfig(TypedDict):
     over a wire, none of which is true of an object graph.
     """
 
-    dialect: str
+    engine: str
     connection_string: str
     display_name: str
     auth_token: str | None
@@ -59,7 +59,7 @@ DEFAULT_TURSO_EMBEDDED_PATH = str(Path(__file__).parent / "todos_turso.db")
 
 
 # THE TWO ENGINES THAT WANT ONLY A PATH, one row each. Both builders returned
-# the same record and differed by the dialect and the word on screen, so those
+# the same record and differed by the engine and the word on screen, so those
 # are the row and the builder is written once.
 #
 # THE PATH IS REQUIRED, and that is the point of the shape rather than a
@@ -75,11 +75,11 @@ _FROM_A_PATH: dict[str, tuple[str, str]] = {
 def _built_from_a_path(name: str) -> Callable[[str], DatabaseConfig]:
     """Build the function that describes one path-based engine."""
 
-    dialect, shown = _FROM_A_PATH[name]
+    engine, shown = _FROM_A_PATH[name]
 
     def build(database_path: str) -> DatabaseConfig:
         return DatabaseConfig(
-            dialect=dialect,
+            engine=engine,
             auth_token=None,
             connection_string=database_path,
             display_name=f"{shown} ({Path(database_path).name})",
@@ -99,7 +99,7 @@ def get_postgres_config(
     host: str, port: int, user: str, password: str, database: str
 ) -> DatabaseConfig:
     return DatabaseConfig(
-        dialect="postgresql",
+        engine="postgresql",
         auth_token=None,
         connection_string=f"postgresql://{user}:{password}@{host}:{port}/{database}",
         display_name=f"PostgreSQL ({database}@{host})",
@@ -113,7 +113,7 @@ def get_turso_cloud_config(url: str, auth_token: str) -> DatabaseConfig:
     installed, so this backend reported itself unavailable on every machine.
     """
     return DatabaseConfig(
-        dialect="turso_cloud",
+        engine="turso_cloud",
         auth_token=auth_token,
         connection_string=url,
         display_name=f"Turso Cloud ({url.split('//')[-1][:24]})",
@@ -142,16 +142,16 @@ TURSO_EMBEDDED_CONFIG = get_turso_embedded_config(DEFAULT_TURSO_EMBEDDED_PATH)
 # ---------------------------------------------------------------------------
 
 
-def _for_dialect(table: dict[str, Any], dialect: str, what: str) -> Any:
+def _for_engine(table: dict[str, Any], engine: str, what: str) -> Any:
     """Read a table, naming what exists when the key does not.
 
     This is the whole difference between a table and a chain. A chain that runs
     out of branches falls off the end: `get_connection` yields nothing and the
     caller gets an error about whatever it did next.
     """
-    if dialect in table:
-        return table[dialect]
-    raise ValueError(f"Unknown dialect {dialect!r}. {what} exist for: {', '.join(sorted(table))}")
+    if engine in table:
+        return table[engine]
+    raise ValueError(f"Unknown engine {engine!r}. {what} exist for: {', '.join(sorted(table))}")
 
 
 # WHERE THIS APP TOUCHES A DATABASE, marked as the package marks its own.
@@ -260,37 +260,37 @@ async def get_connection(config: DatabaseConfig):
 
     THE ENGINE TRAVELS WITH THE CONNECTION, because it is true of the
     connection. Every function that touched a connection used to ask
-    `get_database()` again for its dialect, so a function's behaviour depended
+    `get_database()` again for its engine, so a function's behaviour depended
     on module state no caller could see, and calling one with a connection
     from a different engine would have read the wrong row.
 
     This is the ONLY place engine-specific code lives, and it is a lookup.
     """
-    connector = _for_dialect(CONNECTORS, config["dialect"], "Connectors")
+    connector = _for_engine(CONNECTORS, config["engine"], "Connectors")
     async with connector(config) as conn:
-        yield conn, config["dialect"]
+        yield conn, config["engine"]
 
 
 @boundary
-async def _run(conn: Any, sql: str, dialect: str) -> None:
+async def _run(conn: Any, sql: str, engine: str) -> None:
     """Execute one statement on `conn`, then commit it."""
-    if _for_dialect(AWAITS_EXECUTE, dialect, "Drivers"):
+    if _for_engine(AWAITS_EXECUTE, engine, "Drivers"):
         await conn.execute(sql)
     else:
         conn.execute(sql)
-    await commit(conn, dialect)
+    await commit(conn, engine)
 
 
 @boundary
-async def commit(conn: Any, dialect: str) -> None:
+async def commit(conn: Any, engine: str) -> None:
     """End the transaction on the engine `conn` belongs to.
 
     THIS IS THE LADDER THE THREE EXAMPLE APPS EACH WROTE THREE TIMES:
 
-        dialect = get_database().dialect
-        if dialect == "sqlite":
+        engine = get_database().engine
+        if engine == "sqlite":
             await conn.commit()
-        elif dialect in ("turso_cloud", "turso_embedded"):
+        elif engine in ("turso_cloud", "turso_embedded"):
             conn.commit()
 
     PostgreSQL appears in none of the nine copies. It works, because asyncpg
@@ -302,17 +302,17 @@ async def commit(conn: Any, dialect: str) -> None:
     Here PostgreSQL is a row saying `False`, which is an answer rather than an
     absence, and an engine nobody thought about raises.
     """
-    if not _for_dialect(NEEDS_COMMIT, dialect, "Drivers"):
+    if not _for_engine(NEEDS_COMMIT, engine, "Drivers"):
         return
-    if _for_dialect(AWAITS_EXECUTE, dialect, "Drivers"):
+    if _for_engine(AWAITS_EXECUTE, engine, "Drivers"):
         await conn.commit()
     else:
         conn.commit()
 
 
-def todos_table_sql(dialect: str) -> str:
+def todos_table_sql(engine: str) -> str:
     """The CREATE TABLE for one engine. Returns SQL, runs nothing."""
-    stamp = _for_dialect(TIMESTAMP_TYPES, dialect, "Timestamp types")
+    stamp = _for_engine(TIMESTAMP_TYPES, engine, "Timestamp types")
     return (
         "CREATE TABLE IF NOT EXISTS todos ("
         "id TEXT PRIMARY KEY, "
@@ -325,8 +325,8 @@ def todos_table_sql(dialect: str) -> str:
 
 async def init_schema(config: DatabaseConfig) -> None:
     """Create the todos table on `config`'s engine."""
-    async with get_connection(config) as (conn, dialect):
-        await _run(conn, todos_table_sql(config["dialect"]), dialect)
+    async with get_connection(config) as (conn, engine):
+        await _run(conn, todos_table_sql(config["engine"]), engine)
 
 
 async def test_connection(config: DatabaseConfig) -> tuple[bool, str]:
@@ -343,8 +343,8 @@ async def test_connection(config: DatabaseConfig) -> tuple[bool, str]:
     sends the reader to check a database that is fine.
     """
     try:
-        async with get_connection(config) as (conn, dialect):
-            await _run(conn, "SELECT 1", dialect)
+        async with get_connection(config) as (conn, engine):
+            await _run(conn, "SELECT 1", engine)
         return True, "Connection successful"
     except ImportError as exc:
         return False, f"Driver not installed: {exc}"
@@ -352,16 +352,16 @@ async def test_connection(config: DatabaseConfig) -> tuple[bool, str]:
         return False, f"Could not reach the database: {exc}"
 
 
-def check_driver_available(dialect: str) -> tuple[bool, str]:
+def check_driver_available(engine: str) -> tuple[bool, str]:
     """Whether this backend's driver is installed.
 
     One row per engine rather than a chain of imports, so an engine that is not
-    in the table raises instead of returning "unknown dialect" as if it were an
+    in the table raises instead of returning "unknown engine" as if it were an
     ordinary answer.
     """
     import importlib.util
 
-    module, package = _for_dialect(DRIVERS, dialect, "Drivers")
+    module, package = _for_engine(DRIVERS, engine, "Drivers")
     if importlib.util.find_spec(module) is None:
         return False, f"{package} is not installed"
     return True, f"{package} installed"

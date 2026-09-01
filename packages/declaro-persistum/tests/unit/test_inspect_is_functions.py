@@ -1,15 +1,15 @@
-"""Introspection is functions dispatched on dialect, against a real database.
+"""Introspection is functions dispatched on engine, against a real database.
 
-`create_inspector(dialect)` was ALREADY a dispatch table. It just dispatched
+`create_inspector(engine)` was ALREADY a dispatch table. It just dispatched
 on classes:
 
     INSPECTORS = {"postgresql": PostgreSQLInspector,
                   "sqlite": SQLiteInspector,
                   "turso": TursoInspector}
-    return INSPECTORS[dialect]()
+    return INSPECTORS[engine]()
 
 Every one of those classes was stateless — no `__init__`, no fields, methods
-that took a connection and returned data. `get_dialect()` returned a string
+that took a connection and returned data. `get_engine()` returned a string
 literal. The dispatch was correct all along; the classes were a wrapper around
 the functions the dispatch should have held directly.
 
@@ -22,7 +22,7 @@ parsing works on rows we invented, which is the one thing already covered by
 `inspector/shared.py`'s pure functions. What is worth testing here is that the
 SQL we send to a real engine comes back the shape we expect.
 
-The dialect vocabulary is bounded — postgresql, sqlite, turso — so every
+The engine vocabulary is bounded — postgresql, sqlite, turso — so every
 member is asserted present rather than one being sampled.
 """
 
@@ -31,29 +31,29 @@ from __future__ import annotations
 import pytest
 
 from declaro_persistum.inspector import INSPECTORS, TABLE_EXISTS, introspect
-from declaro_persistum.types import for_dialect
+from declaro_persistum.types import for_engine
 
-DIALECTS = ["postgresql", "sqlite", "turso"]
+ENGINES = ["postgresql", "sqlite", "turso"]
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_every_dialect_has_an_inspect_function(dialect):
+@pytest.mark.parametrize("engine", ENGINES)
+def test_every_engine_has_an_inspect_function(engine):
     """The bounded vocabulary, each member present and callable."""
-    assert dialect in INSPECTORS, f"no inspector registered for {dialect}"
-    assert callable(INSPECTORS[dialect]), (
-        f"{dialect} maps to {type(INSPECTORS[dialect]).__name__}, not a function — "
+    assert engine in INSPECTORS, f"no inspector registered for {engine}"
+    assert callable(INSPECTORS[engine]), (
+        f"{engine} maps to {type(INSPECTORS[engine]).__name__}, not a function — "
         f"the table used to hold classes and instantiate them on the way out"
     )
 
 
-def test_an_unknown_dialect_fails_loudly():
+def test_an_unknown_engine_fails_loudly():
     """A dict lookup on a bounded vocabulary must not fall through.
 
     The raise lived in `class _Inspectors(dict).__missing__` and now lives in
-    `for_dialect`. See `test_apply_is_functions.py` for why the class went.
+    `for_engine`. See `test_apply_is_functions.py` for why the class went.
     """
     with pytest.raises(ValueError, match="postgres"):
-        for_dialect(INSPECTORS, "mysql", "Inspectors")
+        for_engine(INSPECTORS, "mysql", "Inspectors")
 
 
 def test_both_tables_are_plain_dicts():

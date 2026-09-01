@@ -302,7 +302,7 @@ def _handle_drop_view(
 # EVERY LAMBDA TAKES THE SAME FOUR THINGS whether it reads them or not, which
 # is what lets the dispatch be a lookup instead of an if/elif chain (Rule 1).
 # The ones a given handler ignores carry a leading underscore, the same
-# convention `_details` uses in the applier and `_dialect` in the condition
+# convention `_details` uses in the applier and `_engine` in the condition
 # renderer, so an argument that is deliberately unread reads differently from
 # one that was forgotten.
 @helper

@@ -78,7 +78,7 @@ def _replicated(replicate_once, sleeps: list[float]):
 
     return Database(
         path="/tmp/unused.db",
-        dialect="turso",
+        engine="turso",
         journal_mode="wal",
         busy_timeout_s=5.0,
         primary="libsql://example.invalid",

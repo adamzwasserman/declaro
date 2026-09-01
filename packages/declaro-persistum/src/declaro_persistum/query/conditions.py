@@ -53,18 +53,18 @@ __all__ = ["OPERATORS", "COMBINATORS", "Rendered", "Renderer", "render"]
 
 # WHAT EVERY OPERATOR IN THE TABLE IS. Fifteen entries built by four factories,
 # and none of them declared a signature: `render_binary(column, operand, path,
-# dialect)` said only that it takes four things. An audit read that as an
+# engine)` said only that it takes four things. An audit read that as an
 # undeclared domain and was right.
 #
 # DECLARING IT EXPOSED A FOURTH ARGUMENT NOBODY READS. Every one of the five
-# leaf renderers took `dialect` and loaded it zero times; `render` and
+# leaf renderers took `engine` and loaded it zero times; `render` and
 # `_render_group` only passed it down. A condition renders the same on every
 # engine, so there was nothing for it to decide. It was removed rather than
 # typed: a parameter no implementation reads is not a contract, and giving it
 # a precise type would only have made the claim precise.
 #
 # It also hid a defect for as long as it existed. `builder.py` called
-# `render(where, "sql", path)`, passing the literal "sql" as the dialect,
+# `render(where, "sql", path)`, passing the literal "sql" as the engine,
 # which is not one. Nothing noticed, because nothing read it.
 #
 # It is also the shape the rest of this package already uses for an injected
@@ -117,7 +117,7 @@ def _like(pattern: str) -> Renderer:
     return render_like
 
 
-# WHAT AN EMPTY SET COMPARES TO. `IN ()` is a syntax error in every dialect.
+# WHAT AN EMPTY SET COMPARES TO. `IN ()` is a syntax error in every engine.
 # An empty set matches nothing, and its negation matches everything; saying so
 # in SQL is clearer than raising, because an empty list is a legitimate thing
 # for a caller's loop to produce.

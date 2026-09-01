@@ -58,8 +58,8 @@ from declaro_persistum.types import (
 
 
 @helper
-def get_dialect() -> str:
-    """Return dialect identifier."""
+def get_engine() -> str:
+    """Return engine identifier."""
     return "turso"
 
 
@@ -167,7 +167,7 @@ def _as_connection_failure(error: Exception) -> NoReturn:
     """
     raise DeclaroConnectionError(
         f"Failed to connect to Turso database: {error}",
-        dialect="turso",
+        engine="turso",
     ) from error
 
 

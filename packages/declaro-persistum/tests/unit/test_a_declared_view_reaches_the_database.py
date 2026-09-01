@@ -241,13 +241,13 @@ async def test_a_changed_view_query_reaches_the_database(tmp_path) -> None:
     assert "archived" in sql, f"the database still serves the old view: {sql}"
 
 
-def test_the_type_comparison_needs_a_dialect() -> None:
+def test_the_type_comparison_needs_a_engine() -> None:
     """Rule 14, and the reason the defect existed at all."""
     import inspect
 
     from declaro_persistum.differ import diff
 
-    assert inspect.signature(diff).parameters["dialect"].default is (inspect.Parameter.empty)
+    assert inspect.signature(diff).parameters["engine"].default is (inspect.Parameter.empty)
 
 
 def test_a_real_type_change_still_trips_on_postgresql() -> None:

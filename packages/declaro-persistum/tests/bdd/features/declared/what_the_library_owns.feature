@@ -59,6 +59,6 @@ Feature: What the library owns
     Then the database holds no people
     And the caller is told the whole declaration failed
 
-  Scenario: a dialect the library does not speak is refused by name
+  Scenario: an engine the library does not speak is refused by name
     When a database is opened for an engine the library does not speak
     Then it refuses and lists the engines it does speak

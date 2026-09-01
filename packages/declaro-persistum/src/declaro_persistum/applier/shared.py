@@ -2,10 +2,10 @@
 
 ONE COLUMN VOCABULARY, ONE SPELLING PER ENGINE. A schema declares what a column
 means -- `uuid`, `timestamptz`, `numeric(10,2)`, a reference with a cascade --
-and each dialect decides how to write it. That translation is `TYPE_MAPS` and
-it is the whole multi-dialect surface.
+and each engine decides how to write it. That translation is `TYPE_MAPS` and
+it is the whole multi-engine surface.
 
-It used to be half a surface. `map_type` took no dialect: it was the SQLite
+It used to be half a surface. `map_type` took no engine: it was the SQLite
 affinity mapper wearing a neutral name, and `applier/postgresql.py` did not
 import it, keeping a second column renderer that differed in exactly one line.
 Three byte-identical copies of the SQLite mapper also existed, in
@@ -94,10 +94,10 @@ from declaro_persistum.types import (
 #
 # It is worth marking rather than leaving bare. An argument that is silently
 # unread reads the same as one that was forgotten, and this package has just
-# been bitten by exactly that: `dialect` was threaded through the whole
+# been bitten by exactly that: `engine` was threaded through the whole
 # condition renderer, read by nothing, and carrying the literal "sql" from
 # `builder.py` for as long as it existed. The convention is already used by
-# `_render_order_by(term, _dialect, _path)` in query/expressions.py.
+# `_render_order_by(term, _engine, _path)` in query/expressions.py.
 
 
 # THE APPLIER RECONSTRUCTS THESE THREE AND THE RENDERER RAISED ON THEM, SO
@@ -146,7 +146,7 @@ def generate_operation_sql(operation: Operation) -> str:
 
 
 # `generate_sql` WAS HERE AND IS NOW ONLY IN `applier/__init__.py`. This copy
-# took no dialect and rendered through `generate_operation_sql` below, which
+# took no engine and rendered through `generate_operation_sql` below, which
 # is the SQLite and Turso renderer, so a caller who imported it and passed
 # PostgreSQL operations got SQLite SQL and no error. `_alter_column_sql`
 # differs entirely between the two: PostgreSQL emits ALTER TABLE ALTER COLUMN,
@@ -158,7 +158,7 @@ def generate_operation_sql(operation: Operation) -> str:
 # and raised AttributeError on the two backends a developer is likeliest to
 # be running. It was moved up and given a dispatch table so the copies could
 # not drift, and this one was left behind. Guarded by
-# `test_no_second_generate_sql_without_a_dialect.py`.
+# `test_no_second_generate_sql_without_a_engine.py`.
 
 
 # =============================================================================

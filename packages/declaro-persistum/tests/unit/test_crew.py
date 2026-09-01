@@ -139,7 +139,7 @@ async def test_a_crew_refuses_a_replicated_database(tmp_path):
 
     replicated = Database(
         path=str(tmp_path / "r.db"),
-        dialect="sqlite",
+        engine="sqlite",
         journal_mode="wal",
         busy_timeout_s=5.0,
         primary="https://example.turso.io",

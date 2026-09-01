@@ -93,21 +93,21 @@ async def _postgresql() -> Any:
 ENGINES = {"sqlite": _sqlite, "turso": _turso, "postgresql": _postgresql}
 
 
-async def _built(dialect: str, statements: list[str]) -> Any:
-    connection = await ENGINES[dialect]()
+async def _built(engine: str, statements: list[str]) -> Any:
+    connection = await ENGINES[engine]()
     for statement in statements:
         await connection.execute(statement)
-    if dialect != "postgresql":
+    if engine != "postgresql":
         await connection.commit()
     return connection
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_an_inline_multi_column_unique_is_reported(dialect: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_an_inline_multi_column_unique_is_reported(engine: str) -> None:
     """The measured hole: it was reported as nothing at all."""
-    connection = await _built(dialect, [INLINE_MULTI])
+    connection = await _built(engine, [INLINE_MULTI])
     try:
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
 
         indexes = actual["t"].get("indexes") or {}
         assert any(
@@ -118,9 +118,9 @@ async def test_an_inline_multi_column_unique_is_reported(dialect: str) -> None:
         await connection.close()
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
+@pytest.mark.parametrize("engine", sorted(ENGINES))
 async def test_a_single_column_unique_is_still_folded_onto_the_column(
-    dialect: str,
+    engine: str,
 ) -> None:
     """The half the old reasoning covered, and it must not change.
 
@@ -128,9 +128,9 @@ async def test_a_single_column_unique_is_still_folded_onto_the_column(
     reporting it as an index as well as a column property would make the
     differ try to recreate something it never declared.
     """
-    connection = await _built(dialect, [INLINE_SINGLE])
+    connection = await _built(engine, [INLINE_SINGLE])
     try:
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
 
         assert actual["t"]["columns"]["email"].get("unique") is True
         indexes = actual["t"].get("indexes") or {}
@@ -139,12 +139,12 @@ async def test_a_single_column_unique_is_still_folded_onto_the_column(
         await connection.close()
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_a_named_unique_index_is_unaffected(dialect: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_a_named_unique_index_is_unaffected(engine: str) -> None:
     """The form this package itself writes. It was always reported."""
-    connection = await _built(dialect, NAMED_INDEX)
+    connection = await _built(engine, NAMED_INDEX)
     try:
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
 
         assert actual["t"]["indexes"]["ix_cd"]["columns"] == ["c", "d"]
         assert actual["t"]["indexes"]["ix_cd"]["unique"] is True
@@ -152,19 +152,19 @@ async def test_a_named_unique_index_is_unaffected(dialect: str) -> None:
         await connection.close()
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_a_primary_key_index_is_still_not_reported(dialect: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_a_primary_key_index_is_still_not_reported(engine: str) -> None:
     """The other origin the builder skips, and it stays skipped.
 
     A composite primary key produces a `pk`-origin index, and the key is
     already carried on the table as `primary_key`.
     """
     connection = await _built(
-        dialect,
+        engine,
         ['CREATE TABLE "t" ("a" INTEGER, "b" INTEGER, PRIMARY KEY ("a","b"))'],
     )
     try:
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
 
         assert actual["t"].get("primary_key") == ["a", "b"], actual["t"]
         assert not (actual["t"].get("indexes") or {}), actual["t"]
@@ -188,8 +188,8 @@ DECLARED = {
 }
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_a_declared_multi_column_unique_converges(dialect: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_a_declared_multi_column_unique_converges(engine: str) -> None:
     """The control on the whole change, run against a real engine.
 
     Reporting a constraint-backed index that the model does not declare is
@@ -200,28 +200,28 @@ async def test_a_declared_multi_column_unique_converges(dialect: str) -> None:
     from declaro_persistum.applier import apply
     from declaro_persistum.differ.core import diff
 
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
-        plan = diff({}, DECLARED, dialect=dialect, decisions=NOTHING)
+        plan = diff({}, DECLARED, engine=engine, decisions=NOTHING)
         await apply(
             connection,
             plan["operations"],
             plan["execution_order"],
-            dialect,
+            engine,
             dry_run=False,
         )
 
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
         remaining = diff(
             {n: actual[n] for n in DECLARED if n in actual},
             DECLARED,
-            dialect=dialect,
+            engine=engine,
             decisions=NOTHING,
         )["operations"]
 
         assert actual["t"]["indexes"]["ix_cd"]["columns"] == ["c", "d"]
         assert remaining == [], [(o["op"], o["table"]) for o in remaining]
     finally:
-        if dialect == "postgresql":
+        if engine == "postgresql":
             await connection.execute('DROP TABLE IF EXISTS "t" CASCADE')
         await connection.close()

@@ -63,9 +63,7 @@ def test_only_the_operations_sqlite_cannot_alter_rebuild(op: str) -> None:
 
 def test_creating_a_table_does_not_rebuild_it() -> None:
     """The common case, taken from the differ rather than written."""
-    plan = diff(
-        {}, {"t": {"columns": {"c": {"type": "text"}}}}, dialect="sqlite", decisions=NOTHING
-    )
+    plan = diff({}, {"t": {"columns": {"c": {"type": "text"}}}}, engine="sqlite", decisions=NOTHING)
 
     assert not any(requires_reconstruction(o) for o in plan["operations"])
 
@@ -73,7 +71,7 @@ def test_creating_a_table_does_not_rebuild_it() -> None:
 def test_changing_a_column_type_rebuilds() -> None:
     current = {"t": {"columns": {"c": {"type": "text"}}}}
     target = {"t": {"columns": {"c": {"type": "integer"}}}}
-    plan = diff(current, target, dialect="sqlite", decisions=NOTHING)
+    plan = diff(current, target, engine="sqlite", decisions=NOTHING)
 
     assert [requires_reconstruction(o) for o in plan["operations"]] == [True]
 
@@ -199,7 +197,7 @@ def test_a_preview_renders_every_operation() -> None:
     plan = diff(
         {},
         {"t": {"columns": {"c": {"type": "text"}}, "indexes": {"i": {"columns": ["c"]}}}},
-        dialect="sqlite",
+        engine="sqlite",
         decisions=NOTHING,
     )
 
@@ -215,7 +213,7 @@ def test_a_preview_says_where_a_rebuild_would_happen() -> None:
     would make a preview look like a no-op."""
     current = {"t": {"columns": {"c": {"type": "text"}}}}
     target = {"t": {"columns": {"c": {"type": "integer"}}}}
-    plan = diff(current, target, dialect="sqlite", decisions=NOTHING)
+    plan = diff(current, target, engine="sqlite", decisions=NOTHING)
 
     preview = dry_run_preview(plan["operations"], plan["execution_order"])
 

@@ -17,17 +17,17 @@ V = TypeVar("V")
 
 # THE ENGINES, AS A VOCABULARY RATHER THAN A STRING.
 #
-# `dialect: str` appeared on 44 signatures. `str` permits every string, so a
+# `engine: str` appeared on 44 signatures. `str` permits every string, so a
 # slop audit counted three unexercised input regions behind each one — empty,
 # unicode, very long — about 132 in total, or 9% of this package's unexercised
 # regions. None of them is a missing test. They are one declaration, wrong in
 # 44 places: the vocabulary has exactly three members and always did.
 #
 # Declaring it is the Rule 13 remedy. The regions do not need exercising; they
-# need to stop existing. The boundary that admits a dialect from outside is
+# need to stop existing. The boundary that admits an engine from outside is
 # argparse's `choices=` in cli/main.py, which already enforces this same set,
 # so the interior can trust the contract rather than re-check it.
-Dialect = Literal["postgresql", "sqlite", "turso"]
+Engine = Literal["postgresql", "sqlite", "turso"]
 
 # WHICH WAY AN ORDER RUNS, as a vocabulary rather than a mark on a name.
 #
@@ -714,13 +714,13 @@ class SnapshotMeta(TypedDict):
     Attributes:
         version: Snapshot format version
         applied_at: ISO timestamp of when snapshot was created
-        dialect: Database dialect (postgresql, sqlite, turso)
+        engine: Database engine (postgresql, sqlite, turso)
         applied_by: User/system that created the snapshot
     """
 
     version: str
     applied_at: str
-    dialect: str
+    engine: str
     applied_by: str | None
 
 
@@ -729,7 +729,7 @@ class ConnectionConfig(TypedDict, total=False):
     Parsed database connection configuration.
 
     Attributes:
-        dialect: Database type (postgresql, sqlite, turso)
+        engine: Database type (postgresql, sqlite, turso)
         host: Database host
         port: Database port
         database: Database name
@@ -740,7 +740,7 @@ class ConnectionConfig(TypedDict, total=False):
         token: Auth token (for Turso)
     """
 
-    dialect: Literal["postgresql", "sqlite", "turso"]
+    engine: Literal["postgresql", "sqlite", "turso"]
     host: str
     port: int
     database: str
@@ -779,7 +779,7 @@ def is_nullable(column: Column) -> bool:
     return not column.get("primary_key") and bool(column.get("nullable", True))
 
 
-def for_dialect(table: dict[str, V], dialect: str, what: str) -> V:
+def for_engine(table: dict[str, V], engine: str, what: str) -> V:
     """Read a dispatch table, naming what exists when the key does not.
 
     THIS WAS TWO CLASSES. `applier/__init__.py` and `inspector/__init__.py`
@@ -801,23 +801,21 @@ def for_dialect(table: dict[str, V], dialect: str, what: str) -> V:
     was available. `what` names the table so one message can serve every one
     of them.
     """
-    return _WHEN_NO_ENTRY[dialect in table](table, dialect, what)
+    return _WHEN_NO_ENTRY[engine in table](table, engine, what)
 
 
-def _the_entry(table: dict[str, V], dialect: str, _what: str) -> V:
-    """The table holds this dialect, so this is the entry."""
-    return table[dialect]
+def _the_entry(table: dict[str, V], engine: str, _what: str) -> V:
+    """The table holds this engine, so this is the entry."""
+    return table[engine]
 
 
-def _refuse_unknown_dialect(table: dict[str, V], dialect: str, what: str) -> V:
+def _refuse_unknown_engine(table: dict[str, V], engine: str, what: str) -> V:
     """No entry, named alongside the ones that exist."""
-    raise ValueError(
-        f"Unsupported dialect: {dialect}. {what} exist for: {', '.join(sorted(table))}"
-    )
+    raise ValueError(f"Unsupported engine: {engine}. {what} exist for: {', '.join(sorted(table))}")
 
 
-# Whether the table holds the dialect asked for.
+# Whether the table holds the engine asked for.
 _WHEN_NO_ENTRY: dict[bool, Callable[[dict[str, Any], str, str], Any]] = {
     True: _the_entry,
-    False: _refuse_unknown_dialect,
+    False: _refuse_unknown_engine,
 }

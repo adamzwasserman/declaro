@@ -55,19 +55,19 @@ DECLARED = {
     }
 }
 
-DIALECTS = ["postgresql", "sqlite", "turso"]
+ENGINES = ["postgresql", "sqlite", "turso"]
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_the_differ_emits_an_index_beside_the_table(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_the_differ_emits_an_index_beside_the_table(engine: str) -> None:
     """The fix as a shape. Without it the applier is handed no way to know."""
-    ops = [o["op"] for o in diff({}, DECLARED, dialect=dialect, decisions=NOTHING)["operations"]]
+    ops = [o["op"] for o in diff({}, DECLARED, engine=engine, decisions=NOTHING)["operations"]]
 
     assert ops.count("add_index") == 2, ops
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_each_index_is_ordered_after_the_table_it_indexes(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_each_index_is_ordered_after_the_table_it_indexes(engine: str) -> None:
     """CREATE INDEX on a table that does not exist yet fails.
 
     THIS MEASURES TOPOSORT, NOT THE EMISSION ORDER, and saying so is the
@@ -80,7 +80,7 @@ def test_each_index_is_ordered_after_the_table_it_indexes(dialect: str) -> None:
     this file is about, and a reader who took this test as evidence that the
     differ emits them in the right order would be wrong.
     """
-    plan = diff({}, DECLARED, dialect=dialect, decisions=NOTHING)
+    plan = diff({}, DECLARED, engine=engine, decisions=NOTHING)
     ranks = {}
     for rank, index in enumerate(plan["execution_order"]):
         ranks.setdefault(plan["operations"][index]["op"], rank)
@@ -88,11 +88,11 @@ def test_each_index_is_ordered_after_the_table_it_indexes(dialect: str) -> None:
     assert ranks["create_table"] < ranks["add_index"], ranks
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_the_generated_sql_creates_both_indexes(dialect: str) -> None:
-    plan = diff({}, DECLARED, dialect=dialect, decisions=NOTHING)
+@pytest.mark.parametrize("engine", ENGINES)
+def test_the_generated_sql_creates_both_indexes(engine: str) -> None:
+    plan = diff({}, DECLARED, engine=engine, decisions=NOTHING)
 
-    sql = "\n".join(generate_sql(plan["operations"], plan["execution_order"], dialect))
+    sql = "\n".join(generate_sql(plan["operations"], plan["execution_order"], engine))
 
     assert "i_spare" in sql, sql
     assert "i_email" in sql, sql
@@ -106,7 +106,7 @@ async def test_the_index_is_there_after_one_migration() -> None:
     path = tempfile.mktemp(suffix=".db")
     conn = await aiosqlite.connect(path)
     try:
-        plan = diff({}, DECLARED, dialect="sqlite", decisions=NOTHING)
+        plan = diff({}, DECLARED, engine="sqlite", decisions=NOTHING)
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False)
 
         cursor = await conn.execute(
@@ -132,11 +132,11 @@ async def test_one_migration_is_enough_to_converge() -> None:
     path = tempfile.mktemp(suffix=".db")
     conn = await aiosqlite.connect(path)
     try:
-        plan = diff({}, DECLARED, dialect="sqlite", decisions=NOTHING)
+        plan = diff({}, DECLARED, engine="sqlite", decisions=NOTHING)
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False)
 
         actual = await introspect(conn, "sqlite")
-        second = diff({"t": actual["t"]}, DECLARED, dialect="sqlite", decisions=NOTHING)
+        second = diff({"t": actual["t"]}, DECLARED, engine="sqlite", decisions=NOTHING)
 
         assert second["operations"] == [], (
             f"the declared shape needed a second migration: "
@@ -154,7 +154,7 @@ async def test_the_unique_index_actually_constrains() -> None:
     path = tempfile.mktemp(suffix=".db")
     conn = await aiosqlite.connect(path)
     try:
-        plan = diff({}, DECLARED, dialect="sqlite", decisions=NOTHING)
+        plan = diff({}, DECLARED, engine="sqlite", decisions=NOTHING)
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False)
 
         await conn.execute("INSERT INTO t (id, email) VALUES ('1', 'a@b')")
@@ -169,6 +169,6 @@ def test_a_table_with_no_indexes_emits_none() -> None:
     """The floor under the floor. Emitting add_index always would pass above."""
     plain = {"t": {"columns": {"id": {"type": "text", "primary_key": True}}}}
 
-    ops = [o["op"] for o in diff({}, plain, dialect="sqlite", decisions=NOTHING)["operations"]]
+    ops = [o["op"] for o in diff({}, plain, engine="sqlite", decisions=NOTHING)["operations"]]
 
     assert ops == ["create_table"], ops

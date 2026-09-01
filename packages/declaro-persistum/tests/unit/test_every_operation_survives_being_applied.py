@@ -3,7 +3,7 @@
 WRITTEN BEFORE ANY FIX, against a matrix measured rather than assumed.
 
 MEASURED 2026-08-18 by wrapping `applier.apply` for the whole suite and
-recording every (dialect, operation) pair that reached it. Of the 48 cells,
+recording every (engine, operation) pair that reached it. Of the 48 cells,
 2000 tests reached 12:
 
                         postgresql   sqlite   turso
@@ -221,7 +221,7 @@ def _operations_of(current: Any, target: Any) -> set[str]:
     return {
         operation["op"]
         for operation in (
-            *diff(current_schema, target_schema, dialect="sqlite", decisions=NOTHING)["operations"],
+            *diff(current_schema, target_schema, engine="sqlite", decisions=NOTHING)["operations"],
             *diff_views(current_views, target_views),
         )
     }
@@ -304,7 +304,7 @@ def _state(case_half: Any) -> tuple[dict, dict]:
     return case_half if isinstance(case_half, tuple) else (case_half, {})
 
 
-async def _apply_plan(connection: Any, current: Any, target: Any, dialect: str) -> None:
+async def _apply_plan(connection: Any, current: Any, target: Any, engine: str) -> None:
     """Everything that changes between two states: its tables, then its views.
 
     THE VIEWS WERE NOT APPLIED HERE AT ALL. `diff` answers for tables and
@@ -320,12 +320,12 @@ async def _apply_plan(connection: Any, current: Any, target: Any, dialect: str) 
     current_schema, current_views = _state(current)
     target_schema, target_views = _state(target)
 
-    plan = diff(current_schema, target_schema, dialect=dialect, decisions=NOTHING)
+    plan = diff(current_schema, target_schema, engine=engine, decisions=NOTHING)
     await apply(
         connection,
         plan["operations"],
         plan["execution_order"],
-        dialect,
+        engine,
         dry_run=False,
     )
 
@@ -334,19 +334,19 @@ async def _apply_plan(connection: Any, current: Any, target: Any, dialect: str) 
         connection,
         view_operations,
         list(range(len(view_operations))),
-        dialect,
+        engine,
         dry_run=False,
     )
 
 
-async def _converged(connection: Any, target: Any, dialect: str) -> list:
+async def _converged(connection: Any, target: Any, engine: str) -> list:
     """What a second migration would still emit. Zero is the only pass."""
     target_schema, _target_views = _state(target)
-    actual = await introspect(connection, dialect)
+    actual = await introspect(connection, engine)
     return diff(
         {name: actual[name] for name in target_schema if name in actual},
         target_schema,
-        dialect=dialect,
+        engine=engine,
         decisions=NOTHING,
     )["operations"]
 

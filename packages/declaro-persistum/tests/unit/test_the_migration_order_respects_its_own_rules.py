@@ -68,7 +68,7 @@ def _position(ordered: list[Any], op: str, table: str) -> int:
 
 
 def _plan(current: dict[str, Any], target: dict[str, Any]) -> list[Any]:
-    return diff(current, target, dialect="sqlite", decisions=NOTHING)["operations"]
+    return diff(current, target, engine="sqlite", decisions=NOTHING)["operations"]
 
 
 PARENT = {"columns": {"id": {"type": "integer", "primary_key": True}}}

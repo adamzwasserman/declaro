@@ -59,14 +59,14 @@ def then_table_empty(bdd_context):
     async def _query():
         async with bdd_context["backend"]["connect"]() as conn:
             table_name = list(bdd_context["schema"].keys())[0]
-            if bdd_context["dialect"] == "sqlite":
+            if bdd_context["engine"] == "sqlite":
                 cursor = await conn.execute(f"SELECT * FROM {table_name}")
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-            elif bdd_context["dialect"] == "postgresql":
+            elif bdd_context["engine"] == "postgresql":
                 rows = await conn.fetch(f"SELECT * FROM {table_name}")
                 return [dict(row) for row in rows]
-            elif bdd_context["dialect"] == "turso":
+            elif bdd_context["engine"] == "turso":
                 cursor = conn.execute(f"SELECT * FROM {table_name}")
                 rows = cursor.fetchall()
                 return list(rows)

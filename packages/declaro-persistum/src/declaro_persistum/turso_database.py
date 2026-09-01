@@ -111,7 +111,7 @@ from declaro_persistum.reporting import say, say_because
 from declaro_persistum.types import (
     NOTHING,
     DbapiConnection,
-    Dialect,
+    Engine,
     Nothing,
     ReplicaConnection,
     is_nothing,
@@ -130,7 +130,7 @@ _MAX_PULL_BATCHES = 64
 
 # Bound once so the field and the writer cannot disagree. Two literals is two
 # chances for a Database to say it is one engine and write like another.
-DIALECT: Dialect = "turso"
+ENGINE: Engine = "turso"
 
 # How long a writer waits for the replica lock before failing. A property of
 # the engine's own retry behaviour, not of any caller.
@@ -274,7 +274,7 @@ def _is_the_failure(unclosed: Exception | Nothing) -> Exception | Nothing:
         f"replication finished, but its sync connection could not be closed: "
         f"{type(unclosed).__name__}: {unclosed}. That connection is still "
         f"open against the primary.",
-        dialect="turso",
+        engine="turso",
     )
 
 
@@ -532,7 +532,7 @@ async def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
 
     return Database(
         path=path,
-        dialect=DIALECT,
+        engine=ENGINE,
         journal_mode=granted,
         busy_timeout_s=_BUSY_TIMEOUT_S,
         primary=None,
@@ -545,7 +545,7 @@ async def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
         for_ddl=migrating,
         serialise=None,  # MVCC: writers run concurrently, which is the point
         shutdown=shutdown,
-        write_one=WRITERS[DIALECT],
+        write_one=WRITERS[ENGINE],
         # A local file has no remote, so its writes have arrived.
         replicate_once=already_delivered,
         # No remote to pull from: this is a local file.
@@ -647,7 +647,7 @@ async def _open_replicated(
 
     return Database(
         path=path,
-        dialect=DIALECT,
+        engine=ENGINE,
         journal_mode="wal",
         busy_timeout_s=_BUSY_TIMEOUT_S,
         primary=primary,
@@ -661,7 +661,7 @@ async def _open_replicated(
         for_ddl=writing,
         serialise=new_write_lock(asyncio.Lock()),  # WAL: one writer
         shutdown=shutdown,
-        write_one=WRITERS[DIALECT],
+        write_one=WRITERS[ENGINE],
         replicate_once=replicate_once,
         refresh_once=refresh_once,
         release=release,

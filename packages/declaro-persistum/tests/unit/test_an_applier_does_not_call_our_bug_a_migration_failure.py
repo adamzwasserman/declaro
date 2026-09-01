@@ -69,7 +69,7 @@ def _real_ops():
     }
     return [
         o
-        for o in diff(actual, target, dialect="sqlite", decisions={})["operations"]
+        for o in diff(actual, target, engine="sqlite", decisions={})["operations"]
         if o["op"] == "alter_column"
     ]
 

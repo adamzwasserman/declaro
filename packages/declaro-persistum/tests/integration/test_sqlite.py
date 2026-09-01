@@ -65,7 +65,7 @@ async def database(tmp_path):
 
 
 async def _migrate(conn, schema) -> None:
-    plan = diff({}, schema, dialect="sqlite", decisions=NOTHING)
+    plan = diff({}, schema, engine="sqlite", decisions=NOTHING)
     await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False)
 
 
@@ -105,7 +105,7 @@ async def test_migrating_twice_is_a_no_op(database) -> None:
     await _migrate(conn, WIDGETS)
 
     actual = await introspect(conn, "sqlite")
-    second = diff({"widgets": actual["widgets"]}, WIDGETS, dialect="sqlite", decisions=NOTHING)
+    second = diff({"widgets": actual["widgets"]}, WIDGETS, engine="sqlite", decisions=NOTHING)
 
     assert second["operations"] == [], (
         f"an unchanged schema still migrates: "
@@ -129,7 +129,7 @@ async def test_the_schema_survives_closing_and_reopening(database) -> None:
     try:
         actual = await introspect(reopened, "sqlite")
         assert (
-            diff({"widgets": actual["widgets"]}, WIDGETS, dialect="sqlite", decisions=NOTHING)[
+            diff({"widgets": actual["widgets"]}, WIDGETS, engine="sqlite", decisions=NOTHING)[
                 "operations"
             ]
             == []
@@ -140,7 +140,7 @@ async def test_the_schema_survives_closing_and_reopening(database) -> None:
 
 async def test_a_dry_run_changes_nothing(database) -> None:
     _path, conn = database
-    plan = diff({}, WIDGETS, dialect="sqlite", decisions=NOTHING)
+    plan = diff({}, WIDGETS, engine="sqlite", decisions=NOTHING)
 
     result = await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=True)
 
@@ -249,7 +249,7 @@ async def test_a_migration_leaves_foreign_keys_as_it_found_them(database) -> Non
 async def test_generated_sql_is_sql_this_engine_accepts(database) -> None:
     """`generate_sql` renders without running. The engine judges it."""
     path, _conn = database
-    plan = diff({}, WIDGETS, dialect="sqlite", decisions=NOTHING)
+    plan = diff({}, WIDGETS, engine="sqlite", decisions=NOTHING)
 
     statements = generate_sql(plan["operations"], plan["execution_order"], "sqlite")
 
@@ -276,7 +276,7 @@ async def test_a_failed_operation_leaves_no_half_migrated_table(database) -> Non
     """
     _path, conn = database
     plan = diff(
-        {}, {"good": {"columns": {"id": {"type": "text"}}}}, dialect="sqlite", decisions=NOTHING
+        {}, {"good": {"columns": {"id": {"type": "text"}}}}, engine="sqlite", decisions=NOTHING
     )
     broken = list(plan["operations"]) + [
         {

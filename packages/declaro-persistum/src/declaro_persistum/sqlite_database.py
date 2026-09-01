@@ -24,12 +24,12 @@ from declaro_persistum.database import (
     nothing_was_trapped,
     writing,
 )
-from declaro_persistum.types import DbapiConnection, Dialect
+from declaro_persistum.types import DbapiConnection, Engine
 from declaro_persistum.writers import WRITERS
 
 __all__ = ["open_sqlite", "connect_sqlite"]
 
-DIALECT: Dialect = "sqlite"
+ENGINE: Engine = "sqlite"
 
 
 @boundary
@@ -61,7 +61,7 @@ async def open_sqlite(
         db = await open_sqlite("./app.db", shutdown="exit_immediately",
                                busy_timeout_s=5.0)
 
-    There is no `dialect` argument: this opener knows what it opens, and a
+    There is no `engine` argument: this opener knows what it opens, and a
     caller cannot ask for a SQLite database that claims to be something else.
 
     A SQLite database has no primary, so it never replicates. `replicate(db)`
@@ -79,7 +79,7 @@ async def open_sqlite(
 
     db = Database(
         path=path,
-        dialect=DIALECT,
+        engine=ENGINE,
         journal_mode="wal",
         primary=None,
         token=None,
@@ -89,7 +89,7 @@ async def open_sqlite(
         serialise=None,
         shutdown=shutdown,
         busy_timeout_s=busy_timeout_s,
-        write_one=WRITERS[DIALECT],
+        write_one=WRITERS[ENGINE],
         # SQLite writes to a local file: there is no primary.
         replicate_once=already_delivered,
         # No replica to pull from on SQLite.

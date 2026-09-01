@@ -34,7 +34,7 @@ from collections.abc import Callable
 from typing import Any, TypedDict
 
 from declaro_persistum.boundary import helper
-from declaro_persistum.types import NOTHING, Dialect, Nothing, Operation
+from declaro_persistum.types import NOTHING, Engine, Nothing, Operation
 
 # A reader takes one named value out of the operation it is given. It is the
 # only thing that knows where in `details` a value lives, which is why the
@@ -117,15 +117,15 @@ def clause(outer: str, key: str, keyword: str) -> Reader:
 
 @helper
 def built_by(
-    build: Callable[[Operation, Dialect], Any],
-) -> Callable[[Dialect], Reader]:
+    build: Callable[[Operation, Engine], Any],
+) -> Callable[[Engine], Reader]:
     """A value that has to be assembled, like a CREATE TABLE's body.
 
     The assembly is a function because its length depends on the input: one
     clause per column, and the column count is not known here. It is still
     only one of the names the template fills from.
     """
-    return lambda dialect: lambda operation: build(operation, dialect)
+    return lambda engine: lambda operation: build(operation, engine)
 
 
 # =============================================================================

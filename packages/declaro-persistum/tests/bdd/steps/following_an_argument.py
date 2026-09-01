@@ -37,15 +37,15 @@ from typing import NamedTuple
 # and drove, which is the imperative surface stage 1 deleted.
 A_CONNECTION = ("DbapiConnection", "DbapiCursor", "FetchingConnection", "ReplicaConnection")
 
-# WHAT AN ENGINE IS CALLED. A `Database` already carries its dialect, so a
+# WHAT AN ENGINE IS CALLED. A `Database` already carries its engine, so a
 # second place to name one is a second thing that can be wrong, and the two can
 # disagree without anything noticing until the wrong introspector runs.
-AN_ENGINE = ("Dialect",)
-# BY SUBSTRING, NOT BY EQUALITY. `begin_cutover(source_dialect: str, ...)` had
+AN_ENGINE = ("Engine",)
+# BY SUBSTRING, NOT BY EQUALITY. `begin_cutover(source_engine: str, ...)` had
 # the offence and the loose type both, so an exact-name check missed it and the
 # annotation check missed it too. It stayed hidden until the two functions
 # either side of it were fixed.
-AN_ENGINE_BY_NAME = ("dialect", "engine", "backend")
+AN_ENGINE_BY_NAME = ("engine", "engine", "backend")
 
 
 class Offence(NamedTuple):

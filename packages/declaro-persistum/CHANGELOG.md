@@ -2,6 +2,19 @@
 
 All notable changes to `declaro-persistum` are recorded here.
 
+## Unreleased
+
+### One word meant two things. It means neither now.
+
+**"Dialect" is gone from this package.** It named the engine (`postgresql`, `sqlite`, `turso`) and it named the way you phrase a question (pseudo-SQL, Django, Prisma, SQLAlchemy), and nothing in a sentence told you which. The word is retired rather than given to one of them, so a reader who meets it in the entries below knows it is a record of how things were called before 2026-09-01.
+
+- `Dialect` is `Engine`. The `Database` field is `engine`, and its type is `Engine` rather than `str`.
+- The four grammars are grammars. `four_dialects_one_meaning.feature` is `four_grammars_one_meaning.feature`.
+- **Breaking, CLI:** `--dialect` is `--engine`, and its short form `-d` is `-e`. There is no alias.
+- **Breaking, API:** `apply_migrations_async` no longer takes an engine, and `bulk_transfer` and `begin_cutover` no longer take two. Each reads it off the `Database` that was handed to it.
+
+2,212 replacements across 162 files, 27 articles corrected from "a engine" to "an engine", eight files renamed. The suite's failing set is unchanged, compared name by name.
+
 ## 0.1.29 — 2026-08-10
 
 ### Concurrent writers work. The lock that prevented them is conditional now.

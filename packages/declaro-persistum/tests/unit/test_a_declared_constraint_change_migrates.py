@@ -50,19 +50,17 @@ from declaro_persistum.types import NOTHING
 
 pytestmark = pytest.mark.precommit
 
-DIALECTS = ["postgresql", "sqlite", "turso"]
+ENGINES = ["postgresql", "sqlite", "turso"]
 
 
 def _table(column: dict) -> dict:
     return {"t": {"columns": {"id": {"type": "text", "primary_key": True}, "c": column}}}
 
 
-def _ops(before: dict, after: dict, dialect: str) -> list[str]:
+def _ops(before: dict, after: dict, engine: str) -> list[str]:
     return [
         o["op"]
-        for o in diff(_table(before), _table(after), dialect=dialect, decisions=NOTHING)[
-            "operations"
-        ]
+        for o in diff(_table(before), _table(after), engine=engine, decisions=NOTHING)["operations"]
     ]
 
 
@@ -71,21 +69,21 @@ def _ops(before: dict, after: dict, dialect: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_adding_a_unique_constraint_emits_an_operation(dialect: str) -> None:
-    assert _ops({"type": "text"}, {"type": "text", "unique": True}, dialect) != []
+@pytest.mark.parametrize("engine", ENGINES)
+def test_adding_a_unique_constraint_emits_an_operation(engine: str) -> None:
+    assert _ops({"type": "text"}, {"type": "text", "unique": True}, engine) != []
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_removing_a_unique_constraint_emits_an_operation(dialect: str) -> None:
-    assert _ops({"type": "text", "unique": True}, {"type": "text"}, dialect) != []
+@pytest.mark.parametrize("engine", ENGINES)
+def test_removing_a_unique_constraint_emits_an_operation(engine: str) -> None:
+    assert _ops({"type": "text", "unique": True}, {"type": "text"}, engine) != []
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_an_unchanged_unique_emits_nothing(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_an_unchanged_unique_emits_nothing(engine: str) -> None:
     """The floor. Emitting always would make every migration rebuild."""
     same = {"type": "text", "unique": True}
-    assert _ops(same, dict(same), dialect) == []
+    assert _ops(same, dict(same), engine) == []
 
 
 # ---------------------------------------------------------------------------
@@ -119,24 +117,24 @@ def test_an_unchanged_unique_emits_nothing(dialect: str) -> None:
 TEXT_ROUND_TRIPS = ["sqlite"]
 
 
-@pytest.mark.parametrize("dialect", TEXT_ROUND_TRIPS)
-def test_a_check_constraint_change_emits_an_operation(dialect: str) -> None:
+@pytest.mark.parametrize("engine", TEXT_ROUND_TRIPS)
+def test_a_check_constraint_change_emits_an_operation(engine: str) -> None:
     assert (
-        _ops({"type": "integer", "check": "c > 0"}, {"type": "integer", "check": "c > 10"}, dialect)
+        _ops({"type": "integer", "check": "c > 0"}, {"type": "integer", "check": "c > 10"}, engine)
         != []
     )
 
 
-@pytest.mark.parametrize("dialect", TEXT_ROUND_TRIPS)
-def test_removing_a_check_emits_an_operation(dialect: str) -> None:
-    assert _ops({"type": "integer", "check": "c > 0"}, {"type": "integer"}, dialect) != []
+@pytest.mark.parametrize("engine", TEXT_ROUND_TRIPS)
+def test_removing_a_check_emits_an_operation(engine: str) -> None:
+    assert _ops({"type": "integer", "check": "c > 0"}, {"type": "integer"}, engine) != []
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_an_unchanged_check_emits_nothing(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_an_unchanged_check_emits_nothing(engine: str) -> None:
     """The loop, pinned. This is the assertion that was false for an hour."""
     same = {"type": "integer", "check": "c > 0"}
-    assert _ops(same, dict(same), dialect) == []
+    assert _ops(same, dict(same), engine) == []
 
 
 @pytest.mark.asyncio
@@ -151,7 +149,7 @@ async def test_a_declared_check_survives_the_round_trip() -> None:
     conn = await aiosqlite.connect(path)
     try:
         declared = _table({"type": "integer", "check": "c > 0"})
-        plan = diff({}, declared, dialect="sqlite", decisions=NOTHING)
+        plan = diff({}, declared, engine="sqlite", decisions=NOTHING)
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False)
         await conn.commit()
 
@@ -159,7 +157,7 @@ async def test_a_declared_check_survives_the_round_trip() -> None:
 
         assert actual["t"]["columns"]["c"].get("check") == "c > 0"
         assert (
-            diff({"t": actual["t"]}, declared, dialect="sqlite", decisions=NOTHING)["operations"]
+            diff({"t": actual["t"]}, declared, engine="sqlite", decisions=NOTHING)["operations"]
             == []
         )
     finally:
@@ -175,7 +173,7 @@ async def test_a_tightened_check_is_enforced_afterwards() -> None:
     conn = await aiosqlite.connect(path)
     try:
         plan = diff(
-            {}, _table({"type": "integer", "check": "c > 0"}), dialect="sqlite", decisions=NOTHING
+            {}, _table({"type": "integer", "check": "c > 0"}), engine="sqlite", decisions=NOTHING
         )
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False)
         await conn.execute("INSERT INTO t VALUES ('1', 50)")
@@ -185,7 +183,7 @@ async def test_a_tightened_check_is_enforced_afterwards() -> None:
         plan = diff(
             {"t": actual["t"]},
             _table({"type": "integer", "check": "c > 10"}),
-            dialect="sqlite",
+            engine="sqlite",
             decisions=NOTHING,
         )
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False)
@@ -213,7 +211,7 @@ async def test_tightening_onto_data_that_violates_it_fails_loudly() -> None:
     conn = await aiosqlite.connect(path)
     try:
         plan = diff(
-            {}, _table({"type": "integer", "check": "c > 0"}), dialect="sqlite", decisions=NOTHING
+            {}, _table({"type": "integer", "check": "c > 0"}), engine="sqlite", decisions=NOTHING
         )
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False)
         await conn.execute("INSERT INTO t VALUES ('1', 5)")
@@ -223,7 +221,7 @@ async def test_tightening_onto_data_that_violates_it_fails_loudly() -> None:
         plan = diff(
             {"t": actual["t"]},
             _table({"type": "integer", "check": "c > 10"}),
-            dialect="sqlite",
+            engine="sqlite",
             decisions=NOTHING,
         )
 
@@ -244,27 +242,27 @@ async def test_tightening_onto_data_that_violates_it_fails_loudly() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_changing_on_delete_emits_an_operation(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_changing_on_delete_emits_an_operation(engine: str) -> None:
     """CASCADE and RESTRICT are opposite answers to "delete the parent"."""
     before = {"type": "text", "references": "u.id", "on_delete": "cascade"}
     after = {"type": "text", "references": "u.id", "on_delete": "restrict"}
 
-    assert _ops(before, after, dialect) != []
+    assert _ops(before, after, engine) != []
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_changing_on_update_emits_an_operation(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_changing_on_update_emits_an_operation(engine: str) -> None:
     before = {"type": "text", "references": "u.id", "on_update": "cascade"}
     after = {"type": "text", "references": "u.id", "on_update": "set null"}
 
-    assert _ops(before, after, dialect) != []
+    assert _ops(before, after, engine) != []
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_an_unchanged_cascade_emits_nothing(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_an_unchanged_cascade_emits_nothing(engine: str) -> None:
     same = {"type": "text", "references": "u.id", "on_delete": "cascade"}
-    assert _ops(same, dict(same), dialect) == []
+    assert _ops(same, dict(same), engine) == []
 
 
 # ---------------------------------------------------------------------------
@@ -282,13 +280,13 @@ async def test_a_removed_unique_is_gone_from_the_database() -> None:
         with_unique = _table({"type": "text", "unique": True})
         without = _table({"type": "text"})
 
-        plan = diff({}, with_unique, dialect="sqlite", decisions=NOTHING)
+        plan = diff({}, with_unique, engine="sqlite", decisions=NOTHING)
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False)
         await conn.execute("INSERT INTO t VALUES ('1', 'x')")
         await conn.commit()
 
         actual = await introspect(conn, "sqlite")
-        plan = diff({"t": actual["t"]}, without, dialect="sqlite", decisions=NOTHING)
+        plan = diff({"t": actual["t"]}, without, engine="sqlite", decisions=NOTHING)
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False)
         await conn.commit()
 
@@ -310,7 +308,7 @@ async def test_an_added_unique_constrains_the_database() -> None:
     path = tempfile.mktemp(suffix=".db")
     conn = await aiosqlite.connect(path)
     try:
-        plan = diff({}, _table({"type": "text"}), dialect="sqlite", decisions=NOTHING)
+        plan = diff({}, _table({"type": "text"}), engine="sqlite", decisions=NOTHING)
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False)
         await conn.commit()
 
@@ -318,7 +316,7 @@ async def test_an_added_unique_constrains_the_database() -> None:
         plan = diff(
             {"t": actual["t"]},
             _table({"type": "text", "unique": True}),
-            dialect="sqlite",
+            engine="sqlite",
             decisions=NOTHING,
         )
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False)
@@ -343,7 +341,7 @@ async def test_the_two_step_route_to_dropping_a_unique_column_works() -> None:
     conn = await aiosqlite.connect(path)
     try:
         plan = diff(
-            {}, _table({"type": "text", "unique": True}), dialect="sqlite", decisions=NOTHING
+            {}, _table({"type": "text", "unique": True}), engine="sqlite", decisions=NOTHING
         )
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False)
         await conn.execute("INSERT INTO t VALUES ('1', 'x')")
@@ -351,14 +349,14 @@ async def test_the_two_step_route_to_dropping_a_unique_column_works() -> None:
 
         actual = await introspect(conn, "sqlite")
         plan = diff(
-            {"t": actual["t"]}, _table({"type": "text"}), dialect="sqlite", decisions=NOTHING
+            {"t": actual["t"]}, _table({"type": "text"}), engine="sqlite", decisions=NOTHING
         )
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False)
         await conn.commit()
 
         actual = await introspect(conn, "sqlite")
         gone = {"t": {"columns": {"id": {"type": "text", "primary_key": True}}}}
-        plan = diff({"t": actual["t"]}, gone, dialect="sqlite", decisions=NOTHING)
+        plan = diff({"t": actual["t"]}, gone, engine="sqlite", decisions=NOTHING)
         await apply(conn, plan["operations"], plan["execution_order"], "sqlite", dry_run=False)
         await conn.commit()
 
@@ -407,8 +405,8 @@ def test_a_unique_index_on_the_current_side_is_folded_too() -> None:
         }
     }
 
-    assert diff(by_index, by_column, dialect="sqlite", decisions=NOTHING)["operations"] == []
-    assert diff(by_column, by_index, dialect="sqlite", decisions=NOTHING)["operations"] == []
+    assert diff(by_index, by_column, engine="sqlite", decisions=NOTHING)["operations"] == []
+    assert diff(by_column, by_index, engine="sqlite", decisions=NOTHING)["operations"] == []
 
 
 def test_a_multi_column_unique_index_marks_no_single_column_unique() -> None:
@@ -430,7 +428,7 @@ def test_a_multi_column_unique_index_marks_no_single_column_unique() -> None:
         }
     }
 
-    assert diff(pair, neither, dialect="sqlite", decisions=NOTHING)["operations"] == []
+    assert diff(pair, neither, engine="sqlite", decisions=NOTHING)["operations"] == []
 
     from declaro_persistum.differ.core import _with_unique_folded
 
@@ -487,21 +485,21 @@ def test_a_primary_key_is_not_marked_unique_by_its_own_index() -> None:
 #     second diff  alter_column {"check": {...}}   on every deploy
 #
 # SQLite and Turso store the CREATE TABLE text verbatim, so there the declared
-# spelling IS what comes back and the comparison is sound. It is dialect-
+# spelling IS what comes back and the comparison is sound. It is engine-
 # dependent now, which is the same shape `same_type` and the expression
 # defaults already have: a question that only has an answer per engine.
 
 
-@pytest.mark.parametrize("dialect", TEXT_ROUND_TRIPS)
-def test_a_check_change_is_noticed_where_the_text_round_trips(dialect: str) -> None:
+@pytest.mark.parametrize("engine", TEXT_ROUND_TRIPS)
+def test_a_check_change_is_noticed_where_the_text_round_trips(engine: str) -> None:
     assert (
-        _ops({"type": "integer", "check": "c > 0"}, {"type": "integer", "check": "c > 10"}, dialect)
+        _ops({"type": "integer", "check": "c > 0"}, {"type": "integer", "check": "c > 10"}, engine)
         != []
     )
 
 
-@pytest.mark.parametrize("dialect", ["postgresql", "turso"])
-def test_a_check_is_not_compared_where_the_engine_rewrites_it(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ["postgresql", "turso"])
+def test_a_check_is_not_compared_where_the_engine_rewrites_it(engine: str) -> None:
     """Both engines store their own form of the expression.
 
         PostgreSQL  n > 0 AND n < 100  ->  (n > 0) AND (n < 100)
@@ -511,7 +509,7 @@ def test_a_check_is_not_compared_where_the_engine_rewrites_it(dialect: str) -> N
     today, and is the alternative to an alter_column on every deploy.
     """
     assert (
-        _ops({"type": "integer", "check": "c > 0"}, {"type": "integer", "check": "c > 10"}, dialect)
+        _ops({"type": "integer", "check": "c > 0"}, {"type": "integer", "check": "c > 10"}, engine)
         == []
     )
 
@@ -534,4 +532,4 @@ def test_postgresql_does_not_loop_on_an_expression_it_rewrote(declared, stored) 
     current = {"t": {"columns": {"c": {"type": "text", "check": stored}}}}
     target = {"t": {"columns": {"c": {"type": "text", "check": declared}}}}
 
-    assert diff(current, target, dialect="postgresql", decisions=NOTHING)["operations"] == []
+    assert diff(current, target, engine="postgresql", decisions=NOTHING)["operations"] == []

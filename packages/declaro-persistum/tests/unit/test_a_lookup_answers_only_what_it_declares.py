@@ -19,7 +19,7 @@ Each of the others is a real answer rather than a silence, and each says so
 by naming the case in the table instead of hiding it behind a default:
 
     a literal          the None tag, which is what an untagged value carries
-    an untranslated    a default with no dialect spelling, which stays as it is
+    an untranslated    a default with no engine spelling, which stays as it is
     other              a statement whose first word is not one we classify
 """
 

@@ -71,7 +71,7 @@ def test_an_index_over_another_column_is_left_alone() -> None:
 
 def test_the_differ_writes_the_sequence_it_needs() -> None:
     """The plan, end to end, with the index also gone from the declaration."""
-    plan = diff(INDEXED, WITHOUT_EMAIL, dialect="sqlite", decisions=NOTHING)
+    plan = diff(INDEXED, WITHOUT_EMAIL, engine="sqlite", decisions=NOTHING)
 
     assert [op["op"] for op in plan["operations"]] == ["drop_index", "drop_column"]
 
@@ -83,7 +83,7 @@ def test_the_index_is_dropped_once_not_twice() -> None:
     the same index missing from the target. Without a word between them both
     write a `drop_index` and the engine refuses the second as missing.
     """
-    plan = diff(INDEXED, WITHOUT_EMAIL, dialect="sqlite", decisions=NOTHING)
+    plan = diff(INDEXED, WITHOUT_EMAIL, engine="sqlite", decisions=NOTHING)
 
     drops = [op for op in plan["operations"] if op["op"] == "drop_index"]
     assert len(drops) == 1, drops
@@ -106,6 +106,6 @@ def test_the_declaration_keeping_the_index_changes_nothing() -> None:
             "indexes": {"ix_email": {"columns": ["email"]}},
         }
     }
-    plan = diff(INDEXED, still_declared, dialect="sqlite", decisions=NOTHING)
+    plan = diff(INDEXED, still_declared, engine="sqlite", decisions=NOTHING)
 
     assert [op["op"] for op in plan["operations"]] == ["drop_index", "drop_column"]

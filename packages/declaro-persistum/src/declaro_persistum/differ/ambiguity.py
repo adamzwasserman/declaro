@@ -11,7 +11,7 @@ from declaro_persistum.types import (
     Ambiguity,
     Column,
     Decision,
-    Dialect,
+    Engine,
     Nothing,
     Schema,
     Table,
@@ -22,7 +22,7 @@ from declaro_persistum.types import (
 def detect_ambiguities(
     current: Schema,
     target: Schema,
-    dialect: Dialect,
+    engine: Engine,
     decisions: dict[str, Decision] | None | Nothing,
 ) -> list[Ambiguity]:
     """
@@ -39,7 +39,7 @@ def detect_ambiguities(
     Example:
         >>> current = {"users": {"columns": {"name": {"type": "text"}}}}
         >>> target = {"users": {"columns": {"full_name": {"type": "text"}}}}
-        >>> ambiguities = detect_ambiguities(current, target, dialect="postgresql", decisions=NOTHING)
+        >>> ambiguities = detect_ambiguities(current, target, engine="postgresql", decisions=NOTHING)
         >>> print(ambiguities[0]["type"])
         'possible_rename'
     """
@@ -71,7 +71,7 @@ def detect_ambiguities(
         ambiguity
         for table_name in sorted(common_tables)
         for ambiguity in _detect_column_ambiguities(
-            table_name, current[table_name], target[table_name], decisions, dialect
+            table_name, current[table_name], target[table_name], decisions, engine
         )
     )
 
@@ -128,7 +128,7 @@ def _detect_column_ambiguities(
     current: Table,
     target: Table,
     decisions: dict[str, Decision],
-    dialect: Dialect,
+    engine: Engine,
 ) -> list[Ambiguity]:
     """Detect possible column renames and destructive changes."""
     ambiguities: list[Ambiguity] = []
@@ -169,7 +169,7 @@ def _detect_column_ambiguities(
 
     # Detect destructive type changes
     type_ambiguities = _detect_type_change_ambiguities(
-        table_name, current_columns, target_columns, decisions, dialect
+        table_name, current_columns, target_columns, decisions, engine
     )
     ambiguities.extend(type_ambiguities)
 
@@ -239,7 +239,7 @@ def _detect_type_change_ambiguities(
     current_columns: dict[str, Column],
     target_columns: dict[str, Column],
     decisions: dict[str, Decision],
-    dialect: Dialect,
+    engine: Engine,
 ) -> list[Ambiguity]:
     """Detect potentially destructive type changes.
 
@@ -267,7 +267,7 @@ def _detect_type_change_ambiguities(
         if f"{table_name}_{col_name}_type" not in decisions
         for current_type in [current_columns[col_name].get("type", "").lower()]
         for target_type in [target_columns[col_name].get("type", "").lower()]
-        if not same_type(current_type, target_type, dialect)
+        if not same_type(current_type, target_type, engine)
         # The length or precision in the parentheses is not what loses data;
         # the base type is.
         and (current_type.split("(")[0], target_type.split("(")[0]) in RISKY_CHANGES

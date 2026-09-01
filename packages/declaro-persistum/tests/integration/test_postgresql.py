@@ -95,7 +95,7 @@ async def test_a_migration_creates_the_table_it_planned() -> None:
     conn = await _connect()
     try:
         await _clean(conn, "widgets")
-        plan = diff({}, WIDGETS, dialect="postgresql", decisions=NOTHING)
+        plan = diff({}, WIDGETS, engine="postgresql", decisions=NOTHING)
 
         result = await apply(
             conn,
@@ -117,7 +117,7 @@ async def test_introspection_reads_back_what_was_written() -> None:
     conn = await _connect()
     try:
         await _clean(conn, "widgets")
-        plan = diff({}, WIDGETS, dialect="postgresql", decisions=NOTHING)
+        plan = diff({}, WIDGETS, engine="postgresql", decisions=NOTHING)
         await apply(
             conn,
             plan["operations"],
@@ -144,7 +144,7 @@ async def test_migrating_twice_is_a_no_op() -> None:
     conn = await _connect()
     try:
         await _clean(conn, "widgets")
-        plan = diff({}, WIDGETS, dialect="postgresql", decisions=NOTHING)
+        plan = diff({}, WIDGETS, engine="postgresql", decisions=NOTHING)
         await apply(
             conn,
             plan["operations"],
@@ -160,7 +160,7 @@ async def test_migrating_twice_is_a_no_op() -> None:
         # `declaro_probe` carries leftovers from earlier runs. The first
         # version of this reported ten operations, eight of which were mine.
         second = diff(
-            {"widgets": actual["widgets"]}, WIDGETS, dialect="postgresql", decisions=NOTHING
+            {"widgets": actual["widgets"]}, WIDGETS, engine="postgresql", decisions=NOTHING
         )
 
         assert second["operations"] == [], (
@@ -176,7 +176,7 @@ async def test_a_dry_run_changes_nothing() -> None:
     conn = await _connect()
     try:
         await _clean(conn, "widgets")
-        plan = diff({}, WIDGETS, dialect="postgresql", decisions=NOTHING)
+        plan = diff({}, WIDGETS, engine="postgresql", decisions=NOTHING)
 
         result = await apply(
             conn,
@@ -213,7 +213,7 @@ async def test_a_declared_enum_value_can_be_stored() -> None:
     try:
         await _clean(conn, "posts", "_dp_enum_posts_status")
         expanded = expand_schema_enums(POSTS)
-        plan = diff({}, expanded, dialect="postgresql", decisions=NOTHING)
+        plan = diff({}, expanded, engine="postgresql", decisions=NOTHING)
         await apply(
             conn,
             plan["operations"],
@@ -239,7 +239,7 @@ async def test_an_undeclared_enum_value_is_refused() -> None:
     conn = await _connect()
     try:
         await _clean(conn, "posts", "_dp_enum_posts_status")
-        plan = diff({}, expand_schema_enums(POSTS), dialect="postgresql", decisions=NOTHING)
+        plan = diff({}, expand_schema_enums(POSTS), engine="postgresql", decisions=NOTHING)
         await apply(
             conn,
             plan["operations"],
@@ -271,7 +271,7 @@ async def test_an_enum_value_containing_an_apostrophe_survives() -> None:
                 }
             }
         }
-        plan = diff({}, expand_schema_enums(schema), dialect="postgresql", decisions=NOTHING)
+        plan = diff({}, expand_schema_enums(schema), engine="postgresql", decisions=NOTHING)
         await apply(
             conn,
             plan["operations"],
@@ -310,7 +310,7 @@ async def test_postgresql_keeps_its_own_expression_defaults() -> None:
                 }
             }
         }
-        plan = diff({}, schema, dialect="postgresql", decisions=NOTHING)
+        plan = diff({}, schema, engine="postgresql", decisions=NOTHING)
         await apply(
             conn,
             plan["operations"],
@@ -331,7 +331,7 @@ async def test_generated_sql_is_sql_this_server_accepts() -> None:
     conn = await _connect()
     try:
         await _clean(conn, "widgets")
-        plan = diff({}, WIDGETS, dialect="postgresql", decisions=NOTHING)
+        plan = diff({}, WIDGETS, engine="postgresql", decisions=NOTHING)
 
         statements = generate_sql(plan["operations"], plan["execution_order"], "postgresql")
 
@@ -356,7 +356,7 @@ async def test_a_failed_operation_rolls_the_whole_migration_back() -> None:
         plan = diff(
             {},
             {"good": {"columns": {"id": {"type": "text"}}}},
-            dialect="postgresql",
+            engine="postgresql",
             decisions=NOTHING,
         )
         broken = list(plan["operations"]) + [

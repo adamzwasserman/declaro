@@ -56,7 +56,7 @@ You write no migration scripts. You never say "add a column." You declare that t
 
 Reading and writing follow the same rule as the schema. You name a model and the columns you care about, and you get back instances of that model.
 
-There are four ways to say it. They are dialects: four grammars for one meaning. A team arriving from Django writes what it already knows, and so does a team arriving from Prisma or SQLAlchemy.
+There are four ways to say it. They are grammars: four ways of phrasing one meaning. A team arriving from Django writes what it already knows, and so does a team arriving from Prisma or SQLAlchemy.
 
 **Pseudo-SQL**, the library's own, reading in SQL's word order without SQL's text:
 
@@ -84,11 +84,11 @@ Person.query.filter_by(name="bob").with_only("id", "name")
 
 All four read the same models, refuse the same undeclared columns, and produce the same rows. Pick the one your team already speaks.
 
-A dialect borrows the other tool's grammar and nothing else. It does not bring that tool's machinery: no session holding state, no manager attached to a class, no second place where a column can be named. Each is a thin skin over the same declaration, which is what keeps four surfaces from becoming four sets of rules.
+A grammar borrows the other tool's phrasing and nothing else. It does not bring that tool's machinery: no session holding state, no manager attached to a class, no second place where a column can be named. Each is a thin skin over the same declaration, which is what keeps four surfaces from becoming four sets of rules.
 
-And no dialect is a way back to SQL. If one of them could take a string, all four would eventually be judged by it.
+And no grammar is a way back to SQL. If one of them could take a string, all four would eventually be judged by it.
 
-A condition is data in every dialect, so it composes the same way everywhere:
+A condition is data in every grammar, so it composes the same way everywhere:
 
 ```python
 {"age": {"gt": 18}, "status": "active"}
@@ -99,7 +99,7 @@ Writing has the same shape. You declare that a row exists and the library makes 
 
 ## What you can ask for
 
-The vocabulary is small and every word means one thing. Each dialect spells these its own way; the meanings do not change.
+The vocabulary is small and every word means one thing. Each grammar spells these its own way; the meanings do not change.
 
 ### Rows
 

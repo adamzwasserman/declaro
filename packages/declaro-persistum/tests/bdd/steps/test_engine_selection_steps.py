@@ -1,13 +1,13 @@
-"""Steps for cli/dialect_selection.feature: no fakes, because nothing here reaches out.
+"""Steps for cli/engine_selection.feature: no fakes, because nothing here reaches out.
 
 WHAT THIS REPLACES. Two tests in `test_cli_main.py` replaced a command handler
 with a fake, ran the whole program, and read a variable the fake had captured,
-to find out which engine had been chosen. The choice is `_chosen_dialect`, a
+to find out which engine had been chosen. The choice is `_chosen_engine`, a
 pure function over the parsed arguments and the connection string, so the fake
 sat between the test and a value already being returned.
 
 `argparse.Namespace` is the real type the real parser produces, not a stand-in
-for one: `_chosen_dialect` reads `args.dialect` and nothing else off it.
+for one: `_chosen_engine` reads `args.engine` and nothing else off it.
 """
 
 from __future__ import annotations
@@ -19,16 +19,16 @@ import pytest
 from pytest_bdd import parsers, scenarios, then, when
 
 from declaro_persistum.cli.main import (
-    _chosen_dialect,
+    _chosen_engine,
     _detect_from_url,
-    _keep_given_dialect,
+    _keep_given_engine,
     _refuse_unknown_prefix,
-    _the_named_dialect,
-    detect_dialect,
+    _the_named_engine,
+    detect_engine,
     get_connection_string,
 )
 
-scenarios("../features/cli/dialect_selection.feature")
+scenarios("../features/cli/engine_selection.feature")
 
 
 class Ctx(TypedDict, total=False):
@@ -51,9 +51,9 @@ def _call(ctx: Ctx, fn: Any, *args: Any) -> None:
         ctx["refusal"] = refused
 
 
-@when(parsers.parse('_keep_given_dialect is given "{given}" alongside the url "{url}"'))
+@when(parsers.parse('_keep_given_engine is given "{given}" alongside the url "{url}"'))
 def _when_keep_given(ctx, given, url):
-    ctx["answer"] = _keep_given_dialect(given, url)
+    ctx["answer"] = _keep_given_engine(given, url)
 
 
 @when(parsers.parse('_detect_from_url is given no engine alongside the url "{url}"'))
@@ -61,37 +61,37 @@ def _when_detect(ctx, url):
     ctx["answer"] = _detect_from_url(None, url)
 
 
-@when(parsers.parse('an operator types --dialect "{given}" with the url "{url}"'))
-def _when_typed_dialect(ctx, given, url):
-    ctx["answer"] = _chosen_dialect(argparse.Namespace(dialect=given), url)
+@when(parsers.parse('an operator types --engine "{given}" with the url "{url}"'))
+def _when_typed_engine(ctx, given, url):
+    ctx["answer"] = _chosen_engine(argparse.Namespace(engine=given), url)
 
 
-@when(parsers.parse('an operator types no --dialect with the url "{url}"'))
-def _when_no_dialect(ctx, url):
-    ctx["answer"] = _chosen_dialect(argparse.Namespace(dialect=None), url)
+@when(parsers.parse('an operator types no --engine with the url "{url}"'))
+def _when_no_engine(ctx, url):
+    ctx["answer"] = _chosen_engine(argparse.Namespace(engine=None), url)
 
 
-@when("an operator types no --dialect with no url")
+@when("an operator types no --engine with no url")
 def _when_nothing(ctx):
-    ctx["answer"] = _chosen_dialect(argparse.Namespace(dialect=None), None)
+    ctx["answer"] = _chosen_engine(argparse.Namespace(engine=None), None)
 
 
-@when(parsers.parse('detect_dialect is given the url "{url}"'))
-def _when_detect_dialect(ctx, url):
-    _call(ctx, detect_dialect, url)
+@when(parsers.parse('detect_engine is given the url "{url}"'))
+def _when_detect_engine(ctx, url):
+    _call(ctx, detect_engine, url)
 
 
 @when("_refuse_unknown_prefix is given no prefix matches at all")
 def _when_refuse(ctx):
-    # THE EMPTY LIST IS THE INPUT, not a placeholder. `detect_dialect` builds
+    # THE EMPTY LIST IS THE INPUT, not a placeholder. `detect_engine` builds
     # a list of every prefix that matched and hands it on; empty is the case
     # this half answers.
     _call(ctx, _refuse_unknown_prefix, [])
 
 
-@when(parsers.parse('_the_named_dialect is given the prefix matches "{named}"'))
+@when(parsers.parse('_the_named_engine is given the prefix matches "{named}"'))
 def _when_named(ctx, named):
-    _call(ctx, _the_named_dialect, [named])
+    _call(ctx, _the_named_engine, [named])
 
 
 @when(parsers.parse('an operator types the url "{typed}" with "{env}" in the environment'))
@@ -119,10 +119,10 @@ def _then_no_engine(ctx):
     assert ctx["answer"] is None, ctx["answer"]
 
 
-@then("it refuses and says to pass --dialect")
+@then("it refuses and says to pass --engine")
 def _then_refuses(ctx):
     assert ctx["refusal"] is not None, f"it answered {ctx['answer']!r} instead"
-    assert "--dialect" in str(ctx["refusal"]), ctx["refusal"]
+    assert "--engine" in str(ctx["refusal"]), ctx["refusal"]
 
 
 @then(parsers.parse('the connection string is "{expected}"'))

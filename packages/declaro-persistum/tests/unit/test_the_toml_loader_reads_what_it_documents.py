@@ -159,7 +159,7 @@ expression = "lo < hi"
     async def run() -> str:
         connection = await aiosqlite.connect(os.path.join(tempfile.mkdtemp(), "t.db"))
         try:
-            plan = diff({}, schema, dialect="sqlite", decisions=NOTHING)
+            plan = diff({}, schema, engine="sqlite", decisions=NOTHING)
             await apply(
                 connection,
                 plan["operations"],

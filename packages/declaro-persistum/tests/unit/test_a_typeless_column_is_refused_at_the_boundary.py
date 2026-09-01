@@ -40,7 +40,7 @@ from declaro_persistum.validator import validate_schema
 
 pytestmark = [pytest.mark.precommit]
 
-DIALECTS = ["sqlite", "turso", "postgresql"]
+ENGINES = ["sqlite", "turso", "postgresql"]
 
 
 def _schema(column: dict) -> dict:
@@ -100,12 +100,12 @@ def test_an_unknown_type_is_still_only_a_warning() -> None:
     assert report["warnings"], report
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_the_renderers_still_default_and_that_is_recorded(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_the_renderers_still_default_and_that_is_recorded(engine: str) -> None:
     """Not a demand that they keep doing it. A record that they do.
 
     They are unreachable for a schema that went through the validator. If a
     renderer is ever given its own refusal, this test is the one that should
     fail, and its failure is the reminder to delete it.
     """
-    assert "TEXT" in column_definition("c", {}, dialect).upper()
+    assert "TEXT" in column_definition("c", {}, engine).upper()

@@ -37,7 +37,7 @@ def _applier(engine: str) -> Any:
 
 @when(parsers.parse('the "{engine}" applier is asked which engine it is'))
 def _when_engine(ctx, engine):
-    ctx["said"] = _applier(engine).get_dialect()
+    ctx["said"] = _applier(engine).get_engine()
 
 
 @when(parsers.parse('the "{engine}" applier is asked how it scopes a batch'))
@@ -58,8 +58,8 @@ def _then_says(ctx, expected):
 @then("each one says which engine it is and how it scopes a batch")
 def _then_both(ctx):
     for engine, module in ctx["all_of_them"].items():
-        assert module.get_dialect() == engine, (
-            f"the {engine} applier calls itself {module.get_dialect()!r}"
+        assert module.get_engine() == engine, (
+            f"the {engine} applier calls itself {module.get_engine()!r}"
         )
         assert module.get_transaction_mode(), (
             f"the {engine} applier does not say how it scopes a batch"

@@ -40,7 +40,7 @@ from typing import Any
 import pytest
 
 from declaro_persistum.applier import apply
-from declaro_persistum.applier.turso import get_dialect, get_transaction_mode
+from declaro_persistum.applier.turso import get_engine, get_transaction_mode
 from declaro_persistum.exceptions import MigrationError
 
 pytestmark = [pytest.mark.precommit, pytest.mark.turso]
@@ -179,7 +179,7 @@ async def test_a_dry_run_returns_the_sql_and_touches_nothing() -> None:
         await connection.close()
 
 
-def test_the_module_names_its_dialect_and_transaction_mode() -> None:
+def test_the_module_names_its_engine_and_transaction_mode() -> None:
     """Two constants the dispatch tables read, and nothing had read them."""
-    assert get_dialect() == "turso"
+    assert get_engine() == "turso"
     assert get_transaction_mode() == "per_operation"

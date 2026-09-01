@@ -1,6 +1,6 @@
 """Moving rows between databases in bulk. Functions in a table, not classes.
 
-    loader = BULK_LOADERS[dialect]
+    loader = BULK_LOADERS[engine]
     await loader["load_rows"](conn, "users", columns, rows)
 
 The lookup IS the dispatch (Rule 1). There is no factory: `create_bulk_loader`
@@ -10,7 +10,7 @@ and it is gone.
 WHAT WAS HERE BEFORE, AND WHY THIS IS A REPAIR RATHER THAN A REWRITE.
 `PostgreSQLBulkLoader` and `GenericBulkLoader` were stateless classes: no
 `__init__`, no fields, and `self` used once in the whole file. 7a5c9ac deleted
-them and kept the factory returning them, so every dialect raised NameError from
+them and kept the factory returning them, so every engine raised NameError from
 that commit until now, and no test noticed because no test ran them.
 
 The SQL below is the SQL those classes ran, recovered with `git show
@@ -19,7 +19,7 @@ load-bearing: `ORDER BY ctid` and `ORDER BY rowid` are what make a paged read
 stable, and inventing a plausible ordering would silently duplicate and drop
 rows across page boundaries.
 
-TWO IMPLEMENTATIONS, THREE DIALECTS. SQLite and Turso both speak DB-API and
+TWO IMPLEMENTATIONS, THREE ENGINES. SQLite and Turso both speak DB-API and
 share one entry, so a fix lands in one place. PostgreSQL gets its own because
 `copy_records_to_table` is 10-100x faster than INSERT and because its FK switch
 is a session setting rather than a PRAGMA.
@@ -147,7 +147,7 @@ class WriteProgress(Protocol):
 # part of what an engine has to know how to do. `transfer.py` used to answer
 # `hasattr(conn, "fetch")` at three sites to decide between asyncpg and the
 # DB-API drivers, which is a dispatch on type in a package built on dispatch
-# tables. The dialect was already known and the loader was already passed in
+# tables. The engine was already known and the loader was already passed in
 # and ignored.
 #
 # THREE THINGS DIFFER AND NONE OF THEM IS COSMETIC. asyncpg takes `$1`
@@ -293,7 +293,7 @@ async def postgres_load_rows(
     columns: list[str],
     rows: Sequence[tuple[Any, ...]],
 ) -> int:
-    """COPY, not INSERT. That is the whole reason this dialect is separate."""
+    """COPY, not INSERT. That is the whole reason this engine is separate."""
     return await _WHEN_POSTGRES_HAS_ROWS[bool(rows)](conn, table, columns, rows)
 
 

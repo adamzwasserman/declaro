@@ -19,7 +19,7 @@ Nothing between here and there re-checks, and nothing should have to.
 
 WHAT IS DELIBERATELY NOT CHECKED: whether the query is valid SQL. That needs an
 engine, the engine says so at apply time, and a loader guessing at SQL validity
-would reject dialect-specific syntax it does not know.
+would reject engine-specific syntax it does not know.
 """
 
 from __future__ import annotations

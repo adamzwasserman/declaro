@@ -99,5 +99,5 @@ Feature: Every string is checked or bound, never interpolated
 
   Scenario: no public function takes the name of an engine
     When every public function's arguments are read
-    Then none of them takes a dialect or an engine name
+    Then none of them takes an engine or an engine name
     And the engine is decided once, where the database is opened

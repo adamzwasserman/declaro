@@ -85,7 +85,7 @@ def _reconstruction_ops():
     `details: {"column": ..., "changes": {...}}`, so the applier raised
     `KeyError: 'changes'` and reported it as "Failed to execute operation".
     """
-    plan = diff(ACTUAL, TARGET, dialect="sqlite", decisions={})
+    plan = diff(ACTUAL, TARGET, engine="sqlite", decisions={})
     ops = [o for o in plan["operations"] if o["op"] == "alter_column"]
     assert ops, "the differ no longer emits alter_column for a nullability change"
     return ops
@@ -269,7 +269,7 @@ async def test_turso_leaves_enforcement_as_it_found_it(tmp_path, start_enforcing
 
             ops = [
                 o
-                for o in diff(ACTUAL, TARGET, dialect="turso", decisions={})["operations"]
+                for o in diff(ACTUAL, TARGET, engine="turso", decisions={})["operations"]
                 if o["op"] == "alter_column"
             ]
             result = await apply_operations(

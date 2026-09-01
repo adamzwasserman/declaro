@@ -67,15 +67,15 @@ def _quoted(name: str) -> str:
 
 
 @pytest.mark.parametrize("name", AWKWARD)
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_a_table_with_an_awkward_name_is_introspected(dialect: str, name: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_a_table_with_an_awkward_name_is_introspected(engine: str, name: str) -> None:
     """The measured crash. One such table broke the whole introspection."""
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
         await connection.execute(f"CREATE TABLE {_quoted(name)} (id INTEGER PRIMARY KEY, v TEXT)")
         await connection.commit()
 
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
 
         assert name in actual, sorted(actual)
     finally:
@@ -83,20 +83,20 @@ async def test_a_table_with_an_awkward_name_is_introspected(dialect: str, name: 
 
 
 @pytest.mark.parametrize("name", AWKWARD)
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_its_columns_come_back_too(dialect: str, name: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_its_columns_come_back_too(engine: str, name: str) -> None:
     """The floor. A table reported with no columns is a table reported wrong.
 
     Every PRAGMA that reads a column, an index or a foreign key takes the
     table name the same way, so a fix that only repaired the catalogue query
     would leave the table present and empty.
     """
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
         await connection.execute(f"CREATE TABLE {_quoted(name)} (id INTEGER PRIMARY KEY, v TEXT)")
         await connection.commit()
 
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
 
         assert sorted(actual[name]["columns"]) == ["id", "v"], actual[name]
     finally:
@@ -104,36 +104,36 @@ async def test_its_columns_come_back_too(dialect: str, name: str) -> None:
 
 
 @pytest.mark.parametrize("name", AWKWARD)
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_its_index_comes_back_too(dialect: str, name: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_its_index_comes_back_too(engine: str, name: str) -> None:
     """`index_list` and the sqlite_master index query both take the name."""
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
         await connection.execute(f"CREATE TABLE {_quoted(name)} (id INTEGER PRIMARY KEY, v TEXT)")
         await connection.execute(f'CREATE INDEX "ix_v" ON {_quoted(name)} (v)')
         await connection.commit()
 
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
 
         assert "ix_v" in actual[name].get("indexes", {}), actual[name]
     finally:
         await connection.close()
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_one_awkward_table_does_not_hide_the_others(dialect: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_one_awkward_table_does_not_hide_the_others(engine: str) -> None:
     """The consequence that makes this worse than one bad row.
 
     Introspection reads every table in one pass, so a name that breaks the
     query breaks the answer for the whole database.
     """
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
         for name in ("ordinary", "od'd"):
             await connection.execute(f"CREATE TABLE {_quoted(name)} (id INTEGER PRIMARY KEY)")
         await connection.commit()
 
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
 
         assert {"ordinary", "od'd"} <= set(actual), sorted(actual)
     finally:

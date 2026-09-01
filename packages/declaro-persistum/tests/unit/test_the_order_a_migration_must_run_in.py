@@ -183,7 +183,7 @@ def test_the_differ_hands_the_sort_what_the_edge_needs() -> None:
     }
     target = {"users": {"columns": {"id": {"type": "integer"}}}}
 
-    plan = diff(current, target, dialect="sqlite", decisions=NOTHING)
+    plan = diff(current, target, engine="sqlite", decisions=NOTHING)
     operations = plan["operations"]
 
     dropped_index = next(i for i, op in enumerate(operations) if op["op"] == "drop_index")

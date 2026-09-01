@@ -102,7 +102,7 @@ async def test_a_clean_migration_reports_success() -> None:
         }
         ops = [
             o
-            for o in diff(actual, target, dialect="turso", decisions={})["operations"]
+            for o in diff(actual, target, engine="turso", decisions={})["operations"]
             if o["op"] == "alter_column"
         ]
         async with writing(db) as conn:

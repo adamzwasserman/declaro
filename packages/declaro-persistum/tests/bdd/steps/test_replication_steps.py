@@ -138,7 +138,7 @@ def _make(tmp_path, *, replicated=True, recorder=None, shutdown="exit_immediatel
 
     db = Database(
         path=str(tmp_path / "copy.db"),
-        dialect="sqlite",
+        engine="sqlite",
         journal_mode="wal",
         busy_timeout_s=5.0,
         primary="https://example.turso.io" if replicated else None,

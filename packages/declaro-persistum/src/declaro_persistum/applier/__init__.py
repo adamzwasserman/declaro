@@ -1,6 +1,6 @@
-"""Applying migrations: one function per dialect, chosen by a dispatch table.
+"""Applying migrations: one function per engine, chosen by a dispatch table.
 
-`create_applier(dialect)` was the same shape as `create_inspector` — a table
+`create_applier(engine)` was the same shape as `create_inspector` — a table
 over CLASSES that instantiated the winner on the way out. The classes were
 stateless, and the SQL generators beside them were already module-level
 functions. Only `apply()` lived on the class, and it took a connection and a
@@ -8,7 +8,7 @@ list of operations and ran them, which is a function's job.
 
     result = await apply(conn, operations, order, "sqlite", dry_run=False)
 
-An unknown dialect raises `ValueError` naming the ones that exist, rather than
+An unknown engine raises `ValueError` naming the ones that exist, rather than
 a bare `KeyError` that says what was asked for and not what was available.
 """
 
@@ -18,11 +18,11 @@ from typing import Any
 
 from declaro_persistum.applier import postgresql, sqlite, turso
 from declaro_persistum.boundary import helper
-from declaro_persistum.types import Dialect, for_dialect
+from declaro_persistum.types import Engine, for_engine
 
 # A PLAIN DICT. This was `class _Appliers(dict)` with one method, `__missing__`,
 # subclassing dict to borrow its behaviour and override a hook. The lookup is
-# what varied, so the lookup is a function now: `for_dialect` in `types.py`,
+# what varied, so the lookup is a function now: `for_engine` in `types.py`,
 # shared with the inspector table that had the identical class beside it.
 APPLIERS: dict[str, Any] = {
     "postgresql": postgresql.apply,
@@ -36,7 +36,7 @@ async def apply(
     connection: Any,
     operations: list[dict[str, Any]],
     execution_order: list[int],
-    dialect: Dialect,
+    engine: Engine,
     *,
     dry_run: bool,
 ) -> Any:
@@ -59,10 +59,10 @@ async def apply(
     signature with `**kwargs` accepts every keyword, so no gate can check any
     call to it. The sample two paragraphs above read
     `apply(conn, operations, "sqlite")` -- which binds "sqlite" to
-    `execution_order` and never passes `dialect` -- for a full session, in the
+    `execution_order` and never passes `engine` -- for a full session, in the
     docstring of the package's main entry point, and nothing could see it.
     """
-    applier = for_dialect(APPLIERS, dialect, "Appliers")
+    applier = for_engine(APPLIERS, engine, "Appliers")
     return await applier(connection, operations, execution_order, dry_run=dry_run)
 
 
@@ -80,7 +80,7 @@ SQL_GENERATORS: dict[str, Any] = {
 def generate_sql(
     operations: list[dict[str, Any]],
     execution_order: list[int],
-    dialect: Dialect,
+    engine: Engine,
 ) -> list[str]:
     """Render the operations as SQL, in dependency order, without running them.
 
@@ -93,10 +93,10 @@ def generate_sql(
 
     `declaro generate` calls it, so the command worked on PostgreSQL and raised
     AttributeError on the two backends a developer is likeliest to be running.
-    Nothing in the loop is dialect-specific, so putting it here removes the
+    Nothing in the loop is engine-specific, so putting it here removes the
     place the copies could go missing from.
     """
-    render = for_dialect(SQL_GENERATORS, dialect, "SQL generators")
+    render = for_engine(SQL_GENERATORS, engine, "SQL generators")
     return [render(operations[i]) for i in execution_order]
 
 

@@ -55,7 +55,7 @@ _STEPS = _ROOT / "tests" / "bdd"
 #
 # THE `declared/` FILES ARE A SPECIFICATION, NOT COVERAGE. They describe the
 # package HOW-IT-SHOULD-WORK.md says this is, and most of what they describe
-# does not exist yet: three of the four dialects, declared views, declared
+# does not exist yet: three of the four grammars, declared views, declared
 # constraints. Binding them today would turn 52 scenarios red and say nothing
 # a reader could act on, because the answer to every one of them is "not
 # built". They are here so the requirement is written down in the form the
@@ -72,12 +72,12 @@ KNOWN_UNBOUND: dict[str, str] = {
     "a_condition_is_data.feature": _SPEC,
     "absence_is_an_answer.feature": _SPEC,
     "everything_gets_declared.feature": _SPEC,
-    "four_dialects_one_meaning.feature": _SPEC,
+    "four_grammars_one_meaning.feature": _SPEC,
     "the_models_are_the_truth.feature": _SPEC,
     "the_schema_is_declared.feature": _SPEC,
-    # The decision the rest of the surface rests on: what a dialect produces.
-    # A Query today is {sql, params, dialect} and carries SQL text, so four
-    # dialects would be four ways of building a string.
+    # The decision the rest of the surface rests on: what an engine produces.
+    # A Query today is {sql, params, engine} and carries SQL text, so four
+    # engines would be four ways of building a string.
     "a_question_is_data.feature": _SPEC,
     # The schema axis: what a model may declare, what the library owns, what a
     # change would do before it does it, and what a view and an index are.

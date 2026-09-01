@@ -1,4 +1,4 @@
-"""Every table keyed by dialect must hold all three, and be found automatically.
+"""Every table keyed by engine must hold all three, and be found automatically.
 
 FOUR TIMES IN ONE SESSION A FIX LANDED ON ONE COPY OF A PAIR:
 
@@ -15,10 +15,10 @@ FOUR TIMES IN ONE SESSION A FIX LANDED ON ONE COPY OF A PAIR:
 
 Each was found by running the thing on a second engine, and each was fixed by
 hand. This is the shape rather than the instances: a package with one module
-per dialect drifts unless something counts.
+per engine drifts unless something counts.
 
 WHAT THIS COUNTS. Every module-level dict in the package whose keys look like
-dialect names, found by reading the modules rather than listed here, because a
+engine names, found by reading the modules rather than listed here, because a
 list is the thing that goes stale. Each must hold all three.
 
 WHAT IT CANNOT SEE, said plainly. It checks that an entry EXISTS, not that the
@@ -39,11 +39,11 @@ import declaro_persistum
 
 pytestmark = [pytest.mark.precommit]
 
-DIALECTS = {"postgresql", "sqlite", "turso"}
+ENGINES = {"postgresql", "sqlite", "turso"}
 
 
 def _dispatch_tables() -> dict[str, dict]:
-    """Every module-level dict keyed by dialect names, across the package."""
+    """Every module-level dict keyed by engine names, across the package."""
     found: dict[str, dict] = {}
     modules = [declaro_persistum]
     for info in pkgutil.walk_packages(declaro_persistum.__path__, prefix="declaro_persistum."):
@@ -60,9 +60,9 @@ def _dispatch_tables() -> dict[str, dict]:
             if not isinstance(value, dict) or not value:
                 continue
             keys = set(value)
-            # Keyed by dialect: every key is one, and at least two are there.
-            # One entry is a lookup that happens to use a dialect name.
-            if keys <= DIALECTS and len(keys) >= 2:
+            # Keyed by engine: every key is one, and at least two are there.
+            # One entry is a lookup that happens to use an engine name.
+            if keys <= ENGINES and len(keys) >= 2:
                 found[f"{module.__name__}.{name}"] = value
     return found
 
@@ -85,13 +85,13 @@ def test_the_scan_finds_the_tables_this_package_is_known_to_have() -> None:
 
 
 @pytest.mark.parametrize("name", sorted(TABLES))
-def test_it_covers_every_dialect(name: str) -> None:
-    """A dialect missing from a table is a feature missing from an engine."""
-    missing = DIALECTS - set(TABLES[name])
+def test_it_covers_every_engine(name: str) -> None:
+    """An engine missing from a table is a feature missing from an engine."""
+    missing = ENGINES - set(TABLES[name])
 
     assert not missing, (
         f"{name} has no entry for {sorted(missing)}. Every table keyed by "
-        f"dialect answers a question the package asks of all three engines."
+        f"engine answers a question the package asks of all three engines."
     )
 
 
@@ -99,8 +99,8 @@ def test_it_covers_every_dialect(name: str) -> None:
 def test_every_entry_is_callable_or_data(name: str) -> None:
     """The floor under the test above.
 
-    A table holding `None` for a dialect passes a key check and fails at the
+    A table holding `None` for an engine passes a key check and fails at the
     first call, which is the failure the key check exists to move earlier.
     """
-    for dialect, entry in TABLES[name].items():
-        assert entry is not None, f"{name}[{dialect!r}] is None"
+    for engine, entry in TABLES[name].items():
+        assert entry is not None, f"{name}[{engine!r}] is None"

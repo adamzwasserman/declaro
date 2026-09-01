@@ -21,7 +21,7 @@ from declaro_persistum.inspector.shared import (
 )
 from declaro_persistum.types import (
     Column,
-    Dialect,
+    Engine,
     type_of,
     written_as,
 )
@@ -111,31 +111,31 @@ TYPE_MAPS: dict[str, TypeMap] = {
 
 
 @helper
-def _one_absence_is_not_the_other(left: Any, right: Any, _dialect: Dialect) -> bool:
+def _one_absence_is_not_the_other(left: Any, right: Any, _engine: Engine) -> bool:
     """One side has no type, so the answer is whether both sides have none."""
     return bool(left is right)
 
 
 @helper
-def _the_same_spelling(left: Any, right: Any, dialect: Dialect) -> bool:
+def _the_same_spelling(left: Any, right: Any, engine: Engine) -> bool:
     """Two declared types, compared as this engine writes them."""
-    return bool(map_type(left, dialect) == map_type(right, dialect))
+    return bool(map_type(left, engine) == map_type(right, engine))
 
 
 # WHETHER A TYPE IS MISSING ON EITHER SIDE. Absence is a different question
 # from difference, and each has its own answer rather than a shared branch.
-_COMPARE_TYPES: dict[bool, Callable[[Any, Any, Dialect], bool]] = {
+_COMPARE_TYPES: dict[bool, Callable[[Any, Any, Engine], bool]] = {
     True: _one_absence_is_not_the_other,
     False: _the_same_spelling,
 }
 
 
 @helper
-def same_type(left: str | None, right: str | None, dialect: Dialect) -> bool:
+def same_type(left: str | None, right: str | None, engine: Engine) -> bool:
     """Do two declared types name the same column ON THIS ENGINE?
 
     `uuid` and `text` are one column on SQLite and two on PostgreSQL, so the
-    question cannot be answered without the dialect and a string comparison
+    question cannot be answered without the engine and a string comparison
     cannot answer it at all. The differ compared the raw strings and therefore
     proposed a type change on every migration after the first: introspection
     reports what the engine stored, the models file says what was declared,
@@ -144,37 +144,37 @@ def same_type(left: str | None, right: str | None, dialect: Dialect) -> bool:
     Absent on either side means the caller has no type to compare, which is
     not the same as the types differing; two absences are equal and one is not.
     """
-    return _COMPARE_TYPES[left is None or right is None](left, right, dialect)
+    return _COMPARE_TYPES[left is None or right is None](left, right, engine)
 
 
 @helper
-def _refuse_unmappable_dialect(dialect: Dialect) -> Dialect:
+def _refuse_unmappable_engine(engine: Engine) -> Engine:
     """No engine by this name declares how it spells a type."""
-    raise ValueError(f"cannot spell types for dialect {dialect!r}. Supported: {sorted(TYPE_MAPS)}.")
+    raise ValueError(f"cannot spell types for engine {engine!r}. Supported: {sorted(TYPE_MAPS)}.")
 
 
 @helper
-def _the_mappable_dialect(dialect: Dialect) -> Dialect:
+def _the_mappable_engine(engine: Engine) -> Engine:
     """An engine with a type mapper, handed back to be looked up."""
-    return dialect
+    return engine
 
 
 # The refusal happens before the lookup, so `TYPE_MAPS` is read with [] and a
-# dialect it does not hold raises here rather than through a `.get` fallback.
-_WHEN_UNMAPPABLE: dict[bool, Callable[[Dialect], Dialect]] = {
-    True: _the_mappable_dialect,
-    False: _refuse_unmappable_dialect,
+# engine it does not hold raises here rather than through a `.get` fallback.
+_WHEN_UNMAPPABLE: dict[bool, Callable[[Engine], Engine]] = {
+    True: _the_mappable_engine,
+    False: _refuse_unmappable_engine,
 }
 
 
 @helper
-def map_type(type_str: str, dialect: Dialect) -> str:
+def map_type(type_str: str, engine: Engine) -> str:
     """Spell a declared type for one engine.
 
-    `dialect` is required (Rule 14). A default would have meant PostgreSQL
+    `engine` is required (Rule 14). A default would have meant PostgreSQL
     silently receiving SQLite affinity, which is the defect this replaced.
     """
-    mappable = _WHEN_UNMAPPABLE[dialect in TYPE_MAPS](dialect)
+    mappable = _WHEN_UNMAPPABLE[engine in TYPE_MAPS](engine)
     return TYPE_MAPS[mappable](type_str)
 
 
@@ -245,7 +245,7 @@ _NO_UUID = MappingProxyType(
 
 # WRITTEN ONCE, WHOLE. This was built with sqlite's entry and then mutated on
 # the next two lines to add turso and postgresql, so the table a reader sees
-# was not the table the code used. Every dialect is here, and the mapping
+# was not the table the code used. Every engine is here, and the mapping
 # cannot be changed after import.
 NO_EQUIVALENT = MappingProxyType(
     {
@@ -257,7 +257,7 @@ NO_EQUIVALENT = MappingProxyType(
 
 
 @helper
-def _the_dialects_spelling(spelled: dict[str, str], key: str, _value: Any) -> Any:
+def _the_engines_spelling(spelled: dict[str, str], key: str, _value: Any) -> Any:
     """This engine writes the expression its own way."""
     return spelled[key]
 
@@ -268,36 +268,34 @@ def _as_declared(_spelled: dict[str, str], _key: str, value: Any) -> Any:
     return value
 
 
-# WHETHER THIS ENGINE RESPELLS THE EXPRESSION. The dialect is a closed
+# WHETHER THIS ENGINE RESPELLS THE EXPRESSION. The engine is a closed
 # vocabulary and is read by subscript; the expression is not, and both of its
 # cases are named rather than one hiding in a `.get` fallback.
 _SPELLED_FOR: dict[bool, Callable[[dict[str, str], str, Any], Any]] = {
-    True: _the_dialects_spelling,
+    True: _the_engines_spelling,
     False: _as_declared,
 }
 
 
 @helper
-def _untranslated_default(value: Any, _dialect: str, _column: str) -> Any:
-    """A number, a flag or nothing: the same in every dialect.
+def _untranslated_default(value: Any, _engine: str, _column: str) -> Any:
+    """A number, a flag or nothing: the same in every engine.
 
-    Only text can name an expression, so only text has a dialect spelling.
+    Only text can name an expression, so only text has an engine spelling.
     """
     return value
 
 
 @helper
-def _refuse_unspellable_expression(
-    value: str, dialect: str, column: str, refusal: list[str]
-) -> str:
+def _refuse_unspellable_expression(value: str, engine: str, column: str, refusal: list[str]) -> str:
     """This engine has no way to write the expression the column declares."""
     raise ValueError(
-        f"column {column!r} defaults to {value}, which {dialect} cannot spell. {refusal[0]}."
+        f"column {column!r} defaults to {value}, which {engine} cannot spell. {refusal[0]}."
     )
 
 
 @helper
-def _the_spellable_expression(value: str, _dialect: str, _column: str, _refusal: list[str]) -> str:
+def _the_spellable_expression(value: str, _engine: str, _column: str, _refusal: list[str]) -> str:
     """An expression this engine can write, handed back to be spelled."""
     return value
 
@@ -312,23 +310,23 @@ _WHEN_NO_EQUIVALENT: dict[bool, Callable[[str, str, str, list[str]], str]] = {
 
 
 @helper
-def _translate_text_default(value: str, dialect: str, column: str) -> Any:
-    """Text, matched against what this dialect can and cannot spell."""
+def _translate_text_default(value: str, engine: str, column: str) -> Any:
+    """Text, matched against what this engine can and cannot spell."""
     key = value.strip().lower().replace(" ", "")
 
-    refused = NO_EQUIVALENT[dialect]
+    refused = NO_EQUIVALENT[engine]
     refusal = [refused[name] for name in [key] if name in refused]
-    spellable = _WHEN_NO_EQUIVALENT[bool(refusal)](value, dialect, column, refusal)
+    spellable = _WHEN_NO_EQUIVALENT[bool(refusal)](value, engine, column, refusal)
 
-    spelled = EXPRESSION_DEFAULTS[dialect]
+    spelled = EXPRESSION_DEFAULTS[engine]
     return _SPELLED_FOR[key in spelled](spelled, key, spellable)
 
 
-# ONLY TEXT CARRIES A DIALECT SPELLING, and both cases are written out. This
+# ONLY TEXT CARRIES An ENGINE SPELLING, and both cases are written out. This
 # was a `.get` whose second argument answered for every type the table does
 # not name, which reads the same as the fallbacks removed everywhere else
 # today. Naming the other case says it is an answer rather than a silence: a
-# number is a number in every dialect and nothing about it varies.
+# number is a number in every engine and nothing about it varies.
 _TRANSLATE_DEFAULT: dict[bool, Callable[[Any, str, str], Any]] = {
     True: _translate_text_default,
     False: _untranslated_default,
@@ -336,9 +334,9 @@ _TRANSLATE_DEFAULT: dict[bool, Callable[[Any, str, str], Any]] = {
 
 
 @helper
-def _translate_default(value: Any, dialect: str, column: str) -> Any:
-    """The declared default, spelled for `dialect`, or a refusal naming both."""
-    return _TRANSLATE_DEFAULT[written_as(str, value)](value, dialect, column)
+def _translate_default(value: Any, engine: str, column: str) -> Any:
+    """The declared default, spelled for `engine`, or a refusal naming both."""
+    return _TRANSLATE_DEFAULT[written_as(str, value)](value, engine, column)
 
 
 @helper
@@ -446,22 +444,22 @@ DEFAULTS: dict[str, RenderDefault] = {
 
 
 @helper
-def _refuse_unrenderable_dialect(dialect: Dialect) -> Dialect:
+def _refuse_unrenderable_engine(engine: Engine) -> Engine:
     """No engine by this name declares how it writes a default."""
     raise ValueError(
-        f"cannot render a column for dialect {dialect!r}. Supported: {sorted(DEFAULTS)}."
+        f"cannot render a column for engine {engine!r}. Supported: {sorted(DEFAULTS)}."
     )
 
 
 @helper
-def _the_renderable_dialect(dialect: Dialect) -> Dialect:
+def _the_renderable_engine(engine: Engine) -> Engine:
     """An engine with a default renderer, handed back to be looked up."""
-    return dialect
+    return engine
 
 
-_WHEN_UNRENDERABLE: dict[bool, Callable[[Dialect], Dialect]] = {
-    True: _the_renderable_dialect,
-    False: _refuse_unrenderable_dialect,
+_WHEN_UNRENDERABLE: dict[bool, Callable[[Engine], Engine]] = {
+    True: _the_renderable_engine,
+    False: _refuse_unrenderable_engine,
 }
 
 
@@ -487,12 +485,12 @@ def _foreign_key_clause(col: Column, reference: str) -> str:
 
 
 @helper
-def column_definition(name: str, col: Column, dialect: Dialect) -> str:
+def column_definition(name: str, col: Column, engine: Engine) -> str:
     """One column, spelled for one engine.
 
     There used to be two of these, here and in `applier/postgresql.py`, and
     they differed in two lines: the type and the expression default. Both are
-    now looked up by dialect, so the rest -- PRIMARY KEY, NOT NULL, UNIQUE,
+    now looked up by engine, so the rest -- PRIMARY KEY, NOT NULL, UNIQUE,
     CHECK, REFERENCES with its cascade -- is written once.
 
     EACH CLAUSE IS A COMPREHENSION THAT YIELDS IT OR YIELDS NOTHING, so the
@@ -500,16 +498,16 @@ def column_definition(name: str, col: Column, dialect: Dialect) -> str:
     seven branches. `nullable` is tested against False rather than for
     falseness, because a column that never mentions it is not NOT NULL.
     """
-    renderable = _WHEN_UNRENDERABLE[dialect in DEFAULTS](dialect)
+    renderable = _WHEN_UNRENDERABLE[engine in DEFAULTS](engine)
     render_default = DEFAULTS[renderable]
     parts = [
         f'"{name}"',
-        map_type(col.get("type", "text"), dialect),
+        map_type(col.get("type", "text"), engine),
         *["PRIMARY KEY" for declared in [col.get("primary_key")] if declared],
         *["NOT NULL" for nullable in [col.get("nullable")] if nullable is False],
         *["UNIQUE" for declared in [col.get("unique")] if declared],
         *[
-            render_default(_translate_default(col[key], dialect, name))
+            render_default(_translate_default(col[key], engine, name))
             for key in ["default"]
             if key in col
         ],

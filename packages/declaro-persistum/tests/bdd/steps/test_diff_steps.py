@@ -122,15 +122,15 @@ def _given_any(ctx):
 @when("the schemas are diffed")
 def _when_diff(ctx):
     ctx["result"] = diff(
-        ctx["current"], ctx["target"], decisions=ctx["decisions"], dialect="postgresql"
+        ctx["current"], ctx["target"], decisions=ctx["decisions"], engine="postgresql"
     )
 
 
 @when("the schemas are diffed twice")
 def _when_diff_twice(ctx):
-    ctx["result"] = diff(ctx["current"], ctx["target"], dialect="postgresql", decisions=NOTHING)
+    ctx["result"] = diff(ctx["current"], ctx["target"], engine="postgresql", decisions=NOTHING)
     ctx["result_again"] = diff(
-        ctx["current"], ctx["target"], dialect="postgresql", decisions=NOTHING
+        ctx["current"], ctx["target"], engine="postgresql", decisions=NOTHING
     )
 
 

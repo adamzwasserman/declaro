@@ -23,12 +23,12 @@ from declaro_persistum.database import (
     nothing_was_trapped,
     writing,
 )
-from declaro_persistum.types import Dialect, FetchingConnection
+from declaro_persistum.types import Engine, FetchingConnection
 from declaro_persistum.writers import WRITERS
 
 __all__ = ["open_postgresql", "connect_postgresql"]
 
-DIALECT: Dialect = "postgresql"
+ENGINE: Engine = "postgresql"
 
 
 @boundary
@@ -58,7 +58,7 @@ async def open_postgresql(
                                    shutdown="exit_immediately",
                                    busy_timeout_s=10.0)
 
-    There is no `dialect` argument: this opener knows what it opens.
+    There is no `engine` argument: this opener knows what it opens.
 
     `journal_mode` is "server": PostgreSQL has no journal mode a client sets,
     and the field is required, so it says what is true rather than borrowing
@@ -71,7 +71,7 @@ async def open_postgresql(
 
     db = Database(
         path=dsn,
-        dialect=DIALECT,
+        engine=ENGINE,
         journal_mode="server",
         busy_timeout_s=busy_timeout_s,
         primary=None,
@@ -81,7 +81,7 @@ async def open_postgresql(
         close_connection=_close_connection,
         serialise=None,
         shutdown=shutdown,
-        write_one=WRITERS[DIALECT],
+        write_one=WRITERS[ENGINE],
         # PostgreSQL is the primary: there is nowhere further to send.
         replicate_once=already_delivered,
         # No replica to pull from on PostgreSQL.

@@ -44,7 +44,7 @@ from declaro_persistum.applier.statements import (
     the_table,
 )
 from declaro_persistum.boundary import helper
-from declaro_persistum.types import NOTHING, Dialect, Operation
+from declaro_persistum.types import NOTHING, Engine, Operation
 
 # =============================================================================
 # The two values that have to be assembled
@@ -52,7 +52,7 @@ from declaro_persistum.types import NOTHING, Dialect, Operation
 
 
 @helper
-def _table_body(operation: Operation, dialect: Dialect) -> str:
+def _table_body(operation: Operation, engine: Engine) -> str:
     """Everything between the parentheses of a CREATE TABLE.
 
     One clause per column, then the primary key if it spans more than one
@@ -69,7 +69,7 @@ def _table_body(operation: Operation, dialect: Dialect) -> str:
     primary_key = details["primary_key"]
 
     column_defs = [
-        column_definition(name, definition, dialect) for name, definition in columns.items()
+        column_definition(name, definition, engine) for name, definition in columns.items()
     ]
 
     composite_key = [
@@ -87,21 +87,21 @@ def _table_body(operation: Operation, dialect: Dialect) -> str:
 
 
 @helper
-def _column_clause(operation: Operation, dialect: Dialect) -> str:
+def _column_clause(operation: Operation, engine: Engine) -> str:
     """One column, spelled for this engine, as ADD COLUMN wants it."""
     return column_definition(
-        operation["details"]["column"], operation["details"]["definition"], dialect
+        operation["details"]["column"], operation["details"]["definition"], engine
     )
 
 
 @helper
-def _quoted_columns(operation: Operation, _dialect: Dialect) -> str:
+def _quoted_columns(operation: Operation, _engine: Engine) -> str:
     """The columns an index covers, quoted and comma-separated."""
     return ", ".join(f'"{column}"' for column in operation["details"]["definition"]["columns"])
 
 
 @helper
-def _escaped_values(operation: Operation, _dialect: Dialect) -> list[str]:
+def _escaped_values(operation: Operation, _engine: Engine) -> list[str]:
     """The declared values of an enum, with SQL's own escape applied.
 
     THE APOSTROPHE IS DOUBLED, which is how SQL escapes it. These come from a
@@ -123,12 +123,12 @@ def _escaped_values(operation: Operation, _dialect: Dialect) -> list[str]:
 
 @helper
 # honest-code-allow: L1.21.1 - _sqlite_rows and _postgresql_rows ARE the tables this clause asks for, and TEMPLATES is the table of them. PostgreSQL's is already built from SQLite's with the differing rows replaced, so collapsing them would mean a table whose one column is a whole table. what_an_applier_says_about_itself.feature holds the reuse instead
-def _sqlite_rows(dialect: Dialect) -> dict[str, Rendering]:
+def _sqlite_rows(engine: Engine) -> dict[str, Rendering]:
     """The rows for an engine that cannot alter a column in place."""
     return {
         "create_table": {
             "template": 'CREATE TABLE "{table}" (\n    {body}\n)',
-            "reads": {"table": the_table(), "body": built_by(_table_body)(dialect)},
+            "reads": {"table": the_table(), "body": built_by(_table_body)(engine)},
             "given": frozenset(),
             "repeat": NOTHING,
         },
@@ -148,7 +148,7 @@ def _sqlite_rows(dialect: Dialect) -> dict[str, Rendering]:
             "template": 'ALTER TABLE "{table}" ADD COLUMN {column}',
             "reads": {
                 "table": the_table(),
-                "column": built_by(_column_clause)(dialect),
+                "column": built_by(_column_clause)(engine),
             },
             "given": frozenset(),
             "repeat": NOTHING,
@@ -180,7 +180,7 @@ def _sqlite_rows(dialect: Dialect) -> dict[str, Rendering]:
             "reads": {
                 "index": detail("index"),
                 "table": the_table(),
-                "columns": built_by(_quoted_columns)(dialect),
+                "columns": built_by(_quoted_columns)(engine),
                 "unique": flag("definition", "unique", "UNIQUE "),
                 "where": clause("definition", "where", " WHERE "),
             },
@@ -209,7 +209,7 @@ def _sqlite_rows(dialect: Dialect) -> dict[str, Rendering]:
             "template": "INSERT INTO \"{table}\" (value) VALUES ('{values}')",
             "reads": {
                 "table": the_table(),
-                "values": built_by(_escaped_values)(dialect),
+                "values": built_by(_escaped_values)(engine),
             },
             "given": frozenset(),
             "repeat": "values",
@@ -223,19 +223,19 @@ def _sqlite_rows(dialect: Dialect) -> dict[str, Rendering]:
 
 
 @helper
-def _postgresql_rows(dialect: Dialect) -> dict[str, Rendering]:
+def _postgresql_rows(engine: Engine) -> dict[str, Rendering]:
     """The rows for the engine that can alter a column where it stands."""
     return {
         # `alter_column` is absent on purpose. PostgreSQL alters a column
         # where it stands, which is one statement per property that changed,
         # so `rendering` supervises it out of the `alter_column:*` rows below.
-        **{op: row for op, row in _sqlite_rows(dialect).items() if op != "alter_column"},
+        **{op: row for op, row in _sqlite_rows(engine).items() if op != "alter_column"},
         "add_index": {
             "template": ('CREATE {unique}INDEX "{index}" ON "{table}"{using} ({columns}){where}'),
             "reads": {
                 "index": detail("index"),
                 "table": the_table(),
-                "columns": built_by(_quoted_columns)(dialect),
+                "columns": built_by(_quoted_columns)(engine),
                 "unique": flag("definition", "unique", "UNIQUE "),
                 "using": clause("definition", "using", " USING "),
                 "where": clause("definition", "where", " WHERE "),
@@ -444,7 +444,7 @@ _POSTGRESQL_VIEWS: dict[str, Rendering] = {
 
 
 # =============================================================================
-# The tables, by dialect
+# The tables, by engine
 # =============================================================================
 
 TEMPLATES: dict[str, dict[str, Rendering]] = {

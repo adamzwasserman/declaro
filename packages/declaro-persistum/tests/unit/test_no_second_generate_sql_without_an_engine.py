@@ -1,8 +1,8 @@
-"""There is one `generate_sql` and it takes a dialect.
+"""There is one `generate_sql` and it takes an engine.
 
 MEASURED 2026-08-19. There were two:
 
-    applier/__init__.py:79   generate_sql(operations, execution_order, dialect)
+    applier/__init__.py:79   generate_sql(operations, execution_order, engine)
     applier/shared.py:499    generate_sql(operations, execution_order)
 
 The second was called by nothing and reported dark by coverage. It renders
@@ -23,7 +23,7 @@ docstring records what happened last time:
 It was moved up and given a dispatch table precisely so the copies could not
 drift. Leaving one behind in `shared.py` re-creates the condition, silently
 this time: the old failure raised AttributeError, and this one would emit the
-wrong dialect's SQL and exit 0.
+wrong engine's SQL and exit 0.
 
 This is a gate, not a test of behaviour. It reads the package rather than
 asserting on any output, so it fails the day a second one appears.
@@ -70,15 +70,15 @@ def test_there_is_exactly_one() -> None:
     )
 
 
-def test_it_requires_a_dialect() -> None:
+def test_it_requires_a_engine() -> None:
     """A renderer that does not ask which engine renders for the wrong one."""
     for name, function in _every_generate_sql().items():
         parameters = inspect.signature(function).parameters
 
-        assert "dialect" in parameters, f"{name}{inspect.signature(function)}"
+        assert "engine" in parameters, f"{name}{inspect.signature(function)}"
 
 
-def test_the_dialect_has_no_default() -> None:
+def test_the_engine_has_no_default() -> None:
     """Defaulting it would choose an engine for a caller who did not.
 
     That is the same trade `apply(dry_run=...)` used to make, where the
@@ -86,8 +86,8 @@ def test_the_dialect_has_no_default() -> None:
     forgetting there was a choice.
     """
     for name, function in _every_generate_sql().items():
-        dialect = inspect.signature(function).parameters["dialect"]
+        engine = inspect.signature(function).parameters["engine"]
 
-        assert dialect.default is inspect.Parameter.empty, (
-            f"{name} defaults dialect to {dialect.default!r}"
+        assert engine.default is inspect.Parameter.empty, (
+            f"{name} defaults engine to {engine.default!r}"
         )

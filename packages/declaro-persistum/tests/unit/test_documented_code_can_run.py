@@ -68,7 +68,7 @@ DOCS = ROOT / "docs"
 # went 41 -> 2 on 2026-08-14 by fixing the documents, not by widening this set.
 #
 # It is empty now. It held two names, `get_global_connection` and
-# `infer_dialect`, from an anti-example in the architecture document: a
+# `infer_engine`, from an anti-example in the architecture document: a
 # forbidden shape shown to say do not write this. That document was retired,
 # so the sample is no longer read and the two names no longer appear. The set
 # stays because the next anti-example will need it.
@@ -304,7 +304,7 @@ def test_no_sample_calls_a_function_the_wrong_way() -> None:
     signature does not have. This one reads the signature.
 
     It found three stale `diff(...)` calls the moment it was written, left
-    behind when `dialect` became required.
+    behind when `engine` became required.
     """
     import inspect
 

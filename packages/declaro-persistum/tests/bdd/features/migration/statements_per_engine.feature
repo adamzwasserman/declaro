@@ -1,10 +1,10 @@
 @bdd
 Feature: The statements a migration runs, spelled for each engine
   As a service booting against Postgres or SQLite
-  I want the same question asked in the dialect the engine speaks
+  I want the same question asked in the engine the engine speaks
   So that a stamp written on one engine can be read on the other
 
-  # TWO BUILDERS, ONE SHAPE. Each looks its SQL up in a per-dialect table and
+  # TWO BUILDERS, ONE SHAPE. Each looks its SQL up in a per-engine table and
   # hands it back. The table was the only thing that differed.
   #
   # The SQLite ones are RUN against a real database, because a statement that

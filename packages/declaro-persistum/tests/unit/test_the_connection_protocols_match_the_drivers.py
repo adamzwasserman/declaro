@@ -149,8 +149,8 @@ async def test_aiosqlite_is_not_a_fetching_connection() -> None:
         os.unlink(path)
 
 
-def test_no_dialect_module_still_takes_an_untyped_connection() -> None:
-    """The ratchet. A dialect module knows which driver it holds.
+def test_no_engine_module_still_takes_an_untyped_connection() -> None:
+    """The ratchet. An engine module knows which driver it holds.
 
     `inspector/postgresql.py` is only ever handed an asyncpg connection and
     `inspector/sqlite.py` only ever an aiosqlite one, so `Any` there was never

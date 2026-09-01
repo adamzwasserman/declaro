@@ -34,13 +34,13 @@ Feature: How each engine spells a column
     Then it answers "boolean"
 
   @precommit
-  Scenario: _the_mappable_dialect hands back an engine that has a mapper
-    When _the_mappable_dialect is given "sqlite"
+  Scenario: _the_mappable_engine hands back an engine that has a mapper
+    When _the_mappable_engine is given "sqlite"
     Then it answers "sqlite"
 
   @precommit
-  Scenario: _refuse_unmappable_dialect names the engines that do exist
-    When _refuse_unmappable_dialect is given "mysql"
+  Scenario: _refuse_unmappable_engine names the engines that do exist
+    When _refuse_unmappable_engine is given "mysql"
     Then it refuses and names "sqlite"
 
   # ============================================
@@ -112,13 +112,13 @@ Feature: How each engine spells a column
     Then it refuses
 
   @precommit
-  Scenario: _the_renderable_dialect hands back an engine that has a renderer
-    When _the_renderable_dialect is given "postgresql"
+  Scenario: _the_renderable_engine hands back an engine that has a renderer
+    When _the_renderable_engine is given "postgresql"
     Then it answers "postgresql"
 
   @precommit
-  Scenario: _refuse_unrenderable_dialect names the engines that do exist
-    When _refuse_unrenderable_dialect is given "mysql"
+  Scenario: _refuse_unrenderable_engine names the engines that do exist
+    When _refuse_unrenderable_engine is given "mysql"
     Then it refuses and names "sqlite"
 
   # ============================================
@@ -131,12 +131,12 @@ Feature: How each engine spells a column
     Then it answers "(datetime('now'))"
 
   @precommit
-  Scenario: _translate_text_default matches text against what the dialect spells
+  Scenario: _translate_text_default matches text against what the engine spells
     When _translate_text_default is given "now()" for "sqlite" on column "created"
     Then it answers "(datetime('now'))"
 
   @precommit
-  Scenario: _untranslated_default leaves a number the same in every dialect
+  Scenario: _untranslated_default leaves a number the same in every engine
     When _untranslated_default is given the number 7 for "sqlite" on column "n"
     Then it answers the number 7
 
@@ -151,8 +151,8 @@ Feature: How each engine spells a column
     Then it refuses and names "id"
 
   @precommit
-  Scenario: _the_dialects_spelling writes the expression this engine's own way
-    When _the_dialects_spelling looks up "now()" in the sqlite spellings
+  Scenario: _the_engines_spelling writes the expression this engine's own way
+    When _the_engines_spelling looks up "now()" in the sqlite spellings
     Then it answers "CURRENT_TIMESTAMP"
 
   @precommit

@@ -17,7 +17,7 @@ one database to another and `bulk_transfer` is its first phase, so the path
 that carries the data was the path with no test on it.
 
 WHAT IS EXERCISED HERE THAT A SINGLE-ENGINE TRANSFER CANNOT BE: the two
-dialects use different machinery, not different spellings. PostgreSQL loads
+engines use different machinery, not different spellings. PostgreSQL loads
 with COPY and reads `ORDER BY ctid`; the DB-API side uses INSERT. Both
 directions run below, because reading is not writing and each engine does
 one of them in each direction.
@@ -89,8 +89,8 @@ async def _postgresql() -> Any:
     return await open_postgresql(PROBE_URL, shutdown="exit_immediately", busy_timeout_s=5.0)
 
 
-async def _make_widgets(database: Any, dialect: str, *, with_rows: bool) -> None:
-    uuid_type = "UUID" if dialect == "postgresql" else "TEXT"
+async def _make_widgets(database: Any, engine: str, *, with_rows: bool) -> None:
+    uuid_type = "UUID" if engine == "postgresql" else "TEXT"
     async with writing(database) as connection:
         await connection.execute(
             f'CREATE TABLE "widgets" (id {uuid_type} PRIMARY KEY, name TEXT, count INTEGER)'
@@ -98,7 +98,7 @@ async def _make_widgets(database: Any, dialect: str, *, with_rows: bool) -> None
         if not with_rows:
             return
         for row in ROWS:
-            if dialect == "postgresql":
+            if engine == "postgresql":
                 await connection.execute(
                     'INSERT INTO "widgets" (id, name, count) VALUES ($1, $2, $3)',
                     *row,
@@ -108,12 +108,12 @@ async def _make_widgets(database: Any, dialect: str, *, with_rows: bool) -> None
                     'INSERT INTO "widgets" (id, name, count) VALUES (?, ?, ?)',
                     (str(row[0]), row[1], row[2]),
                 )
-        if dialect != "postgresql":
+        if engine != "postgresql":
             await connection.commit()
 
 
-async def _rows_of(database: Any, dialect: str) -> list[tuple]:
-    """The dialect is passed, not sniffed.
+async def _rows_of(database: Any, engine: str) -> list[tuple]:
+    """The engine is passed, not sniffed.
 
     asyncpg's `execute` returns a status string and its `fetch` returns rows;
     the DB-API drivers return a cursor from `execute`. Asking the connection
@@ -122,7 +122,7 @@ async def _rows_of(database: Any, dialect: str) -> list[tuple]:
     """
     sql = 'SELECT name, count FROM "widgets" ORDER BY name'
     async with writing(database) as connection:
-        if dialect == "postgresql":
+        if engine == "postgresql":
             return [tuple(r) for r in await connection.fetch(sql)]
         cursor = await connection.execute(sql)
         return [tuple(r) for r in await cursor.fetchall()]

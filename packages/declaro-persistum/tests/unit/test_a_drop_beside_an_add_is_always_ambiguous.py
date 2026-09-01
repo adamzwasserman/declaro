@@ -39,7 +39,7 @@ _ID = {"id": {"type": "integer"}}
 
 
 def _ambiguities(current: dict, target: dict) -> list[dict]:
-    return diff(current, target, dialect="sqlite", decisions=NOTHING)["ambiguities"]
+    return diff(current, target, engine="sqlite", decisions=NOTHING)["ambiguities"]
 
 
 @pytest.mark.parametrize(

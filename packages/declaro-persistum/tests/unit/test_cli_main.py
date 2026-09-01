@@ -1,4 +1,4 @@
-"""CLI entry point: dialect detection, connection resolution, and dispatch.
+"""CLI entry point: engine detection, connection resolution, and dispatch.
 
 `cli/main.py` carried 30 branches at 0% coverage — part of the Slop Audit
 L1.19 gap (declaro-xu0).
@@ -25,12 +25,12 @@ import pytest
 cli = importlib.import_module("declaro_persistum.cli.main")
 
 create_parser = cli.create_parser
-detect_dialect = cli.detect_dialect
+detect_engine = cli.detect_engine
 get_connection_string = cli.get_connection_string
 main = cli.main
 
 
-class TestDetectDialect:
+class TestDetectEngine:
     @pytest.mark.parametrize(
         "url,expected",
         [
@@ -41,21 +41,21 @@ class TestDetectDialect:
             ("https://x.turso.io", "turso"),
         ],
     )
-    def test_each_scheme_maps_to_its_dialect(self, url, expected):
-        assert detect_dialect(url) == expected
+    def test_each_scheme_maps_to_its_engine(self, url, expected):
+        assert detect_engine(url) == expected
 
     def test_an_unknown_scheme_raises_and_says_how_to_proceed(self):
-        with pytest.raises(ValueError, match="--dialect"):
-            detect_dialect("mysql://host/db")
+        with pytest.raises(ValueError, match="--engine"):
+            detect_engine("mysql://host/db")
 
     def test_an_empty_string_raises(self):
         with pytest.raises(ValueError):
-            detect_dialect("")
+            detect_engine("")
 
     def test_matching_is_on_the_prefix_not_a_substring(self):
         """A path that merely contains 'sqlite://' is not a sqlite URL."""
         with pytest.raises(ValueError):
-            detect_dialect("weird://wrapped/sqlite://x")
+            detect_engine("weird://wrapped/sqlite://x")
 
 
 class TestGetConnectionString:
@@ -99,6 +99,6 @@ class TestMainDispatch:
         assert main(["diff"]) == 1
         assert "Database connection required" in capsys.readouterr().err
 
-    def test_an_undetectable_dialect_exits_one(self, capsys):
+    def test_an_undetectable_engine_exits_one(self, capsys):
         assert main(["-c", "mysql://host/db", "diff"]) == 1
-        assert "Cannot detect dialect" in capsys.readouterr().err
+        assert "Cannot detect engine" in capsys.readouterr().err

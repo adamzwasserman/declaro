@@ -9,7 +9,7 @@ import asyncio
 
 from pytest_bdd import given, parsers, then, when
 
-from declaro_persistum.types import for_dialect
+from declaro_persistum.types import for_engine
 from tests.bdd.factories.connection_factory import (
     BACKENDS,
     apply_step,
@@ -24,21 +24,21 @@ from tests.bdd.factories.schema_factory import simple_todos_schema
 @given("an SQLite database connection")
 def given_sqlite_connection(bdd_context):
     """Set up SQLite connection."""
-    bdd_context["dialect"] = "sqlite"
+    bdd_context["engine"] = "sqlite"
     bdd_context["backend"] = BACKENDS["sqlite"]()
 
 
 @given("a PostgreSQL database connection")
 def given_postgresql_connection(bdd_context, require_postgresql):
     """Set up PostgreSQL connection (requires real database)."""
-    bdd_context["dialect"] = "postgresql"
+    bdd_context["engine"] = "postgresql"
     bdd_context["backend"] = BACKENDS["postgresql"]()
 
 
 @given("a Turso database connection")
 def given_turso_connection(bdd_context, require_turso):
     """Set up Turso connection (requires real database)."""
-    bdd_context["dialect"] = "turso"
+    bdd_context["engine"] = "turso"
     bdd_context["backend"] = BACKENDS["turso"]()
 
 
@@ -135,7 +135,7 @@ def given_todos_with_rows(bdd_context, count: int, todo_factory):
         async with bdd_context["backend"]["connect"]() as conn:
             await apply_step(bdd_context["backend"]["teardown"], conn, schema)
             await apply_step(bdd_context["backend"]["setup"], conn, schema)
-            seed = for_dialect(SEEDERS, bdd_context["dialect"], "Seeders")
+            seed = for_engine(SEEDERS, bdd_context["engine"], "Seeders")
             await seed(conn, rows)
 
     asyncio.run(_setup())
@@ -155,19 +155,19 @@ def when_insert_todo(bdd_context, title: str):
 
     async def _insert():
         async with bdd_context["backend"]["connect"]() as conn:
-            if bdd_context["dialect"] == "sqlite":
+            if bdd_context["engine"] == "sqlite":
                 await conn.execute(
                     "INSERT INTO todos (id, title, completed) VALUES (?, ?, ?)", (todo_id, title, 0)
                 )
                 await conn.commit()
-            elif bdd_context["dialect"] == "postgresql":
+            elif bdd_context["engine"] == "postgresql":
                 await conn.execute(
                     "INSERT INTO todos (id, title, completed) VALUES ($1, $2, $3)",
                     todo_id,
                     title,
                     False,
                 )
-            elif bdd_context["dialect"] == "turso":
+            elif bdd_context["engine"] == "turso":
                 # Turso uses sync pyturso API with ? placeholders
                 conn.execute(
                     "INSERT INTO todos (id, title, completed) VALUES (?, ?, ?)", (todo_id, title, 0)
@@ -185,12 +185,12 @@ def when_update_todo_completed(bdd_context):
 
     async def _update():
         async with bdd_context["backend"]["connect"]() as conn:
-            if bdd_context["dialect"] == "sqlite":
+            if bdd_context["engine"] == "sqlite":
                 await conn.execute("UPDATE todos SET completed = ? WHERE id = ?", (1, todo_id))
                 await conn.commit()
-            elif bdd_context["dialect"] == "postgresql":
+            elif bdd_context["engine"] == "postgresql":
                 await conn.execute("UPDATE todos SET completed = $1 WHERE id = $2", True, todo_id)
-            elif bdd_context["dialect"] == "turso":
+            elif bdd_context["engine"] == "turso":
                 conn.execute("UPDATE todos SET completed = ? WHERE id = ?", (1, todo_id))
                 conn.commit()
 
@@ -203,14 +203,14 @@ def when_query_completed(bdd_context):
 
     async def _query():
         async with bdd_context["backend"]["connect"]() as conn:
-            if bdd_context["dialect"] == "sqlite":
+            if bdd_context["engine"] == "sqlite":
                 cursor = await conn.execute("SELECT * FROM todos WHERE completed = ?", (1,))
                 rows = await cursor.fetchall()
                 bdd_context["results"] = [dict(row) for row in rows]
-            elif bdd_context["dialect"] == "postgresql":
+            elif bdd_context["engine"] == "postgresql":
                 rows = await conn.fetch("SELECT * FROM todos WHERE completed = $1", True)
                 bdd_context["results"] = [dict(row) for row in rows]
-            elif bdd_context["dialect"] == "turso":
+            elif bdd_context["engine"] == "turso":
                 cursor = conn.execute("SELECT * FROM todos WHERE completed = ?", (1,))
                 rows = cursor.fetchall()
                 # Turso returns tuples, so the names come from the cursor.
@@ -232,12 +232,12 @@ def when_delete_todo(bdd_context):
 
     async def _delete():
         async with bdd_context["backend"]["connect"]() as conn:
-            if bdd_context["dialect"] == "sqlite":
+            if bdd_context["engine"] == "sqlite":
                 await conn.execute("DELETE FROM todos WHERE id = ?", (todo_id,))
                 await conn.commit()
-            elif bdd_context["dialect"] == "postgresql":
+            elif bdd_context["engine"] == "postgresql":
                 await conn.execute("DELETE FROM todos WHERE id = $1", todo_id)
-            elif bdd_context["dialect"] == "turso":
+            elif bdd_context["engine"] == "turso":
                 conn.execute("DELETE FROM todos WHERE id = ?", (todo_id,))
                 conn.commit()
 
@@ -250,19 +250,19 @@ def when_execute_sql(bdd_context, sql: str):
 
     async def _execute():
         async with bdd_context["backend"]["connect"]() as conn:
-            if bdd_context["dialect"] == "sqlite":
+            if bdd_context["engine"] == "sqlite":
                 cursor = await conn.execute(sql)
                 if sql.strip().upper().startswith("SELECT"):
                     rows = await cursor.fetchall()
                     bdd_context["results"] = [dict(row) for row in rows]
                 await conn.commit()
-            elif bdd_context["dialect"] == "postgresql":
+            elif bdd_context["engine"] == "postgresql":
                 if sql.strip().upper().startswith("SELECT"):
                     rows = await conn.fetch(sql)
                     bdd_context["results"] = [dict(row) for row in rows]
                 else:
                     await conn.execute(sql)
-            elif bdd_context["dialect"] == "turso":
+            elif bdd_context["engine"] == "turso":
                 cursor = conn.execute(sql)
                 if sql.strip().upper().startswith("SELECT"):
                     rows = cursor.fetchall()
@@ -298,7 +298,7 @@ def then_results_match_expected(bdd_context):
 
 
 # =============================================================================
-# Dialect-Specific Steps
+# Engine-Specific Steps
 # =============================================================================
 
 
@@ -308,7 +308,7 @@ def then_postgresql_params(bdd_context):
     if "$1" in bdd_context["sql"] or "$2" in bdd_context["sql"]:
         return
     # If building query programmatically, check params dict
-    assert bdd_context["dialect"] == "postgresql" or "$" not in bdd_context["sql"]
+    assert bdd_context["engine"] == "postgresql" or "$" not in bdd_context["sql"]
 
 
 @then("SQLite should use :name parameters")
@@ -316,7 +316,7 @@ def then_sqlite_params(bdd_context):
     """Verify SQLite parameter style."""
     if ":" in bdd_context["sql"]:
         return
-    assert bdd_context["dialect"] != "sqlite" or "?" not in bdd_context["sql"]
+    assert bdd_context["engine"] != "sqlite" or "?" not in bdd_context["sql"]
 
 
 @then("Turso should use ? parameters")

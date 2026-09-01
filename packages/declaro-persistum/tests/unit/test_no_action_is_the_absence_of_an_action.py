@@ -92,7 +92,7 @@ async def test_declaring_no_action_migrates_nothing(tmp_path: pathlib.Path, clau
         ),
     )
 
-    result = diff(live, _declared(on_delete="no action"), dialect="sqlite", decisions=NOTHING)
+    result = diff(live, _declared(on_delete="no action"), engine="sqlite", decisions=NOTHING)
 
     assert result["operations"] == []
 
@@ -115,7 +115,7 @@ async def test_declaring_nothing_against_the_same_database_migrates_nothing(
         ),
     )
 
-    result = diff(live, _declared(), dialect="sqlite", decisions=NOTHING)
+    result = diff(live, _declared(), engine="sqlite", decisions=NOTHING)
 
     assert result["operations"] == []
 
@@ -138,7 +138,7 @@ async def test_a_real_cascade_is_still_seen_as_a_change(
         ),
     )
 
-    result = diff(live, _declared(on_delete="cascade"), dialect="sqlite", decisions=NOTHING)
+    result = diff(live, _declared(on_delete="cascade"), engine="sqlite", decisions=NOTHING)
 
     assert [op["op"] for op in result["operations"]] == [
         "drop_foreign_key",

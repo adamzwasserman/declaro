@@ -20,7 +20,7 @@ from declaro_persistum.types import (
     NOTHING,
     Column,
     Decision,
-    Dialect,
+    Engine,
     Nothing,
     Schema,
     Table,
@@ -429,7 +429,7 @@ def load_snapshot(schema_dir: str | Path) -> Schema:
 def save_snapshot(
     schema_dir: str | Path,
     schema: Schema,
-    dialect: Dialect,
+    engine: Engine,
     *,
     applied_by: str | None | Nothing,
 ) -> None:
@@ -439,7 +439,7 @@ def save_snapshot(
     Args:
         schema_dir: Path to schema directory
         schema: Schema to save
-        dialect: Database dialect
+        engine: Database engine
         applied_by: User/system identifier
     """
     # A default in the signature would decide this where no reader
@@ -457,7 +457,7 @@ def save_snapshot(
         "_meta": {
             "version": "1.0.0",
             "applied_at": datetime.now(UTC).isoformat(),
-            "dialect": dialect,
+            "engine": engine,
             **{field: applied_by for field in ["applied_by"] if applied_by},
         }
     }

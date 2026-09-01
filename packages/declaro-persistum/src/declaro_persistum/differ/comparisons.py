@@ -16,7 +16,7 @@ from typing import Any
 from declaro_persistum.boundary import helper
 from declaro_persistum.types import (
     Column,
-    Dialect,
+    Engine,
     Operation,
     Table,
     applied_to_text,
@@ -237,20 +237,20 @@ def _folded_keyword(text: str) -> str:
 
 
 @helper
-def _both_absent(current: Any, target: Any, _dialect: Dialect) -> bool:
+def _both_absent(current: Any, target: Any, _engine: Engine) -> bool:
     """One side declares no default, so they agree only if neither does."""
     return current is target
 
 
 @helper
-def _same_spelling(current: Any, target: Any, dialect: Dialect) -> bool:
+def _same_spelling(current: Any, target: Any, engine: Engine) -> bool:
     """Both sides declare a default, so the two spellings are compared."""
     # The declared default, spelled the way this engine stores it. The applier
     # uses the same table on the way in, so the two sides are asking one
     # question rather than two.
     from declaro_persistum.applier.shared import EXPRESSION_DEFAULTS
 
-    spelled = EXPRESSION_DEFAULTS.get(dialect, {})
+    spelled = EXPRESSION_DEFAULTS.get(engine, {})
     current = _comparable(current, spelled)
     target = _comparable(target, spelled)
 
@@ -282,7 +282,7 @@ def _same_keyword(current: Any, target: Any, _current_number: Any, _target_numbe
     )
 
 
-_WHEN_EITHER_IS_ABSENT: dict[bool, Callable[[Any, Any, Dialect], bool]] = {
+_WHEN_EITHER_IS_ABSENT: dict[bool, Callable[[Any, Any, Engine], bool]] = {
     True: _both_absent,
     False: _same_spelling,
 }
@@ -674,7 +674,7 @@ def _replaced_constraint(table_name: str, const_name: str, definition: Any) -> l
 # WHICH ENGINES A NAMED CONSTRAINT IS COMPARED ON, named one by one. Read with
 # `[]`, so an engine that joins the vocabulary without an entry here is refused
 # rather than quietly treated like PostgreSQL.
-_CONSTRAINTS_ON: dict[Dialect, Callable[[str, Table, Table], list[Operation]]] = {
+_CONSTRAINTS_ON: dict[Engine, Callable[[str, Table, Table], list[Operation]]] = {
     "sqlite": _compared_constraints,
     "turso": _compared_constraints,
     "postgresql": _constraints_not_compared,

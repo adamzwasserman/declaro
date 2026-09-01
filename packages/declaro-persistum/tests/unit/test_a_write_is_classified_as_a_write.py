@@ -105,7 +105,7 @@ def test_an_empty_statement_is_other_rather_than_a_crash(sql: str) -> None:
 def test_something_nobody_taught_it_is_other_not_a_guess() -> None:
     """A dict lookup with a fallback, which is the right shape here.
 
-    Unlike a dialect or a column type, an unrecognised STATEMENT is not a
+    Unlike an engine or a column type, an unrecognised STATEMENT is not a
     caller error: SQL has more verbs than this table will ever hold, and
     "other" is an honest answer rather than a guess at one of the six.
     """

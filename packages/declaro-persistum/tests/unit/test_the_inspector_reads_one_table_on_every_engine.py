@@ -1,7 +1,7 @@
 """`get_table_columns` is documented as the inspector's and exists on one.
 
 `docs/usage.md:755` shows it as part of the inspector interface, beside
-`table_exists` and `get_dialect`:
+`table_exists` and `get_engine`:
 
     columns = await inspector.get_table_columns(conn, "users")
 
@@ -16,7 +16,7 @@ lived in `applier/postgresql.py` alone while the docs described it as the
 package's, and the fix was to move it up and give it a dispatch table.
 `table_exists` in this same package already has that shape: three
 implementations, a `TABLE_EXISTS` table, and one package-level function that
-takes a dialect. This follows it.
+takes an engine. This follows it.
 
 Coverage reported `get_table_columns` dark, which is how it was found: a
 documented function that nothing in the package calls and no test ran.
@@ -65,65 +65,65 @@ async def _postgresql() -> Any:
 
 
 CONNECT = {"sqlite": _sqlite, "turso": _turso, "postgresql": _postgresql}
-DIALECTS = sorted(CONNECT)
+ENGINES = sorted(CONNECT)
 
 
-async def _prepared(dialect: str) -> Any:
-    connection = await CONNECT[dialect]()
+async def _prepared(engine: str) -> Any:
+    connection = await CONNECT[engine]()
     await connection.execute(CREATE)
-    if dialect != "postgresql":
+    if engine != "postgresql":
         await connection.commit()
     return connection
 
 
-async def _done(connection: Any, dialect: str) -> None:
-    if dialect == "postgresql":
+async def _done(connection: Any, engine: str) -> None:
+    if engine == "postgresql":
         await connection.execute('DROP TABLE IF EXISTS "widgets" CASCADE')
     await connection.close()
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-async def test_it_names_every_column(dialect: str) -> None:
-    connection = await _prepared(dialect)
+@pytest.mark.parametrize("engine", ENGINES)
+async def test_it_names_every_column(engine: str) -> None:
+    connection = await _prepared(engine)
     try:
-        columns = await get_table_columns(connection, dialect, "widgets")
+        columns = await get_table_columns(connection, engine, "widgets")
 
         assert sorted(columns) == ["id", "name"], columns
     finally:
-        await _done(connection, dialect)
+        await _done(connection, engine)
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-async def test_it_carries_each_column_s_type(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+async def test_it_carries_each_column_s_type(engine: str) -> None:
     """The floor. A dict of empty definitions would satisfy the test above."""
-    connection = await _prepared(dialect)
+    connection = await _prepared(engine)
     try:
-        columns = await get_table_columns(connection, dialect, "widgets")
+        columns = await get_table_columns(connection, engine, "widgets")
 
         assert columns["name"].get("type"), columns["name"]
         assert columns["id"].get("primary_key") is True, columns["id"]
     finally:
-        await _done(connection, dialect)
+        await _done(connection, engine)
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-async def test_a_table_that_is_not_there_is_refused_by_name(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+async def test_a_table_that_is_not_there_is_refused_by_name(engine: str) -> None:
     """What `usage.md` promises: it raises rather than returning an empty dict.
 
     An empty dict is what an absent table and a table with no columns would
     both look like, and only one of those is possible.
     """
-    connection = await _prepared(dialect)
+    connection = await _prepared(engine)
     try:
         with pytest.raises(DeclaroError) as caught:
-            await get_table_columns(connection, dialect, "no_such_table")
+            await get_table_columns(connection, engine, "no_such_table")
 
         assert "no_such_table" in str(caught.value), caught.value
     finally:
-        await _done(connection, dialect)
+        await _done(connection, engine)
 
 
-def test_an_unknown_dialect_is_refused_and_the_known_ones_named() -> None:
+def test_an_unknown_engine_is_refused_and_the_known_ones_named() -> None:
     """The same refusal every other dispatch table in this package gives."""
     import asyncio
 

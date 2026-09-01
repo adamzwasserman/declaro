@@ -14,7 +14,7 @@ THREE SEPARATE DEFECTS BROKE IT, ALL ON SQLITE AND TURSO, ALL MEASURED
 Each has its own cause and its own fix:
 
     `uuid` is spelled TEXT, so introspection said "text" and the differ
-    compared raw strings. `same_type(left, right, dialect)` compares them as
+    compared raw strings. `same_type(left, right, engine)` compares them as
     the engine spells them.
 
     A materialized view is not in `sqlite_master` as a view; the emulation is

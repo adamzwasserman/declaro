@@ -1,16 +1,16 @@
 @bdd @specification
 Feature: A question is data, not a statement
-  A dialect produces something. The library turns that into a statement for one
-  engine, at the last possible moment. What a dialect produces is the thing this
+  A grammar produces something. The library turns that into a statement for one
+  engine, at the last possible moment. What a grammar produces is the thing this
   feature is about, and it is the decision the rest of the surface rests on.
 
-  IF IT CARRIES SQL TEXT, NOTHING ELSE WORKS. Four dialects producing a string are
+  IF IT CARRIES SQL TEXT, NOTHING ELSE WORKS. Four grammars producing a string are
   four ways of building a string, and the surface is imperative underneath whatever
   the grammar looks like. A declared view has the same requirement from the other
   direction: "the library writes the SELECT" only means something if a view can be
   declared as an object the library renders.
 
-  So the same object serves both. A question asked in any dialect and a view declared
+  So the same object serves both. A question asked in any grammar and a view declared
   against the models are the same kind of value, and rendering is one step that
   happens once, per engine, at the edge.
 
@@ -18,7 +18,7 @@ Feature: A question is data, not a statement
 
   Scenario: a question carries no SQL
     Given a model Person declaring people with columns id and name
-    When a caller asks for people named "bob" in any dialect
+    When a caller asks for people named "bob" in any grammar
     Then the question it built contains no SQL text
     And nothing in it is a string that would parse as a statement
 
@@ -76,13 +76,13 @@ Feature: A question is data, not a statement
   Scenario: nothing but the renderer builds a statement
     When every place a statement is built is read
     Then all of them are in the rendering step
-    And no dialect and no vocabulary function builds one
+    And no grammar and no vocabulary function builds one
 
   # ------------------------------------------- the same object serves a view
 
   Scenario: a view is declared as a question with a name
     Given a view "order_totals" declared as a question about Order
-    Then what it holds is the same kind of value a dialect produces
+    Then what it holds is the same kind of value a grammar produces
 
   Scenario: the library renders the view's SELECT
     Given a view "order_totals" declared as a question about Order
@@ -103,4 +103,4 @@ Feature: A question is data, not a statement
   Scenario: a rendered statement is not a question
     Given a question rendered for sqlite
     Then what comes back is a statement and its parameters
-    And it cannot be rendered again, or asked in another dialect
+    And it cannot be rendered again, or asked in another grammar

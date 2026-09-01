@@ -1,12 +1,12 @@
-"""The dialect probe reads the driver's module path, and nothing else.
+"""The engine probe reads the driver's module path, and nothing else.
 
-`_conn_module` was `getattr(conn, "_declaro_dialect", type(conn).__module__)`,
+`_conn_module` was `getattr(conn, "_declaro_engine", type(conn).__module__)`,
 and its docstring said the attribute is "set on driver-owned async wrappers
 like TursoAsyncConnection". Nothing set it.
 
-    _declaro_dialect in the package, outside the probe itself:  0
-    _declaro_dialect in any installed driver:                   0
-    _declaro_dialect in docs or README:                         0
+    _declaro_engine in the package, outside the probe itself:  0
+    _declaro_engine in any installed driver:                   0
+    _declaro_engine in docs or README:                         0
 
 It was added in 4b4098c for `LibSQLAsyncConnection` and `TursoAsyncConnection`.
 7a5c9ac deleted every class in the package and libsql was eradicated, so both
@@ -15,7 +15,7 @@ unreachable since, while the docstring went on promising it.
 
 THE COST OF LEAVING IT is not the wasted lookup. It is that the package
 advertised an extension point it does not have: an integrator reading that
-docstring would put `_declaro_dialect` on their own wrapper, watch it work,
+docstring would put `_declaro_engine` on their own wrapper, watch it work,
 and have no way to know they were relying on a line that was about to be
 deleted as dead. A promise nothing keeps is worse than no promise.
 
@@ -32,7 +32,7 @@ from typing import cast
 
 import pytest
 
-from declaro_persistum.query.executor import detect_dialect
+from declaro_persistum.query.executor import detect_engine
 
 pytestmark = pytest.mark.precommit
 
@@ -46,15 +46,15 @@ class _ClaimsToBeTurso:
     an object with one attribute, which is the entire input under test.
     """
 
-    _declaro_dialect = "turso"
+    _declaro_engine = "turso"
 
 
 def test_the_attribute_is_not_consulted() -> None:
-    """Carrying `_declaro_dialect` does not make a connection a Turso one."""
+    """Carrying `_declaro_engine` does not make a connection a Turso one."""
     with pytest.raises(ValueError) as refused:
-        detect_dialect(_ClaimsToBeTurso())
+        detect_engine(_ClaimsToBeTurso())
 
-    assert "_ClaimsToBeTurso" in str(refused.value) or "test_the_dialect_probe" in str(
+    assert "_ClaimsToBeTurso" in str(refused.value) or "test_the_engine_probe" in str(
         refused.value
     ), f"the refusal should name what it could not place, and says: {refused.value}"
 
@@ -66,7 +66,7 @@ def test_a_real_driver_is_still_placed_by_its_module() -> None:
 
     conn = aiosqlite.Connection(lambda: None, iter_chunk_size=1)
 
-    assert detect_dialect(conn) == "sqlite"
+    assert detect_engine(conn) == "sqlite"
 
 
 def test_nothing_in_the_package_reads_or_sets_the_attribute() -> None:
@@ -88,13 +88,13 @@ def test_nothing_in_the_package_reads_or_sets_the_attribute() -> None:
     found = _offenders_in(scanned, SRC)
 
     assert found == [], (
-        f"_declaro_dialect is back in the package as code at {found}. The probe "
+        f"_declaro_engine is back in the package as code at {found}. The probe "
         f"no longer reads it, so setting it does nothing and the two will drift."
     )
 
 
 def _touches_the_attribute(node: ast.AST) -> bool:
-    """Whether this node reads, writes or names `_declaro_dialect` as code."""
+    """Whether this node reads, writes or names `_declaro_engine` as code."""
     return _AS_CODE.get(type(node), _not_this_node)(node)
 
 
@@ -125,7 +125,7 @@ def _not_this_node(_node: ast.AST) -> bool:
     return False
 
 
-NAME = "_declaro_dialect"
+NAME = "_declaro_engine"
 _BUILTINS = frozenset({"getattr", "hasattr", "setattr", "delattr"})
 _AS_CODE: dict[type, Callable[[ast.AST], bool]] = {
     ast.Attribute: _attribute_named,
@@ -154,27 +154,27 @@ def test_the_scan_finds_one_when_there_is_one(tmp_path) -> None:
     """
     planted = tmp_path / "planted.py"
     planted.write_text(
-        '''"""A docstring naming _declaro_dialect, which is not code."""
+        '''"""A docstring naming _declaro_engine, which is not code."""
 
 
 def reads(conn):
-    return conn._declaro_dialect
+    return conn._declaro_engine
 
 
 def asks(conn):
-    return getattr(conn, "_declaro_dialect", None)
+    return getattr(conn, "_declaro_engine", None)
 
 
 def checks(conn):
-    return hasattr(conn, "_declaro_dialect")
+    return hasattr(conn, "_declaro_engine")
 
 
 class Wrapper:
-    _declaro_dialect: str = "turso"
+    _declaro_engine: str = "turso"
 
 
 class Plain:
-    _declaro_dialect = "turso"
+    _declaro_engine = "turso"
 '''
     )
 

@@ -189,7 +189,7 @@ from declaro_persistum.differ.comparisons import (
 )
 from declaro_persistum.types import (
     Column,
-    Dialect,
+    Engine,
     Operation,
     Table,
     is_nullable,
@@ -325,7 +325,7 @@ def _diff_columns(
     table_name: str,
     current: Table,
     target: Table,
-    dialect: Dialect,
+    engine: Engine,
 ) -> list[Operation]:
     """
     Compute column-level operations.
@@ -411,9 +411,7 @@ def _diff_columns(
         }
         for col_name in common_cols
         for alter_details in [
-            _compute_column_alterations(
-                current_columns[col_name], target_columns[col_name], dialect
-            )
+            _compute_column_alterations(current_columns[col_name], target_columns[col_name], engine)
         ]
         if alter_details
     )
@@ -429,7 +427,7 @@ def _diff_columns(
 def _compute_column_alterations(
     current: Column,
     target: Column,
-    dialect: Dialect,
+    engine: Engine,
 ) -> dict[str, Any] | None:
     """
     Compute what alterations are needed for a column.
@@ -498,15 +496,15 @@ def _compute_column_alterations(
     # without an expression parser. PostgreSQL is excluded for the same
     # reason. SQLite keeps the CREATE TABLE text verbatim, which is what makes
     # the comparison sound there and nowhere else.
-    compared = ("unique", "check") if dialect == "sqlite" else ("unique",)
+    compared = ("unique", "check") if engine == "sqlite" else ("unique",)
 
     # WHETHER EACH PROPERTY AGREES, AND WHAT WOULD BE WRITTEN IF IT DID NOT,
     # kept apart so the change record is one comprehension over the answers
     # rather than a branch per property.
     agreed: dict[str, bool] = {
-        "type": same_type(current.get("type"), target.get("type"), dialect),
+        "type": same_type(current.get("type"), target.get("type"), engine),
         "nullable": current_nullable == target_nullable,
-        "default": same_default(current_default, target_default, dialect),
+        "default": same_default(current_default, target_default, engine),
         **{prop: _same_constraint(prop, current.get(prop), target.get(prop)) for prop in compared},
     }
     recorded: dict[str, Any] = {
@@ -542,7 +540,7 @@ def _same_constraint(prop: str, current: Any, target: Any) -> bool:
 
 
 @helper
-def same_default(current: Any, target: Any, dialect: Dialect) -> bool:
+def same_default(current: Any, target: Any, engine: Engine) -> bool:
     """Do these two spellings mean the same default?
 
     ONE QUESTION, RATHER THAN A LIST OF THE LITERALS SOMEBODY HAS BEEN BITTEN
@@ -564,7 +562,7 @@ def same_default(current: Any, target: Any, dialect: Dialect) -> bool:
     denote the same thing, and falls back to verbatim comparison for the
     opaque case, which is where an expression like `now()` belongs.
 
-    `dialect` IS REQUIRED, AND ITS ABSENCE COST TWO MIGRATION LOOPS IN A DAY.
+    `engine` IS REQUIRED, AND ITS ABSENCE COST TWO MIGRATION LOOPS IN A DAY.
     A default declared `now()` is WRITTEN to SQLite as `(datetime('now'))`,
     because SQLite cannot parse the first, and read back as what was written.
     Comparing the stored spelling against the declared one without knowing the
@@ -572,7 +570,7 @@ def same_default(current: Any, target: Any, dialect: Dialect) -> bool:
 
         alter_column {"default": {"from": "(datetime('now'))", "to": "now()"}}
 
-    `same_type` one screen away has taken a dialect from the beginning and
+    `same_type` one screen away has taken an engine from the beginning and
     asks `map_type` whether two declared types name the same column ON THIS
     ENGINE. This is the same question about defaults, and the asymmetry
     between two functions doing one job is what should have been noticed the
@@ -582,7 +580,7 @@ def same_default(current: Any, target: Any, dialect: Dialect) -> bool:
     whether `true` and `1` are the same default on SQLite, which stores
     booleans as integers. Not measured, so not folded.
     """
-    return _WHEN_EITHER_IS_ABSENT[current is None or target is None](current, target, dialect)
+    return _WHEN_EITHER_IS_ABSENT[current is None or target is None](current, target, engine)
 
 
 @helper

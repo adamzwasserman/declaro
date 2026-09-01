@@ -41,7 +41,7 @@ EXPR = sys.modules["declaro_persistum.query.expressions"]
 
 pytestmark = pytest.mark.precommit
 
-DIALECTS = ["postgresql", "sqlite", "turso"]
+ENGINES = ["postgresql", "sqlite", "turso"]
 
 
 # ---------------------------------------------------------------------------
@@ -86,17 +86,17 @@ def test_now_takes_no_column() -> None:
     }
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_an_aggregate_renders_with_its_alias(dialect: str) -> None:
-    sql, params = TABLE.render_function(TABLE.count_("*", alias="n"), dialect, "p")
+@pytest.mark.parametrize("engine", ENGINES)
+def test_an_aggregate_renders_with_its_alias(engine: str) -> None:
+    sql, params = TABLE.render_function(TABLE.count_("*", alias="n"), engine, "p")
 
     assert sql == "COUNT(*) AS n"
     assert params == {}
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_an_aggregate_without_an_alias_renders_bare(dialect: str) -> None:
-    sql, _ = TABLE.render_function(TABLE.count_("*", alias=None), dialect, "p")
+@pytest.mark.parametrize("engine", ENGINES)
+def test_an_aggregate_without_an_alias_renders_bare(engine: str) -> None:
+    sql, _ = TABLE.render_function(TABLE.count_("*", alias=None), engine, "p")
 
     assert sql == "COUNT(*)", sql
 
@@ -183,21 +183,21 @@ def test_a_case_inside_an_aggregate_renders_bare() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_a_plain_order_term_renders(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_plain_order_term_renders(engine: str) -> None:
     sql, params = EXPR.render_order_term(
-        {"kind": "order_by", "column": "id", "direction": "DESC"}, dialect, "p"
+        {"kind": "order_by", "column": "id", "direction": "DESC"}, engine, "p"
     )
 
     assert "id" in sql and "DESC" in sql, sql
     assert params == {}
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_a_case_order_term_renders_without_its_alias(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_a_case_order_term_renders_without_its_alias(engine: str) -> None:
     sql, params = EXPR.render_order_term(
         {"kind": "case_order_by", "expr": _band(), "direction": "ASC"},
-        dialect,
+        engine,
         "p",
     )
 
@@ -237,11 +237,11 @@ def test_the_subquery_tag_check_works() -> None:
 def test_rendering_a_subquery_raises_today() -> None:
     """PINNED AS BROKEN, because it is, and the suite must say so.
 
-        render_subquery(expr, dialect) -> expr["query"].to_sql(dialect)
+        render_subquery(expr, engine) -> expr["query"].to_sql(engine)
 
     Nothing in this package has a `to_sql` method. The only declaration of one
     is the `RendersCondition` Protocol, whose body raises `CODE NOT WRITTEN`
-    and which declares `to_sql(self, dialect, path)` -- a different arity from
+    and which declares `to_sql(self, engine, path)` -- a different arity from
     the call above, so even an implementation would not fit.
 
     `SubqueryExpr`'s own docstring shows

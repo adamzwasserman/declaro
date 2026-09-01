@@ -34,7 +34,7 @@ def ctx() -> Ctx:
         "query": {
             "sql": 'SELECT id FROM "t" ORDER BY id',
             "params": {"a": 1},
-            "dialect": "sqlite",
+            "engine": "sqlite",
         },
         "rows": -1,
     }
@@ -101,4 +101,4 @@ def _then_one_clause(ctx, clause):
 @then("its parameters and its engine are unchanged")
 def _then_carried(ctx):
     assert ctx["query"]["params"] == {"a": 1}, ctx["query"]["params"]
-    assert ctx["query"]["dialect"] == "sqlite", ctx["query"]["dialect"]
+    assert ctx["query"]["engine"] == "sqlite", ctx["query"]["engine"]

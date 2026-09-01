@@ -82,7 +82,7 @@ def _database(conn: _Conn):
 
     return Database(
         path=":memory:",
-        dialect="sqlite",
+        engine="sqlite",
         journal_mode="wal",
         busy_timeout_s=5.0,
         primary=None,

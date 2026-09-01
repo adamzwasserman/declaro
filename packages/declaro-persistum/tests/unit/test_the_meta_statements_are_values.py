@@ -41,7 +41,7 @@ from declaro_persistum.migrations import (
 
 pytestmark = pytest.mark.precommit
 
-DIALECTS = ["sqlite", "postgresql"]
+ENGINES = ["sqlite", "postgresql"]
 
 
 # ---------------------------------------------------------------------------
@@ -79,15 +79,15 @@ def test_the_meta_table_records_when_it_was_stamped() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_reading_a_stamp_selects_by_key(dialect: str) -> None:
-    sql = stored_hash_sql(dialect)
+@pytest.mark.parametrize("engine", ENGINES)
+def test_reading_a_stamp_selects_by_key(engine: str) -> None:
+    sql = stored_hash_sql(engine)
 
     assert sql.startswith("SELECT value FROM"), sql
     assert "WHERE key =" in sql, sql
 
 
-def test_the_two_dialects_differ_only_in_the_placeholder() -> None:
+def test_the_two_engines_differ_only_in_the_placeholder() -> None:
     """SQLite binds `?` and asyncpg binds `$1`, and nothing else changes.
 
     Written as a comparison rather than two literals because that is the whole
@@ -99,7 +99,7 @@ def test_the_two_dialects_differ_only_in_the_placeholder() -> None:
 
     assert sqlite != postgres
     assert sqlite.replace("?", "$1") == postgres, (
-        f"the dialects differ by more than the placeholder:\n"
+        f"the engines differ by more than the placeholder:\n"
         f"  sqlite:     {sqlite}\n"
         f"  postgresql: {postgres}"
     )
@@ -110,32 +110,32 @@ def test_the_two_dialects_differ_only_in_the_placeholder() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_writing_a_stamp_is_an_upsert(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_writing_a_stamp_is_an_upsert(engine: str) -> None:
     """`ON CONFLICT (key)` or a second boot raises UNIQUE constraint failed."""
-    sql = store_hash_sql(dialect)
+    sql = store_hash_sql(engine)
 
     assert "INSERT INTO" in sql, sql
     assert "ON CONFLICT (key)" in sql, (
-        f"no conflict target on the {dialect} upsert, so restamping inserts a "
+        f"no conflict target on the {engine} upsert, so restamping inserts a "
         f"duplicate or raises: {sql}"
     )
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_the_upsert_updates_rather_than_doing_nothing(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_the_upsert_updates_rather_than_doing_nothing(engine: str) -> None:
     """`DO NOTHING` keeps one row and never refreshes the stamp.
 
     It is the mutation that slipped past a real database too, on the first
     attempt, because the row count is one either way and the timestamps were
     compared with `>=`. On the text there is nothing to slip past.
     """
-    sql = store_hash_sql(dialect)
+    sql = store_hash_sql(engine)
 
-    assert "DO UPDATE SET" in sql, f"the {dialect} upsert does not update: {sql}"
+    assert "DO UPDATE SET" in sql, f"the {engine} upsert does not update: {sql}"
     assert "DO NOTHING" not in sql, sql
     assert "value =" in sql and "updated_at =" in sql, (
-        f"the {dialect} upsert refreshes neither the value nor the timestamp: {sql}"
+        f"the {engine} upsert refreshes neither the value nor the timestamp: {sql}"
     )
 
 
@@ -144,17 +144,17 @@ def test_the_upsert_updates_rather_than_doing_nothing(dialect: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("dialect", DIALECTS)
-def test_asking_for_user_tables_excludes_our_own(dialect: str) -> None:
+@pytest.mark.parametrize("engine", ENGINES)
+def test_asking_for_user_tables_excludes_our_own(engine: str) -> None:
     """`_declaro_meta` is ours. A database holding only it is empty.
 
     Counting it would make every fresh database look populated, and
     `apply_migrations` reads that to decide whether it is bootstrapping.
     """
-    sql = user_tables_sql(dialect)
+    sql = user_tables_sql(engine)
 
     assert META_TABLE in sql, (
-        f"the {dialect} query does not mention {META_TABLE}, so it cannot exclude it: {sql}"
+        f"the {engine} query does not mention {META_TABLE}, so it cannot exclude it: {sql}"
     )
 
 
@@ -175,7 +175,7 @@ def test_sqlite_excludes_its_internal_tables_too() -> None:
 
 
 @pytest.mark.parametrize("builder", [stored_hash_sql, store_hash_sql, user_tables_sql])
-def test_an_unknown_dialect_raises_and_names_the_ones_that_exist(builder) -> None:
+def test_an_unknown_engine_raises_and_names_the_ones_that_exist(builder) -> None:
     """A dispatch on a bounded set must not fall through.
 
     These were `if hasattr(conn, "fetch")` inside each function: one branch for

@@ -11,20 +11,20 @@ class TestDiff:
 
     def test_diff_empty_schemas(self):
         """Diffing two empty schemas produces no operations."""
-        result = diff(current={}, target={}, dialect="postgresql", decisions=NOTHING)
+        result = diff(current={}, target={}, engine="postgresql", decisions=NOTHING)
         assert result["operations"] == []
         assert result["ambiguities"] == []
 
     def test_diff_identical_schemas(self, simple_schema):
         """Diffing identical schemas produces no operations."""
         result = diff(
-            current=simple_schema, target=simple_schema, dialect="postgresql", decisions=NOTHING
+            current=simple_schema, target=simple_schema, engine="postgresql", decisions=NOTHING
         )
         assert result["operations"] == []
 
     def test_diff_create_table(self, simple_schema):
         """Adding a new table creates CREATE TABLE operation."""
-        result = diff(current={}, target=simple_schema, dialect="postgresql", decisions=NOTHING)
+        result = diff(current={}, target=simple_schema, engine="postgresql", decisions=NOTHING)
 
         assert len(result["operations"]) >= 1
         create_ops = [op for op in result["operations"] if op["op"] == "create_table"]
@@ -33,7 +33,7 @@ class TestDiff:
 
     def test_diff_drop_table(self, simple_schema):
         """Removing a table creates DROP TABLE operation."""
-        result = diff(current=simple_schema, target={}, dialect="postgresql", decisions=NOTHING)
+        result = diff(current=simple_schema, target={}, engine="postgresql", decisions=NOTHING)
 
         drop_ops = [op for op in result["operations"] if op["op"] == "drop_table"]
         assert len(drop_ops) == 1
@@ -44,7 +44,7 @@ class TestDiff:
         current: Schema = {"users": {"columns": {"id": {"type": "uuid"}}}}
         target: Schema = {"users": {"columns": {"id": {"type": "uuid"}, "email": {"type": "text"}}}}
 
-        result = diff(current=current, target=target, dialect="postgresql", decisions=NOTHING)
+        result = diff(current=current, target=target, engine="postgresql", decisions=NOTHING)
 
         add_ops = [op for op in result["operations"] if op["op"] == "add_column"]
         assert len(add_ops) == 1
@@ -56,7 +56,7 @@ class TestDiff:
         current: Schema = {"users": {"columns": {"id": {"type": "uuid"}, "temp": {"type": "text"}}}}
         target: Schema = {"users": {"columns": {"id": {"type": "uuid"}}}}
 
-        result = diff(current=current, target=target, dialect="postgresql", decisions=NOTHING)
+        result = diff(current=current, target=target, engine="postgresql", decisions=NOTHING)
 
         drop_ops = [op for op in result["operations"] if op["op"] == "drop_column"]
         assert len(drop_ops) == 1
@@ -69,7 +69,7 @@ class TestDiff:
             "users": {"columns": {"full_name": {"type": "text", "renamed_from": "name"}}}
         }
 
-        result = diff(current=current, target=target, dialect="postgresql", decisions=NOTHING)
+        result = diff(current=current, target=target, engine="postgresql", decisions=NOTHING)
 
         rename_ops = [op for op in result["operations"] if op["op"] == "rename_column"]
         assert len(rename_ops) == 1
@@ -81,7 +81,7 @@ class TestDiff:
         current: Schema = {"users": {"columns": {"count": {"type": "integer"}}}}
         target: Schema = {"users": {"columns": {"count": {"type": "bigint"}}}}
 
-        result = diff(current=current, target=target, dialect="postgresql", decisions=NOTHING)
+        result = diff(current=current, target=target, engine="postgresql", decisions=NOTHING)
 
         alter_ops = [op for op in result["operations"] if op["op"] == "alter_column"]
         assert len(alter_ops) == 1
@@ -98,7 +98,7 @@ class TestDiff:
             }
         }
 
-        result = diff(current=current, target=target, dialect="postgresql", decisions=NOTHING)
+        result = diff(current=current, target=target, engine="postgresql", decisions=NOTHING)
 
         add_idx_ops = [op for op in result["operations"] if op["op"] == "add_index"]
         assert len(add_idx_ops) == 1
@@ -120,7 +120,7 @@ class TestDiff:
             },
         }
 
-        result = diff(current=current, target=target, dialect="postgresql", decisions=NOTHING)
+        result = diff(current=current, target=target, engine="postgresql", decisions=NOTHING)
 
         fk_ops = [op for op in result["operations"] if op["op"] == "add_foreign_key"]
         assert len(fk_ops) == 1

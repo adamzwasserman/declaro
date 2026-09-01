@@ -70,7 +70,7 @@ CASES = [
     (
         DeclaroConnectionError,
         ("unreachable",),
-        {"dialect": "postgresql"},
+        {"engine": "postgresql"},
         ["unreachable", "postgresql"],
     ),
     (

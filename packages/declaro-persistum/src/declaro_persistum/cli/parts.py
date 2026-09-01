@@ -18,11 +18,11 @@ from declaro_persistum.types import (
     Ambiguity,
     ApplyResult,
     Decision,
-    Dialect,
     DiffResult,
+    Engine,
     Operation,
     Schema,
-    for_dialect,
+    for_engine,
 )
 
 # =============================================================================
@@ -567,7 +567,7 @@ def sqlite_path(connection_string: str) -> str:
     THIS WAS `connection_string.replace("sqlite:///", "")`, and two things were
     wrong with it. A replace is not a prefix strip, so it also ate the sequence
     out of the middle of a path. And it did nothing at all to a two-slash URL,
-    which `detect_dialect` accepted as SQLite, so aiosqlite was handed
+    which `detect_engine` accepted as SQLite, so aiosqlite was handed
     `sqlite://foo.db` as a FILENAME and answered
 
         sqlite3.OperationalError: unable to open database file
@@ -639,23 +639,23 @@ CONNECTORS: dict[str, Any] = {
 
 
 @helper
-async def _connect(connection_string: str, dialect: Dialect) -> Any:
-    """Open a connection for `dialect`."""
-    connector = for_dialect(CONNECTORS, dialect, "Connectors")
+async def _connect(connection_string: str, engine: Engine) -> Any:
+    """Open a connection for `engine`."""
+    connector = for_engine(CONNECTORS, engine, "Connectors")
     return await connector(connection_string)
 
 
 @boundary
-async def _disconnect(connection: Any, dialect: Dialect) -> None:
+async def _disconnect(connection: Any, engine: Engine) -> None:
     """Close a connection.
 
-    The chain here read `if dialect == "postgresql" or dialect == "sqlite" or
-    dialect == "turso"`, which is every dialect there is, so it was an `if`
+    The chain here read `if engine == "postgresql" or engine == "sqlite" or
+    engine == "turso"`, which is every engine there is, so it was an `if`
     that is always true guarding the one line it contains -- and silence for
-    any engine added later. `for_dialect` keeps the check and makes the
+    any engine added later. `for_engine` keeps the check and makes the
     silence impossible.
     """
-    for_dialect(CONNECTORS, dialect, "Connectors")
+    for_engine(CONNECTORS, engine, "Connectors")
     await connection.close()
 
 

@@ -92,7 +92,7 @@ result = await apply(conn, operations, [0, 1], "sqlite")
 result = await apply(conn, operations, [0, 1], "turso")
 ```
 
-`SQLiteApplier`, `TursoApplier` and `PostgreSQLApplier` were stateless classes and are gone. One function takes the dialect as its fourth argument. There is no sync path: `TursoApplier.apply_sync` was deleted in `d98038a`, having imported a name `abstractions.reconstruction` never defined, so it raised `ImportError` the moment it was reached.
+`SQLiteApplier`, `TursoApplier` and `PostgreSQLApplier` were stateless classes and are gone. One function takes the engine as its fourth argument. There is no sync path: `TursoApplier.apply_sync` was deleted in `d98038a`, having imported a name `abstractions.reconstruction` never defined, so it raised `ImportError` the moment it was reached.
 
 ### Direct API (Advanced)
 

@@ -1,7 +1,7 @@
 """The bulk loaders must move rows, and something must run them.
 
 `create_bulk_loader` raised NameError for postgresql, sqlite and turso — every
-dialect it claimed to support — from 7a5c9ac until today. The de-classing sweep
+engine it claimed to support — from 7a5c9ac until today. The de-classing sweep
 removed `PostgreSQLBulkLoader` and `GenericBulkLoader` and kept the factory that
 returns them.
 
@@ -36,26 +36,26 @@ pytestmark = pytest.mark.precommit
 # direction and the message only knew how to report one of them.
 #
 # The gate is still a gate: the type declares what a loader must carry, and
-# this asserts every dialect carries all of it. Taking the vocabulary from the
+# this asserts every engine carries all of it. Taking the vocabulary from the
 # type is what stops the two drifting, which is the whole point of the file.
 OPERATIONS = set(BulkLoader.__annotations__)
 
 
-def test_every_supported_dialect_has_every_operation() -> None:
+def test_every_supported_engine_has_every_operation() -> None:
     from declaro_persistum.bulk_loader import BULK_LOADERS
 
     assert set(BULK_LOADERS) == {"postgresql", "sqlite", "turso"}, (
         f"BULK_LOADERS covers {sorted(BULK_LOADERS)}; transfer.py looks up "
-        f"whatever dialect it was handed"
+        f"whatever engine it was handed"
     )
-    for dialect, loader in BULK_LOADERS.items():
+    for engine, loader in BULK_LOADERS.items():
         assert set(loader) == OPERATIONS, (
-            f"{dialect} is missing {sorted(OPERATIONS - set(loader))} and "
+            f"{engine} is missing {sorted(OPERATIONS - set(loader))} and "
             f"carries {sorted(set(loader) - OPERATIONS)} the type does not "
             f"declare"
         )
         for name, fn in loader.items():
-            assert callable(fn), f"{dialect}[{name!r}] is not callable"
+            assert callable(fn), f"{engine}[{name!r}] is not callable"
 
 
 @pytest.mark.asyncio

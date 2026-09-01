@@ -152,16 +152,16 @@ def test_the_constraint_is_named_in_the_create() -> None:
     assert "ck_order" in rendered, rendered
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_the_constraint_reaches_the_database(dialect: str) -> None:
-    connection = await ENGINES[dialect]()
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_the_constraint_reaches_the_database(engine: str) -> None:
+    connection = await ENGINES[engine]()
     try:
-        plan = diff({}, DECLARED, dialect=dialect, decisions=NOTHING)
+        plan = diff({}, DECLARED, engine=engine, decisions=NOTHING)
         await apply(
             connection,
             plan["operations"],
             plan["execution_order"],
-            dialect,
+            engine,
             dry_run=False,
         )
 
@@ -169,7 +169,7 @@ async def test_the_constraint_reaches_the_database(dialect: str) -> None:
         # hands you; aiosqlite returns a cursor FROM execute. Third time this
         # session I have written the same line for both.
         select = "SELECT sql FROM sqlite_master WHERE name='t'"
-        if dialect == "turso":
+        if engine == "turso":
             cursor = connection.cursor()
             await cursor.execute(select)
             rows = await cursor.fetchall()
@@ -183,25 +183,25 @@ async def test_the_constraint_reaches_the_database(dialect: str) -> None:
         await connection.close()
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_the_constraint_is_enforced(dialect: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_the_constraint_is_enforced(engine: str) -> None:
     """The floor. A CHECK that is written and not enforced reads as correct.
 
     A row violating it must be refused, which is the whole reason to declare
     one.
     """
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
-        plan = diff({}, DECLARED, dialect=dialect, decisions=NOTHING)
+        plan = diff({}, DECLARED, engine=engine, decisions=NOTHING)
         await apply(
             connection,
             plan["operations"],
             plan["execution_order"],
-            dialect,
+            engine,
             dry_run=False,
         )
 
-        cursor = connection.cursor() if dialect == "turso" else connection
+        cursor = connection.cursor() if engine == "turso" else connection
         await cursor.execute('INSERT INTO "t" (a, lo, hi) VALUES (1, 1, 2)')
         await connection.commit()
 
@@ -259,8 +259,8 @@ EXPRESSIONS = [
 
 
 @pytest.mark.parametrize("expression", EXPRESSIONS)
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_a_declared_constraint_converges(dialect: str, expression: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_a_declared_constraint_converges(engine: str, expression: str) -> None:
     """Declare it, apply it, read it back, diff again. Zero operations."""
     from declaro_persistum.inspector import introspect
 
@@ -274,35 +274,35 @@ async def test_a_declared_constraint_converges(dialect: str, expression: str) ->
             "constraints": {"ck": {"type": "check", "expression": expression}},
         }
     }
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
-        plan = diff({}, declared, dialect=dialect, decisions=NOTHING)
+        plan = diff({}, declared, engine=engine, decisions=NOTHING)
         await apply(
             connection,
             plan["operations"],
             plan["execution_order"],
-            dialect,
+            engine,
             dry_run=False,
         )
 
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
         remaining = diff(
             {n: actual[n] for n in declared if n in actual},
             declared,
-            dialect=dialect,
+            engine=engine,
             decisions=NOTHING,
         )["operations"]
 
         assert remaining == [], (
-            f"{expression!r} on {dialect} migrates on every deploy: "
+            f"{expression!r} on {engine} migrates on every deploy: "
             f"{[(o['op'], o['details']) for o in remaining]}"
         )
     finally:
         await connection.close()
 
 
-@pytest.mark.parametrize("dialect", sorted(ENGINES))
-async def test_a_changed_constraint_is_still_noticed(dialect: str) -> None:
+@pytest.mark.parametrize("engine", sorted(ENGINES))
+async def test_a_changed_constraint_is_still_noticed(engine: str) -> None:
     """The control on the normalisation.
 
     Folding `<>` to `!=` must not fold two genuinely different expressions
@@ -322,20 +322,20 @@ async def test_a_changed_constraint_is_still_noticed(dialect: str) -> None:
             }
         }
 
-    connection = await ENGINES[dialect]()
+    connection = await ENGINES[engine]()
     try:
-        plan = diff({}, declared("lo < hi"), dialect=dialect, decisions=NOTHING)
+        plan = diff({}, declared("lo < hi"), engine=engine, decisions=NOTHING)
         await apply(
             connection,
             plan["operations"],
             plan["execution_order"],
-            dialect,
+            engine,
             dry_run=False,
         )
 
-        actual = await introspect(connection, dialect)
+        actual = await introspect(connection, engine)
         changed = diff(
-            {n: actual[n] for n in actual}, declared("lo > hi"), dialect=dialect, decisions=NOTHING
+            {n: actual[n] for n in actual}, declared("lo > hi"), engine=engine, decisions=NOTHING
         )["operations"]
 
         assert [o["op"] for o in changed] == ["drop_constraint", "add_constraint"], changed
@@ -349,8 +349,8 @@ async def test_postgresql_creates_the_constraint_too() -> None:
     The shared renderer was given the constraints an hour before this one, so
     the fix landed on two engines of three and PostgreSQL still dropped a
     declared constraint on the floor. That is the shape this module's own
-    comment records about `generate_sql` living in one dialect module: a
-    function copied per dialect goes missing from the copies.
+    comment records about `generate_sql` living in one engine module: a
+    function copied per engine goes missing from the copies.
     """
     from declaro_persistum.inspector import introspect
 
@@ -366,7 +366,7 @@ async def test_postgresql_creates_the_constraint_too() -> None:
                 "constraints": {"ck_order": {"type": "check", "expression": "lo < hi"}},
             }
         }
-        plan = diff({}, declared, dialect="postgresql", decisions=NOTHING)
+        plan = diff({}, declared, engine="postgresql", decisions=NOTHING)
         await apply(
             connection,
             plan["operations"],
@@ -417,7 +417,7 @@ async def test_postgresql_does_not_propose_a_constraint_it_already_has() -> None
                 "constraints": {"ck_order": {"type": "check", "expression": "lo > 0 AND hi > 0"}},
             }
         }
-        plan = diff({}, declared, dialect="postgresql", decisions=NOTHING)
+        plan = diff({}, declared, engine="postgresql", decisions=NOTHING)
         await apply(
             connection,
             plan["operations"],
@@ -430,7 +430,7 @@ async def test_postgresql_does_not_propose_a_constraint_it_already_has() -> None
         remaining = diff(
             {n: actual[n] for n in declared if n in actual},
             declared,
-            dialect="postgresql",
+            engine="postgresql",
             decisions=NOTHING,
         )["operations"]
 

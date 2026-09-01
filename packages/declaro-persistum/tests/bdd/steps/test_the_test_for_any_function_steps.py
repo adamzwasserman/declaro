@@ -270,7 +270,7 @@ def _then_no_third_fate(ctx: Ctx) -> None:
 _NONE_OF_THEM: dict[str, str] = {
     "takes a connection or a cursor": "is a connection",
     "yields or returns a connection": "hands back",
-    "takes a dialect or an engine name": "names an engine",
+    "takes an engine or an engine name": "names an engine",
 }
 
 
@@ -285,7 +285,7 @@ def _then_none_of_them(ctx: Ctx, said: str) -> None:
 def _then_decided_at_open(ctx: Ctx) -> None:
     from declaro_persistum.database import Database
 
-    assert "dialect" in Database.__annotations__
+    assert "engine" in Database.__annotations__
 
 
 @then("it names no SQL verb")

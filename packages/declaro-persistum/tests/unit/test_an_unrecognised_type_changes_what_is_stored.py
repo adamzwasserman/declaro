@@ -25,7 +25,7 @@ an omission. The validator knows 46 names, which is the PostgreSQL
 vocabulary, so an unknown one is either a custom PostgreSQL type -- legitimate,
 and the reason the check is a warning -- or a typo. Refusing them would reject
 a schema that declares a PostgreSQL custom type and also targets SQLite.
-`validate_schema` takes no dialect, so it cannot refuse for one engine and
+`validate_schema` takes no engine, so it cannot refuse for one engine and
 allow it for another without a signature change.
 
 What is fixed is the warning, which said "may be custom type or enum" and read

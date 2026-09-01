@@ -333,7 +333,7 @@ class TestSelect:
         ]
         assert positions == sorted(positions)
 
-    def test_the_dialect_is_left_unset(self):
+    def test_the_engine_is_left_unset(self):
         assert (
             select(
                 from_table="users",
@@ -345,7 +345,7 @@ class TestSelect:
                 joins=NOTHING,
                 group_by=NOTHING,
                 having=NOTHING,
-            )["dialect"]
+            )["engine"]
             is None
         )
 
@@ -463,7 +463,7 @@ class TestDelete:
 class TestComposition:
     def test_with_limit_appends_when_there_is_none(self):
         assert (
-            with_limit({"sql": "SELECT 1", "params": {}, "dialect": None}, 5)["sql"]
+            with_limit({"sql": "SELECT 1", "params": {}, "engine": None}, 5)["sql"]
             == "SELECT 1 LIMIT 5"
         )
 
@@ -487,7 +487,7 @@ class TestComposition:
 
     def test_with_offset_appends_when_there_is_none(self):
         assert (
-            with_offset({"sql": "SELECT 1", "params": {}, "dialect": None}, 5)["sql"]
+            with_offset({"sql": "SELECT 1", "params": {}, "engine": None}, 5)["sql"]
             == "SELECT 1 OFFSET 5"
         )
 
@@ -529,28 +529,27 @@ class TestComposition:
         )
         assert q["sql"] == 'SELECT * FROM "t" LIMIT 5'
 
-    def test_composition_preserves_params_and_dialect(self):
-        q = with_limit({"sql": "SELECT 1", "params": {"a": 1}, "dialect": "sqlite"}, 5)
+    def test_composition_preserves_params_and_engine(self):
+        q = with_limit({"sql": "SELECT 1", "params": {"a": 1}, "engine": "sqlite"}, 5)
         assert q["params"] == {"a": 1}
-        assert q["dialect"] == "sqlite"
+        assert q["engine"] == "sqlite"
 
     def test_with_params_merges_into_the_existing_params(self):
-        q = with_params({"sql": "SELECT :a, :b", "params": {"a": 1}, "dialect": None}, b=2)
+        q = with_params({"sql": "SELECT :a, :b", "params": {"a": 1}, "engine": None}, b=2)
         assert q["params"] == {"a": 1, "b": 2}
 
     def test_with_params_overwrites_a_colliding_key(self):
-        assert with_params({"sql": "q", "params": {"a": 1}, "dialect": None}, a=2)["params"] == {
+        assert with_params({"sql": "q", "params": {"a": 1}, "engine": None}, a=2)["params"] == {
             "a": 2
         }
 
     def test_with_params_leaves_the_sql_alone(self):
         assert (
-            with_params({"sql": "SELECT 1", "params": {}, "dialect": None}, a=1)["sql"]
-            == "SELECT 1"
+            with_params({"sql": "SELECT 1", "params": {}, "engine": None}, a=1)["sql"] == "SELECT 1"
         )
 
     def test_the_original_query_is_not_mutated(self):
-        original = {"sql": "SELECT 1", "params": {"a": 1}, "dialect": None}
+        original = {"sql": "SELECT 1", "params": {"a": 1}, "engine": None}
         with_params(original, b=2)
         with_limit(original, 5)
-        assert original == {"sql": "SELECT 1", "params": {"a": 1}, "dialect": None}
+        assert original == {"sql": "SELECT 1", "params": {"a": 1}, "engine": None}

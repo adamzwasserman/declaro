@@ -569,5 +569,5 @@ def _reads(fact: FactName) -> Callable[[], Any]:
 # runner reaches them off the module and `applier/__init__.py` re-exports them.
 _ENGINE = "sqlite"
 
-get_dialect = _reads("dialect")
+get_engine = _reads("engine")
 get_transaction_mode = _reads("transaction_mode")

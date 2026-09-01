@@ -4,18 +4,18 @@ Feature: Which engine the command line decides to talk to
   I want the engine chosen from what I typed, or read off the URL when I said nothing
   So that a command never runs against an engine nobody picked
 
-  # ONE SCENARIO PER FUNCTION in the dialect-selection path of `cli/main.py`.
+  # ONE SCENARIO PER FUNCTION in the engine-selection path of `cli/main.py`.
   # Every one of these is pure: a value in, a value out.
   #
   # WHY THIS FILE EXISTS. Two tests used to answer these questions by replacing
   # a command handler with a fake, running the whole program, and reading a
   # variable the fake had captured. The answer they were reaching for is what
-  # `_chosen_dialect` returns, so the fake was standing between the test and a
+  # `_chosen_engine` returns, so the fake was standing between the test and a
   # function that already hands the value back.
 
   @precommit
-  Scenario: _keep_given_dialect keeps what the operator typed
-    When _keep_given_dialect is given "postgresql" alongside the url "mysql://host/db"
+  Scenario: _keep_given_engine keeps what the operator typed
+    When _keep_given_engine is given "postgresql" alongside the url "mysql://host/db"
     Then the engine is "postgresql"
 
   @precommit
@@ -24,33 +24,33 @@ Feature: Which engine the command line decides to talk to
     Then the engine is "sqlite"
 
   @precommit
-  Scenario: _chosen_dialect prefers what the operator typed over the url
-    When an operator types --dialect "postgresql" with the url "mysql://host/db"
+  Scenario: _chosen_engine prefers what the operator typed over the url
+    When an operator types --engine "postgresql" with the url "mysql://host/db"
     Then the engine is "postgresql"
 
   @precommit
-  Scenario: _chosen_dialect reads the url when the operator typed no engine
-    When an operator types no --dialect with the url "sqlite:///x.db"
+  Scenario: _chosen_engine reads the url when the operator typed no engine
+    When an operator types no --engine with the url "sqlite:///x.db"
     Then the engine is "sqlite"
 
   @precommit
-  Scenario: _chosen_dialect answers nothing when there is no url to read
-    When an operator types no --dialect with no url
+  Scenario: _chosen_engine answers nothing when there is no url to read
+    When an operator types no --engine with no url
     Then there is no engine
 
   @precommit
-  Scenario: detect_dialect refuses a url naming an engine nobody supports
-    When detect_dialect is given the url "mysql://host/db"
-    Then it refuses and says to pass --dialect
+  Scenario: detect_engine refuses a url naming an engine nobody supports
+    When detect_engine is given the url "mysql://host/db"
+    Then it refuses and says to pass --engine
 
   @precommit
   Scenario: _refuse_unknown_prefix says what the operator can do about it
     When _refuse_unknown_prefix is given no prefix matches at all
-    Then it refuses and says to pass --dialect
+    Then it refuses and says to pass --engine
 
   @precommit
-  Scenario: _the_named_dialect hands back the engine the prefix named
-    When _the_named_dialect is given the prefix matches "sqlite"
+  Scenario: _the_named_engine hands back the engine the prefix named
+    When _the_named_engine is given the prefix matches "sqlite"
     Then the engine is "sqlite"
 
   @precommit

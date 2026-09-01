@@ -47,7 +47,7 @@ from declaro_persistum.query.expressions import (  # noqa: F401
     render_order_term,
     render_subquery,
 )
-from declaro_persistum.types import NOTHING, Dialect, Nothing, Schema, Table, resolved
+from declaro_persistum.types import NOTHING, Engine, Nothing, Schema, Table, resolved
 
 __all__ = [
     "SQLFunction",
@@ -193,20 +193,20 @@ def subquery(query: Any) -> SubqueryExpr:
 
 
 @helper
-def _render_case_argument(arg: Any, path: str, _dialect: Dialect) -> tuple[str, dict[str, Any]]:
+def _render_case_argument(arg: Any, path: str, _engine: Engine) -> tuple[str, dict[str, Any]]:
     """A CASE used as a function argument carries no alias of its own."""
     return render_case(arg, path, with_alias=False)
 
 
 @helper
-def _render_subquery_argument(arg: Any, _path: str, dialect: Dialect) -> tuple[str, dict[str, Any]]:
+def _render_subquery_argument(arg: Any, _path: str, engine: Engine) -> tuple[str, dict[str, Any]]:
     """A subquery argument is wrapped, because it is one value here."""
-    sql, params = render_subquery(arg, dialect)
+    sql, params = render_subquery(arg, engine)
     return f"({sql})", params
 
 
 @helper
-def _render_literal(arg: Any, _path: str, _dialect: Dialect) -> tuple[str, dict[str, Any]]:
+def _render_literal(arg: Any, _path: str, _engine: Engine) -> tuple[str, dict[str, Any]]:
     """Anything carrying no tag is written as it stands."""
     return str(arg), {}
 
@@ -257,7 +257,7 @@ _WHEN_UNKNOWN_KIND: dict[bool, Any] = {
 
 
 @helper
-def render_function(fn: SQLFunction, dialect: Dialect, path: str) -> tuple[str, dict[str, Any]]:
+def render_function(fn: SQLFunction, engine: Engine, path: str) -> tuple[str, dict[str, Any]]:
     """Render a function call, and any expression nested inside it.
 
     A nested argument gets its own sub-path, so a CASE inside an aggregate
@@ -269,7 +269,7 @@ def render_function(fn: SQLFunction, dialect: Dialect, path: str) -> tuple[str, 
     for i, arg in enumerate(fn["args"]):
         kind = kind_of(arg)
         known = _WHEN_UNKNOWN_KIND[kind in _RENDER_ARGUMENT](kind)
-        sql, rendered_params = _RENDER_ARGUMENT[known](arg, f"{path}_a{i}", dialect)
+        sql, rendered_params = _RENDER_ARGUMENT[known](arg, f"{path}_a{i}", engine)
         parts.append(sql)
         params.update(rendered_params)
 

@@ -58,32 +58,32 @@ def _when_postgresql_type(ctx, declared):
     _call(ctx, "postgresql_type", declared)
 
 
-@when(parsers.parse('map_type is given "{declared}" for "{dialect}"'))
-def _when_map_type(ctx, declared, dialect):
-    _call(ctx, "map_type", declared, dialect)
+@when(parsers.parse('map_type is given "{declared}" for "{engine}"'))
+def _when_map_type(ctx, declared, engine):
+    _call(ctx, "map_type", declared, engine)
 
 
-@when(parsers.parse('_the_mappable_dialect is given "{dialect}"'))
-def _when_mappable(ctx, dialect):
-    _call(ctx, "_the_mappable_dialect", dialect)
+@when(parsers.parse('_the_mappable_engine is given "{engine}"'))
+def _when_mappable(ctx, engine):
+    _call(ctx, "_the_mappable_engine", engine)
 
 
-@when(parsers.parse('_refuse_unmappable_dialect is given "{dialect}"'))
-def _when_unmappable(ctx, dialect):
-    _call(ctx, "_refuse_unmappable_dialect", dialect)
+@when(parsers.parse('_refuse_unmappable_engine is given "{engine}"'))
+def _when_unmappable(ctx, engine):
+    _call(ctx, "_refuse_unmappable_engine", engine)
 
 
 # --------------------------------------------------------- comparing two types
 
 
-@when(parsers.parse('same_type compares "{left}" and "{right}" on "{dialect}"'))
-def _when_same_type(ctx, left, right, dialect):
-    _call(ctx, "same_type", left, right, dialect)
+@when(parsers.parse('same_type compares "{left}" and "{right}" on "{engine}"'))
+def _when_same_type(ctx, left, right, engine):
+    _call(ctx, "same_type", left, right, engine)
 
 
-@when(parsers.parse('_the_same_spelling compares "{left}" and "{right}" on "{dialect}"'))
-def _when_same_spelling(ctx, left, right, dialect):
-    _call(ctx, "_the_same_spelling", left, right, dialect)
+@when(parsers.parse('_the_same_spelling compares "{left}" and "{right}" on "{engine}"'))
+def _when_same_spelling(ctx, left, right, engine):
+    _call(ctx, "_the_same_spelling", left, right, engine)
 
 
 @when(parsers.parse('_one_absence_is_not_the_other compares nothing with "{right}"'))
@@ -139,61 +139,61 @@ def _when_unspellable_default(ctx):
     _call(ctx, "_refuse_unspellable_default", object())
 
 
-@when(parsers.parse('_the_renderable_dialect is given "{dialect}"'))
-def _when_renderable(ctx, dialect):
-    _call(ctx, "_the_renderable_dialect", dialect)
+@when(parsers.parse('_the_renderable_engine is given "{engine}"'))
+def _when_renderable(ctx, engine):
+    _call(ctx, "_the_renderable_engine", engine)
 
 
-@when(parsers.parse('_refuse_unrenderable_dialect is given "{dialect}"'))
-def _when_unrenderable(ctx, dialect):
-    _call(ctx, "_refuse_unrenderable_dialect", dialect)
+@when(parsers.parse('_refuse_unrenderable_engine is given "{engine}"'))
+def _when_unrenderable(ctx, engine):
+    _call(ctx, "_refuse_unrenderable_engine", engine)
 
 
 # --------------------------------------------------- translating between engines
 
 
-@when(parsers.parse('_translate_default is given "{value}" for "{dialect}" on column "{column}"'))
-def _when_translate_default(ctx, value, dialect, column):
-    _call(ctx, "_translate_default", value, dialect, column)
+@when(parsers.parse('_translate_default is given "{value}" for "{engine}" on column "{column}"'))
+def _when_translate_default(ctx, value, engine, column):
+    _call(ctx, "_translate_default", value, engine, column)
 
 
 @when(
-    parsers.parse('_translate_text_default is given "{value}" for "{dialect}" on column "{column}"')
+    parsers.parse('_translate_text_default is given "{value}" for "{engine}" on column "{column}"')
 )
-def _when_translate_text(ctx, value, dialect, column):
-    _call(ctx, "_translate_text_default", value, dialect, column)
-
-
-@when(
-    parsers.parse(
-        '_untranslated_default is given the number {value:d} for "{dialect}" on column "{column}"'
-    )
-)
-def _when_untranslated(ctx, value, dialect, column):
-    _call(ctx, "_untranslated_default", value, dialect, column)
+def _when_translate_text(ctx, value, engine, column):
+    _call(ctx, "_translate_text_default", value, engine, column)
 
 
 @when(
     parsers.parse(
-        '_the_spellable_expression is given "{value}" for "{dialect}" on column "{column}"'
+        '_untranslated_default is given the number {value:d} for "{engine}" on column "{column}"'
     )
 )
-def _when_spellable_expression(ctx, value, dialect, column):
-    _call(ctx, "_the_spellable_expression", value, dialect, column, "unused")
+def _when_untranslated(ctx, value, engine, column):
+    _call(ctx, "_untranslated_default", value, engine, column)
 
 
 @when(
     parsers.parse(
-        '_refuse_unspellable_expression is given "{value}" for "{dialect}" on column "{column}"'
+        '_the_spellable_expression is given "{value}" for "{engine}" on column "{column}"'
     )
 )
-def _when_unspellable_expression(ctx, value, dialect, column):
-    _call(ctx, "_refuse_unspellable_expression", value, dialect, column, "unused")
+def _when_spellable_expression(ctx, value, engine, column):
+    _call(ctx, "_the_spellable_expression", value, engine, column, "unused")
 
 
-@when(parsers.parse('_the_dialects_spelling looks up "{value}" in the sqlite spellings'))
-def _when_dialects_spelling(ctx, value):
-    _call(ctx, "_the_dialects_spelling", {"now()": "CURRENT_TIMESTAMP"}, value, value)
+@when(
+    parsers.parse(
+        '_refuse_unspellable_expression is given "{value}" for "{engine}" on column "{column}"'
+    )
+)
+def _when_unspellable_expression(ctx, value, engine, column):
+    _call(ctx, "_refuse_unspellable_expression", value, engine, column, "unused")
+
+
+@when(parsers.parse('_the_engines_spelling looks up "{value}" in the sqlite spellings'))
+def _when_engines_spelling(ctx, value):
+    _call(ctx, "_the_engines_spelling", {"now()": "CURRENT_TIMESTAMP"}, value, value)
 
 
 @when(parsers.parse('_as_declared looks up "{value}" in the sqlite spellings'))
@@ -204,9 +204,9 @@ def _when_as_declared(ctx, value):
 # ------------------------------------------------------------- a whole column
 
 
-@when(parsers.parse('column_definition is given a text column "{name}" for "{dialect}"'))
-def _when_column_definition(ctx, name, dialect):
-    _call(ctx, "column_definition", name, {"type": "text"}, dialect)
+@when(parsers.parse('column_definition is given a text column "{name}" for "{engine}"'))
+def _when_column_definition(ctx, name, engine):
+    _call(ctx, "column_definition", name, {"type": "text"}, engine)
 
 
 @when(parsers.parse('_foreign_key_clause is given a column referencing "{reference}"'))

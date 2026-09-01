@@ -1,7 +1,7 @@
 """Read a SQLite database's shape back out of it. Functions, not a class.
 
 `SQLiteInspector` was stateless: no `__init__`, no fields, four methods that
-each took a connection and returned data, and a `get_dialect()` that returned
+each took a connection and returned data, and a `get_engine()` that returned
 the string "sqlite". Instantiating it accomplished nothing — `create_inspector`
 built one, called one method, and dropped it.
 
@@ -61,7 +61,7 @@ _USER_TABLES = """
 
 # The turso patterns are here as well as in the turso inspector because
 # `open_turso` runs the Turso engine even for a local database, and that engine
-# creates __turso_internal_mvcc_meta. A caller passing dialect="sqlite" for a
+# creates __turso_internal_mvcc_meta. A caller passing engine="sqlite" for a
 # SQLite-compatible file would otherwise have the differ read a system table as
 # a user table and emit drop_table for it. The engine refuses the drop, so the
 # migration fails outright.
@@ -321,7 +321,7 @@ async def introspect(
     """Read the whole schema back.
 
     A connection failure is raised as a typed `ConnectionError` carrying the
-    dialect, so a caller can tell "the database is unreachable" from "the
+    engine, so a caller can tell "the database is unreachable" from "the
     database says no" without reading the message (Rule 8).
     """
     # A default in the signature would decide this where no reader
@@ -386,7 +386,7 @@ def _as_connection_failure(error: Exception) -> NoReturn:
     says no" by the type, without reading the message (Rule 8).
     """
     raise DeclaroConnectionError(
-        f"Failed to introspect database: {error}", dialect="sqlite"
+        f"Failed to introspect database: {error}", engine="sqlite"
     ) from error
 
 

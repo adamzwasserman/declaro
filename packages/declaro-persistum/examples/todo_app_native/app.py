@@ -224,7 +224,7 @@ async def use_turso_embedded(
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Render the main page with all todos."""
-    async with get_connection(request.app.state.database) as (conn, dialect):
+    async with get_connection(request.app.state.database) as (conn, engine):
         todos = await execute(
             select(
                 "id",
@@ -260,7 +260,7 @@ async def create_todo(request: Request, title: str = Form(...)):
     """Create a new todo."""
     todo_id = str(uuid.uuid4())
 
-    async with get_connection(request.app.state.database) as (conn, dialect):
+    async with get_connection(request.app.state.database) as (conn, engine):
         await execute(
             insert(
                 "todos",
@@ -271,7 +271,7 @@ async def create_todo(request: Request, title: str = Form(...)):
             conn,
             row_factory=NOTHING,
         )
-        await commit(conn, dialect)
+        await commit(conn, engine)
 
         todo = await execute_one(
             select(
@@ -304,7 +304,7 @@ async def create_todo(request: Request, title: str = Form(...)):
 @app.put("/todos/{todo_id}/toggle", response_class=HTMLResponse)
 async def toggle_todo(request: Request, todo_id: str):
     """Toggle todo completion status."""
-    async with get_connection(request.app.state.database) as (conn, dialect):
+    async with get_connection(request.app.state.database) as (conn, engine):
         current = await execute_one(
             select(
                 "completed",
@@ -334,7 +334,7 @@ async def toggle_todo(request: Request, todo_id: str):
             conn,
             row_factory=NOTHING,
         )
-        await commit(conn, dialect)
+        await commit(conn, engine)
 
         todo = await execute_one(
             select(
@@ -367,13 +367,13 @@ async def toggle_todo(request: Request, todo_id: str):
 @app.delete("/todos/{todo_id}", response_class=HTMLResponse)
 async def delete_todo(request: Request, todo_id: str):
     """Delete a todo."""
-    async with get_connection(request.app.state.database) as (conn, dialect):
+    async with get_connection(request.app.state.database) as (conn, engine):
         await execute(
             delete("todos", where={"id": todo_id}, params=NOTHING, returning=NOTHING),
             conn,
             row_factory=NOTHING,
         )
-        await commit(conn, dialect)
+        await commit(conn, engine)
 
     return ""
 
@@ -381,7 +381,7 @@ async def delete_todo(request: Request, todo_id: str):
 @app.get("/todos/count", response_class=HTMLResponse)
 async def get_count(request: Request):
     """Get todo counts for the footer."""
-    async with get_connection(request.app.state.database) as (conn, dialect):
+    async with get_connection(request.app.state.database) as (conn, engine):
         active_count = await execute_scalar(
             select(
                 "COUNT(*) AS c",
