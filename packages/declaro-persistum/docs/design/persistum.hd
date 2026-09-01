@@ -56,13 +56,13 @@ module declaro-persistum
     skipped: list<Operation>
   }
 
-  # A Database is data carrying its own injected boundary. `dialect` is
+  # A Database is data carrying its own injected boundary. `engine` is
   # decided at open, which is why nothing downstream has to work out what
-  # engine it is talking to.
+  # engine it is talking to, and why no public function takes one.
   type Database = {
     path: str
     primary: str
-    dialect: str
+    engine: str
     serialise: any
   }
 
@@ -84,17 +84,17 @@ module declaro-persistum
 
   boundary_in fn load_models_from_module : (module_path: str) -> Schema side_effect reads "python_module"
 
-  boundary_in fn introspect : (connection: any, dialect: str) -> Schema side_effect reads "database"
+  boundary_in fn introspect : (connection: any, engine: str) -> Schema side_effect reads "database"
 
   # --- column 3: pure functions — the core -------------------------------
 
-  fn diff : (current: Schema, target: Schema, dialect: str, decisions: any) -> DiffResult
+  fn diff : (current: Schema, target: Schema, engine: str, decisions: any) -> DiffResult
 
   fn build_dependency_graph : (operations: list<Operation>) -> dict<int, list<int>>
 
   fn topological_sort : (operations: list<Operation>, dependencies: dict<int, list<int>>) -> list<int>
 
-  fn detect_ambiguities : (current: Schema, target: Schema, dialect: str, decisions: any) -> list<any>
+  fn detect_ambiguities : (current: Schema, target: Schema, engine: str, decisions: any) -> list<any>
 
   fn validate_schema : (schema: Schema) -> any
 
@@ -128,7 +128,7 @@ module declaro-persistum
 
   # --- column 2: orchestrators — coordinate, own no logic ----------------
 
-  orchestrator fn apply_migrations_async : (db: Database, dialect: str, schema_path: str) -> ApplyResult
+  orchestrator fn apply_migrations_async : (db: Database, schema_path: str) -> ApplyResult
 
   orchestrator fn begin_cutover : (source: Database, target: Database, schema_path: str) -> any
 
@@ -136,7 +136,7 @@ module declaro-persistum
 
   # --- column 4: output boundary — writes the world ----------------------
 
-  boundary_out fn apply : (connection: any, operations: list<Operation>, execution_order: list<int>, dialect: str) -> ApplyResult side_effect writes "database"
+  boundary_out fn apply : (connection: any, operations: list<Operation>, execution_order: list<int>, engine: str) -> ApplyResult side_effect writes "database"
 
   boundary_out fn open_sqlite : (path: str, shutdown: str, busy_timeout_s: float) -> Database side_effect reads "filesystem"
 
