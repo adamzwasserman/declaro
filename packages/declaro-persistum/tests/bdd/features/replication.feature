@@ -35,10 +35,10 @@ Feature: Replication — one function, both directions, out of the way of real w
   # Opportunistic — replication yields to real work
   # ============================================================
 
-  Scenario: replication runs only when no writer is waiting
+  Scenario: replication runs only when no write is in flight
     Given a replicated database whose background replication is running
     When a replication pass is considered
-    Then it proceeds only when no writer is waiting for the serialise lock, because replication goes out on the held connection and every waiting writer is a request paying for the round trip
+    Then it proceeds only when no write is in flight, because replication goes out on the held connection and every write in flight is a request paying for the round trip
     And load is counted as writers waiting for that lock, NOT as CPU and NOT as active readers — a reader takes no lock at all and never contends with replication
     And it is the exact resource replication takes rather than a cheaper signal standing in for it, which is the substitution that has already cost this package three production incidents
 

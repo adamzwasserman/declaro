@@ -117,7 +117,7 @@ async def test_a_drainer_runs_whatever_writer_it_was_given() -> None:
             connect=connect,
             close_connection=no_passes,
             for_ddl=writing,
-            serialise=None,
+            in_flight={"count": 0},
             shutdown="exit_immediately",
             write_one=_recording(label),
             replicate_once=already_delivered,

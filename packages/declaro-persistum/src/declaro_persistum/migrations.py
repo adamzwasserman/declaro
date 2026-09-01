@@ -621,9 +621,11 @@ async def _apply_and_report(
 ) -> dict[str, Any]:
     """Run the operations the order names, then report what happened.
 
-    No pause. A migration is a writer, and it holds the serialise lock for the
-    whole of `_for_ddl`; opportunistic replication defers to a waiting writer,
-    so nothing can push mid-transaction.
+    No pause. A migration is a write, and it is in flight for the whole of
+    `_for_ddl`; opportunistic replication defers to a write in flight, so
+    nothing can push mid-transaction. It used to say "holds the serialise
+    lock", which is the same guarantee resting on a lock that no longer
+    exists.
     """
     async with _for_ddl(plan["db"]) as conn:
         result = await apply_operations(

@@ -90,7 +90,7 @@ def _database(conn: _Conn):
         connect=connect,
         close_connection=no_passes,
         for_ddl=writing,
-        serialise=None,
+        in_flight={"count": 0},
         shutdown="exit_immediately",
         write_one=_write_one,
         replicate_once=already_delivered,

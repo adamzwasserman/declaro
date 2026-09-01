@@ -106,6 +106,7 @@ from declaro_persistum.database import (
     already_delivered,
     check_shutdown,
     no_passes,
+    no_writes_in_flight,
     nothing_was_trapped,
     writing,
 )
@@ -550,7 +551,7 @@ async def _open_local(path: str, shutdown: ShutdownPolicy) -> Database:
         # MVCC, and a table created on an MVCC connection is invisible to any
         # other connection that has already read. `migrating` is the WAL door.
         for_ddl=migrating,
-        serialise=None,  # MVCC: writers run concurrently, which is the point
+        in_flight=no_writes_in_flight(),
         shutdown=shutdown,
         write_one=WRITERS[ENGINE],
         # A local file has no remote, so its writes have arrived.
@@ -666,7 +667,7 @@ async def _open_replicated(
         # the schema change would never leave this machine. A replica is on
         # WAL already, so there is no MVCC blind spot to avoid.
         for_ddl=writing,
-        serialise=None,  # nothing to serialise: one connection, BEGIN CONCURRENT
+        in_flight=no_writes_in_flight(),
         shutdown=shutdown,
         write_one=WRITERS[ENGINE],
         replicate_once=replicate_once,

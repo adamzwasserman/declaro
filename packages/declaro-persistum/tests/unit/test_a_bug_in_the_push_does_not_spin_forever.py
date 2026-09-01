@@ -86,7 +86,7 @@ def _replicated(replicate_once, sleeps: list[float]):
         connect=never_used,
         close_connection=no_passes,
         for_ddl=never_used,
-        serialise=None,
+        in_flight={"count": 0},
         shutdown="exit_immediately",
         write_one=never_used,
         replicate_once=replicate_once,

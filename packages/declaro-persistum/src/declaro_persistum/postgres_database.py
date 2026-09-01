@@ -20,6 +20,7 @@ from declaro_persistum.database import (
     already_delivered,
     check_shutdown,
     no_passes,
+    no_writes_in_flight,
     nothing_was_trapped,
     writing,
 )
@@ -79,7 +80,7 @@ async def open_postgresql(
         connect=connect_postgresql,
         for_ddl=writing,  # DDL and writes take the same door here
         close_connection=_close_connection,
-        serialise=None,
+        in_flight=no_writes_in_flight(),
         shutdown=shutdown,
         write_one=WRITERS[ENGINE],
         # PostgreSQL is the primary: there is nowhere further to send.

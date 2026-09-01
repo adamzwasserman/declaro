@@ -65,7 +65,7 @@ Feature: What a database is when you open it, and what that decides
     Given a temporary directory
     When a local Turso database is opened
     Then it reports that it is not replicated
-    And it carries no write lock, because nothing needs serialising
+    And no write is in flight on it yet
 
   # THIS SCENARIO USED TO ASSERT THE OPPOSITE and it passed. It said a
   # replicated database carries a write lock "because the replica takes one
@@ -77,7 +77,7 @@ Feature: What a database is when you open it, and what that decides
     Given a temporary directory
     When a Turso database is opened with a primary
     Then it reports that it is replicated
-    And it carries no write lock, because one connection runs many writers
+    And no write is in flight on it yet
 
   @network
   Scenario: the answer comes from the primary, not from a flag beside it

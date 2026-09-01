@@ -27,7 +27,7 @@ import asyncio
 
 import pytest
 
-from declaro_persistum.database import new_write_lock, reading, writing
+from declaro_persistum.database import no_writes_in_flight, reading, writing
 from declaro_persistum.sqlite_database import open_sqlite
 from declaro_persistum.turso_database import migrating, open_turso
 from declaro_persistum.types import NOTHING
@@ -54,7 +54,7 @@ async def test_a_clean_block_commits_on_both_paths(tmp_path, serialised: bool) -
     """No explicit commit, and the write is still there."""
     db = await _sqlite(tmp_path, f"c{serialised}.db")
     if serialised:
-        db["serialise"] = new_write_lock(asyncio.Lock())
+        db["in_flight"] = no_writes_in_flight()
 
     async with writing(db) as conn:
         await conn.execute("INSERT INTO t VALUES (1)")
@@ -67,7 +67,7 @@ async def test_a_clean_block_commits_on_both_paths(tmp_path, serialised: bool) -
 async def test_a_block_that_raises_rolls_back_on_both_paths(tmp_path, serialised: bool) -> None:
     db = await _sqlite(tmp_path, f"r{serialised}.db")
     if serialised:
-        db["serialise"] = new_write_lock(asyncio.Lock())
+        db["in_flight"] = no_writes_in_flight()
 
     with pytest.raises(RuntimeError):
         async with writing(db) as conn:
@@ -83,7 +83,7 @@ async def test_an_explicit_commit_still_works(tmp_path, serialised: bool) -> Non
     """A second commit is harmless, so existing code is not broken by this."""
     db = await _sqlite(tmp_path, f"e{serialised}.db")
     if serialised:
-        db["serialise"] = new_write_lock(asyncio.Lock())
+        db["in_flight"] = no_writes_in_flight()
 
     async with writing(db) as conn:
         await conn.execute("INSERT INTO t VALUES (1)")
@@ -98,7 +98,7 @@ async def test_the_serialise_lock_is_released_after_a_failed_block(
 ) -> None:
     """A rollback must not leave the lock held, or the next writer hangs."""
     db = await _sqlite(tmp_path, "lock.db")
-    db["serialise"] = new_write_lock(asyncio.Lock())
+    db["in_flight"] = no_writes_in_flight()
 
     with pytest.raises(RuntimeError):
         async with writing(db) as conn:
@@ -127,39 +127,32 @@ async def test_turso_commits_too(tmp_path) -> None:
     assert await _count(db) == 1
 
 
-def test_both_paths_finish_a_block_the_same_way() -> None:
-    """The structural guard: two paths that must agree share one function.
+def test_one_write_path_scopes_every_block() -> None:
+    """The structural guard, and there is one path to guard now.
 
-    IT USED TO COUNT `"_write_connection(db)"` TWICE IN `writing`'S SOURCE,
-    and on 2026-08-22 the two branches became `_WRITE_PATH`, a table read by
-    `writing`. The string left that function and the test went red while the
-    property it guards still held, which is the same failure it exists to
-    catch pointed the other way: it was reading one function's text rather
-    than asking where the paths go.
+    IT COUNTED TWO. A local database took `_write_connection` and a replicated
+    one took a lock first, and this asserted both reached the shared
+    transaction scope, because the commit once went into the second only and
+    every local write vanished.
 
-    It asks the table now. Every entry either is `_write_connection` or
-    reaches it, so a future edit that gives one path its own commit fails
-    here whichever shape the choice is written in.
+    THE SECOND PATH IS GONE, with the lock it existed for. So the property
+    changes shape: `writing` must reach `_write_connection` itself, with no
+    table in between choosing. A future edit that reintroduces a branch fails
+    here, which is what the original was for.
     """
     import inspect
 
     from declaro_persistum import database
 
-    shared = database._write_connection
-    stray = [
-        f"{key}: {entry.__name__}"
-        for key, entry in database._WRITE_PATH.items()
-        if entry is not shared and "_write_connection(db)" not in inspect.getsource(entry)
-    ]
-
-    assert not stray, (
-        f"these write paths no longer go through the shared transaction "
-        f"scope: {stray}. That is exactly how the commit came to apply to "
-        f"replicated databases only."
+    source = inspect.getsource(database.writing)
+    assert "_write_connection(db)" in source, (
+        "`writing` no longer reaches the shared transaction scope directly. "
+        "That is exactly how the commit came to apply to replicated databases "
+        "only."
     )
-    assert len(database._WRITE_PATH) == 2, (
-        "the write paths are no longer two, so this test is measuring "
-        "something other than the pair it was written for"
+    assert not hasattr(database, "_WRITE_PATH"), (
+        "the write paths are a table again. If that is deliberate, this test "
+        "has to go back to walking every entry to the shared scope."
     )
 
 

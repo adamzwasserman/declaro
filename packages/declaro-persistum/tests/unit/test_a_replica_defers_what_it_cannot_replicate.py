@@ -131,7 +131,7 @@ def _replica(push, *, waiting: int = 0) -> dict:
     return {
         "closed": False,
         "primary": "libsql://example",
-        "serialise": {"waiting": waiting},
+        "in_flight": {"count": waiting},
         "push": push,
         "pull": push,
         "path": "x.db",

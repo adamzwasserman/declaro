@@ -147,7 +147,7 @@ async def test_a_crew_refuses_a_replicated_database(tmp_path):
         connect=unused,
         close_connection=unused,
         for_ddl=writing,
-        serialise=asyncio.Lock(),
+        in_flight={"count": 0},
         replicate_once=unused,
         refresh_once=unused,
         release=unused,

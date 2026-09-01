@@ -21,6 +21,7 @@ from declaro_persistum.database import (
     already_delivered,
     check_shutdown,
     no_passes,
+    no_writes_in_flight,
     nothing_was_trapped,
     writing,
 )
@@ -67,7 +68,8 @@ async def open_sqlite(
     A SQLite database has no primary, so it never replicates. `replicate(db)`
     raises on it rather than returning a success nobody earned.
 
-    Writers are NOT serialised here by a lock. SQLite takes one writer and
+    Writers are NOT serialised by a lock here or on any other engine. SQLite
+    takes one writer and
     `BEGIN IMMEDIATE` fails at the start of a transaction rather than part-way
     through it; `busy_timeout_s` is how long a writer waits for the lock before
     that failure. Concurrency comes from the crew (crew.py), which bounds how
@@ -86,7 +88,7 @@ async def open_sqlite(
         connect=connect_sqlite,
         for_ddl=writing,  # DDL and writes take the same door here
         close_connection=_close_connection,
-        serialise=None,
+        in_flight=no_writes_in_flight(),
         shutdown=shutdown,
         busy_timeout_s=busy_timeout_s,
         write_one=WRITERS[ENGINE],

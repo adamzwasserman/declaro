@@ -24,9 +24,9 @@ Feature: When a replica decides a replication pass is worth taking
     Then is_replicated answers no
 
   @precommit
-  Scenario: writers_waiting counts nobody when no lock is held
+  Scenario: writes_in_flight counts nobody on a database nobody is writing to
     Given a database with no primary
-    Then writers_waiting counts 0
+    Then writes_in_flight counts 0
 
   @precommit
   Scenario: nothing_happened answers no rather than failing

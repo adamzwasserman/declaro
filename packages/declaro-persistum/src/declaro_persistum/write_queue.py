@@ -114,10 +114,12 @@ is NOT about MVCC. Measured 2026-08-12 against a real replica, pyturso 0.7.2:
                                       12 retries over 30s on an IDLE database
 
 So MVCC plus replication is fine for sequential writes. What breaks is more
-than one replica connection against one replica, which is what persistum's
-one-connection-per-write does the moment nothing serialises it. MVCC is
-incidental: it is merely the mode in which `_write_serialisation` stops
-taking the lock, and that lock is what has been masking this on WAL.
+than one replica connection against one replica, which is what
+one-connection-per-write would do. A replicated database does not do that: it
+opens ONE connection at open and hands it to every write, so the constraint is
+respected by the shape rather than by a lock. There is no lock anywhere in this
+package now, and 16 concurrent writers through that one connection all landed
+and all reached the primary, measured 2026-09-01.
 
 THIS PARAGRAPH PREVIOUSLY SAID "MVCC IS LOCAL ONLY ... it creates local-only
 internal tables the replication engine cannot reconcile." Both halves were wrong.

@@ -179,11 +179,16 @@ def _when_open_turso_local(ctx):
     )
 
 
-@then("it carries no write lock, because nothing needs serialising")
-def _then_no_lock(ctx):
-    assert ctx["db"]["serialise"] is None, (
-        "a local database carries a write lock. Serialising costs the "
-        "concurrency MVCC exists to provide, and nothing local needs it."
+@then("no write is in flight on it yet")
+def _then_nothing_in_flight(ctx):
+    """No engine serialises its writers, so there is no lock left to check for.
+
+    What a freshly opened database does carry is a count of writes in flight,
+    which starts at zero and is what opportunistic replication yields to.
+    """
+    assert ctx["db"]["in_flight"]["count"] == 0, (
+        f"a database reports {ctx['db']['in_flight']['count']} writes in "
+        f"flight before anything has written to it"
     )
 
 
@@ -229,25 +234,6 @@ def _when_open_turso_replicated(ctx):
 @then("it reports that it is replicated")
 def _then_replicated(ctx):
     assert is_replicated(ctx["db"]) is True, ctx["db"]["primary"]
-
-
-@then("it carries no write lock, because one connection runs many writers")
-def _then_replica_has_no_lock(ctx):
-    """The reverse of what this step asserted until 2026-09-01.
-
-    It required a lock, on the reading that a replica takes one connection so
-    writes must go one at a time. The connection count is right and the
-    conclusion is not: `BEGIN CONCURRENT` runs many writers on one connection.
-
-    Measured against a real primary, 16 concurrent writers with no lock:
-    nothing ever blocked, 17 of 17 durable locally and 17 of 17 on the
-    primary, over four runs and once at 64 writers.
-    """
-    assert ctx["db"]["serialise"] is None, (
-        "a replicated database still carries a write lock. It serialises "
-        "writers that BEGIN CONCURRENT would have run at once, and it was "
-        "built on a count of connections rather than a count of writes."
-    )
 
 
 @then("removing the primary changes the answer")

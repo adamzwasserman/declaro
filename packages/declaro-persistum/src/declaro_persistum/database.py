@@ -59,7 +59,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import Any, Literal, TypedDict, cast
+from typing import Any, Literal, TypedDict
 
 from declaro_persistum.boundary import helper
 from declaro_persistum.exceptions import DatabaseClosedError
@@ -73,10 +73,10 @@ __all__ = [
     "Database",
     "ShutdownPolicy",
     "check_shutdown",
-    "WriteLock",
+    "WritesInFlight",
     "nothing_was_trapped",
-    "new_write_lock",
-    "writers_waiting",
+    "no_writes_in_flight",
+    "writes_in_flight",
     "reading",
     "writing",
     "is_replicated",
@@ -213,34 +213,37 @@ Sleep = Callable[[float], Awaitable[None]]
 Untrap = Callable[[], int]
 
 
-class WriteLock(TypedDict):
-    """The serialise lock, and the count of writers waiting on it.
+class WritesInFlight(TypedDict):
+    """How many writes are running right now.
 
-    THE COUNT LIVES WITH THE LOCK BECAUSE IT DESCRIBES THE LOCK. Opportunistic
-    replication yields when a writer is waiting, and the resource it yields is
-    this one: replication goes out on the held connection, and so does every
-    write. Counting anything else — CPU, active readers, a queue length — is a
-    cheaper signal standing in for the real noun, which is the substitution
-    behind every replication incident this package has had.
+    IT WAS A LOCK UNTIL 2026-09-01, carrying its own count of writers queued
+    behind it. The lock is gone, because a replica holds one connection and one
+    connection runs many writers. The COUNT is not gone, and deleting it with
+    the lock disabled opportunistic replication for an afternoon.
 
-    A reader is not counted. `reading` takes no lock, so a reader never
-    contends with replication and must never defer it.
+    IT DESCRIBES THE CONTENDED RESOURCE. Replication goes out on the same
+    connection every write uses, so a write in flight is a request paying for
+    the round trip that replication would otherwise take. Counting anything
+    else — CPU, active readers, a queue length — is a cheaper signal standing
+    in for the real noun, which is the substitution behind every replication
+    incident this package has had.
+
+    A reader is not counted. `reading` contends with nothing and must never
+    defer replication.
     """
 
-    lock: asyncio.Lock
-    waiting: int
+    count: int
 
 
 @helper
-def new_write_lock(lock: asyncio.Lock) -> WriteLock:
-    return {"lock": lock, "waiting": 0}
+def no_writes_in_flight() -> WritesInFlight:
+    return {"count": 0}
 
 
 @helper
-def writers_waiting(db: Database) -> int:
-    """How many writers are blocked on the serialise lock right now."""
-    serialise = db["serialise"]
-    return 0 if serialise is None else serialise["waiting"]
+def writes_in_flight(db: Database) -> int:
+    """How many writes are running on this database right now."""
+    return db["in_flight"]["count"]
 
 
 class Database(TypedDict):
@@ -286,7 +289,7 @@ class Database(TypedDict):
     connect: Connect
     close_connection: CloseConnection
     for_ddl: ForDDL
-    serialise: WriteLock | None
+    in_flight: WritesInFlight
     shutdown: ShutdownPolicy
     write_one: WriteOne
     closed: bool
@@ -378,48 +381,19 @@ async def _write_connection(db: Database) -> AsyncIterator[Any]:
     it had read 1 before the "fix". Two paths that must agree are one function
     or they drift.
     """
+    # COUNTED AROUND THE WRITE, not anywhere convenient. A counter that is
+    # initialised and never incremented satisfies every test that sets it by
+    # hand, which is how machinery that does nothing passes for healthy. Around
+    # the write it means exactly: writes holding the connection replication
+    # would take.
+    db["in_flight"]["count"] += 1
     conn = await db["connect"](db)
     try:
         async with TRANSACTIONS[db["engine"]](conn):
             yield conn
     finally:
         await db["close_connection"](conn)
-
-
-@helper
-@asynccontextmanager
-async def _serialised_write(db: Database) -> AsyncIterator[Any]:
-    """Take the serialise lock, then write. Only a replicated database gets here.
-
-    `serialise` is not None on this path: `_WRITE_PATH` is keyed on exactly
-    that, so the field is read once here and read as the lock it is.
-    """
-    serialise = cast("WriteLock", db["serialise"])
-    # INCREMENTED AROUND THE AWAIT, not anywhere convenient. A counter that is
-    # initialised and never incremented satisfies every test that sets it by
-    # hand, which is how machinery that does nothing passes for healthy.
-    # Around the await it means exactly: writers currently blocked on the
-    # resource replication would take.
-    serialise["waiting"] += 1
-    try:
-        await serialise["lock"].acquire()
-    finally:
-        serialise["waiting"] -= 1
-    try:
-        async with _write_connection(db) as conn:
-            yield conn
-    finally:
-        serialise["lock"].release()
-
-
-# Which door a write goes through. A local database has no lock to take, and
-# `_write_connection` is that door unchanged; a replicated one goes through the
-# lock first. The two paths share `_write_connection`, so the commit cannot
-# reach one and miss the other.
-_WRITE_PATH: dict[bool, ForDDL] = {
-    True: _serialised_write,
-    False: _write_connection,
-}
+        db["in_flight"]["count"] -= 1
 
 
 @helper
@@ -479,9 +453,8 @@ async def nothing_happened(_db: Database) -> bool:
 async def writing(db: Database) -> AsyncIterator[Any]:
     """A connection for writing, for the span of the block.
 
-    NO DATABASE SERIALISES ITS WRITERS, on any engine. `serialise` is None
-    everywhere, so `_WRITE_PATH` always takes the unserialised branch and the
-    other one is unreachable.
+    NO DATABASE SERIALISES ITS WRITERS, on any engine. There is one write path
+    and it takes no lock.
 
     IT SAID THE OPPOSITE UNTIL 2026-09-01: that a replicated database
     serialises its writers because the engine allows one, citing a run where
@@ -496,7 +469,7 @@ async def writing(db: Database) -> AsyncIterator[Any]:
     `_write_connection`.
     """
     _check_open(db)
-    async with _WRITE_PATH[db["serialise"] is not None](db) as conn:
+    async with _write_connection(db) as conn:
         yield conn
 
 
@@ -572,14 +545,14 @@ async def replicate_if_idle(db: Database) -> bool:
     """Replicate only when no writer is waiting. Returns whether a pass ran.
 
     OPPORTUNISTIC MEANS YIELDING TO REAL WORK. Replication holds the same
-    connection every write holds, so a writer waiting on the serialise lock is
-    a request paying for the round trip.
+    connection every write holds, so a write in flight is a request paying for
+    the round trip.
 
     A DEFERRED PASS IS DROPPED, NOT QUEUED. Ten passes skipped under load
     produce one pass when the load clears, not ten — otherwise recovering load
     releases a backlog onto a connection at the moment it can least afford it.
     """
-    idle = not db["closed"] and is_replicated(db) and writers_waiting(db) == 0
+    idle = not db["closed"] and is_replicated(db) and writes_in_flight(db) == 0
     return await _IF_IDLE[idle](db)
 
 
@@ -625,7 +598,7 @@ async def replicate_on_shutdown(db: Database, *, now: Callable[[], float]) -> No
     THE ONE PLACE BLOCKING IS CORRECT, AND THE ONE PLACE POLITENESS IS WRONG.
     On ephemeral disk anything not replicated when the process dies is gone,
     and sustained load is exactly when the most unreplicated data is sitting
-    there. So this ignores `writers_waiting` entirely.
+    there. So this ignores `writes_in_flight` entirely.
 
     IT LOGS BECAUSE A PROCESS THAT WILL NOT EXIT IS INDISTINGUISHABLE FROM A
     HUNG ONE. Every line carries the path and the elapsed time, so an operator

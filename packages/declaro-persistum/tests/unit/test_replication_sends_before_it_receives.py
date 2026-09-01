@@ -39,7 +39,7 @@ def _replica(order: list[str], *, push_ok: bool = True) -> dict:
     return {
         "closed": False,
         "primary": "libsql://example",
-        "serialise": {"waiting": 0},
+        "in_flight": {"count": 0},
         "replicate_once": push,
         "refresh_once": pull,
         "path": "x.db",
@@ -128,7 +128,7 @@ def test_the_injected_names_are_the_ones_an_opener_fills() -> None:
     # the opener passes them as keyword arguments rather than quoted keys. The
     # detector was wrong and the code was right, which is the shape of half
     # the false reports I have made today.
-    for field in ("replicate_once", "refresh_once", "closed", "primary", "serialise"):
+    for field in ("replicate_once", "refresh_once", "closed", "primary", "in_flight"):
         assert field in fields, (
             f"{field} is not a field of Database, so the record in this file "
             f"is testing a shape the package does not build"

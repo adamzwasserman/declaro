@@ -55,7 +55,7 @@ class TestALocalDatabase:
         db = await open_turso(
             str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
         )
-        assert db["serialise"] is None
+        assert db["in_flight"]["count"] == 0
 
     @pytest.mark.asyncio
     async def test_a_write_is_readable_afterwards(self, tmp_path):
@@ -154,7 +154,7 @@ class TestTheEngineChoiceIsNotTheCallers:
         db = await open_turso(
             str(tmp_path / "t.db"), shutdown="exit_immediately", primary=NOTHING, token=NOTHING
         )
-        assert db["serialise"] is None, (
+        assert db["in_flight"]["count"] == 0, (
             "a local database serialised its writers, which throws away the "
             "concurrency MVCC is enabled for"
         )

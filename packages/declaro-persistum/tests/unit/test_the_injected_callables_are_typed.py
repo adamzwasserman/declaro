@@ -57,10 +57,10 @@ def test_no_database_field_is_an_undeclared_callable() -> None:
 
 
 def test_the_write_lock_names_the_kind_of_lock_it_holds() -> None:
-    from declaro_persistum.database import WriteLock
+    from declaro_persistum.database import WritesInFlight
 
-    assert _annotation(WriteLock, "lock") != "Any", (
-        "WriteLock.lock is Any, so nothing says it must be acquirable; "
+    assert _annotation(WritesInFlight, "count") != "Any", (
+        "WritesInFlight.count is Any, so nothing says it is a number; "
         "`writing` calls .acquire() and .release() on it"
     )
 

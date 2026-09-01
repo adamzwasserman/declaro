@@ -27,13 +27,13 @@ from pytest_bdd import given, scenarios, then, when
 from declaro_persistum import database as db_mod
 from declaro_persistum.database import (
     Database,
-    new_write_lock,
     no_passes,
+    no_writes_in_flight,
     nothing_was_trapped,
     replicate,
     replicate_if_idle,
     replicate_on_shutdown,
-    writers_waiting,
+    writes_in_flight,
     writing,
 )
 from declaro_persistum.turso_database import open_turso, replicate_path
@@ -146,7 +146,7 @@ def _make(tmp_path, *, replicated=True, recorder=None, shutdown="exit_immediatel
         connect=connect,
         close_connection=close_connection,
         for_ddl=writing,
-        serialise=new_write_lock(asyncio.Lock()) if replicated else None,
+        in_flight=no_writes_in_flight(),
         shutdown=shutdown,
         write_one=_write_one,
         replicate_once=replicate_once,
@@ -301,7 +301,7 @@ def _when_pass_considered(ctx):
         db, rec = _make(ctx["tmp_path"])
         ctx["ran_free"] = await replicate_if_idle(db)
         rec["calls"].clear()
-        db["serialise"]["waiting"] = 1
+        db["in_flight"]["count"] = 1
         ctx["ran_busy"] = await replicate_if_idle(db)
         ctx["calls_busy"] = list(rec["calls"])
         ctx["db"] = db
@@ -310,7 +310,7 @@ def _when_pass_considered(ctx):
 
 
 @then(
-    "it proceeds only when no writer is waiting for the serialise lock, because replication goes out on the held connection and every waiting writer is a request paying for the round trip"
+    "it proceeds only when no write is in flight, because replication goes out on the held connection and every write in flight is a request paying for the round trip"
 )
 def _then_yields(ctx):
     assert ctx["ran_free"] is True, "replication deferred with nothing waiting"
@@ -327,7 +327,7 @@ def _then_readers_not_load(ctx):
     async def run():
         db, _ = _make(ctx["tmp_path"])
         async with db_mod.reading(db):
-            assert writers_waiting(db) == 0, "a reader was counted as load"
+            assert writes_in_flight(db) == 0, "a reader was counted as load"
 
     asyncio.run(run())
 
@@ -351,14 +351,19 @@ def _then_counter_is_real(ctx):
         for _ in range(20):
             await asyncio.sleep(0)
 
-        assert writers_waiting(db) == 1, (
-            f"a genuinely blocked writer read as {writers_waiting(db)}; a "
-            f"counter that is never incremented satisfies every test that "
-            f"sets it by hand"
+        # TWO, NOT ONE, AND THE MEANING IS WHY. This read 1 while the count
+        # was writers queued behind a lock: the first writer had acquired and
+        # left the queue, so only the second was in it. The count is writes in
+        # flight now, and both of these are running, so it is 2. A counter
+        # that is never incremented still reads 0 and still fails here.
+        assert writes_in_flight(db) == 2, (
+            f"two writers are running and the count says "
+            f"{writes_in_flight(db)}; a counter that is never incremented "
+            f"satisfies every test that sets it by hand"
         )
         release.set()
         await asyncio.gather(first, blocked)
-        assert writers_waiting(db) == 0, "the count did not come back down"
+        assert writes_in_flight(db) == 0, "the count did not come back down"
 
     asyncio.run(run())
 
@@ -367,11 +372,11 @@ def _then_counter_is_real(ctx):
 def _when_ten_passes(ctx):
     async def run():
         db, rec = _make(ctx["tmp_path"])
-        db["serialise"]["waiting"] = 1
+        db["in_flight"]["count"] = 1
         for _ in range(10):
             await replicate_if_idle(db)
         ctx["under_load"] = list(rec["calls"])
-        db["serialise"]["waiting"] = 0
+        db["in_flight"]["count"] = 0
         await replicate_if_idle(db)
         ctx["after_load"] = list(rec["calls"])
 
@@ -555,7 +560,7 @@ def _then_no_default(ctx):
 def _when_shutdown(ctx, caplog):
     async def run():
         db, rec = _make(ctx["tmp_path"], recorder=new_recorder(batches=0, failures=1))
-        db["serialise"]["waiting"] = 5  # heavy load: must be ignored
+        db["in_flight"]["count"] = 5  # heavy load: must be ignored
         clock = iter([0.0, 1.5, 3.0, 4.5, 6.0, 7.5, 9.0])
         with caplog.at_level(logging.INFO):
             await replicate_on_shutdown(db, now=lambda: next(clock))
@@ -622,7 +627,7 @@ def _then_truncation_visible(ctx):
 def _when_flush(ctx):
     async def run():
         db, rec = _make(ctx["tmp_path"])
-        db["serialise"]["waiting"] = 3  # an explicit call ignores load
+        db["in_flight"]["count"] = 3  # an explicit call ignores load
         await db_mod.flush(db)
         ctx["calls"] = list(rec["calls"])
 

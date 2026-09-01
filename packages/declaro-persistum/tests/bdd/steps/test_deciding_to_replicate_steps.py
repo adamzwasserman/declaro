@@ -30,7 +30,7 @@ from declaro_persistum.database import (
     nothing_was_trapped,
     replicate,
     replicate_if_idle,
-    writers_waiting,
+    writes_in_flight,
     writing,
 )
 
@@ -73,7 +73,7 @@ def _a_database(ctx: Ctx, *, primary: str | None, waiting: int, closed: bool) ->
         connect=_never,
         close_connection=no_passes,
         for_ddl=writing,
-        serialise={"waiting": waiting, "lock": None},
+        in_flight={"count": waiting},
         shutdown="exit_immediately",
         write_one=_never,
         replicate_once=_sent,
@@ -116,9 +116,9 @@ def _then_not_replicated(ctx):
     assert is_replicated(ctx["db"]) is False
 
 
-@then(parsers.parse("writers_waiting counts {expected:d}"))
+@then(parsers.parse("writes_in_flight counts {expected:d}"))
 def _then_waiting(ctx, expected):
-    assert writers_waiting(ctx["db"]) == expected
+    assert writes_in_flight(ctx["db"]) == expected
 
 
 # THE STEPS RUN THE COROUTINE THEMSELVES. pytest-bdd calls a step function
