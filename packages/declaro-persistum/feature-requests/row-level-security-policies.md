@@ -1,7 +1,9 @@
 # Feature Request: Per-Table Row-Level-Security Policies
 
 **Requested by**: honest-starter (FastAPI/HTMX multi-user starter)
+
 **Priority**: High — blocks auth-first starter kit; currently requires either an app-layer TableProxy wrapper (fragile, bypassable) or monkey-patching Declaro's execute methods (fragile, modifies vendored lib).
+
 **Context**: Apps built on `honest-starter` are multi-user by design. Every non-public row needs: `created_by_user_id`, `public`, `shared_with_user_ids`, `created_date`, `last_changed_date`, `deleted_date`. Every SELECT must filter by ownership. Every INSERT must auto-set ownership + timestamps. Every UPDATE must auto-bump `last_changed_date`. Every DELETE must soft-delete (set `deleted_date = now()` instead of removing the row). Today SQLAlchemy apps do this with `before_compile` / `before_flush` events. Declaro has no equivalent, so the enforcement either leaks into every route (easy to forget) or requires a TableProxy shim.
 
 ---
