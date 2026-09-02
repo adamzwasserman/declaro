@@ -216,7 +216,7 @@ module declaro-persistum
 
   # One door. The target says which engine is behind it, so a caller never names
   # one. `tests/bdd/features/opening/open_database.feature`.
-  boundary_in fn open_database : (target: str, shutdown: str) -> Database side_effect reads "network"
+  boundary_in fn open_database : (target: str, shutdown: str) -> Database side_effect reads "network" invokes engine_of
 
   # A read waits for nothing: the local file is a full copy, so a read never
   # touches the primary.
@@ -299,18 +299,38 @@ module declaro-persistum
 
   orchestrator fn drain : (db: Database, room: Room, retry: Retry) -> Answer invokes render, writing, is_contention, delay_before
 
+  # THE ONE PLACE BLOCKING IS CORRECT. It pushes until the primary has
+  # everything, retrying rather than giving up, because the usual deployment has
+  # disk that does not survive the process and anything unreplicated at exit is
+  # gone. `shutdown` is required at open for the same reason: there is no safe
+  # default for whether your data survives.
+  orchestrator fn shut_down : (db: Database, retry: Retry) -> Answer invokes replicate, delay_before, close
+
   # --- the chains: how the world reaches the work ------------------------
   #
-  # TWO OF THESE ARE TWO CARDS AND THAT IS HONEST. A read has no output
-  # boundary: the Answer goes back to a caller who is not on this board. A write
-  # has no input boundary: the caller's row arrives as an argument.
+  # EVERY CHAIN STARTS AT `open_database`, and that is not a formality. The
+  # architecture says a Database is "data carrying its own injected callables
+  # and its engine, decided once", so every orchestrator here takes one and
+  # there is exactly one place it can have come from. An orchestrator with
+  # nothing to its left would be a sequence that starts from nowhere, and I
+  # drew three of those before this line.
+  #
+  # `migrating` starts at the schema file instead, because that is the more
+  # specific input door: the models are the truth, and they arrive by being
+  # read.
 
   chain migrating = load_models -> migrate -> writing
 
+  # A READ ENDS AT THE ORCHESTRATOR, because the Answer goes back to a caller
+  # who is not on this board. `reading` is its left neighbour rather than its
+  # right one: putting a read boundary after the orchestrator would be an arrow
+  # into column 1.
   chain asking = reading -> ask
 
-  chain writing_a_row = write -> writing
+  chain writing_a_row = open_database -> write -> writing
 
-  chain draining = drain -> writing
+  chain draining = open_database -> drain -> writing
 
-  chain replicating = replicate
+  chain shutting_down = open_database -> shut_down -> close
+
+  chain replicating = open_database -> shut_down -> replicate
