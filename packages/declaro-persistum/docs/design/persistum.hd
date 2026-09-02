@@ -66,10 +66,33 @@ module declaro-persistum
     in_flight: any
   }
 
+  # WHAT EVERY VOCABULARY WORD GIVES BACK. Six keys, of which a word fills one
+  # and leaves the rest as the declared absence NOTHING. `failure` is a key like
+  # any other, so a caller tells success from failure by which key is filled
+  # rather than by catching something.
+  type Answer = {
+    rows: list<any>
+    row: any
+    number: int
+    truth: bool
+    mappings: list<dict<str, any>>
+    failure: any
+  }
+
   type Receipt = {
     ticket: str
     ok: bool
     error: str
+  }
+
+  type Room = {
+    writes: list<any>
+    waiting: dict<str, any>
+  }
+
+  type Drained = {
+    receipts: list<Receipt>
+    orphans: list<str>
   }
 
   type Retry = {
@@ -146,7 +169,20 @@ module declaro-persistum
 
   boundary_out fn replicate : (db: Database) -> bool side_effect writes "network"
 
-  boundary_out fn flush : (db: Database) -> any side_effect writes "network"
+  boundary_out fn flush : (db: Database) -> None side_effect writes "network"
+
+  # --- the write queue, which was on the surface and undeclared ----------
+  #
+  # `Receipt` and `Retry` were orphan types until these three cards arrived:
+  # declared, and named by nothing. A room is a waiting room in front of the
+  # log, `deposit` hands a write to it and gets a ticket, and `drain` empties
+  # it one write at a time under a retry policy.
+
+  fn new_room : () -> Room
+
+  fn deposit : (room: Room, write: any) -> str
+
+  fn drain : (room: Room, execute: any, retry: Retry) -> Drained
 
   boundary_out fn close : (db: Database) -> Database side_effect writes "network"
 
