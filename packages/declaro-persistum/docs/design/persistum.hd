@@ -15,42 +15,41 @@ module declaro-persistum
 
   # --- the closed sets --------------------------------------------------
   #
-  # Each is a vocabulary the documents name, written as one rather than as
+  # Each is a closed set the documents name, written as one rather than as
   # `str`, because `str` admits every string and a test then has to go looking
   # for the few that mean something.
+  #
+  # A `set` AND NOT A `set` PLUS A `vocabulary`. A vocabulary composes several
+  # sets into one type, and with one set each it adds a name nothing can use:
+  # the explorer reads what a signature mentions, so a set named only by a
+  # vocabulary is an orphan and six of them were.
 
-  set engines = { "postgresql", "sqlite", "turso" }
-  vocabulary Engine = { engines }
+  set Engine = { "postgresql", "sqlite", "turso" }
 
-  set directions = { "ascending", "descending" }
-  vocabulary Direction = { directions }
+  set Direction = { "ascending", "descending" }
 
   # "Fifteen operators, named as keys because a condition is data."
-  set operators = {
+  set Operator = {
     "eq", "ne", "lt", "lte", "gt", "gte", "in", "not_in", "between",
     "like", "contains", "startswith", "endswith", "is_null", "is_not_null"
   }
-  vocabulary Operator = { operators }
 
   # The whole vocabulary, and every one of them means one thing.
-  set words = {
+  set Word = {
     "all", "one", "first", "page", "ordered_by", "values", "distinct", "exists",
     "count", "sum", "average", "smallest", "largest", "count_distinct",
     "grouped_by", "having",
     "add", "change", "change_all", "remove", "remove_all", "replace",
     "of"
   }
-  vocabulary Word = { words }
 
   # "You say that in plain terms", for a materialized view.
-  set freshness = { "always", "hourly", "daily", "on_demand" }
-  vocabulary Freshness = { freshness }
+  set Freshness = { "always", "hourly", "daily", "on_demand" }
 
   # `a_model_declares_and_does_nothing_else.feature`: "the rules are a table, so
   # the checker knows nothing about validators". One row per habit a model must
   # not carry.
-  set habits = { "validator", "method", "property", "inheritance" }
-  vocabulary Habit = { habits }
+  set Habit = { "validator", "method", "property", "inheritance" }
 
   # --- what a caller declares -------------------------------------------
 
