@@ -129,6 +129,10 @@ module declaro-persistum
 
   fn delay_before : (retry: Retry, attempt: int) -> float
 
+  # THESE THREE ARE REACHED FROM MODULES THIS FILE DOES NOT DECLARE:
+  # `column_types.py` and `model_columns.py`, two calls each. They are
+  # under-declared here rather than uncalled, and the honest fix is a
+  # declaration for those modules rather than a call invented for this one.
   fn is_literal_type : (annotation: any) -> bool
 
   fn get_literal_columns : (schema: Schema) -> dict<str, any>
@@ -162,9 +166,9 @@ module declaro-persistum
   # is the docstring and the key of the Answer each fills. Two cards here was a
   # second copy of a thing the code stopped having.
 
-  orchestrator fn about_rows : (db: Database, word: str, model: any, narrowed: dict<str, any>) -> Answer invokes render, reading
+  orchestrator fn about_rows : (db: Database, word: str, model: any, narrowed: dict<str, any>) -> Answer invokes render
 
-  orchestrator fn add : (db: Database, declared: any) -> Answer invokes render, writing
+  orchestrator fn add : (db: Database, declared: any) -> Answer invokes render
 
   # --- the two doors to the database, which are the actual I/O -----------
   #
@@ -217,7 +221,10 @@ module declaro-persistum
 
   fn deposit : (room: Room, write: any) -> str
 
-  fn drain : (room: Room, execute: any, retry: Retry) -> Drained
+  # `drain` reaches the retry pair directly, verified in `write_queue.py`: it
+  # asks `is_contention` whether a refusal is worth another attempt and
+  # `delay_before` how long to wait. Both were orphans until this line.
+  fn drain : (room: Room, execute: any, retry: Retry) -> Drained invokes is_contention, delay_before
 
   boundary_out fn close : (db: Database) -> Database side_effect writes "network"
 
@@ -247,6 +254,21 @@ module declaro-persistum
   # --- the chain the whole library exists to run -------------------------
 
   chain migrate = load_schema_from_models -> apply_migrations_async -> apply
+
+  # TWO CARDS, NOT THREE, AND THAT IS THE HONEST SHAPE. A read has no output
+  # boundary: the connection comes in and the Answer goes back to the caller,
+  # who is not on this board. A write has no input boundary: the caller's row
+  # arrives as an argument and the connection is where it leaves. Forcing a
+  # third card onto either would mean inventing one.
+  #
+  # NEITHER ORCHESTRATOR INVOKES ITS DOOR. `about_rows` receives the connection
+  # `reading` produced; declaring a call would be an orchestrator reaching
+  # leftward into an input boundary, which is the one direction that cannot
+  # happen and which I declared twice before catching it.
+
+  chain asking = reading -> about_rows
+
+  chain adding = add -> writing
 
 
 
