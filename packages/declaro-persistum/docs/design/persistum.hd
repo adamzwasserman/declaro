@@ -103,6 +103,10 @@ module declaro-persistum
 
   # --- column 1: input boundary — reads the world ------------------------
 
+  # TWO CARDS, ONE SHAPE. Erase the names and these differ by what they read
+  # and nothing else: a path in, a Schema out. The map found it. They are two
+  # functions in the code today and this file says what is, so both are here.
+
   boundary_in fn load_schema_from_models : (models_dir: str) -> Schema side_effect reads "filesystem"
 
   boundary_in fn load_models_from_module : (module_path: str) -> Schema side_effect reads "python_module"
@@ -143,11 +147,36 @@ module declaro-persistum
   # The Pydantic models are the single source of truth for what is in the
   # database. Nothing here introspects to find out what columns exist.
 
-  boundary_in fn all : (db: Database, model: any, narrowed: dict<str, any>) -> Answer side_effect reads "database"
+  # A VOCABULARY WORD IS AN ORCHESTRATOR, NOT A BOUNDARY. Asking is multistage:
+  # check the columns against the model, build the declaration, render it for
+  # the engine this Database carries, take a connection, run it, and shape the
+  # rows into an Answer. Only one of those steps touches the world.
+  #
+  # THESE THREE WERE DECLARED AS I/O and they are not. `add` writes nothing
+  # itself; it hands a statement to the write door. The map showed three
+  # boundary cards with no orchestrator above them, which is what a multistage
+  # process looks like when nobody owns the sequence.
+  #
+  # `all` and `one` ARE ONE FUNCTION ALREADY. `asking.py` generates them, with
+  # `exists` and `count`, from `_about_rows` over a four-row table; what differs
+  # is the docstring and the key of the Answer each fills. Two cards here was a
+  # second copy of a thing the code stopped having.
 
-  boundary_in fn one : (db: Database, model: any, narrowed: dict<str, any>) -> Answer side_effect reads "database"
+  orchestrator fn about_rows : (db: Database, word: str, model: any, narrowed: dict<str, any>) -> Answer invokes render, reading
 
-  boundary_out fn add : (db: Database, declared: any) -> Answer side_effect writes "database"
+  orchestrator fn add : (db: Database, declared: any) -> Answer invokes render, writing
+
+  # --- the two doors to the database, which are the actual I/O -----------
+  #
+  # `reading` waits for nothing, because a read never touches the primary.
+  # `writing` scopes a transaction, commits on a clean exit, rolls back on an
+  # exception, and counts the write in flight so replication yields to it.
+
+  boundary_in fn reading : (db: Database) -> any side_effect reads "database"
+
+  boundary_out fn writing : (db: Database) -> any side_effect writes "database"
+
+  fn render : (declaration: any, engine: str) -> any
 
   # --- column 2: orchestrators — coordinate, own no logic ----------------
 
@@ -160,6 +189,12 @@ module declaro-persistum
   # --- column 4: output boundary — writes the world ----------------------
 
   boundary_out fn apply : (connection: any, operations: list<Operation>, execution_order: list<int>, engine: str) -> ApplyResult side_effect writes "database"
+
+  # THREE CARDS, ONE SHAPE. A target in, a Database out, and what separates
+  # them is which engine they stamp. `tests/bdd/features/opening/` already
+  # specifies the replacement: one `open_database` that reads the target and
+  # works the engine out, with `engine_of` as the pure decision beside it.
+  # Neither is built, so neither is declared here.
 
   boundary_in fn open_sqlite : (path: str, shutdown: str, busy_timeout_s: float) -> Database side_effect reads "filesystem"
 
