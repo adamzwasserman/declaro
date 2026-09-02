@@ -20,9 +20,14 @@ module declaro-persistum
   # for the few that mean something.
   #
   # A `set` AND NOT A `set` PLUS A `vocabulary`. A vocabulary composes several
-  # sets into one type, and with one set each it adds a name nothing can use:
-  # the explorer reads what a signature mentions, so a set named only by a
-  # vocabulary is an orphan and six of them were.
+  # sets into one type, and with one set each it adds a name nothing else can
+  # use, so the set carries the type name directly.
+  #
+  # The `vocabulary` form would pass too. It did not on 2026-09-01, because
+  # `build-map` worked out what was used from signatures and record fields and
+  # never followed a vocabulary to its sets, so all six read as declared and
+  # unused. That was a gap in the tool rather than in the usage, and it is
+  # fixed; this file keeps the flatter form on its own merits.
 
   set Engine = { "postgresql", "sqlite", "turso" }
 
