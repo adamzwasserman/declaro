@@ -17,7 +17,7 @@
 
 module declaro-persistum
 
-  layer domain
+  layer data
 
   # --- the data ----------------------------------------------------------
 
@@ -120,29 +120,29 @@ module declaro-persistum
   # The Pydantic models are the single source of truth for what is in the
   # database. Nothing here introspects to find out what columns exist.
 
-  boundary_out fn rows : (db: Database, model: any, narrowed: dict<str, any>) -> list<any> side_effect reads "database"
+  boundary_in fn all : (db: Database, model: any, narrowed: dict<str, any>) -> Answer side_effect reads "database"
 
-  boundary_out fn one : (db: Database, model: any, narrowed: dict<str, any>) -> any side_effect reads "database"
+  boundary_in fn one : (db: Database, model: any, narrowed: dict<str, any>) -> Answer side_effect reads "database"
 
-  boundary_out fn added : (db: Database, declared: any) -> int side_effect writes "database"
+  boundary_out fn add : (db: Database, declared: any) -> Answer side_effect writes "database"
 
   # --- column 2: orchestrators — coordinate, own no logic ----------------
 
-  orchestrator fn apply_migrations_async : (db: Database, schema_path: str) -> ApplyResult
+  orchestrator fn apply_migrations_async : (db: Database, schema_path: str, expand_enums: bool, force: bool) -> ApplyResult invokes introspect, diff, detect_ambiguities, validate_schema, topological_sort, apply
 
-  orchestrator fn begin_cutover : (source: Database, target: Database, schema_path: str) -> any
+  orchestrator fn begin_cutover : (source: Database, target: Database, schema_path: str, batch_size: int, tables: list<str>, expand_enums: bool, on_progress: any, resume: bool, fail_open: bool, compare_on_read: bool) -> any invokes bulk_transfer
 
-  orchestrator fn bulk_transfer : (source: Database, target: Database, schema_path: str) -> any
+  orchestrator fn bulk_transfer : (source: Database, target: Database, schema_path: str, batch_size: int, tables: list<str>, expand_enums: bool, on_progress: any, resume: bool) -> any invokes apply_migrations_async, introspect, build_dependency_graph, topological_sort, apply
 
   # --- column 4: output boundary — writes the world ----------------------
 
   boundary_out fn apply : (connection: any, operations: list<Operation>, execution_order: list<int>, engine: str) -> ApplyResult side_effect writes "database"
 
-  boundary_out fn open_sqlite : (path: str, shutdown: str, busy_timeout_s: float) -> Database side_effect reads "filesystem"
+  boundary_in fn open_sqlite : (path: str, shutdown: str, busy_timeout_s: float) -> Database side_effect reads "filesystem"
 
-  boundary_out fn open_turso : (path: str, primary: str, token: str, shutdown: str) -> Database side_effect reads "network"
+  boundary_in fn open_turso : (path: str, primary: str, token: str, shutdown: str) -> Database side_effect reads "network"
 
-  boundary_out fn open_postgresql : (dsn: str, shutdown: str, busy_timeout_s: float) -> Database side_effect reads "network"
+  boundary_in fn open_postgresql : (dsn: str, shutdown: str, busy_timeout_s: float) -> Database side_effect reads "network"
 
   boundary_out fn replicate : (db: Database) -> bool side_effect writes "network"
 
@@ -150,13 +150,34 @@ module declaro-persistum
 
   boundary_out fn close : (db: Database) -> Database side_effect writes "network"
 
+  # --- what this declaration still reports, and why ----------------------
+  #
+  # Twelve violations, and three of them are findings about the CODE rather
+  # than about this file. They arrived by declaring `invokes` truthfully.
+  #
+  # `apply_migrations_async` calls `introspect`, which is a boundary_in, so it
+  # reaches leftward. It genuinely does: a migration reads the live database
+  # mid-sequence. The four-column model has no way to say that, and the
+  # framework's own `honest-persist.hd` carries the same violation on `migrate`
+  # calling `inspect`. Recorded rather than hidden.
+  #
+  # `begin_cutover` calls `bulk_transfer`, which calls `apply_migrations_async`.
+  # Three orchestrators deep, and orchestrators do not compose. Verified in the
+  # source: one call each, `cutover.py` to `transfer.py` to `migrations.py`.
+  # That is a real shape in the package and this is the first thing to have
+  # said so.
+  #
+  # The nine remaining are public entry points a caller reaches, which no
+  # sibling declares a call to. `add`, `close`, `flush` and `replicate` are the
+  # surface. `delay_before`, `is_contention` and the three literal helpers are
+  # reached from modules this file does not declare, so they are under-declared
+  # here rather than uncalled.
+
   # --- the chain the whole library exists to run -------------------------
 
-  chain migrate = load_schema_from_models -> introspect -> diff -> topological_sort -> apply
+  chain migrate = load_schema_from_models -> apply_migrations_async -> apply
 
-  chain read = rows
 
-  chain write = added
 
 # ---------------------------------------------------------------------------
 # WHAT THIS FILE GOT WRONG, kept rather than quietly deleted.
