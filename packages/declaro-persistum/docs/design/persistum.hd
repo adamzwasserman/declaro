@@ -1,42 +1,164 @@
-# declaro-persistum declared in .hd — the four-column architecture overview.
+# declaro-persistum, declared from the specification rather than from the code.
 #
-# Read it with read_hd, check it with validate, draw it with render.
+# SOURCES, IN ORDER, AND NOTHING ELSE. `HOW-IT-SHOULD-WORK.md` says what a
+# caller can ask for. `docs/architecture.md` says what shape it has to take.
+# `tests/bdd/features/` says it again as scenarios. No source file was opened to
+# write this, deliberately: the declaration is what the code follows, so reading
+# the code to write it would make it a description of what exists and the two
+# would then be one thing wearing two names.
 #
-# What the columns mean here:
-#   1 input boundary   reads the world: schema files, database metadata
-#   2 orchestrators    coordinate the other three; own no logic of their own
-#   3 pure functions   data in, data out; the whole diff/plan/render core
-#   4 output boundary  writes the world: DDL, DML, replication, connections
-#
-# CORRECTED 2026-08-29, against the running package rather than from memory.
-# This file had drifted far enough to describe a package that no longer
-# exists, and it contradicted the first principle of the architecture doc
-# while doing so. Both faults are recorded at the foot of this file, because
-# a design document that was wrong once will be read by someone who does not
-# know which parts were fixed.
+# SO PARTS OF THIS ARE NOT BUILT. That is the point rather than a defect. Three
+# of the four grammars, the declaration the grammars produce, and the checking
+# step are specified and absent. A declaration that only says what exists cannot
+# be a target.
 
 module declaro-persistum
 
   layer data
 
-  # --- the data ----------------------------------------------------------
+  # --- the vocabularies -------------------------------------------------
+  #
+  # Each of these is a closed set the documents name. Written as a vocabulary
+  # rather than `str`, because `str` admits every string and then a test has to
+  # go looking for the ones that mean something.
+
+  set engines = { "postgresql", "sqlite", "turso" }
+  vocabulary Engine = { engines }
+
+  set directions = { "ascending", "descending" }
+  vocabulary Direction = { directions }
+
+  # HOW-IT-SHOULD-WORK, "Narrowing": fifteen operators, named as keys because a
+  # condition is data. Each takes an `ignore_case` companion for text.
+  set operators = {
+    "eq", "ne", "lt", "lte", "gt", "gte", "in", "not_in", "between",
+    "like", "contains", "startswith", "endswith", "is_null", "is_not_null"
+  }
+  vocabulary Operator = { operators }
+
+  # HOW-IT-SHOULD-WORK, "What you can ask for": the whole vocabulary, and every
+  # one of them means one thing. A word not in this set is not a question this
+  # library answers.
+  set words = {
+    "all", "one", "first", "page", "ordered_by", "values", "distinct", "exists",
+    "count", "sum", "average", "smallest", "largest", "count_distinct",
+    "grouped_by", "having",
+    "add", "change", "change_all", "remove", "remove_all", "replace",
+    "of"
+  }
+  vocabulary Word = { words }
+
+  # "You say that in plain terms", for a materialized view.
+  set freshness = { "always", "hourly", "daily", "on_demand" }
+  vocabulary Freshness = { freshness }
+
+  # --- what a caller declares -------------------------------------------
 
   type Column = {
-    type: str
-    nullable: bool
-    default: str
+    means: str
+    optional: bool
     references: str
   }
 
-  type Table = {
+  type Model = {
+    table: str
     columns: dict<str, Column>
-    indexes: list<any>
-    constraints: list<any>
   }
 
-  # A Schema IS the mapping. It is not a record with a `tables` field, which
-  # is what this file said and what made every call written from it fail.
-  type Schema = dict<str, Table>
+  type Schema = dict<str, Model>
+
+  # WHAT A SCHEMA FILE DECLARES, all of it. `View` and `Index` were declared
+  # types no function named, which is the map saying that a whole section of
+  # the specification had no path: "a view is a query with a name, you declare
+  # it against your models the way you declare a table".
+  type Declared = {
+    models: Schema
+    views: dict<str, View>
+    indexes: dict<str, Index>
+  }
+
+  # A condition is data, and it nests: `{"or": [{...}, {...}]}` is in the
+  # specification, so a flat list of triples cannot hold one.
+  type Condition = {
+    column: str
+    operator: Operator
+    value: any
+    ignore_case: bool
+    any_of: list<Condition>
+    none_of: list<Condition>
+  }
+
+  type Ordering = {
+    column: str
+    direction: Direction
+  }
+
+  type Paging = {
+    size: int
+    number: int
+  }
+
+  # WHAT FOUR GRAMMARS PRODUCE. `HOW-IT-SHOULD-WORK` line 87: each grammar is a
+  # thin skin over the same declaration. This is that declaration, and it is
+  # what a view holds as well, because "the library writes the SELECT" only
+  # means something if a view holds a value the library can render.
+  #
+  # NO DATABASE FIELD. A view is declared in a schema file with no database in
+  # sight, and it holds one of these.
+  type Declaration = {
+    word: Word
+    model: Model
+    columns: list<str>
+    narrowing: list<Condition>
+    order: list<Ordering>
+    paging: Paging
+    measures: dict<str, Word>
+    kept: list<Condition>
+    values: dict<str, any>
+    related: Model
+  }
+
+  type View = {
+    name: str
+    declares: Declaration
+    materialized: bool
+    fresh: Freshness
+  }
+
+  type Index = {
+    name: str
+    columns: list<str>
+    unique: bool
+  }
+
+  # --- what the library gives back ---------------------------------------
+
+  # "A function that cannot do its job returns that fact to you. It does not
+  # write it to a log nobody reads."
+  type Failure = {
+    what: str
+    because: str
+  }
+
+  # One shape for every word. A word fills one key and leaves the rest as the
+  # named absence, so a missing row and a failure are values you must look at.
+  type Answer = {
+    rows: list<any>
+    row: any
+    number: int
+    truth: bool
+    mappings: list<dict<str, any>>
+    failure: Failure
+  }
+
+  # What rendering produces: the statement, and the values it did NOT write into
+  # the statement, kept apart so the driver binds them.
+  type Statement = {
+    sql: str
+    parameters: dict<str, any>
+  }
+
+  # --- the schema half ---------------------------------------------------
 
   type Operation = {
     kind: str
@@ -44,55 +166,40 @@ module declaro-persistum
     detail: dict<str, any>
   }
 
-  type DiffResult = {
+  # "Ambiguity comes back instead of getting guessed."
+  type Ambiguity = {
+    table: str
+    gone: str
+    arrived: str
+  }
+
+  type Difference = {
     operations: list<Operation>
-    execution_order: list<int>
-    dependencies: dict<int, list<int>>
-    ambiguities: list<any>
+    order: list<int>
+    ambiguities: list<Ambiguity>
   }
 
-  type ApplyResult = {
-    applied: list<Operation>
-    skipped: list<Operation>
-  }
-
-  # A Database is data carrying its own injected boundary. `engine` is
-  # decided at open, which is why nothing downstream has to work out what
-  # engine it is talking to, and why no public function takes one.
+  # Data carrying its own injected callables and its engine, decided once.
   type Database = {
-    path: str
+    target: str
+    engine: Engine
     primary: str
-    engine: str
-    in_flight: any
+    connect: any
+    close_connection: any
+    shutdown: str
   }
 
-  # WHAT EVERY VOCABULARY WORD GIVES BACK. Six keys, of which a word fills one
-  # and leaves the rest as the declared absence NOTHING. `failure` is a key like
-  # any other, so a caller tells success from failure by which key is filled
-  # rather than by catching something.
-  type Answer = {
-    rows: list<any>
-    row: any
-    number: int
-    truth: bool
-    mappings: list<dict<str, any>>
-    failure: any
+  # --- the write queue ---------------------------------------------------
+
+  type Room = {
+    arrivals: list<any>
+    waiting: dict<str, any>
   }
 
   type Receipt = {
     ticket: str
     ok: bool
-    error: str
-  }
-
-  type Room = {
-    writes: list<any>
-    waiting: dict<str, any>
-  }
-
-  type Drained = {
-    receipts: list<Receipt>
-    orphans: list<str>
+    failure: Failure
   }
 
   type Retry = {
@@ -101,232 +208,109 @@ module declaro-persistum
     max_delay_s: float
   }
 
-  # --- column 1: input boundary — reads the world ------------------------
+  # --- column 1: input I/O, everything that reads the world ---------------
 
-  # TWO CARDS, ONE SHAPE. Erase the names and these differ by what they read
-  # and nothing else: a path in, a Schema out. The map found it. They are two
-  # functions in the code today and this file says what is, so both are here.
+  boundary_in fn load_models : (module_path: str) -> Declared side_effect reads "python_module"
 
-  boundary_in fn load_schema_from_models : (models_dir: str) -> Schema side_effect reads "filesystem"
+  boundary_in fn introspect : (db: Database) -> Schema side_effect reads "database"
 
-  boundary_in fn load_models_from_module : (module_path: str) -> Schema side_effect reads "python_module"
+  # One door. The target says which engine is behind it, so a caller never names
+  # one. `tests/bdd/features/opening/open_database.feature`.
+  boundary_in fn open_database : (target: str, shutdown: str) -> Database side_effect reads "network"
 
-  boundary_in fn introspect : (connection: any, engine: str) -> Schema side_effect reads "database"
-
-  # --- column 3: pure functions — the core -------------------------------
-
-  fn diff : (current: Schema, target: Schema, engine: str, decisions: any) -> DiffResult
-
-  fn build_dependency_graph : (operations: list<Operation>) -> dict<int, list<int>>
-
-  fn topological_sort : (operations: list<Operation>, dependencies: dict<int, list<int>>) -> list<int>
-
-  fn detect_ambiguities : (current: Schema, target: Schema, engine: str, decisions: any) -> list<any>
-
-  fn validate_schema : (schema: Schema) -> any
-
-  fn is_contention : (error: any) -> bool
-
-  fn delay_before : (retry: Retry, attempt: int) -> float
-
-  # THESE THREE ARE REACHED FROM MODULES THIS FILE DOES NOT DECLARE:
-  # `column_types.py` and `model_columns.py`, two calls each. They are
-  # under-declared here rather than uncalled, and the honest fix is a
-  # declaration for those modules rather than a call invented for this one.
-  fn is_literal_type : (annotation: any) -> bool
-
-  fn get_literal_columns : (schema: Schema) -> dict<str, any>
-
-  fn extract_literal_values : (annotation: any) -> list<str>
-
-  # --- the declared surface: a model in, rows out ------------------------
-  #
-  # THE CALLER DESCRIBES THE RESULT, NEVER THE SQL. That is the first
-  # principle of the architecture doc, and these are the functions that
-  # honor it. A caller names a Database it declared and a model carrying
-  # `@table`; the columns it may narrow on are the model's own fields, and
-  # a column the model does not declare is refused before any statement
-  # exists.
-  #
-  # The Pydantic models are the single source of truth for what is in the
-  # database. Nothing here introspects to find out what columns exist.
-
-  # A VOCABULARY WORD IS AN ORCHESTRATOR, NOT A BOUNDARY. Asking is multistage:
-  # check the columns against the model, build the declaration, render it for
-  # the engine this Database carries, take a connection, run it, and shape the
-  # rows into an Answer. Only one of those steps touches the world.
-  #
-  # THESE THREE WERE DECLARED AS I/O and they are not. `add` writes nothing
-  # itself; it hands a statement to the write door. The map showed three
-  # boundary cards with no orchestrator above them, which is what a multistage
-  # process looks like when nobody owns the sequence.
-  #
-  # `all` and `one` ARE ONE FUNCTION ALREADY. `asking.py` generates them, with
-  # `exists` and `count`, from `_about_rows` over a four-row table; what differs
-  # is the docstring and the key of the Answer each fills. Two cards here was a
-  # second copy of a thing the code stopped having.
-
-  orchestrator fn about_rows : (db: Database, word: str, model: any, narrowed: dict<str, any>) -> Answer invokes render
-
-  orchestrator fn add : (db: Database, declared: any) -> Answer invokes render
-
-  # --- the two doors to the database, which are the actual I/O -----------
-  #
-  # `reading` waits for nothing, because a read never touches the primary.
-  # `writing` scopes a transaction, commits on a clean exit, rolls back on an
-  # exception, and counts the write in flight so replication yields to it.
-
+  # A read waits for nothing: the local file is a full copy, so a read never
+  # touches the primary.
   boundary_in fn reading : (db: Database) -> any side_effect reads "database"
 
+  # --- column 4: output I/O, everything that writes it --------------------
+
+  # Scopes a transaction, commits on a clean exit, rolls back on an exception.
+  # The only thing here that gives you rollback.
   boundary_out fn writing : (db: Database) -> any side_effect writes "database"
-
-  fn render : (declaration: any, engine: str) -> any
-
-  # --- column 2: orchestrators — coordinate, own no logic ----------------
-
-  orchestrator fn apply_migrations_async : (db: Database, schema_path: str, expand_enums: bool, force: bool) -> ApplyResult invokes introspect, diff, detect_ambiguities, validate_schema, topological_sort, apply
-
-  orchestrator fn begin_cutover : (source: Database, target: Database, schema_path: str, batch_size: int, tables: list<str>, expand_enums: bool, on_progress: any, resume: bool, fail_open: bool, compare_on_read: bool) -> any invokes bulk_transfer
-
-  orchestrator fn bulk_transfer : (source: Database, target: Database, schema_path: str, batch_size: int, tables: list<str>, expand_enums: bool, on_progress: any, resume: bool) -> any invokes apply_migrations_async, introspect, build_dependency_graph, topological_sort, apply
-
-  # --- column 4: output boundary — writes the world ----------------------
-
-  boundary_out fn apply : (connection: any, operations: list<Operation>, execution_order: list<int>, engine: str) -> ApplyResult side_effect writes "database"
-
-  # THREE CARDS, ONE SHAPE. A target in, a Database out, and what separates
-  # them is which engine they stamp. `tests/bdd/features/opening/` already
-  # specifies the replacement: one `open_database` that reads the target and
-  # works the engine out, with `engine_of` as the pure decision beside it.
-  # Neither is built, so neither is declared here.
-
-  boundary_in fn open_sqlite : (path: str, shutdown: str, busy_timeout_s: float) -> Database side_effect reads "filesystem"
-
-  boundary_in fn open_turso : (path: str, primary: str, token: str, shutdown: str) -> Database side_effect reads "network"
-
-  boundary_in fn open_postgresql : (dsn: str, shutdown: str, busy_timeout_s: float) -> Database side_effect reads "network"
 
   boundary_out fn replicate : (db: Database) -> bool side_effect writes "network"
 
-  boundary_out fn flush : (db: Database) -> None side_effect writes "network"
+  boundary_out fn close : (db: Database) -> Database side_effect writes "network"
 
-  # --- the write queue, which was on the surface and undeclared ----------
+  # --- column 3: the pure core -------------------------------------------
   #
-  # `Receipt` and `Retry` were orphan types until these three cards arrived:
-  # declared, and named by nothing. A room is a waiting room in front of the
-  # log, `deposit` hands a write to it and gets a ticket, and `drain` empties
-  # it one write at a time under a retry policy.
+  # "Diffing, ordering, ambiguity detection, validation, SQL rendering: all
+  # functions over data, and none of them opens anything."
+
+  # THE CHECK THAT MAKES THE SURFACE DECLARATIVE, and the one the drawing that
+  # preceded this file left out entirely. "Ask for a column no model declares,
+  # and the library stops you in your own process. It names your model and lists
+  # the columns it does declare."
+  fn checked : (model: Model, columns: list<str>) -> list<str> | Failure
+
+  # The pure decision `open_database` rests on. A string in, one of three words
+  # out, and it opens nothing.
+  fn engine_of : (target: str) -> Engine | Failure
+
+  # The four grammars. Four thin skins, one value. A fifth is a fifth card here
+  # and changes nothing to its right.
+  fn declared_in_pseudo_sql : (model: Model, asked: dict<str, any>) -> Declaration | Failure invokes checked
+
+  fn declared_in_django : (model: Model, asked: dict<str, any>) -> Declaration | Failure invokes checked
+
+  fn declared_in_prisma : (model: Model, asked: dict<str, any>) -> Declaration | Failure invokes checked
+
+  fn declared_in_sqlalchemy : (model: Model, asked: dict<str, any>) -> Declaration | Failure invokes checked
+
+  # The last step, and the only one that knows the engine. The statement is
+  # rendered; the values are not, and come back beside it.
+  fn render : (declares: Declaration, engine: Engine) -> Statement
+
+  fn render_operation : (operation: Operation, engine: Engine) -> Statement
+
+  # Shapes rows into the one key the word asked for.
+  fn answered : (declares: Declaration, rows: list<any>) -> Answer
+
+  fn diff : (current: Schema, target: Schema, decisions: dict<str, str>) -> Difference
+
+  fn ordered : (operations: list<Operation>) -> list<int>
+
+  fn ambiguities : (current: Schema, target: Schema) -> list<Ambiguity>
+
+  fn validate : (schema: Schema) -> list<Failure>
 
   fn new_room : () -> Room
 
-  fn deposit : (room: Room, write: any) -> str
+  fn deposit : (room: Room, declares: Declaration) -> str
 
-  # `drain` reaches the retry pair directly, verified in `write_queue.py`: it
-  # asks `is_contention` whether a refusal is worth another attempt and
-  # `delay_before` how long to wait. Both were orphans until this line.
-  fn drain : (room: Room, execute: any, retry: Retry) -> Drained invokes is_contention, delay_before
+  fn is_contention : (failure: Failure) -> bool
 
-  boundary_out fn close : (db: Database) -> Database side_effect writes "network"
+  fn delay_before : (retry: Retry, attempt: int) -> float
 
-  # --- what this declaration still reports, and why ----------------------
+  fn collect : (room: Room, ticket: str) -> Receipt
+
+  # --- column 2: the orchestrators ---------------------------------------
   #
-  # Twelve violations, and three of them are findings about the CODE rather
-  # than about this file. They arrived by declaring `invokes` truthfully.
+  # Each owns one sequence and none of them composes with another. None calls a
+  # boundary to its left: what an input boundary produced arrives as an
+  # argument, because an arrow into column 1 is the one direction that cannot
+  # happen.
+
+  orchestrator fn ask : (db: Database, declares: Declaration) -> Answer invokes render, answered
+
+  orchestrator fn write : (db: Database, declares: Declaration) -> Answer invokes render, writing, answered
+
+  orchestrator fn migrate : (db: Database, declared: Declared, live: Schema) -> Answer invokes ambiguities, validate, diff, ordered, render, render_operation, writing
+
+  orchestrator fn drain : (db: Database, room: Room, retry: Retry) -> Answer invokes render, writing, is_contention, delay_before
+
+  # --- the chains: how the world reaches the work ------------------------
   #
-  # `apply_migrations_async` calls `introspect`, which is a boundary_in, so it
-  # reaches leftward. It genuinely does: a migration reads the live database
-  # mid-sequence. The four-column model has no way to say that, and the
-  # framework's own `honest-persist.hd` carries the same violation on `migrate`
-  # calling `inspect`. Recorded rather than hidden.
-  #
-  # `begin_cutover` calls `bulk_transfer`, which calls `apply_migrations_async`.
-  # Three orchestrators deep, and orchestrators do not compose. Verified in the
-  # source: one call each, `cutover.py` to `transfer.py` to `migrations.py`.
-  # That is a real shape in the package and this is the first thing to have
-  # said so.
-  #
-  # The nine remaining are public entry points a caller reaches, which no
-  # sibling declares a call to. `add`, `close`, `flush` and `replicate` are the
-  # surface. `delay_before`, `is_contention` and the three literal helpers are
-  # reached from modules this file does not declare, so they are under-declared
-  # here rather than uncalled.
+  # TWO OF THESE ARE TWO CARDS AND THAT IS HONEST. A read has no output
+  # boundary: the Answer goes back to a caller who is not on this board. A write
+  # has no input boundary: the caller's row arrives as an argument.
 
-  # --- the chain the whole library exists to run -------------------------
+  chain migrating = load_models -> migrate -> writing
 
-  chain migrate = load_schema_from_models -> apply_migrations_async -> apply
+  chain asking = reading -> ask
 
-  # TWO CARDS, NOT THREE, AND THAT IS THE HONEST SHAPE. A read has no output
-  # boundary: the connection comes in and the Answer goes back to the caller,
-  # who is not on this board. A write has no input boundary: the caller's row
-  # arrives as an argument and the connection is where it leaves. Forcing a
-  # third card onto either would mean inventing one.
-  #
-  # NEITHER ORCHESTRATOR INVOKES ITS DOOR. `about_rows` receives the connection
-  # `reading` produced; declaring a call would be an orchestrator reaching
-  # leftward into an input boundary, which is the one direction that cannot
-  # happen and which I declared twice before catching it.
+  chain writing_a_row = write -> writing
 
-  chain asking = reading -> about_rows
+  chain draining = drain -> writing
 
-  chain adding = add -> writing
-
-
-
-# ---------------------------------------------------------------------------
-# WHAT THIS FILE GOT WRONG, kept rather than quietly deleted.
-#
-# 1. IT CONTRADICTED THE FIRST PRINCIPLE. It declared
-#
-#        type Query = { sql: str, params: dict<str, any> }
-#        type PendingWrite = { sql: str, params: dict<str, any> }
-#
-#    and a column of functions returning Query. The architecture doc's first
-#    line says "the caller describes the result, not the SQL". A type whose
-#    body is an SQL string is the caller writing the SQL, so this document
-#    was the design authority for the thing the design forbids. Both types
-#    are gone from here. `PendingWrite` still exists in the code, carrying
-#    `sql` and `params`, and the write queue still takes it. That is
-#    outstanding work, not a shape this file endorses.
-#
-# 2. IT NAMED NINE FUNCTIONS THAT DO NOT EXIST. Measured 2026-08-29 by
-#    importing each one:
-#
-#        inspect_schema          renamed `introspect`
-#        stored_schema_hash      gone
-#        compute_schema_hash     internal, `_compute_schema_hash`
-#        validate_schema         moved to `validator`, returns ValidationResult
-#        acquire                 gone with the pool
-#        acquire_write           gone with the pool
-#        push_once               gone
-#        push_loop               gone
-#        initial_replication     gone
-#
-#    Seven more were named as though public and are internal: diff,
-#    build_dependency_graph, topological_sort, detect_ambiguities, apply,
-#    is_contention, delay_before.
-#
-# 3. IT DESCRIBED A CONNECTION POOL THAT WAS DELETED. Seven signatures took
-#    `pool: any`, and the foot of the file called the pool the one thick
-#    boundary. There is no pool. `open_sqlite` / `open_turso` /
-#    `open_postgresql` return a `Database` carrying its own injected
-#    callables, and that is the boundary now.
-#
-# 4. ITS Schema TYPE WAS THE WRONG SHAPE. It said `{ tables: dict<...> }`.
-#    A Schema is the mapping itself. Code written from this file failed at
-#    the first call.
-#
-# WHAT IS STILL UNRESOLVED, so nobody reads this file as a finished design:
-#
-#   - `select`, `insert`, `update` and `delete` still build a Query carrying
-#     SQL text, and `select` takes `where` as a string.
-#   - `execute`, `execute_one`, `execute_scalar` and `execute_many` still
-#     take a live connection the caller drives.
-#   - `writing`, `reading` and `migrating` hand out that connection, which is
-#     what makes the four above possible.
-#   - A `View` is declared as `{ name, query, materialized, refresh }` where
-#     `query` is a SELECT string. There is no declared form for a view, a
-#     materialized view, or a CHECK constraint.
-#   - Four query syntaxes are documented — native, Django, Prisma,
-#     SQLAlchemy — and one is implemented. `rows` / `one` / `added` are that
-#     one. The other three exist as example apps that call the same builder.
-# ---------------------------------------------------------------------------
+  chain replicating = replicate
