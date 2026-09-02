@@ -241,7 +241,7 @@ module declaro-persistum
   # One door for every engine. The target says what is behind it, so a caller
   # never names one. The bound on connections and the shutdown policy are stated
   # here because this is the only place they can be.
-  boundary_in fn open_database : (target: str, shutdown: str, connections: int) -> Database side_effect reads "network" invokes engine_of
+  boundary_in fn open_database : (target: str, shutdown: str, connections: int) -> Database side_effect reads "network" invokes engine_of, new_room
 
   # --- column 4: output I/O ----------------------------------------------
   #
@@ -327,15 +327,30 @@ module declaro-persistum
 
   fn collect : (room: Room, ticket: str) -> Receipt
 
+  # WHICH GRAMMAR, AS A TABLE. The caller reached for one of four names and the
+  # table says which builder that is. This is the package's own idiom and it is
+  # what makes the four grammars reachable: an orchestrator invokes the table,
+  # not four functions.
+  dispatch by_grammar = {
+    "pseudo-sql" -> declared_in_pseudo_sql,
+    "django" -> declared_in_django,
+    "prisma" -> declared_in_prisma,
+    "sqlalchemy" -> declared_in_sqlalchemy
+  }
+
   # --- column 2: the orchestrators ---------------------------------------
   #
   # Each owns one sequence, none composes with another, and none reaches back
   # into column 1. Every one takes a Database, and there is exactly one place a
   # Database comes from, which is why every chain below starts where it does.
 
-  orchestrator fn ask : (db: Database, declares: Declaration) -> Answer invokes render, execute, answered
+  orchestrator fn ask : (db: Database, model: Model, grammar: str, asked: dict<str, any>) -> Answer invokes by_grammar, render, execute, answered
 
-  orchestrator fn write : (db: Database, declares: Declaration) -> Answer invokes render, writing, execute, answered
+  # THROUGH THE ROOM. "You deposit and you're free": `deposit` hands back a
+  # ticket and runs nothing, the crew drains it, and `collect` is how the answer
+  # is asked for. A word like `add` reports how many rows it touched, so it
+  # collects before it answers.
+  orchestrator fn write : (db: Database, model: Model, grammar: str, asked: dict<str, any>, room: Room) -> Answer invokes by_grammar, deposit, collect, answered
 
   # A list handed to one call lands together. Two separate calls do not, unless
   # a caller declares a group, and then the group reports as one answer.
