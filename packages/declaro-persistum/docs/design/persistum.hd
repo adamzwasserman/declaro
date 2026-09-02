@@ -8,6 +8,11 @@
 # the other.
 #
 # SO PARTS OF THIS ARE NOT BUILT, and that is what a target is for.
+#
+# RENDER IT WITH THE `row` LAYOUT, not the default `columns`. Orchestrators sit
+# above the pure core and the board is three columns rather than four, which is
+# how this module reads: input on the left, output on the right, and the
+# sequence over the work it drives.
 
 module declaro-persistum
 
