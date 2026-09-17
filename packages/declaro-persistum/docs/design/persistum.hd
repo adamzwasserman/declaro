@@ -192,10 +192,6 @@ module declaro-persistum
                       writer_waiting: bool
                       attempts: int }
 
-  # `flush`'S OWN RECORD.
-  type Flushing = { db: Database
-                    started_at: float }
-
   # `answer`'S OWN RECORD, AND NOTHING ELSE NAMES IT. The four things the caller
   # said are the top half. The bottom half is what each step in the chain
   # produced, in the order the chain runs them, so the last field is what leaves
@@ -256,14 +252,14 @@ module declaro-persistum
   # calls `drain` on every pass, so a caller's write does not travel on the door
   # the caller knocked on. `deposit` hands back a ticket and returns; the write
   # leaves the process later, here.
-  # SIX. The server starts. The one place the signal handler goes in.
+  # FIVE. The server starts. The one place the signal handler goes in.
   boundary_in fn starting : () -> NOTHING | Fault side_effect reads "caller" invokes start
 
-  # FIVE. A caller asks for replication and waits for it.
-  # `tests/bdd/features/replication.feature`: it returns once both directions
-  # have completed, and it ignores load, because a caller who awaited this has
-  # already said it is willing to wait.
-  boundary_in fn flushing : (db: Database) -> NOTHING | Fault side_effect reads "caller" invokes flush
+  # NO FLUSH DOOR. Decided 2026-09-17. `architecture.md:308`: no caller waits for
+  # the primary, with exactly two exceptions, a cold open and shutdown, both at
+  # the edges of the process. `replication.feature` has a scenario where a caller
+  # awaits `flush`; that scenario contradicts the architecture and is the one to
+  # change.
 
   boundary_in fn given_a_turn : (db: Database, room: Room) -> NOTHING | Fault side_effect reads "scheduler" invokes catch_up
 
@@ -299,8 +295,6 @@ module declaro-persistum
   # installed and returns.
   orchestrator fn start : () -> NOTHING | Fault invokes install_signal_handler, log_to_console
 
-  # Pushes and pulls until both directions are done, ignoring load.
-  orchestrator fn flush : (flushing: Flushing) -> Flushing | Fault invokes replicates, read_clock, push_to_turso, pull_from_turso, progress_line, log_to_console
 
   # --- column 3: output I/O, and there are four ways out ------------------
   #
@@ -431,7 +425,7 @@ module declaro-persistum
   fn declaration_from_prisma : (asked: Asked) -> Declaration | Fault
   fn declaration_from_sqlalchemy : (asked: Asked) -> Declaration | Fault
 
-  # --- what `shut_down`, `flush` and `catch_up` reach ---------------------
+  # --- what `shut_down` and `catch_up` reach ------------------------------
 
   # DERIVED, NEVER STORED. `database/opening.feature:14`: whether a database
   # replicates comes from its primary, because a second flag could disagree with
