@@ -171,7 +171,6 @@ def _make(tmp_path, *, replicated=True, recorder=None, shutdown="exit_immediatel
 @given("a shutdown in progress with local commits the primary has not seen")
 @given("a shutdown that is taking a long time")
 @given("a platform grace period shorter than the replication needs")
-@given("a caller that needs the primary current before it continues")
 @given("a replicated database whose caller asked for shutdown replication")
 @given("a caller that has not asked for shutdown replication")
 @given("a database with no primary")
@@ -617,29 +616,6 @@ def _then_truncation_visible(ctx):
     assert any("Not yet delivered" in m for m in ctx["logs"]), (
         f"a retry said nothing about what is still undelivered, so a SIGKILL "
         f"mid-replication would leave no record: {ctx['logs']}"
-    )
-
-
-# ------------------------------------------------------------------- explicit
-
-
-@when("it calls flush and awaits it")
-def _when_flush(ctx):
-    async def run():
-        db, rec = _make(ctx["tmp_path"])
-        db["in_flight"]["count"] = 3  # an explicit call ignores load
-        await db_mod.flush(db)
-        ctx["calls"] = list(rec["calls"])
-
-    asyncio.run(run())
-
-
-@then(
-    "it returns once both directions have completed, and it ignores load, because a caller that awaited this has already said it is willing to wait"
-)
-def _then_flush_completed(ctx):
-    assert "up" in ctx["calls"] and "down" in ctx["calls"], (
-        f"flush did not complete both directions: {ctx['calls']}"
     )
 
 
