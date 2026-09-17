@@ -284,7 +284,7 @@ module declaro-persistum
 
   # Pushes until Turso has everything, retrying rather than giving up,
   # then closes. The one place blocking is correct.
-  orchestrator fn shut_down : (shutting_down: ShuttingDown) -> ShuttingDown | Fault invokes replicates, read_clock, push_to_turso, draw_random, next_wait, progress_line, log_to_console
+  orchestrator fn shut_down : (shutting_down: ShuttingDown) -> ShuttingDown | Fault invokes replicates, read_clock, push_to_turso, next_wait, progress_line, log_to_console
 
   # Empties the room one write at a time in arrival order, and, if nothing else
   # wants the connection, pushes and pulls on it.
@@ -293,7 +293,7 @@ module declaro-persistum
   # the same question: is a writer waiting. `architecture.md:308` has
   # `replicate_if_idle` ask it, and the drainer is what knows the answer. Split
   # across two orchestrators, it gets asked twice and answered twice.
-  orchestrator fn catch_up : (catching_up: CatchingUp) -> CatchingUp | Fault invokes writer_waiting, next_in_order, run_statement, worth_retrying, budget_spent, draw_random, next_wait, replicates, push_to_turso, pull_from_turso, log_to_console
+  orchestrator fn catch_up : (catching_up: CatchingUp) -> CatchingUp | Fault invokes writer_waiting, next_in_order, run_statement, worth_retrying, budget_spent, read_clock, next_wait, replicates, push_to_turso, pull_from_turso, log_to_console
 
   # Installs the one signal handler. Safe to call again: the second call finds it
   # installed and returns.
@@ -349,12 +349,12 @@ module declaro-persistum
   # who never opted in changes nothing about what happens at exit.
   boundary_out fn register_for_shutdown : (db: Database) -> NOTHING | Fault side_effect writes "shutdown list"
 
-  # A CLOCK AND A RANDOM SOURCE ARE THE WORLD. `engine_of.feature` says a pure
-  # function reads no clock and no random source. Shutdown names the elapsed time
-  # on every line, and retries wait with jitter so two callers do not wait in
-  # step, so both reads happen here and their answers are handed inward.
+  # THE CLOCK IS THE WORLD, AND READING IT IS INPUT. `engine_of.feature` says a
+  # pure function reads no clock. Decided 2026-09-17: this is an input boundary
+  # that an orchestrator calls, unlike the doors, which call an orchestrator.
+  # It sits here only until the format can declare that kind; explorer has the
+  # request. Its answer is handed inward to the pure functions that need time.
   boundary_out fn read_clock : () -> float side_effect reads "clock"
-  boundary_out fn draw_random : () -> float side_effect reads "random"
 
   boundary_out fn log_to_console : (event: dict<str, Value>) -> NOTHING side_effect writes "log"
 
@@ -438,9 +438,12 @@ module declaro-persistum
   # the first. It decides whether any sync door is reached at all.
   fn replicates : (db: Database) -> bool
 
-  # THE NEXT WAIT GROWS, AND TWO CALLERS DO NOT WAIT IN STEP. The random value
-  # arrives from `draw_random`, so this stays pure.
-  fn next_wait : (attempt: int, random: float) -> float
+  # THE NEXT WAIT GROWS, AND TWO CALLERS DO NOT WAIT IN STEP. No random source:
+  # the spread comes from the time and the write's ticket, so the same three
+  # inputs always give the same wait and a test checks an exact number. The
+  # ticket is what separates two callers who retry at the same instant, since
+  # they read the same time.
+  fn next_wait : (attempt: int, now: float, ticket: Ticket) -> float
 
   # EVERY LINE NAMES THE DATABASE AND THE TIME ELAPSED, AND UNTIL THE PUSH ENDS
   # EACH ONE SAYS THE DATA HAS NOT YET REACHED THE CLOUD. `replication.feature`
