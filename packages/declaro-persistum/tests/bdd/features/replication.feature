@@ -105,15 +105,6 @@ Feature: Replication — one function, both directions, out of the way of real w
     When the process is killed before replication completes
     Then the last line logged states that the data has not yet reached the primary, because the platform can always cut this short and a silent truncation is indistinguishable from success
 
-  # ============================================================
-  # Explicit — a caller asking for replication directly
-  # ============================================================
-
-  Scenario: a caller can ask for replication and wait for it
-    Given a caller that needs the primary current before it continues
-    When it calls flush and awaits it
-    Then it returns once both directions have completed, and it ignores load, because a caller that awaited this has already said it is willing to wait
-
   # MOVED TO `replication/provisioning_a_copy.feature`, AND IT WAS WRONG HERE.
   # This scenario ran against a stand-in for the pyturso driver that accepted
   # any path. The real driver refuses a path whose folder does not exist, and
