@@ -5,8 +5,8 @@
 # to write this: a declaration written from the code describes what exists, and
 # then the two are one thing wearing two names and neither can check the other.
 #
-# THREE CARDS SO FAR, AND THEY ARE THE INPUT BOUNDARIES. Nothing else is here
-# yet, deliberately. The last attempt was a whole board written at once and
+# BUILT ONE CARD AT A TIME, EACH READ ON THE MAP BEFORE THE NEXT. Nothing is here
+# that was not argued for. The last attempt was a whole board written at once and
 # defended for eleven rounds; this one gets read before it grows.
 
 module declaro-persistum
@@ -42,8 +42,16 @@ module declaro-persistum
   # IT TRAVELS BY RETURN AND BY NOTHING ELSE. Every function below that can fail
   # says so in its return type, and so does every caller of one, out to the door
   # the caller knocked on. No log line, no exception thrown past the signatures.
-  type Fault = { what_went_wrong: str
+  type Fault = { kind: FaultKind
+                 what_went_wrong: str
                  what_to_do_instead: str }
+
+  # WHETHER TO TRY AGAIN IS ASKED OF THE KIND, NEVER OF THE MESSAGE.
+  # `tests/bdd/features/running/retrying_is_the_librarys_job.feature`: a conflict
+  # is retried and a refusal is not, and a spent budget must be told apart from a
+  # refusal. `cut_short` is the platform killing a shutdown before it finished.
+  set fault_kinds = { "conflict" : "two writers wrote one row; try again", "refused" : "the request itself is wrong; change it", "budget_spent" : "retried as many times as allowed", "cut_short" : "the process was killed before the work finished" }
+  vocabulary FaultKind = { fault_kinds }
 
   # A VALUE, AND THE SMALLEST ONE. `HOW-IT-SHOULD-WORK.md` says every string you
   # pass is either checked against your declaration or bound as a parameter.
@@ -160,6 +168,34 @@ module declaro-persistum
   type Room = { arrivals: list<Statement>
                 waiting: list<Ticket> }
 
+  # `connect`'S OWN RECORD. The caller's three arguments on top, then what each
+  # step returned, in the order the chain runs them.
+  type Connecting = { target: str
+                      shutdown: Shutdown
+                      connections: int
+                      engine: Engine
+                      settings: dict<str, Value>
+                      permitted: int
+                      connection: Connection
+                      database: Database }
+
+  # `shut_down`'S OWN RECORD. When it started and how many pushes it has made,
+  # because every log line names the database and the time elapsed.
+  type ShuttingDown = { db: Database
+                        started_at: float
+                        attempts: int }
+
+  # `catch_up`'S OWN RECORD. Whether a writer was waiting decides whether the
+  # sync pass runs at all, so the answer is kept rather than asked twice.
+  type CatchingUp = { db: Database
+                      room: Room
+                      writer_waiting: bool
+                      attempts: int }
+
+  # `flush`'S OWN RECORD.
+  type Flushing = { db: Database
+                    started_at: float }
+
   # `answer`'S OWN RECORD, AND NOTHING ELSE NAMES IT. The four things the caller
   # said are the top half. The bottom half is what each step in the chain
   # produced, in the order the chain runs them, so the last field is what leaves
@@ -220,6 +256,12 @@ module declaro-persistum
   # calls `drain` on every pass, so a caller's write does not travel on the door
   # the caller knocked on. `deposit` hands back a ticket and returns; the write
   # leaves the process later, here.
+  # FIVE. A caller asks for replication and waits for it.
+  # `tests/bdd/features/replication.feature`: it returns once both directions
+  # have completed, and it ignores load, because a caller who awaited this has
+  # already said it is willing to wait.
+  boundary_in fn flushing : (db: Database) -> NOTHING | Fault side_effect reads "caller" invokes flush
+
   boundary_in fn given_a_turn : (db: Database, room: Room) -> NOTHING | Fault side_effect reads "scheduler" invokes catch_up
 
   # --- column 2: one orchestrator per door --------------------------------
@@ -231,7 +273,7 @@ module declaro-persistum
 
   # Works out which engine the target names, connects, copies the whole database
   # if this copy is cold, and hands back the handle everything downstream reads.
-  orchestrator fn connect : (target: str, shutdown: Shutdown, connections: int) -> Database | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, open_connection, pull_from_turso, log_to_console
+  orchestrator fn connect : (connecting: Connecting) -> Connecting | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, open_connection, replicates, install_signal_handler, pull_from_turso, log_to_console
 
   # Checks the columns against the model, builds the declaration, renders it for
   # this engine, runs it, and shapes what comes back.
@@ -239,7 +281,7 @@ module declaro-persistum
 
   # Pushes until Turso has everything, retrying rather than giving up,
   # then closes. The one place blocking is correct.
-  orchestrator fn shut_down : (db: Database) -> NOTHING | Fault invokes push_to_turso, log_to_console
+  orchestrator fn shut_down : (shutting_down: ShuttingDown) -> ShuttingDown | Fault invokes replicates, read_clock, push_to_turso, draw_random, next_wait, progress_line, log_to_console
 
   # Empties the room one write at a time in arrival order, and, if nothing else
   # wants the connection, pushes and pulls on it.
@@ -248,7 +290,10 @@ module declaro-persistum
   # the same question: is a writer waiting. `architecture.md:308` has
   # `replicate_if_idle` ask it, and the drainer is what knows the answer. Split
   # across two orchestrators, it gets asked twice and answered twice.
-  orchestrator fn catch_up : (db: Database, room: Room) -> NOTHING | Fault invokes run_statement, push_to_turso, pull_from_turso, log_to_console
+  orchestrator fn catch_up : (catching_up: CatchingUp) -> CatchingUp | Fault invokes writer_waiting, next_in_order, run_statement, worth_retrying, budget_spent, draw_random, next_wait, replicates, push_to_turso, pull_from_turso, log_to_console
+
+  # Pushes and pulls until both directions are done, ignoring load.
+  orchestrator fn flush : (flushing: Flushing) -> Flushing | Fault invokes replicates, read_clock, push_to_turso, pull_from_turso, progress_line, log_to_console
 
   # --- column 3: output I/O, and there are four ways out ------------------
   #
@@ -284,6 +329,19 @@ module declaro-persistum
   # put into it leaves this caller's hands and is picked up by another, which is
   # why this is a door rather than a step.
   boundary_out fn deposit : (room: Room, statement: Statement) -> Ticket | Fault side_effect writes "room"
+
+  # THE SIGNAL HANDLER IS INSTALLED AT OPEN, AND ONLY WHEN THE CALLER ASKED.
+  # `replication.feature`: a database opened without asking for shutdown
+  # replication installs nothing, and when one is installed, any handler the
+  # host application already set still runs. It chains; it never replaces.
+  boundary_out fn install_signal_handler : (db: Database) -> NOTHING | Fault side_effect writes "signal"
+
+  # A CLOCK AND A RANDOM SOURCE ARE THE WORLD. `engine_of.feature` says a pure
+  # function reads no clock and no random source. Shutdown names the elapsed time
+  # on every line, and retries wait with jitter so two callers do not wait in
+  # step, so both reads happen here and their answers are handed inward.
+  boundary_out fn read_clock : () -> float side_effect reads "clock"
+  boundary_out fn draw_random : () -> float side_effect reads "random"
 
   boundary_out fn log_to_console : (event: dict<str, Value>) -> NOTHING side_effect writes "log"
 
@@ -359,3 +417,32 @@ module declaro-persistum
   fn declaration_from_django : (asked: Asked) -> Declaration | Fault
   fn declaration_from_prisma : (asked: Asked) -> Declaration | Fault
   fn declaration_from_sqlalchemy : (asked: Asked) -> Declaration | Fault
+
+  # --- what `shut_down`, `flush` and `catch_up` reach ---------------------
+
+  # DERIVED, NEVER STORED. `database/opening.feature:14`: whether a database
+  # replicates comes from its primary, because a second flag could disagree with
+  # the first. It decides whether any sync door is reached at all.
+  fn replicates : (db: Database) -> bool
+
+  # THE NEXT WAIT GROWS, AND TWO CALLERS DO NOT WAIT IN STEP. The random value
+  # arrives from `draw_random`, so this stays pure.
+  fn next_wait : (attempt: int, random: float) -> float
+
+  # EVERY LINE NAMES THE DATABASE AND THE TIME ELAPSED, AND UNTIL THE PUSH ENDS
+  # EACH ONE SAYS THE DATA HAS NOT YET REACHED THE CLOUD. `replication.feature`
+  # asks that a shutdown cut short says so in its last line. Nothing runs after
+  # the kill, so every line has to be fit to be the last one.
+  fn progress_line : (db: Database, elapsed: float, done: bool) -> dict<str, Value>
+
+  # `architecture.md:308`: the sync pass is dropped when a writer is waiting.
+  fn writer_waiting : (room: Room) -> bool
+
+  # The room drains one write at a time, in arrival order.
+  fn next_in_order : (room: Room) -> Statement | NOTHING
+
+  # Asked of the fault's kind, never its message.
+  fn worth_retrying : (fault: Fault) -> bool
+
+  # A bounded budget, and spending it is an answer of its own kind.
+  fn budget_spent : (attempts: int, budget: int) -> bool
