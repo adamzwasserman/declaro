@@ -252,6 +252,13 @@ module declaro-persistum
   # calls `drain` on every pass, so a caller's write does not travel on the door
   # the caller knocked on. `deposit` hands back a ticket and returns; the write
   # leaves the process later, here.
+  # THE CLOCK IS THE WORLD, AND READING IT IS INPUT. `engine_of.feature` says a
+  # pure function reads no clock. This is the fourth role, added 2026-09-17: the
+  # program asks, rather than the world calling in. It stands with the doors,
+  # calls nothing, and heads no chain, and the three orchestrators that need the
+  # time call it and hand its answer to the pure functions.
+  reader fn read_clock : () -> float side_effect reads "clock"
+
   # FIVE. The server starts. The one place the signal handler goes in.
   boundary_in fn starting : () -> NOTHING | Fault side_effect reads "caller" invokes start
 
@@ -342,13 +349,6 @@ module declaro-persistum
   # HANDLER WORKS THROUGH. A database that did not ask stays off it, so a caller
   # who never opted in changes nothing about what happens at exit.
   boundary_out fn register_for_shutdown : (db: Database) -> NOTHING | Fault side_effect writes "shutdown list"
-
-  # THE CLOCK IS THE WORLD, AND READING IT IS INPUT. `engine_of.feature` says a
-  # pure function reads no clock. Decided 2026-09-17: this is an input boundary
-  # that an orchestrator calls, unlike the doors, which call an orchestrator.
-  # It sits here only until the format can declare that kind; explorer has the
-  # request. Its answer is handed inward to the pure functions that need time.
-  boundary_out fn read_clock : () -> float side_effect reads "clock"
 
   boundary_out fn log_to_console : (event: dict<str, Value>) -> NOTHING side_effect writes "log"
 
