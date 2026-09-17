@@ -181,7 +181,7 @@ module declaro-persistum
 
   # `shut_down`'S OWN RECORD. When it started and how many pushes it has made,
   # because every log line names the database and the time elapsed.
-  type ShuttingDown = { db: Database
+  type ShuttingDown = { databases: list<Database>
                         started_at: float
                         attempts: int }
 
@@ -249,13 +249,16 @@ module declaro-persistum
   # IT IS THE ONE WITH THE HIGHEST COST OF BEING WRONG. The usual deployment has
   # disk that does not survive the process, so anything unreplicated at exit is
   # gone, and the window between the signal and the kill is all there is.
-  boundary_in fn stopping : (db: Database) -> NOTHING | Fault side_effect reads "signal" invokes shut_down
+  boundary_in fn stopping : (registered: list<Database>) -> NOTHING | Fault side_effect reads "signal" invokes shut_down
 
   # FOUR. The runtime hands us a turn, and nothing outside asked for that
   # either. `architecture.md:227` is a loop that runs until stop is set and
   # calls `drain` on every pass, so a caller's write does not travel on the door
   # the caller knocked on. `deposit` hands back a ticket and returns; the write
   # leaves the process later, here.
+  # SIX. The server starts. The one place the signal handler goes in.
+  boundary_in fn starting : () -> NOTHING | Fault side_effect reads "caller" invokes start
+
   # FIVE. A caller asks for replication and waits for it.
   # `tests/bdd/features/replication.feature`: it returns once both directions
   # have completed, and it ignores load, because a caller who awaited this has
@@ -273,7 +276,7 @@ module declaro-persistum
 
   # Works out which engine the target names, connects, copies the whole database
   # if this copy is cold, and hands back the handle everything downstream reads.
-  orchestrator fn connect : (connecting: Connecting) -> Connecting | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, open_connection, replicates, install_signal_handler, pull_from_turso, log_to_console
+  orchestrator fn connect : (connecting: Connecting) -> Connecting | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, open_connection, replicates, register_for_shutdown, pull_from_turso, log_to_console
 
   # Checks the columns against the model, builds the declaration, renders it for
   # this engine, runs it, and shapes what comes back.
@@ -291,6 +294,10 @@ module declaro-persistum
   # `replicate_if_idle` ask it, and the drainer is what knows the answer. Split
   # across two orchestrators, it gets asked twice and answered twice.
   orchestrator fn catch_up : (catching_up: CatchingUp) -> CatchingUp | Fault invokes writer_waiting, next_in_order, run_statement, worth_retrying, budget_spent, draw_random, next_wait, replicates, push_to_turso, pull_from_turso, log_to_console
+
+  # Installs the one signal handler. Safe to call again: the second call finds it
+  # installed and returns.
+  orchestrator fn start : () -> NOTHING | Fault invokes install_signal_handler, log_to_console
 
   # Pushes and pulls until both directions are done, ignoring load.
   orchestrator fn flush : (flushing: Flushing) -> Flushing | Fault invokes replicates, read_clock, push_to_turso, pull_from_turso, progress_line, log_to_console
@@ -330,11 +337,17 @@ module declaro-persistum
   # why this is a door rather than a step.
   boundary_out fn deposit : (room: Room, statement: Statement) -> Ticket | Fault side_effect writes "room"
 
-  # THE SIGNAL HANDLER IS INSTALLED AT OPEN, AND ONLY WHEN THE CALLER ASKED.
-  # `replication.feature`: a database opened without asking for shutdown
-  # replication installs nothing, and when one is installed, any handler the
-  # host application already set still runs. It chains; it never replaces.
-  boundary_out fn install_signal_handler : (db: Database) -> NOTHING | Fault side_effect writes "signal"
+  # ONE HANDLER FOR THE PROCESS, INSTALLED AT STARTUP, AND INSTALLING IT TWICE
+  # CHANGES NOTHING. Decided 2026-09-17: a handler per open database would stack
+  # one on another, so it goes in once and a second call finds it there and
+  # returns. `replication.feature`: any handler the host application already set
+  # still runs. It chains; it never replaces.
+  boundary_out fn install_signal_handler : () -> NOTHING | Fault side_effect writes "signal"
+
+  # A DATABASE THAT ASKED TO REPLICATE AT EXIT PUTS ITSELF ON THE LIST THE ONE
+  # HANDLER WORKS THROUGH. A database that did not ask stays off it, so a caller
+  # who never opted in changes nothing about what happens at exit.
+  boundary_out fn register_for_shutdown : (db: Database) -> NOTHING | Fault side_effect writes "shutdown list"
 
   # A CLOCK AND A RANDOM SOURCE ARE THE WORLD. `engine_of.feature` says a pure
   # function reads no clock and no random source. Shutdown names the elapsed time
