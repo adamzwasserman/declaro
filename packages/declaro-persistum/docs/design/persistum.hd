@@ -606,7 +606,7 @@ module declaro-persistum
 
   # Driver rows in, and out comes what was asked for: instances of the model, a
   # number, or `NOTHING`.
-  fn answer_from_rows : (model: Model, rows: Rows, declaration: Declaration) -> Answer | Fault note "turns driver rows into instances of the model, a number, or NOTHING"
+  fn answer_from_rows : (model: Model, rows: Rows, declaration: Declaration) -> Answer | Fault note "turns driver rows into instances of the model, a number, true or false, or NOTHING"
 
   # FOUR BUILDERS, ONE TABLE, AND NO GUESSING ANYWHERE.
   # The four cards below are what the four grammars produce, all of it the same
@@ -687,7 +687,7 @@ module declaro-persistum
 
   # The models are the desired state, so the target schema is derived from them
   # and from nothing the database says.
-  fn schema_from_declared : (declared: Declared) -> Schema | Fault note "builds the target schema from the models, and from nothing else"
+  fn schema_from_declared : (declared: Declared) -> Schema | Fault note "builds the target schema from what the code declares, and from nothing else"
 
   # A HANDLE HANDED BACK BEFORE THE DATABASE MATCHES THE MODELS IS A HANDLE TO A
   # DATABASE THAT WILL REFUSE THE FIRST QUESTION ASKED OF IT. So opening
@@ -698,10 +698,14 @@ module declaro-persistum
   # only in the live database is dropped, what differs is altered.
   fn difference : (live: Schema, target: Schema) -> list<Operation> note "works out which operations turn the live schema into the target"
 
-  # A COLUMN GONE AND ANOTHER APPEARED IS TWO DIFFERENT CHANGES. This stops and
-  # says it cannot tell, unless the query_answer was remembered. Choosing wrong
-  # destroys a column, so the fault it returns names the two columns and the
-  # door that answers.
+  # A COLUMN GONE AND ANOTHER APPEARED IS TWO DIFFERENT CHANGES. It reads the
+  # answer off `renamed_from` on the column that replaced the old one. When no
+  # column says, it stops rather than guessing, and the fault names both columns
+  # and the declaration to write.
+  #
+  # `a_rename_is_asked_and_remembered.feature` DESCRIBES THE OLD ANSWER. It has
+  # a person answering once and the library remembering it, which needs somebody
+  # at a deploy. That scenario is the one to change, like the awaited flush.
   fn name_what_is_ambiguous : (operations: list<Operation>, declared: Declared) -> list<Operation> | Fault note "stops on a change that could be a rename or a drop and an add"
 
   # Dependencies decide the order: a table before the index on it, a parent
