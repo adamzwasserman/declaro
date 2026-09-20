@@ -68,7 +68,42 @@ _SPEC = (
     "does not exist yet, and binding it would assert nothing a reader can act on"
 )
 
+_ONE_EACH = (
+    "One function, one feature, written while the declaration was being "
+    "reconciled against the features in September 2026. The function it "
+    "describes is declared in docs/design/persistum.hd and not yet built, so "
+    "binding it today would turn every scenario red and say only 'not built'. "
+    "It comes off this list when its function exists."
+)
+
 KNOWN_UNBOUND: dict[str, str] = {
+    "query_ask.feature": _ONE_EACH,
+    "query_answer.feature": _ONE_EACH,
+    "query_run_statement.feature": _ONE_EACH,
+    "query_run_together.feature": _ONE_EACH,
+    "query_begin_concurrent.feature": _ONE_EACH,
+    "query_collect.feature": _ONE_EACH,
+    "query_deliver.feature": _ONE_EACH,
+    "room_make.feature": _ONE_EACH,
+    "room_deposit.feature": _ONE_EACH,
+    "room_release_ticket.feature": _ONE_EACH,
+    "room_post_receipt.feature": _ONE_EACH,
+    "room_run_write.feature": _ONE_EACH,
+    "lifecycle_stop.feature": _ONE_EACH,
+    "lifecycle_shut_down.feature": _ONE_EACH,
+    "lifecycle_turn.feature": _ONE_EACH,
+    "lifecycle_catch_up.feature": _ONE_EACH,
+    "lifecycle_install_handler.feature": _ONE_EACH,
+    "lifecycle_register.feature": _ONE_EACH,
+    "lifecycle_read_registered.feature": _ONE_EACH,
+    "turso_push.feature": _ONE_EACH,
+    "turso_pull.feature": _ONE_EACH,
+    "log_write.feature": _ONE_EACH,
+    "clock_read.feature": _ONE_EACH,
+    "session_connect.feature": _ONE_EACH,
+    "session_open_connection.feature": _ONE_EACH,
+    "session_open_writer.feature": _ONE_EACH,
+    "session_close_connection.feature": _ONE_EACH,
     "a_condition_is_data.feature": _SPEC,
     "absence_is_an_answer.feature": _SPEC,
     "everything_gets_declared.feature": _SPEC,
@@ -85,20 +120,17 @@ KNOWN_UNBOUND: dict[str, str] = {
     # change would do before it does it, and what a view and an index are.
     "every_column_type_is_declarable.feature": _SPEC,
     "a_name_the_library_owns_is_refused.feature": _SPEC,
-    "asking_what_would_change.feature": _SPEC,
-    "a_rename_is_asked_and_remembered.feature": _SPEC,
     "losing_data_is_said_out_loud.feature": _SPEC,
     "a_view_is_a_named_declaration.feature": _SPEC,
-    "render.feature": _SPEC,
+    "compile_statement.feature": _SPEC,
     "freshness_is_declared_in_plain_words.feature": _SPEC,
     "an_index_can_span_columns.feature": _SPEC,
     "one_table_of_capabilities.feature": _SPEC,
     # One door and the pure decision it rests on. Neither is built.
-    "open_database.feature": _SPEC,
+    "session_open.feature": _SPEC,
     "engine_of.feature": _SPEC,
     # Running a question: what is held, what comes back, how many connections,
     # and whose job retrying is.
-    "a_statement_is_built_once.feature": _SPEC,
     "what_comes_back.feature": _SPEC,
     "several_writes_travel_together.feature": _SPEC,
     "how_many_connections_and_when.feature": _SPEC,
