@@ -223,8 +223,8 @@ module declaro-persistum
   # DIFFERENTLY. A read runs now and answers now. A write is deposited and
   # answered by a ticket, and the rows reach the engine later, on a spare
   # moment. Splitting the set is what lets the table below say so word by word.
-  set readings = { "all", "one", "first", "page", "distinct", "exists", "count", "sum", "average", "smallest", "largest", "count_distinct" } note "the askings that run now and answer now"
-  set writings = { "add", "change", "change_all", "remove", "remove_all", "replace" } note "the askings that are deposited and drained later"
+  set readings = { "all", "one", "first", "page", "distinct", "exists", "count", "sum", "average", "smallest", "largest", "count_distinct" } note "the twelve askings that run now and answer now; this is the read half of the fork"
+  set writings = { "add", "change", "change_all", "remove", "remove_all", "replace" } note "the six askings that are deposited and drained later; the write half of the fork"
   vocabulary Wanted = { readings, writings } note "what a question asks for, reading or writing"
 
   # Fifteen operators, named as keys because a condition is data.
@@ -464,7 +464,7 @@ module declaro-persistum
 
   # Checks the columns against the model, builds the declaration, renders it for
   # this engine, runs it, and shapes what comes back.
-  orchestrator fn query_answer : (asking: Answering) -> Answering | Fault invokes by_grammar, refuse_undeclared_columns, join_between, compile_statement, by_wanted, answer_from_rows, answer_from_ticket, log_write note "turns a caller's question into rows, a number, or a ticket"
+  orchestrator fn query_answer : (asking: Answering) -> Answering | Fault invokes by_grammar, refuse_undeclared_columns, join_between, compile_statement, query_run_statement, room_deposit, answer_from_rows, answer_from_ticket, log_write note "turns a caller's question into rows, a number, or a ticket"
 
   # Pushes until Turso has everything, retrying rather than giving up,
   # then closes. The one place blocking is correct.
@@ -641,10 +641,13 @@ module declaro-persistum
   # `Declaration`. `by_grammar` picks between them, and it is a lookup rather
   # than a detection: the key arrived with the call.
   #
-  # WHERE EACH ASKING GOES, WORD BY WORD. Twelve run now; six are deposited and
-  # drained later. Written out rather than reduced to a rule, because a reader
-  # asking "does `exists` block" should read the query_answer rather than derive it.
-  dispatch by_wanted = { "all" -> query_run_statement, "one" -> query_run_statement, "first" -> query_run_statement, "page" -> query_run_statement, "distinct" -> query_run_statement, "exists" -> query_run_statement, "count" -> query_run_statement, "sum" -> query_run_statement, "average" -> query_run_statement, "smallest" -> query_run_statement, "largest" -> query_run_statement, "count_distinct" -> query_run_statement, "add" -> room_deposit, "change" -> room_deposit, "change_all" -> room_deposit, "remove" -> room_deposit, "remove_all" -> room_deposit, "replace" -> room_deposit } note "sends each asking where it goes: twelve run now, six are deposited"
+  # NO TABLE FOR THE READ AND WRITE FORK, BECAUSE THE VOCABULARY ALREADY SPLITS.
+  # A `dispatch by_wanted` stood here with eighteen rows pointing at two sinks,
+  # which looked like eighteen decisions and was one: is this a read or a write.
+  # `readings` and `writings` are that column, written once. `query_answer`
+  # reaches both sinks, and which one runs is decided by the word it holds.
+  # What actually differs between `one`, `count` and `sum` is not a fork at all;
+  # it is inside `compile_statement`, where it belongs.
 
   # THIS IS WHAT KEEPS `query_ask` ONE DOOR. Four doors would say the caller entered
   # four different buildings. One door carrying which entry point was used says
