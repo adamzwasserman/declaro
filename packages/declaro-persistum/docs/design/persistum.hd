@@ -109,13 +109,38 @@ module declaro-persistum
                  columns: list<str>
                  unique: bool }
 
+  # A CONSTRAINT IS A RULE ABOUT A COLUMN, AND IT IS DATA HERE FOR THE REASON
+  # EVERY OTHER RULE IS. `HOW-IT-SHOULD-WORK.md`'s test catches
+  # `field(check="total >= 0")` the same way it catches a WHERE clause given as
+  # text: that string is neither a declared name nor a bound value, so the only
+  # thing left to do with it is paste it in.
+  type Constraint = { name: str
+                      columns: list<str>
+                      rule: Condition }
+
   type Table = { name: str
                  columns: list<Column>
                  indexes: list<Index>
-                 constraints: list<str> }
+                 constraints: list<Constraint> }
+
+  # A VIEW IS A DECLARATION WITH A NAME, NOT A STRING. `a_view_is_a_named_
+  # declaration.feature`: you declare it against your models and the library
+  # writes the SELECT, which only means something if what is stored is the same
+  # `Declaration` a caller asks with. A plain view has no freshness to state.
+  type View = { name: str
+                declaration: Declaration
+                freshness: Freshness | NOTHING }
+
+  # HOW STALE YOU CAN STAND IT, IN THE LIBRARY'S WORDS. The three come from
+  # `freshness_is_declared_in_plain_words.feature`, which refuses to let a
+  # caller say `on_commit` or `trigger`: those are mechanisms, and picking one
+  # is the library's job. A caller who has to know which engine they are on has
+  # been handed that job back.
+  set freshnesses = { "always current", "current when read", "refreshed when asked" }
+  vocabulary Freshness = { freshnesses }
 
   type Schema = { tables: list<Table>
-                  views: list<str> }
+                  views: list<View> }
 
   # WHAT THE DIFFER EMITS. The words are `schema/diff.feature`'s own. Each
   # operation says whether carrying it out destroys something, because
@@ -421,7 +446,7 @@ module declaro-persistum
   # THE SAME PLANNING, THEN CARRIES IT OUT. It reaches the same pure functions
   # in the same order as `plan_change`, so what a caller was shown and what runs
   # cannot come apart, and then spells each operation for this engine.
-  orchestrator fn migrate : (migrating: Migrating) -> Migrating | Fault invokes refuse_owned_names, schema_from_models, inspect_schema, difference, name_what_is_ambiguous, order_operations, name_what_destroys, capability_of, spell_operation, run_statement, log_to_console
+  orchestrator fn migrate : (migrating: Migrating) -> Migrating | Fault invokes refuse_owned_names, schema_from_models, inspect_schema, difference, name_what_is_ambiguous, order_operations, name_what_destroys, capability_of, mechanism_for, spell_view, spell_operation, run_statement, log_to_console
 
   # Writes the answer down where the next deploy will find it.
   orchestrator fn remember_rename : (db: Database, gone: str, appeared: str) -> NOTHING | Fault invokes store_rename, log_to_console
@@ -671,3 +696,15 @@ module declaro-persistum
   # caller to write it. A pair of models with no key between them is a fault
   # naming both, since no join exists to work out.
   fn join_between : (near: Model, far: Model, condition: Condition) -> Join | Fault
+
+  # --- what a declared view reaches ---------------------------------------
+
+  # The library writes the SELECT, which is this: the same compiler the data
+  # half uses, over the declaration the view holds.
+  fn spell_view : (view: View, engine: Engine) -> Statement | Fault
+
+  # PICKS THE MECHANISM THE CALLER REFUSED TO NAME. PostgreSQL has a real
+  # materialized view and SQLite does not, so one engine gets a declaration and
+  # the other gets a table, its triggers and a registry row. Which is which is
+  # in the capability table, not in a function name.
+  fn mechanism_for : (freshness: Freshness, engine: Engine, capability: Capability) -> list<Operation> | Fault
