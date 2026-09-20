@@ -31,7 +31,7 @@ module declaro-persistum
   #
   # A PURE FUNCTION USED TO BUILD IT AND CANNOT. `assemble` took the driver's
   # connection as an argument, and naming a handle in a signature is reading it.
-  # Holding one inside a record is not, so `session_connect` puts the five fields
+  # Holding one inside a record is not, so `session_connect` puts the six fields
   # together itself. That is what an orchestrator is: the thing that keeps what
   # each step returned.
   #
@@ -359,6 +359,8 @@ module declaro-persistum
                       engine: Engine
                       settings: dict<str, Value>
                       permitted: int
+                      crew: int
+                      writers: list<Connection>
                       connection: Connection
                       declared: Declared
                       live: Schema
@@ -494,7 +496,7 @@ module declaro-persistum
   #
   # Works out which engine the target names, connects, copies the whole database
   # if this copy is cold, and hands back the handle everything downstream reads.
-  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, crew_size, room_make, replicates, lifecycle_install_handler, lifecycle_register, turso_pull, schema_read_declared, refuse_owned_names, schema_from_declared, schema_inspect, migration_needed, difference, name_what_is_ambiguous, order_operations, name_what_destroys, refuse_undeclared_loss, capability_of, mechanism_for, spell_view, spell_operation, migration_report, query_run_statement, log_write note "works out the engine, connects, and builds the handle everything downstream reads"
+  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, crew_size, session_open_writer, room_make, replicates, lifecycle_install_handler, lifecycle_register, turso_pull, schema_read_declared, refuse_owned_names, schema_from_declared, schema_inspect, migration_needed, difference, name_what_is_ambiguous, order_operations, name_what_destroys, refuse_undeclared_loss, capability_of, mechanism_for, spell_view, spell_operation, migration_report, query_run_statement, log_write note "works out the engine, connects, and builds the handle everything downstream reads"
 
   # Checks the columns against the model, builds the declaration, renders it for
   # this engine, runs it, and shapes what comes back.
@@ -515,7 +517,7 @@ module declaro-persistum
   # the same question: is a writer waiting. `architecture.md:308` has
   # `replicate_if_idle` ask it, and the drainer is what knows the query_answer. Split
   # across two orchestrators, it gets asked twice and answered twice.
-  orchestrator fn lifecycle_catch_up : (catching_up: CatchingUp) -> CatchingUp | Fault invokes writer_waiting, next_in_order, query_begin_concurrent, query_run_statement, worth_retrying, budget_spent, clock_read, next_wait, receipt_for, room_post_receipt, replicates, turso_push, turso_pull, log_write note "spends a free turn draining the room, then syncing if nobody is writing"
+  orchestrator fn lifecycle_catch_up : (catching_up: CatchingUp) -> CatchingUp | Fault invokes writer_waiting, next_in_order, query_begin_concurrent, room_run_write, worth_retrying, budget_spent, clock_read, next_wait, receipt_for, room_post_receipt, replicates, turso_push, turso_pull, log_write note "spends a free turn draining the room, then syncing if nobody is writing"
 
 
   # --- column 3: output I/O, and there are four ways out ------------------
@@ -546,11 +548,25 @@ module declaro-persistum
   # as a value, never as a log line. `architecture.md:116` is why it can only be
   # reached from column 2: writing a log line is I/O, so a function in the
   # middle that logs has reached outside without changing its signature.
+  # ONE PER DRAINER, OPENED AT OPEN AND HELD FOR LIFE. A drainer writes and
+  # never reads, and `architecture.md:213` opens it in its own mode, so this is
+  # not the connection `session_open_connection` hands back. Opening them here
+  # is what makes reuse possible; a connection per write is the cost the crew
+  # exists to avoid.
+  boundary_out fn session_open_writer : (target: str) -> Connection | Fault side_effect reads_writes "database" note "opens one drainer's connection, held for its life"
+
   # WITHOUT THIS THE CREW IS ORDINARY LOCKING. `architecture.md:220`: BEGIN
   # CONCURRENT is mandatory on a deposited write, and it is what lets several
   # drainers overlap inside the engine instead of queueing behind one writer.
   # Each drainer says it on its own connection, once per write.
   boundary_out fn query_begin_concurrent : (writer: Connection) -> NOTHING | Fault side_effect writes "database" note "opens one write so drainers overlap rather than queue"
+
+  # THE BEGIN AND THE WRITE SHARE ONE HANDLE, WHICH IS WHY BOTH TAKE IT. A
+  # drainer holds one connection and writes on it only. `query_run_statement`
+  # takes the database and serves reads and the DDL a migration runs;
+  # `architecture.md:156` keeps DDL off the crew, because a table created on one
+  # MVCC connection is invisible to every other.
+  boundary_out fn room_run_write : (writer: Connection, statement: Statement) -> int | Fault side_effect writes "database" note "runs one deposited write on the drainer's own connection"
 
   # A WRITE LEAVES HERE AND THE CALLER DOES NOT WAIT. `architecture.md:201`: the
   # caller deposits and gets a ticket back immediately, and a crew of drainers
