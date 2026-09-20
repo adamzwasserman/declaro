@@ -1,0 +1,121 @@
+# declaro-observe, declared from the specification rather than from the code.
+#
+# SOURCE. `docs/architecture/observe-architecture.md`, which is the only one
+# this package has. No feature files exist yet, so anything the document does
+# not say is left out rather than guessed at.
+#
+# WHAT IT IS. Event sourcing for a web application: something happens, an event
+# is written down, and every number anyone wants is derived from those events
+# rather than counted into a variable. The document's first page says why: a
+# logger singleton, a metric registry and a trace context threaded through a
+# codebase are three ways of keeping state where nobody can see it.
+
+module declaro-observe
+
+  layer application
+
+  # AN EVENT IS DATA, AND IT IS WRITTEN ONCE. The seven fields are the
+  # document's own. Nothing updates an event; a correction is another event.
+  type Event = { id: str
+                 ts: str
+                 type: EventType
+                 source: str
+                 payload: dict<str, str>
+                 correlation_id: str | NOTHING
+                 duration_ms: int | NOTHING }
+
+  set event_types = { "request", "query", "error", "custom" }
+  vocabulary EventType = { event_types }
+
+  # WHAT TO OBSERVE IS DECLARED, NOT SCATTERED. The document asks for one TOML
+  # file rather than decorators spread through a codebase: where events go, how
+  # long they are kept, how many travel at once, what is captured without being
+  # asked for, and what every event carries.
+  type Config = { store: str
+                  retention_days: int
+                  batch_size: int
+                  captures: list<EventType>
+                  always_include: dict<str, str> }
+
+  # A NUMBER NOBODY INCREMENTS. A projection is a question over the events,
+  # kept fresh by the database rather than by a counter somebody remembers to
+  # update, which is what makes it derived rather than held.
+  type Projection = { name: str
+                      over: EventType
+                      grouped_by: list<str>
+                      refreshed: str }
+
+  type Fault = { what_went_wrong: str
+                 what_to_do_instead: str }
+
+  # `request_observe`'S OWN RECORD.
+  type Observing = { config: Config
+                     started_at: float
+                     events: list<Event>
+                     written: int }
+
+  # --- column 1: how the world gets in ------------------------------------
+
+  # A REQUEST ARRIVES AND LEAVES, AND BOTH ARE EVENTS. The middleware is a
+  # function the application calls, so the door is the request reaching it.
+  boundary_in fn request_observe : (source: str, payload: dict<str, str>) -> NOTHING | Fault side_effect reads "HTTP" invokes observe_request
+
+  # Something inside the application says an event happened, rather than the
+  # middleware noticing it.
+  boundary_in fn event_emit : (type: EventType, source: str, payload: dict<str, str>) -> NOTHING | Fault side_effect reads "caller" invokes observe_emit
+
+  # THE APPLICATION STARTS, AND WHAT IT OBSERVES IS ALREADY WRITTEN DOWN. This
+  # is the door the declared projections arrive through: a question over the
+  # events, handed to the database once, rather than a counter created at the
+  # first request.
+  boundary_in fn lifecycle_start : (config_path: str, projections_path: str) -> NOTHING | Fault side_effect reads "caller" invokes observe_start
+
+  # The declared configuration and the declared projections, asked for at
+  # startup. Two files, because the document keeps them apart.
+  reader fn config_read : (path: str) -> Config | Fault side_effect reads "files"
+  reader fn projections_read : (path: str) -> list<Projection> | Fault side_effect reads "files"
+
+  # An event needs a time and an identity, and neither is derivable.
+  reader fn clock_read : () -> float side_effect reads "clock"
+  reader fn id_new : () -> str side_effect reads "random"
+
+  # --- column 2 ------------------------------------------------------------
+
+  # Reads what to observe and hands every declared projection to the database
+  # once, so nothing is created on a request path.
+  orchestrator fn observe_start : (config: Config, projections: list<Projection>) -> NOTHING | Fault invokes config_read, projections_read, projection_declare, log_write
+
+  # Times the request, makes the two events around it and buffers them.
+  orchestrator fn observe_request : (observing: Observing) -> Observing | Fault invokes config_read, clock_read, id_new, event_from, is_captured, with_always_included, buffer_add, is_full, store_write, log_write
+
+  # The same, for an event the application asked for by name.
+  orchestrator fn observe_emit : (observing: Observing) -> Observing | Fault invokes clock_read, id_new, event_from, is_captured, with_always_included, buffer_add, is_full, store_write, log_write
+
+  # --- column 3: the pure core ---------------------------------------------
+
+  # The event, assembled from what happened and what the clock and the id
+  # reader answered.
+  fn event_from : (type: EventType, source: str, payload: dict<str, str>, id: str, ts: str, duration_ms: int | NOTHING) -> Event
+
+  # Whether this kind of event is one the configuration asked to capture.
+  fn is_captured : (type: EventType, config: Config) -> bool
+
+  # What every event carries, added here rather than by each caller.
+  fn with_always_included : (event: Event, config: Config) -> Event
+
+  # The buffer is a value handed back, not a place events accumulate out of
+  # sight.
+  fn buffer_add : (events: list<Event>, event: Event) -> list<Event>
+
+  fn is_full : (events: list<Event>, config: Config) -> bool
+
+  # --- column 4: what it writes -------------------------------------------
+
+  # THE EVENTS GO TO declaro-persistum, WHICH FROM HERE IS OUTSIDE. The
+  # projections are that package's materialized views, declared there and
+  # refreshed there; this module writes events and asks for nothing back.
+  boundary_out fn store_write : (events: list<Event>) -> int | Fault side_effect writes "declaro-persistum"
+
+  boundary_out fn projection_declare : (projection: Projection) -> NOTHING | Fault side_effect writes "declaro-persistum"
+
+  boundary_out fn log_write : (event: dict<str, str>) -> NOTHING side_effect writes "log"
