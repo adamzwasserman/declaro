@@ -16,7 +16,7 @@ module declaro-persistum
   # EVERY SIDE OF THE WORLD THIS MODULE TOUCHES, LISTED ONCE. A boundary naming
   # a side that is not here is a fault, and a side here that nothing touches is
   # one too, so the two lists and the cards cannot drift apart.
-  inputs = { "caller" : "a library call from the host program", "models" : "the Pydantic models the host declares", "database" : "what a database says it holds", "turso" : "the sync channel, inbound", "clock" : "the wall clock", "signal" : "the platform's shutdown", "scheduler" : "a spare turn from the runtime", "room" : "the waiting room, read by a caller collecting" }
+  inputs = { "caller" : "a library call from the host program", "models" : "the Pydantic models the host declares", "database" : "what a database says it holds", "turso" : "the sync channel, inbound", "clock" : "the wall clock", "signal" : "the platform's shutdown", "scheduler" : "a spare turn from the runtime", "shutdown list" : "the databases that asked to replicate at exit", "room" : "the waiting room, read by a caller collecting" }
   outputs = { "database" : "statements, and the connection they run on", "turso" : "the sync channel, outbound", "room" : "writes deposited and outcomes posted", "signal" : "the process's one handler", "shutdown list" : "the databases shutdown works through", "log" : "what an operator reads afterwards" }
 
   # `Database` IS BACK, AND EVERY FIELD NOW HAS A LINE BEHIND IT. It was cut for
@@ -252,9 +252,11 @@ module declaro-persistum
   set operators = { "eq", "ne", "lt", "lte", "gt", "gte", "in", "not_in", "between", "like", "contains", "startswith", "endswith", "is_null", "is_not_null" } note "the fifteen ways to narrow, named as keys"
   vocabulary Operator = { operators } note "which comparison a condition makes"
 
-  # A BARE VALUE MEANS `eq`, AND THIS SHAPE DOES NOT SAY SO. Nor does it carry
-  # `or` and `not`, which are keys holding a condition rather than a column. Two
-  # known holes, left open rather than guessed at.
+  # `and` IS WHAT TWO KEYS ALREADY MEAN, so `each` needs no word of its own.
+  # `or` and `not` are keys holding a condition rather than a column, so they
+  # hold conditions here. A bare value meaning `eq` never reaches this type: the
+  # four builders expand it, which is what they are for, and by the time a
+  # declaration exists every comparison names its operator.
   # IGNORE_CASE IS A COMPANION ON EVERY TEXT OPERATOR, AND THAT IS NOT A DETAIL.
   # `HOW-IT-SHOULD-WORK.md`: the same `like` matched a name on one engine and
   # nothing on another, silently, and it is the library's job to make the
@@ -262,7 +264,9 @@ module declaro-persistum
   type Comparison = { operator: Operator
                       value: Value
                       ignore_case: bool } note "one comparison: an operator, the value bound to it, and whether case matters"
-  type Condition = dict<str, Comparison> note "how a question narrows, as data in every grammar"
+  type Condition = { each: dict<str, Comparison>
+                     any_of: list<Condition>
+                     none_of: list<Condition> } note "how a question narrows, as data in every grammar"
 
   set directions = { "ascending", "descending" } note "which way an order sorts"
   vocabulary Direction = { directions } note "ascending or descending"
@@ -402,7 +406,7 @@ module declaro-persistum
   # IT IS THE ONE WITH THE HIGHEST COST OF BEING WRONG. The usual deployment has
   # disk that does not survive the process, so anything unreplicated at exit is
   # gone, and the window between the signal and the kill is all there is.
-  boundary_in fn lifecycle_stop : (registered: list<Database>) -> NOTHING | Fault side_effect reads "signal" invokes lifecycle_shut_down note "receives the platform's shutdown signal"
+  boundary_in fn lifecycle_stop : () -> NOTHING | Fault side_effect reads "signal" invokes lifecycle_shut_down note "receives the platform's shutdown signal"
 
   # LIFECYCLE. The runtime hands us a turn, and nothing outside asked for that
   # either. `architecture.md:227` is a loop that runs until stop is set and
@@ -414,6 +418,12 @@ module declaro-persistum
   # program asks, rather than the world calling in. It stands with the doors,
   # calls nothing, and heads no chain, and the three orchestrators that need the
   # time call it and hand its query_answer to the pure functions.
+  # LIFECYCLE. THE DATABASES THAT ASKED TO REPLICATE AT EXIT. `lifecycle_register`
+  # writes this list as each one opens, and nothing else reads it. The signal
+  # carries no arguments, so without this reader the door would have to be handed
+  # a list the module wrote itself.
+  reader fn lifecycle_read_registered : () -> list<Database> | Fault side_effect reads "shutdown list" note "reads the databases that asked to replicate at exit"
+
   reader fn clock_read : () -> float side_effect reads "clock" note "asks the clock what time it is"
 
   # QUERY. A caller comes back for the write it deposited. `write_queue.feature`:
@@ -433,8 +443,9 @@ module declaro-persistum
   # --- column 2: one orchestrator per door --------------------------------
   #
   # A DOOR RECEIVES AND AN ORCHESTRATOR SEQUENCES, and each door reaches exactly
-  # one. Nine doors, nine orchestrators, and the family word is the same on both
-  # sides so a chain never changes vocabulary halfway down.
+  # one. Five doors, five orchestrators, and the family word is the same on both
+  # sides so a chain never changes vocabulary halfway down. It was nine of each
+  # until the schema and startup doors came off.
 
   # THE MIGRATION RUNS BEFORE THE HANDLE COMES BACK. The models the code has and
   # the schema the database has meet here, and a database still behind its models
@@ -451,7 +462,7 @@ module declaro-persistum
 
   # Pushes until Turso has everything, retrying rather than giving up,
   # then closes. The one place blocking is correct.
-  orchestrator fn lifecycle_shut_down : (shutting_down: ShuttingDown) -> ShuttingDown | Fault invokes replicates, clock_read, turso_push, next_wait, progress_line, log_write note "gets every local commit to Turso before the process dies"
+  orchestrator fn lifecycle_shut_down : (shutting_down: ShuttingDown) -> ShuttingDown | Fault invokes lifecycle_read_registered, replicates, clock_read, turso_push, next_wait, progress_line, log_write note "gets every local commit to Turso before the process dies"
 
   # Waits for the drainer to finish this caller's write, hands back the receipt
   # and drops the ticket, so a collected ticket leaves the room empty again.
