@@ -19,7 +19,7 @@ module declaro-ximinez
                  declared_type: str | NOTHING
                  line: int
                  initialized: bool
-                 used: bool } note "a name, a declared type, and whether anything reads it"
+                 used: bool } note "one local variable, and whether it is typed, set and read"
 
   type FunctionScope = { name: str
                          line: int
@@ -30,20 +30,20 @@ module declaro-ximinez
   # exclusive per function: annotations on first assignment, or one `types:`
   # block at the top. `style_mixing.feature` is the file that says a function
   # using both is refused.
-  set styles = { "inline" : "a type beside each first assignment", "block" : "one types: block at the top of the function" } note "a type beside each assignment, or one block at the top"
-  vocabulary Style = { styles } note "a function picks one and keeps to it"
+  set styles = { "inline" : "a type beside each first assignment", "block" : "one types: block at the top of the function" } note "the two ways to declare types in a function"
+  vocabulary Style = { styles } note "which style a function uses; it may not use both"
 
   type Violation = { rule: Rule
                      file: str
                      line: int
                      what_went_wrong: str
-                     what_to_do_instead: str } note "what is wrong, where, and what to write instead"
+                     what_to_do_instead: str } note "one refusal, saying where it is and what to write instead"
 
   # WHAT THE CHECKER CAN REFUSE. Drawn from the feature files, one rule each:
   # an undeclared local, a type that does not match what was assigned, the two
   # styles in one function, and a field no model declares.
   set rules = { "undeclared_local" : "a local with no declared type", "type_mismatch" : "what was assigned does not fit what was declared", "mixed_styles" : "one function used both styles", "unknown_field" : "a field the model does not declare" } note "the four things a file can be refused for"
-  vocabulary Rule = { rules } note "which rule this violation broke"
+  vocabulary Rule = { rules } note "which rule a violation broke"
 
   # A MODEL, AS LOADED FROM THE CALLER'S OWN FILES. Section 6.3: field names
   # and types, relationships and their targets.
@@ -54,15 +54,15 @@ module declaro-ximinez
   # THREE ENDINGS, AND A BUILD MACHINE HAS TO TELL THEM APART. Section 6.8: no
   # violations is 0, violations found is 1, and a file that would not parse or
   # a configuration that makes no sense is 2.
-  set endings = { "clean" : "0, nothing to report", "violations" : "1, the file is refused", "unusable" : "2, the source would not parse or the configuration is wrong" } note "clean, refused, or unusable"
-  vocabulary Ending = { endings } note "which of the three this run was"
+  set endings = { "clean" : "0, nothing to report", "violations" : "1, the file is refused", "unusable" : "2, the source would not parse or the configuration is wrong" } note "the three ways a run ends, and the code each returns"
+  vocabulary Ending = { endings } note "how this run ended"
 
   # HOW MUCH THE OPERATOR WANTS TO READ. Section 6.7, one word per flag.
-  set reports = { "standard", "quiet", "machine", "full" } note "four ways to read the same violations"
-  vocabulary ReportStyle = { reports } note "how much the operator wants to read"
+  set reports = { "standard", "quiet", "machine", "full" } note "the four ways to read the same violations"
+  vocabulary ReportStyle = { reports } note "how much output the operator asked for"
 
   type Fault = { what_went_wrong: str
-                 what_to_do_instead: str } note "two fields, because naming the problem is only half of one"
+                 what_to_do_instead: str } note "a failure on its way back; it says what to do, not only what broke"
 
   # `check_run`'S OWN RECORD.
   type Checking = { paths: list<str>
@@ -71,67 +71,67 @@ module declaro-ximinez
                     scopes: list<FunctionScope>
                     models: list<Model>
                     violations: list<Violation>
-                    ending: Ending } note "the files, what they declare, and what was found"
+                    ending: Ending } note "what one run carries: the files, what they declare, what was found"
 
   # --- column 1: how the world gets in ------------------------------------
 
   # An operator, or the hook standing in for one, asks for these files to be
   # checked.
-  boundary_in fn command_run : (argv: list<str>) -> int | Fault side_effect reads "argv" invokes check_run note "a hook or an operator asks for these files to be checked"
+  boundary_in fn command_run : (argv: list<str>) -> int | Fault side_effect reads "argv" invokes check_run note "checks the files it was pointed at, and answers with an exit code"
 
   # THE FILES ARE ASKED FOR, THEY DO NOT ARRIVE. Both of these are the program
   # reading what it was pointed at, so they are readers rather than doors.
-  reader fn files_read_source : (path: str) -> str | Fault side_effect reads "files" note "the program reads what it was pointed at"
-  reader fn files_read_models : (path: str) -> list<str> | Fault side_effect reads "files" note "the caller's Pydantic models, so a field can be checked"
+  reader fn files_read_source : (path: str) -> str | Fault side_effect reads "files" note "reads one source file"
+  reader fn files_read_models : (path: str) -> list<str> | Fault side_effect reads "files" note "reads the caller's model files"
 
   # --- column 2 ------------------------------------------------------------
 
   # Reads each file, collects what every function declares, checks it against
   # what the code does and against the models, and turns what it found into an
   # exit code.
-  orchestrator fn check_run : (checking: Checking) -> Checking | Fault invokes files_read_source, parse_source, scopes_of, style_of, undeclared_locals, type_mismatches, files_read_models, models_from_source, unknown_fields, nearest_field, ending_for, format_report, terminal_print, log_write note "read, collect, check, and turn what was found into an exit code"
+  orchestrator fn check_run : (checking: Checking) -> Checking | Fault invokes files_read_source, parse_source, scopes_of, style_of, undeclared_locals, type_mismatches, files_read_models, models_from_source, unknown_fields, nearest_field, ending_for, format_report, terminal_print, log_write note "reads each file, checks what it declares, and reports what it found"
 
   # --- column 3: the pure core ---------------------------------------------
 
   # Section 6.1: the source becomes a tree without losing its formatting, and
   # `types:` is read as an indented block rather than as a syntax error.
-  fn parse_source : (source: str) -> Tree | Fault note "types: is read as a block rather than as a syntax error"
+  fn parse_source : (source: str) -> Tree | Fault note "turns source into a tree, reading types: as a block rather than an error"
 
   type Tree = { path: str
-                nodes: list<str> } note "the source, parsed without losing its formatting"
+                nodes: list<str> } note "a parsed source file, formatting intact"
 
-  fn scopes_of : (tree: Tree) -> list<FunctionScope> note "one symbol table per function, because a style is per function"
+  fn scopes_of : (tree: Tree) -> list<FunctionScope> note "collects what every function declares"
 
   # A function declares one style or the other, and a function using both is a
   # violation rather than a preference.
-  fn style_of : (scope: FunctionScope) -> Style | Violation note "a function using both styles is a violation, not a preference"
+  fn style_of : (scope: FunctionScope) -> Style | Violation note "settles which typing style a function uses, and refuses one using both"
 
   # THE RULE THE TOOL EXISTS FOR. Every local is typed, so a local with no type
   # is named with its line and what to write instead.
-  fn undeclared_locals : (scope: FunctionScope) -> list<Violation> note "the rule this tool exists for"
+  fn undeclared_locals : (scope: FunctionScope) -> list<Violation> note "finds every local with no declared type, which is why this tool exists"
 
   # What was assigned has to fit what was declared.
-  fn type_mismatches : (scope: FunctionScope) -> list<Violation> note "what was assigned has to fit what was declared"
+  fn type_mismatches : (scope: FunctionScope) -> list<Violation> note "finds a value that does not fit the type declared for it"
 
   # Section 6.3: the caller's own Pydantic models, read into field names,
   # types, and the relationships between them.
-  fn models_from_source : (sources: list<str>) -> list<Model> | Fault note "field names, types, and the relationships between them"
+  fn models_from_source : (sources: list<str>) -> list<Model> | Fault note "reads models into field names, types and relationships"
 
   # Section 6.4: a field access checked against the model that declares it.
-  fn unknown_fields : (scope: FunctionScope, models: list<Model>) -> list<Violation> note "a field access checked against the model that declares it"
+  fn unknown_fields : (scope: FunctionScope, models: list<Model>) -> list<Violation> note "finds a field access no model declares"
 
   # A MISSPELT FIELD IS TOLD WHICH FIELD IT MEANT. Section 6.4 suggests a
   # correction by edit distance, which is what makes the violation say what to
   # do rather than only what is wrong.
-  fn nearest_field : (asked: str, model: Model) -> str | NOTHING note "a misspelt field is told which field it meant"
+  fn nearest_field : (asked: str, model: Model) -> str | NOTHING note "suggests the field a misspelling meant"
 
-  fn ending_for : (violations: list<Violation>) -> Ending note "0, 1 or 2, so a build machine can act on it"
+  fn ending_for : (violations: list<Violation>) -> Ending note "settles how this run ends: clean, refused, or unusable"
 
   # One violation list, four ways to read it.
-  fn format_report : (violations: list<Violation>, style: ReportStyle) -> str note "one violation list, four ways to read it"
+  fn format_report : (violations: list<Violation>, style: ReportStyle) -> str note "writes the violations the way the operator asked to read them"
 
   # --- column 4: what it writes -------------------------------------------
 
-  boundary_out fn terminal_print : (line: str) -> NOTHING side_effect writes "terminal" note "what the developer reads"
+  boundary_out fn terminal_print : (line: str) -> NOTHING side_effect writes "terminal" note "writes a line the developer reads"
 
-  boundary_out fn log_write : (event: dict<str, str>) -> NOTHING side_effect writes "log" note "read afterwards, never instead of returning a fault"
+  boundary_out fn log_write : (event: dict<str, str>) -> NOTHING side_effect writes "log" note "writes a line read afterwards; a failure never travels here"
