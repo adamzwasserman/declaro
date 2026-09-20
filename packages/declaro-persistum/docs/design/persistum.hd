@@ -115,6 +115,11 @@ module declaro-persistum
   # are declared the way a column is. Without them here, the desired state could
   # not hold what `Table` already knows how to carry.
   #
+  # A FOREIGN KEY IS DECLARED ONCE, ON THE COLUMN THAT POINTS. It sat here as a
+  # mapping on the model and again in the prose as a facet of a column, which is
+  # two places for one fact and the duplication this library exists to remove.
+  # `join_between` reads the column.
+  #
   # `dropping` IS HOW LOSING DATA IS ASKED FOR. Decided 2026-09-20: a column
   # absent from a model is not permission to drop it, because a typo is also a
   # column absent from a model. Naming it here is the permission, and it is a
@@ -135,8 +140,7 @@ module declaro-persistum
                  columns: list<Column>
                  dropping: list<str>
                  indexes: list<Index>
-                 constraints: list<Constraint>
-                 references: dict<str, str> } note "your description of one table, which is the only description there is"
+                 constraints: list<Constraint> } note "your description of one table, which is the only description there is"
 
   # --- the schema, which is the models and nothing else --------------------
   #
@@ -155,6 +159,7 @@ module declaro-persistum
   type Column = { name: str
                   declared_type: str
                   renamed_from: str | NOTHING
+                  references: str | NOTHING
                   facets: dict<str, Value> } note "one column and what field() declared about it"
 
   type Index = { name: str
@@ -375,9 +380,14 @@ module declaro-persistum
                         started_at: float
                         attempts: int } note "what shutdown carries: when it began and how many pushes it has made"
 
-  # `lifecycle_catch_up`'S OWN RECORD. Whether a writer was waiting decides whether the
+  # `lifecycle_catch_up`'S OWN RECORD. One drainer's turn, so it names the
+  # connection that drainer holds. Without it the record would say a turn writes
+  # without saying what it writes on, and the two outs that take a connection
+  # would be handed one from nowhere. Whether a writer was waiting decides whether the
   # sync pass runs at all, so the answer is kept rather than asked twice.
   type CatchingUp = { db: Database
+                      writer: Connection
+                      statement: Statement | NOTHING
                       writer_waiting: bool
                       attempts: int } note "what a free turn carries, including whether a writer was waiting"
 
