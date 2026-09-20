@@ -350,9 +350,13 @@ module declaro-persistum
   # stayed busy for the whole retry budget. Anything refused outright never
   # becomes a receipt, it is raised, and telling those two apart is the caller's
   # whole reason to read this.
+  #
+  # THE FAILURE IS A FAULT, NOT A SENTENCE. It carried a bare string until
+  # 2026-09-20, which made a receipt the one place in this module that said what
+  # went wrong without saying what to do about it.
   type Receipt = { id: str
                    ok: bool
-                   error: str } note "what a write did; ok false means the engine stayed busy, nothing else"
+                   failure: Fault | NOTHING } note "what a write did; ok false means the engine stayed busy, nothing else"
   type Room = { arrivals: list<Statement>
                 waiting: list<Ticket> } note "the waiting room between callers and drainers; empty when nobody is mid-flight"
 
@@ -510,11 +514,11 @@ module declaro-persistum
 
   # Checks the columns against the model, builds the declaration, renders it for
   # this engine, runs it, and shapes what comes back.
-  orchestrator fn query_answer : (asking: Answering) -> Answering | Fault invokes by_grammar, refuse_undeclared_columns, join_between, compile_statement, query_run_statement, room_deposit, answer_from_rows, answer_from_ticket, log_write note "turns a caller's question into rows, a number, or a ticket"
+  orchestrator fn query_answer : (asking: Answering) -> Answering | Fault invokes by_grammar, refuse_undeclared_columns, join_between, compile_statement, travels_together, query_run_statement, query_run_together, room_deposit, answer_from_rows, answer_from_ticket, log_write note "turns a caller's question into rows, a number, or a ticket"
 
   # Pushes until Turso has everything, retrying rather than giving up,
   # then closes. The one place blocking is correct.
-  orchestrator fn lifecycle_shut_down : (shutting_down: ShuttingDown) -> ShuttingDown | Fault invokes lifecycle_read_registered, replicates, clock_read, turso_push, next_wait, progress_line, log_write note "gets every local commit to Turso before the process dies"
+  orchestrator fn lifecycle_shut_down : (shutting_down: ShuttingDown) -> ShuttingDown | Fault invokes lifecycle_read_registered, replicates, clock_read, turso_push, next_wait, progress_line, session_close_connection, log_write note "gets every local commit to Turso before the process dies"
 
   # Waits for the drainer to finish this caller's write, hands back the receipt
   # and drops the ticket, so a collected ticket leaves the room empty again.
@@ -558,6 +562,13 @@ module declaro-persistum
   # as a value, never as a log line. `architecture.md:116` is why it can only be
   # reached from column 2: writing a log line is I/O, so a function in the
   # middle that logs has reached outside without changing its signature.
+  # WHAT IS OPENED IS CLOSED, AND SHUTDOWN IS WHERE. `architecture.md:314` ends
+  # shutdown with the close, after the push. It was off the board while the only
+  # connection was one the operating system would close anyway; a crew of
+  # drainers each holding one for life is a different claim, and a connection
+  # left open is an OS thread left running.
+  boundary_out fn session_close_connection : (connection: Connection) -> NOTHING | Fault side_effect writes "database" note "closes one connection, after shutdown has pushed"
+
   # ONE PER DRAINER, OPENED AT OPEN AND HELD FOR LIFE. A drainer writes and
   # never reads, and `architecture.md:213` opens it in its own mode, so this is
   # not the connection `session_open_connection` hands back. Opening them here
@@ -570,6 +581,14 @@ module declaro-persistum
   # drainers overlap inside the engine instead of queueing behind one writer.
   # Each drainer says it on its own connection, once per write.
   boundary_out fn query_begin_concurrent : (writer: Connection) -> NOTHING | Fault side_effect writes "database" note "opens one write so drainers overlap rather than queue"
+
+  # SEVERAL WRITES THAT LAND TOGETHER, OR NOT AT ALL. `HOW-IT-SHOULD-WORK.md`:
+  # declare several together and they arrive together. That cannot go through
+  # the room: `architecture.md:150` says two deposits are two independent writes
+  # and the first stays landed when the second fails, because it is already in
+  # the log. Holding the connection for the group is the only thing here that
+  # rolls back, so this is the one write that does not take a ticket.
+  boundary_out fn query_run_together : (db: Database, statements: list<Statement>) -> int | Fault side_effect writes "database" note "runs several writes as one transaction, the only rollback there is"
 
   # THE BEGIN AND THE WRITE SHARE ONE HANDLE, WHICH IS WHY BOTH TAKE IT. A
   # drainer holds one connection and writes on it only. `query_run_statement`
@@ -675,6 +694,12 @@ module declaro-persistum
   # and the map said so: with two possible producers it refused to draw where a
   # `Declaration` comes from at all. A check answers whether something is wrong.
   fn refuse_undeclared_columns : (model: Model, declaration: Declaration) -> NOTHING | Fault note "refuses a column no model declares, naming the model and its columns"
+
+  # WHICH WRITES HAVE TO TRAVEL TOGETHER. `add` carrying one row is a deposit
+  # and a ticket; `add` carrying several is a transaction, because the caller
+  # asked for all of them or none. The declaration already says how many rows it
+  # holds, so nothing new has to be declared to know which is which.
+  fn travels_together : (declaration: Declaration) -> bool note "answers whether these writes have to land together"
 
   # A WRITE'S ANSWER IS ITS TICKET, AND IT NEEDS SHAPING TOO. A read comes back
   # through `answer_from_rows`; a write comes back from `room_deposit` holding a
