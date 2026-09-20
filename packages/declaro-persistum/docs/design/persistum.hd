@@ -87,6 +87,63 @@ module declaro-persistum
   type Model = { table: str
                  columns: list<str> }
 
+  # --- the schema, which is the models and nothing else --------------------
+  #
+  # `HOW-IT-SHOULD-WORK.md`: you change a model, the library reads the live
+  # database, compares it to your models, works out the difference and applies
+  # it. The models are the desired state and everything else is derived.
+
+  # A column's facets are what `field` declares: a key, a floor, a length. The
+  # set of types a model may write is in
+  # `schema-declared/every_column_type_is_declarable.feature`, which exists
+  # because a type the loader cannot read is a model nobody can declare.
+  type Column = { name: str
+                  declared_type: str
+                  facets: dict<str, Value> }
+
+  type Index = { name: str
+                 columns: list<str>
+                 unique: bool }
+
+  type Table = { name: str
+                 columns: list<Column>
+                 indexes: list<Index>
+                 constraints: list<str> }
+
+  type Schema = { tables: list<Table>
+                  views: list<str> }
+
+  # WHAT THE DIFFER EMITS. The words are `schema/diff.feature`'s own. Each
+  # operation says whether carrying it out destroys something, because
+  # `losing_data_is_said_out_loud.feature` asks the library to say which of them
+  # do, derived from the models rather than asked for.
+  set operation_kinds = { "create_table", "drop_table", "add_column", "drop_column", "alter_column", "rename_column", "rename_table", "create_index", "drop_index", "create_view", "drop_view", "insert_enum_values" }
+  vocabulary OperationKind = { operation_kinds }
+
+  type Operation = { kind: OperationKind
+                     table: str
+                     detail: dict<str, Value>
+                     destroys: bool }
+
+  # An answer rather than an effect: `asking_what_would_change.feature` wants the
+  # operations in the order they would run, and nothing to have changed.
+  type Plan = { operations: list<Operation>
+                destroys: list<str> }
+
+  type Report = { plan: Plan
+                  applied: int }
+
+  # ENGINES DO NOT OFFER THE SAME THINGS, AND ONE TABLE SAYS SO.
+  # `one_table_of_capabilities.feature`: PostgreSQL has a materialized view and
+  # SQLite does not, so one is built from a table, its triggers and a registry
+  # row. Split this across a function per operation and "native or built" ends
+  # up encoded in function names, where nobody can read it.
+  set features = { "materialized_view", "check_constraint", "partial_index", "enum", "range_type" }
+  vocabulary Feature = { features }
+
+  type Capability = { native: bool
+                      built_from: str }
+
   # The three engines, and what in a target names each. Straight from the table
   # in `tests/bdd/features/opening/engine_of.feature`.
   set engines = { "sqlite" : "a bare path, or a sqlite scheme", "postgresql" : "a postgresql or postgres scheme", "turso" : "a libsql scheme, or a path with a primary" }
@@ -201,6 +258,21 @@ module declaro-persistum
                       writer_waiting: bool
                       attempts: int }
 
+  # `plan_change`'S OWN RECORD.
+  type Planning = { db: Database
+                    models: list<Model>
+                    live: Schema
+                    target: Schema
+                    plan: Plan }
+
+  # `migrate`'S OWN RECORD. It carries the plan it is carrying out, so what ran
+  # and what was going to run are the same list.
+  type Migrating = { db: Database
+                     models: list<Model>
+                     plan: Plan
+                     statements: list<Statement>
+                     report: Report }
+
   # `collect`'S OWN RECORD.
   type Collecting = { room: Room
                       ticket: Ticket
@@ -273,7 +345,26 @@ module declaro-persistum
   # time call it and hand its answer to the pure functions.
   reader fn read_clock : () -> float side_effect reads "clock"
 
-  # FIVE. A caller comes back for the write it deposited. `write_queue.feature`:
+  # FIVE. A caller asks what would change, and nothing changes.
+  # `schema-declared/asking_what_would_change.feature`: nobody deploys a schema
+  # change without reading it first, and no difference is an answer rather than
+  # an empty effect.
+  boundary_in fn asked_what_would_change : (db: Database, models: list<Model>) -> Plan | Fault side_effect reads "caller" invokes plan_change
+
+  # SIX. A caller asks for the database to match the models. It writes no
+  # migration script and never says "add a column"; reaching the declared state
+  # is the library's problem.
+  boundary_in fn asked_to_migrate : (db: Database, models: list<Model>) -> Report | Fault side_effect reads "caller" invokes migrate
+
+  # SEVEN. A caller answers the one question the library refuses to guess.
+  # `a_rename_is_asked_and_remembered.feature`: a column gone and another
+  # appeared is either a rename or a drop and an add, and the difference is your
+  # data. The answer is remembered, because asking again on every deploy asks in
+  # the middle of a deploy, which is the worst moment and the one where people
+  # say yes to anything.
+  boundary_in fn answering_a_rename : (db: Database, gone: str, appeared: str) -> NOTHING | Fault side_effect reads "caller" invokes remember_rename
+
+  # EIGHT. A caller comes back for the write it deposited. `write_queue.feature`:
   # a ticket belongs to exactly one caller, so a failure reaches that caller and
   # nobody else, and a caller draws its own atomicity boundary by choosing when
   # to collect. Deposit hands out the ticket; this is where it is spent.
@@ -308,6 +399,18 @@ module declaro-persistum
   # Pushes until Turso has everything, retrying rather than giving up,
   # then closes. The one place blocking is correct.
   orchestrator fn shut_down : (shutting_down: ShuttingDown) -> ShuttingDown | Fault invokes replicates, read_clock, push_to_turso, next_wait, progress_line, log_to_console
+
+  # Reads the live database, builds the target from the models, works out the
+  # difference, refuses what is ambiguous and names what destroys data.
+  orchestrator fn plan_change : (planning: Planning) -> Planning | Fault invokes refuse_owned_names, schema_from_models, inspect_schema, difference, name_what_is_ambiguous, order_operations, name_what_destroys, log_to_console
+
+  # THE SAME PLANNING, THEN CARRIES IT OUT. It reaches the same pure functions
+  # in the same order as `plan_change`, so what a caller was shown and what runs
+  # cannot come apart, and then spells each operation for this engine.
+  orchestrator fn migrate : (migrating: Migrating) -> Migrating | Fault invokes refuse_owned_names, schema_from_models, inspect_schema, difference, name_what_is_ambiguous, order_operations, name_what_destroys, capability_of, spell_operation, run_statement, log_to_console
+
+  # Writes the answer down where the next deploy will find it.
+  orchestrator fn remember_rename : (db: Database, gone: str, appeared: str) -> NOTHING | Fault invokes store_rename, log_to_console
 
   # Waits for the drainer to finish this caller's write, hands back the receipt
   # and drops the ticket, so a collected ticket leaves the room empty again.
@@ -382,6 +485,16 @@ module declaro-persistum
   # failure whose caller has already gone has nowhere to go, so the drainer logs
   # it, and that is the only place it can still be seen.
   boundary_out fn post_receipt : (room: Room, ticket: Ticket, receipt: Receipt) -> NOTHING | Fault side_effect writes "room"
+
+  # WHAT THE DATABASE ACTUALLY HOLDS. The program asks; nothing arrives on its
+  # own, so this is a reader rather than a door. It is the only place the
+  # library asks a database what is there, and it asks so it can compare, never
+  # so it can decide what belongs.
+  reader fn inspect_schema : (db: Database) -> Schema | Fault side_effect reads "database"
+
+  # The remembered answer to a rename, kept in the library's own table so it
+  # outlives the run that answered it.
+  boundary_out fn store_rename : (db: Database, gone: str, appeared: str) -> NOTHING | Fault side_effect writes "database"
 
   boundary_out fn log_to_console : (event: dict<str, Value>) -> NOTHING side_effect writes "log"
 
@@ -499,3 +612,40 @@ module declaro-persistum
 
   # Builds what the caller will read out of what the engine did.
   fn receipt_for : (ticket: Ticket, failure: NOTHING | Fault) -> Receipt
+
+  # --- what the schema half reaches ---------------------------------------
+
+  # THE LIBRARY KEEPS ITS OWN TABLES BESIDE YOURS, AND A COLLISION IS SILENT
+  # UNTIL IT IS FATAL. `a_name_the_library_owns_is_refused.feature` lists the
+  # prefixes: `_declaro_meta`, `_dp_`, `_declaro_tmp_`, and `sqlite_` and
+  # `turso_`, which belong to the engines.
+  fn refuse_owned_names : (models: list<Model>) -> NOTHING | Fault
+
+  # The models are the desired state, so the target schema is derived from them
+  # and from nothing the database says.
+  fn schema_from_models : (models: list<Model>) -> Schema | Fault
+
+  # Set theory over two schemas: what is only in the target is created, what is
+  # only in the live database is dropped, what differs is altered.
+  fn difference : (live: Schema, target: Schema) -> list<Operation>
+
+  # A COLUMN GONE AND ANOTHER APPEARED IS TWO DIFFERENT CHANGES. This stops and
+  # says it cannot tell, unless the answer was remembered. Choosing wrong
+  # destroys a column, so the fault it returns names the two columns and the
+  # door that answers.
+  fn name_what_is_ambiguous : (operations: list<Operation>, remembered: dict<str, str>) -> list<Operation> | Fault
+
+  # Dependencies decide the order: a table before the index on it, a parent
+  # before the child that points at it.
+  fn order_operations : (operations: list<Operation>) -> list<Operation> | Fault
+
+  # Dropping a column loses what was in it, dropping a table loses all of it,
+  # and narrowing a type loses what no longer fits.
+  fn name_what_destroys : (operations: list<Operation>) -> Plan
+
+  # Native here, built there, and the table says which.
+  fn capability_of : (engine: Engine, feature: Feature) -> Capability
+
+  # One operation into the statements that carry it out on this engine. The
+  # schema half's `compile_statement`.
+  fn spell_operation : (operation: Operation, engine: Engine) -> list<Statement> | Fault
