@@ -165,6 +165,15 @@ module declaro-persistum
   # written out at `architecture.md:244` and is not here, because nothing on this
   # board collects one yet.
   type Ticket = str
+
+  # WHAT A CALLER READS WHEN IT COMES BACK FOR ITS WRITE. `architecture.md:244`
+  # writes the three fields out. `ok` false means one thing only: the engine
+  # stayed busy for the whole retry budget. Anything refused outright never
+  # becomes a receipt, it is raised, and telling those two apart is the caller's
+  # whole reason to read this.
+  type Receipt = { id: str
+                   ok: bool
+                   error: str }
   type Room = { arrivals: list<Statement>
                 waiting: list<Ticket> }
 
@@ -191,6 +200,11 @@ module declaro-persistum
                       room: Room
                       writer_waiting: bool
                       attempts: int }
+
+  # `collect`'S OWN RECORD.
+  type Collecting = { room: Room
+                      ticket: Ticket
+                      receipt: Receipt }
 
   # `answer`'S OWN RECORD, AND NOTHING ELSE NAMES IT. The four things the caller
   # said are the top half. The bottom half is what each step in the chain
@@ -259,7 +273,13 @@ module declaro-persistum
   # time call it and hand its answer to the pure functions.
   reader fn read_clock : () -> float side_effect reads "clock"
 
-  # FIVE. The server starts. The one place the signal handler goes in.
+  # FIVE. A caller comes back for the write it deposited. `write_queue.feature`:
+  # a ticket belongs to exactly one caller, so a failure reaches that caller and
+  # nobody else, and a caller draws its own atomicity boundary by choosing when
+  # to collect. Deposit hands out the ticket; this is where it is spent.
+  boundary_in fn collecting : (room: Room, ticket: Ticket) -> Receipt | Fault side_effect reads "caller" invokes collect
+
+  # SIX. The server starts. The one place the signal handler goes in.
   boundary_in fn starting : () -> NOTHING | Fault side_effect reads "caller" invokes start
 
   # NO FLUSH DOOR. Decided 2026-09-17. `architecture.md:308`: no caller waits for
@@ -289,6 +309,10 @@ module declaro-persistum
   # then closes. The one place blocking is correct.
   orchestrator fn shut_down : (shutting_down: ShuttingDown) -> ShuttingDown | Fault invokes replicates, read_clock, push_to_turso, next_wait, progress_line, log_to_console
 
+  # Waits for the drainer to finish this caller's write, hands back the receipt
+  # and drops the ticket, so a collected ticket leaves the room empty again.
+  orchestrator fn collect : (collecting: Collecting) -> Collecting | Fault invokes release_ticket, refusal_reaches_caller, log_to_console
+
   # Empties the room one write at a time in arrival order, and, if nothing else
   # wants the connection, pushes and pulls on it.
   #
@@ -296,7 +320,7 @@ module declaro-persistum
   # the same question: is a writer waiting. `architecture.md:308` has
   # `replicate_if_idle` ask it, and the drainer is what knows the answer. Split
   # across two orchestrators, it gets asked twice and answered twice.
-  orchestrator fn catch_up : (catching_up: CatchingUp) -> CatchingUp | Fault invokes writer_waiting, next_in_order, run_statement, worth_retrying, budget_spent, read_clock, next_wait, replicates, push_to_turso, pull_from_turso, log_to_console
+  orchestrator fn catch_up : (catching_up: CatchingUp) -> CatchingUp | Fault invokes writer_waiting, next_in_order, run_statement, worth_retrying, budget_spent, read_clock, next_wait, receipt_for, post_receipt, replicates, push_to_turso, pull_from_turso, log_to_console
 
   # Installs the one signal handler. Safe to call again: the second call finds it
   # installed and returns.
@@ -349,6 +373,15 @@ module declaro-persistum
   # HANDLER WORKS THROUGH. A database that did not ask stays off it, so a caller
   # who never opted in changes nothing about what happens at exit.
   boundary_out fn register_for_shutdown : (db: Database) -> NOTHING | Fault side_effect writes "shutdown list"
+
+  # WAITS FOR THIS ONE TICKET AND TAKES IT OUT. The caller is parked here until
+  # the drainer posts what happened, which is why a deposit could return at once.
+  boundary_out fn release_ticket : (room: Room, ticket: Ticket) -> Receipt | Fault side_effect reads_writes "room"
+
+  # THE DRAINER PUTS THE OUTCOME WHERE THE WAITING CALLER WILL FIND IT. A
+  # failure whose caller has already gone has nowhere to go, so the drainer logs
+  # it, and that is the only place it can still be seen.
+  boundary_out fn post_receipt : (room: Room, ticket: Ticket, receipt: Receipt) -> NOTHING | Fault side_effect writes "room"
 
   boundary_out fn log_to_console : (event: dict<str, Value>) -> NOTHING side_effect writes "log"
 
@@ -456,3 +489,13 @@ module declaro-persistum
 
   # A bounded budget, and spending it is an answer of its own kind.
   fn budget_spent : (attempts: int, budget: int) -> bool
+
+  # --- what `collect` and the drainer reach -------------------------------
+
+  # A REFUSAL IS RAISED, A SPENT BUDGET IS A RECEIPT. `write_queue.feature`: a
+  # caller that cannot tell them apart will retry the one that can never succeed
+  # and give up on the one that would have worked. Asked of the fault's kind.
+  fn refusal_reaches_caller : (fault: Fault) -> bool
+
+  # Builds what the caller will read out of what the engine did.
+  fn receipt_for : (ticket: Ticket, failure: NOTHING | Fault) -> Receipt
