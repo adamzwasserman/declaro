@@ -91,6 +91,11 @@ module declaro-persistum
   # is a promise about speed and a constraint is a rule about a column, and both
   # are declared the way a column is. Without them here, the desired state could
   # not hold what `Table` already knows how to carry.
+  # EVERYTHING THE CODE DECLARES, IN ONE ANSWER. A view is declared against the
+  # models, so the two arrive together or the target schema is half built.
+  type Declared = { models: list<Model>
+                    views: list<View> } note "the models and views the code declares"
+
   type Model = { table: str
                  columns: list<Column>
                  indexes: list<Index>
@@ -295,7 +300,7 @@ module declaro-persistum
                       settings: dict<str, Value>
                       permitted: int
                       connection: Connection
-                      models: list<Model>
+                      declared: Declared
                       live: Schema
                       wanted_schema: Schema
                       needs_migration: bool
@@ -316,8 +321,7 @@ module declaro-persistum
 
   # `schema_work_out`'S OWN RECORD.
   type Planning = { db: Database
-                    models: list<Model>
-                    views: list<View>
+                    declared: Declared
                     live: Schema
                     target: Schema
                     plan: Plan } note "what working out a migration carries: live, target and plan"
@@ -325,11 +329,16 @@ module declaro-persistum
   # `schema_migrate`'S OWN RECORD. It carries the plan it is carrying out, so what ran
   # and what was going to run are the same list.
   type Migrating = { db: Database
-                     models: list<Model>
-                     views: list<View>
+                     declared: Declared
                      plan: Plan
                      statements: list<Statement>
                      report: Report } note "what a migration carries, including the plan it is running"
+
+  # `schema_remember`'S OWN RECORD. Its two strings come from a person, so they
+  # are the one pair on this board a door is right to take.
+  type Remembering = { db: Database
+                       gone: str
+                       appeared: str } note "what remembering one rename carries"
 
   # `query_deliver`'S OWN RECORD.
   type Collecting = { room: Room
@@ -417,12 +426,12 @@ module declaro-persistum
   # `schema-declared/asking_what_would_change.feature`: nobody deploys a schema
   # change without reading it first, and no difference is an query_answer rather than
   # an empty effect.
-  boundary_in fn schema_plan : (db: Database, models: list<Model>, views: list<View>) -> Plan | Fault side_effect reads "caller" invokes schema_work_out note "says what a migration would change, and changes nothing"
+  boundary_in fn schema_plan : (db: Database) -> Plan | Fault side_effect reads "caller" invokes schema_work_out note "says what a migration would change, and changes nothing"
 
   # SCHEMA. A caller asks for the database to match the models. It writes no
   # migration script and never says "add a column"; reaching the declared state
   # is the library's problem.
-  boundary_in fn schema_apply : (db: Database, models: list<Model>, views: list<View>) -> Report | Fault side_effect reads "caller" invokes schema_migrate note "makes the database match the models"
+  boundary_in fn schema_apply : (db: Database) -> Report | Fault side_effect reads "caller" invokes schema_migrate note "makes the database match the models"
 
   # SCHEMA. A caller answers the one question the library refuses to guess.
   # `a_rename_is_asked_and_remembered.feature`: a column gone and another
@@ -469,7 +478,7 @@ module declaro-persistum
   #
   # Works out which engine the target names, connects, copies the whole database
   # if this copy is cold, and hands back the handle everything downstream reads.
-  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, replicates, lifecycle_register, turso_pull, schema_read_models, schema_from_models, schema_inspect, migration_needed, schema_read_renames, difference, name_what_is_ambiguous, order_operations, name_what_destroys, capability_of, spell_operation, query_run_statement, log_write note "works out the engine, connects, and builds the handle everything downstream reads"
+  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, replicates, lifecycle_register, turso_pull, schema_read_declared, schema_from_declared, schema_inspect, migration_needed, schema_read_renames, difference, name_what_is_ambiguous, order_operations, name_what_destroys, capability_of, spell_operation, query_run_statement, log_write note "works out the engine, connects, and builds the handle everything downstream reads"
 
   # Checks the columns against the model, builds the declaration, renders it for
   # this engine, runs it, and shapes what comes back.
@@ -481,15 +490,15 @@ module declaro-persistum
 
   # Reads the live database, builds the target from the models, works out the
   # difference, refuses what is ambiguous and names what destroys data.
-  orchestrator fn schema_work_out : (planning: Planning) -> Planning | Fault invokes refuse_owned_names, schema_from_models, schema_inspect, schema_read_renames, difference, name_what_is_ambiguous, order_operations, name_what_destroys, log_write note "works out the difference between the models and the live database"
+  orchestrator fn schema_work_out : (planning: Planning) -> Planning | Fault invokes refuse_owned_names, schema_read_declared, schema_from_declared, schema_inspect, schema_read_renames, difference, name_what_is_ambiguous, order_operations, name_what_destroys, log_write note "works out the difference between the models and the live database"
 
   # THE SAME PLANNING, THEN CARRIES IT OUT. It reaches the same pure functions
   # in the same order as `schema_work_out`, so what a caller was shown and what runs
   # cannot come apart, and then spells each operation for this engine.
-  orchestrator fn schema_migrate : (migrating: Migrating) -> Migrating | Fault invokes refuse_owned_names, schema_from_models, schema_inspect, schema_read_renames, difference, name_what_is_ambiguous, order_operations, name_what_destroys, capability_of, mechanism_for, spell_view, spell_operation, query_run_statement, log_write note "plans the same way, then carries the plan out"
+  orchestrator fn schema_migrate : (migrating: Migrating) -> Migrating | Fault invokes refuse_owned_names, schema_read_declared, schema_from_declared, schema_inspect, schema_read_renames, difference, name_what_is_ambiguous, order_operations, name_what_destroys, capability_of, mechanism_for, spell_view, spell_operation, query_run_statement, log_write note "plans the same way, then carries the plan out"
 
   # Writes the query_answer down where the next deploy will find it.
-  orchestrator fn schema_remember : (db: Database, gone: str, appeared: str) -> NOTHING | Fault invokes schema_store_rename, log_write note "writes a rename answer down where it outlives the run"
+  orchestrator fn schema_remember : (remembering: Remembering) -> NOTHING | Fault invokes schema_store_rename, log_write note "writes a rename answer down where it outlives the run"
 
   # Waits for the drainer to finish this caller's write, hands back the receipt
   # and drops the ticket, so a collected ticket leaves the room empty again.
@@ -572,10 +581,12 @@ module declaro-persistum
   # own, so this is a reader rather than a door. It is the only place the
   # library asks a database what is there, and it asks so it can compare, never
   # so it can decide what belongs.
-  # SESSION. THE MODELS THE CODE HAS. They are not a door argument: a caller
-  # declares them and the library asks for them, the same way it asks a database
-  # what it holds. Both answers meet in `migration_needed`.
-  reader fn schema_read_models : () -> list<Model> | Fault side_effect reads "models" note "asks the code which models it declares"
+  # WHAT THE CODE DECLARES, ASKED FOR RATHER THAN PASSED IN. A caller declares
+  # models and views and the library asks for them, the same way it asks a
+  # database what it holds. Both answers meet in `migration_needed`. No door
+  # takes them, because a caller that had to hand them over could hand a
+  # different set to each door and nothing would notice.
+  reader fn schema_read_declared : () -> Declared | Fault side_effect reads "models" note "asks the code which models and views it declares"
 
   # SCHEMA. What a rename was answered as, last time somebody answered one.
   # `schema_store_rename` writes these down; without this reader the answer
@@ -725,11 +736,11 @@ module declaro-persistum
   # UNTIL IT IS FATAL. `a_name_the_library_owns_is_refused.feature` lists the
   # prefixes: `_declaro_meta`, `_dp_`, `_declaro_tmp_`, and `sqlite_` and
   # `turso_`, which belong to the engines.
-  fn refuse_owned_names : (models: list<Model>) -> NOTHING | Fault note "refuses a model that claims a name the library or an engine owns"
+  fn refuse_owned_names : (declared: Declared) -> NOTHING | Fault note "refuses a model that claims a name the library or an engine owns"
 
   # The models are the desired state, so the target schema is derived from them
   # and from nothing the database says.
-  fn schema_from_models : (models: list<Model>, views: list<View>) -> Schema | Fault note "builds the target schema from the models, and from nothing else"
+  fn schema_from_declared : (declared: Declared) -> Schema | Fault note "builds the target schema from the models, and from nothing else"
 
   # A HANDLE HANDED BACK BEFORE THE DATABASE MATCHES THE MODELS IS A HANDLE TO A
   # DATABASE THAT WILL REFUSE THE FIRST QUESTION ASKED OF IT. So opening
