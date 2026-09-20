@@ -50,31 +50,31 @@ module declaro-persistum-cli
 
   # --- column 1: how the world gets in ------------------------------------
 
-  # ONE. An operator types a command. The URL may be here or in the
+  # COMMAND. An operator types a command. The URL may be here or in the
   # environment, and if it is in neither this door refuses rather than guessing.
-  boundary_in fn command_line : (argv: list<str>) -> int | Fault side_effect reads "argv" side_effect reads "env:DECLARO_DATABASE_URL" invokes run_command
+  boundary_in fn command_run : (argv: list<str>) -> int | Fault side_effect reads "argv" side_effect reads "env:DECLARO_DATABASE_URL" invokes run_command
 
   # THE OPERATOR IS ASKED ONLY IF THEY ARE THERE TO ANSWER.
   # `cli/overwriting_a_snapshot.feature`: an automated run must not stop on a
   # question nobody can hear. Both of these are the program asking rather than
   # the world arriving, so they are readers.
-  reader fn terminal_is_interactive : () -> bool side_effect reads "terminal"
-  reader fn ask_operator : (question: str) -> str | Fault side_effect reads "terminal"
+  reader fn terminal_interactive : () -> bool side_effect reads "terminal"
+  reader fn terminal_ask : (question: str) -> str | Fault side_effect reads "terminal"
 
   # The operator's own schema files, read so `validate` can say what is wrong
   # before anything reaches a database.
-  reader fn read_schema_files : (path: str) -> list<str> | Fault side_effect reads "files"
+  reader fn files_read_schema : (path: str) -> list<str> | Fault side_effect reads "files"
 
   # --- column 2: one orchestrator, because there is one way in -------------
 
   # Reads what was typed, settles the engine, asks before overwriting a
   # snapshot when somebody is there to answer, runs the command the table names
   # and turns what came back into an exit code.
-  orchestrator fn run_command : (running: Running) -> Running | Fault invokes parse_arguments, chosen_engine, terminal_is_interactive, ask_operator, overwrite_agreed, by_command, exit_code_for, print_line, log_to_console
+  orchestrator fn run_command : (running: Running) -> Running | Fault invokes parse_arguments, chosen_engine, terminal_interactive, terminal_ask, overwrite_agreed, by_command, exit_code_for, print_line, log_to_console
 
   # --- the table that says what each command does -------------------------
 
-  dispatch by_command = { "diff" -> ask_what_would_change, "apply" -> ask_to_migrate, "validate" -> read_schema_files, "snapshot" -> write_snapshot, "generate" -> write_types }
+  dispatch by_command = { "diff" -> ask_what_would_change, "apply" -> ask_to_migrate, "validate" -> files_read_schema, "snapshot" -> write_snapshot, "generate" -> write_types }
 
   # --- column 3: the pure core ---------------------------------------------
 
