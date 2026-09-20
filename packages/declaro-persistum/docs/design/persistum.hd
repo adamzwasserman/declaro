@@ -27,7 +27,7 @@ module declaro-persistum
   #               database carries the engine, and that is the only place it is
   #               written down.
   #   connection  a replicated database connects at open and holds it for life.
-  #               `run_statement` has nothing to run on without it.
+  #               `query_run_statement` has nothing to run on without it.
   #   shutdown    `architecture.md:314`: required at open, and `lifecycle_shut_down` is
   #               the function that reads it.
   #   primary     `tests/bdd/features/database/opening.feature:14`: whether a
@@ -375,7 +375,7 @@ module declaro-persistum
   # LIFECYCLE. The runtime hands us a turn, and nothing outside query_ask for that
   # either. `architecture.md:227` is a loop that runs until stop is set and
   # calls `drain` on every pass, so a caller's write does not travel on the door
-  # the caller knocked on. `deposit` hands back a ticket and returns; the write
+  # the caller knocked on. `room_deposit` hands back a ticket and returns; the write
   # leaves the process later, here.
   # THE CLOCK IS THE WORLD, AND READING IT IS INPUT. `engine_of.feature` says a
   # pure function reads no clock. This is the fourth role, added 2026-09-17: the
@@ -429,31 +429,31 @@ module declaro-persistum
 
   # Works out which engine the target names, connects, copies the whole database
   # if this copy is cold, and hands back the handle everything downstream reads.
-  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, open_connection, replicates, register_for_shutdown, pull_from_turso, log_to_console
+  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, replicates, lifecycle_register, turso_pull, log_write
 
   # Checks the columns against the model, builds the declaration, renders it for
   # this engine, runs it, and shapes what comes back.
-  orchestrator fn query_answer : (asking: Answering) -> Answering | Fault invokes by_grammar, refuse_undeclared_columns, join_between, compile_statement, by_wanted, answer_from_rows, log_to_console
+  orchestrator fn query_answer : (asking: Answering) -> Answering | Fault invokes by_grammar, refuse_undeclared_columns, join_between, compile_statement, by_wanted, answer_from_rows, log_write
 
   # Pushes until Turso has everything, retrying rather than giving up,
   # then closes. The one place blocking is correct.
-  orchestrator fn lifecycle_shut_down : (shutting_down: ShuttingDown) -> ShuttingDown | Fault invokes replicates, clock_read, push_to_turso, next_wait, progress_line, log_to_console
+  orchestrator fn lifecycle_shut_down : (shutting_down: ShuttingDown) -> ShuttingDown | Fault invokes replicates, clock_read, turso_push, next_wait, progress_line, log_write
 
   # Reads the live database, builds the target from the models, works out the
   # difference, refuses what is ambiguous and names what destroys data.
-  orchestrator fn schema_work_out : (planning: Planning) -> Planning | Fault invokes refuse_owned_names, schema_from_models, schema_inspect, difference, name_what_is_ambiguous, order_operations, name_what_destroys, log_to_console
+  orchestrator fn schema_work_out : (planning: Planning) -> Planning | Fault invokes refuse_owned_names, schema_from_models, schema_inspect, difference, name_what_is_ambiguous, order_operations, name_what_destroys, log_write
 
   # THE SAME PLANNING, THEN CARRIES IT OUT. It reaches the same pure functions
   # in the same order as `schema_work_out`, so what a caller was shown and what runs
   # cannot come apart, and then spells each operation for this engine.
-  orchestrator fn schema_migrate : (migrating: Migrating) -> Migrating | Fault invokes refuse_owned_names, schema_from_models, schema_inspect, difference, name_what_is_ambiguous, order_operations, name_what_destroys, capability_of, mechanism_for, spell_view, spell_operation, run_statement, log_to_console
+  orchestrator fn schema_migrate : (migrating: Migrating) -> Migrating | Fault invokes refuse_owned_names, schema_from_models, schema_inspect, difference, name_what_is_ambiguous, order_operations, name_what_destroys, capability_of, mechanism_for, spell_view, spell_operation, query_run_statement, log_write
 
   # Writes the query_answer down where the next deploy will find it.
-  orchestrator fn schema_remember : (db: Database, gone: str, appeared: str) -> NOTHING | Fault invokes store_rename, log_to_console
+  orchestrator fn schema_remember : (db: Database, gone: str, appeared: str) -> NOTHING | Fault invokes schema_store_rename, log_write
 
   # Waits for the drainer to finish this caller's write, hands back the receipt
   # and drops the ticket, so a collected ticket leaves the room empty again.
-  orchestrator fn query_deliver : (query_collect: Collecting) -> Collecting | Fault invokes release_ticket, refusal_reaches_caller, log_to_console
+  orchestrator fn query_deliver : (query_collect: Collecting) -> Collecting | Fault invokes room_release_ticket, refusal_reaches_caller, log_write
 
   # Empties the room one write at a time in arrival order, and, if nothing else
   # wants the connection, pushes and pulls on it.
@@ -462,11 +462,11 @@ module declaro-persistum
   # the same question: is a writer waiting. `architecture.md:308` has
   # `replicate_if_idle` ask it, and the drainer is what knows the query_answer. Split
   # across two orchestrators, it gets query_ask twice and answered twice.
-  orchestrator fn lifecycle_catch_up : (catching_up: CatchingUp) -> CatchingUp | Fault invokes writer_waiting, next_in_order, run_statement, worth_retrying, budget_spent, clock_read, next_wait, receipt_for, post_receipt, replicates, push_to_turso, pull_from_turso, log_to_console
+  orchestrator fn lifecycle_catch_up : (catching_up: CatchingUp) -> CatchingUp | Fault invokes writer_waiting, next_in_order, query_run_statement, worth_retrying, budget_spent, clock_read, next_wait, receipt_for, room_post_receipt, replicates, turso_push, turso_pull, log_write
 
   # Installs the one signal handler. Safe to call again: the second call finds it
   # installed and returns.
-  orchestrator fn lifecycle_install : () -> NOTHING | Fault invokes install_signal_handler, log_to_console
+  orchestrator fn lifecycle_install : () -> NOTHING | Fault invokes lifecycle_install_handler, log_write
 
 
   # --- column 3: output I/O, and there are four ways out ------------------
@@ -477,19 +477,19 @@ module declaro-persistum
 
   # SESSION. Ask the driver for a connection. `architecture.md:96` says the handle
   # carries its engine, decided once, so nothing downstream works it out again.
-  boundary_out fn open_connection : (target: str, connections: int) -> Connection | Fault side_effect reads_writes "database"
+  boundary_out fn session_open_connection : (target: str, connections: int) -> Connection | Fault side_effect reads_writes "database"
 
   # QUERY. Run a statement on that connection. The driver does not know whether it
   # was a select or a create table, so this is one door rather than four.
-  boundary_out fn run_statement : (db: Database, statement: Statement) -> Rows | int | Fault side_effect reads_writes "database"
+  boundary_out fn query_run_statement : (db: Database, statement: Statement) -> Rows | int | Fault side_effect reads_writes "database"
 
   # THREE and FOUR. The sync channel, in its two directions. `architecture.md`
   # names exactly two moments where sync is on the critical path, one per
   # direction: a cold open copies the whole database before returning, and
   # shutdown pushes until Turso has everything. Two callers, two
   # directions, one connection. A card is a function, not a connection.
-  boundary_out fn pull_from_turso : (db: Database) -> NOTHING | Fault side_effect reads "turso"
-  boundary_out fn push_to_turso : (db: Database) -> NOTHING | Fault side_effect writes "turso"
+  boundary_out fn turso_pull : (db: Database) -> NOTHING | Fault side_effect reads "turso"
+  boundary_out fn turso_push : (db: Database) -> NOTHING | Fault side_effect writes "turso"
 
   # THE ODD ONE, AND IT RETURNS NOTHING. Every other outward call hands back a
   # value the caller uses. This one does not, which is why it is a door and not
@@ -502,28 +502,28 @@ module declaro-persistum
   # empties the queue afterwards. The room is not the outside world, but a value
   # put into it leaves this caller's hands and is picked up by another, which is
   # why this is a door rather than a step.
-  boundary_out fn deposit : (room: Room, statement: Statement) -> Ticket | Fault side_effect writes "room"
+  boundary_out fn room_deposit : (room: Room, statement: Statement) -> Ticket | Fault side_effect writes "room"
 
   # ONE HANDLER FOR THE PROCESS, INSTALLED AT STARTUP, AND INSTALLING IT TWICE
   # CHANGES NOTHING. Decided 2026-09-17: a handler per open database would stack
   # one on another, so it goes in once and a second call finds it there and
   # returns. `replication.feature`: any handler the host application already set
   # still runs. It chains; it never replaces.
-  boundary_out fn install_signal_handler : () -> NOTHING | Fault side_effect writes "signal"
+  boundary_out fn lifecycle_install_handler : () -> NOTHING | Fault side_effect writes "signal"
 
   # A DATABASE THAT ASKED TO REPLICATE AT EXIT PUTS ITSELF ON THE LIST THE ONE
   # HANDLER WORKS THROUGH. A database that did not ask stays off it, so a caller
   # who never opted in changes nothing about what happens at exit.
-  boundary_out fn register_for_shutdown : (db: Database) -> NOTHING | Fault side_effect writes "shutdown list"
+  boundary_out fn lifecycle_register : (db: Database) -> NOTHING | Fault side_effect writes "shutdown list"
 
   # WAITS FOR THIS ONE TICKET AND TAKES IT OUT. The caller is parked here until
-  # the drainer posts what happened, which is why a deposit could return at once.
-  boundary_out fn release_ticket : (room: Room, ticket: Ticket) -> Receipt | Fault side_effect reads_writes "room"
+  # the drainer posts what happened, which is why a room_deposit could return at once.
+  boundary_out fn room_release_ticket : (room: Room, ticket: Ticket) -> Receipt | Fault side_effect reads_writes "room"
 
   # THE DRAINER PUTS THE OUTCOME WHERE THE WAITING CALLER WILL FIND IT. A
   # failure whose caller has already gone has nowhere to go, so the drainer logs
   # it, and that is the only place it can still be seen.
-  boundary_out fn post_receipt : (room: Room, ticket: Ticket, receipt: Receipt) -> NOTHING | Fault side_effect writes "room"
+  boundary_out fn room_post_receipt : (room: Room, ticket: Ticket, receipt: Receipt) -> NOTHING | Fault side_effect writes "room"
 
   # WHAT THE DATABASE ACTUALLY HOLDS. The program asks; nothing arrives on its
   # own, so this is a reader rather than a door. It is the only place the
@@ -533,9 +533,9 @@ module declaro-persistum
 
   # The remembered query_answer to a rename, kept in the library's own table so it
   # outlives the run that answered it.
-  boundary_out fn store_rename : (db: Database, gone: str, appeared: str) -> NOTHING | Fault side_effect writes "database"
+  boundary_out fn schema_store_rename : (db: Database, gone: str, appeared: str) -> NOTHING | Fault side_effect writes "database"
 
-  boundary_out fn log_to_console : (event: dict<str, Value>) -> NOTHING side_effect writes "log"
+  boundary_out fn log_write : (event: dict<str, Value>) -> NOTHING side_effect writes "log"
 
   # CLOSING THE CONNECTION IS NOT HERE. The process ending closes it, and I
   # cannot yet say what we do that the operating system does not. It comes back
@@ -598,7 +598,7 @@ module declaro-persistum
   # WHERE EACH ASKING GOES, WORD BY WORD. Twelve run now; six are deposited and
   # drained later. Written out rather than reduced to a rule, because a reader
   # asking "does `exists` block" should read the query_answer rather than derive it.
-  dispatch by_wanted = { "all" -> run_statement, "one" -> run_statement, "first" -> run_statement, "page" -> run_statement, "distinct" -> run_statement, "exists" -> run_statement, "count" -> run_statement, "sum" -> run_statement, "average" -> run_statement, "smallest" -> run_statement, "largest" -> run_statement, "count_distinct" -> run_statement, "add" -> deposit, "change" -> deposit, "change_all" -> deposit, "remove" -> deposit, "remove_all" -> deposit, "replace" -> deposit }
+  dispatch by_wanted = { "all" -> query_run_statement, "one" -> query_run_statement, "first" -> query_run_statement, "page" -> query_run_statement, "distinct" -> query_run_statement, "exists" -> query_run_statement, "count" -> query_run_statement, "sum" -> query_run_statement, "average" -> query_run_statement, "smallest" -> query_run_statement, "largest" -> query_run_statement, "count_distinct" -> query_run_statement, "add" -> room_deposit, "change" -> room_deposit, "change_all" -> room_deposit, "remove" -> room_deposit, "remove_all" -> room_deposit, "replace" -> room_deposit }
 
   # THIS IS WHAT KEEPS `query_ask` ONE DOOR. Four doors would say the caller entered
   # four different buildings. One door carrying which entry point was used says

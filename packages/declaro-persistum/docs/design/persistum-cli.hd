@@ -70,11 +70,11 @@ module declaro-persistum-cli
   # Reads what was typed, settles the engine, asks before overwriting a
   # snapshot when somebody is there to answer, runs the command the table names
   # and turns what came back into an exit code.
-  orchestrator fn command_dispatch : (running: Running) -> Running | Fault invokes parse_arguments, chosen_engine, terminal_interactive, terminal_ask, overwrite_agreed, by_command, exit_code_for, print_line, log_to_console
+  orchestrator fn command_dispatch : (running: Running) -> Running | Fault invokes parse_arguments, chosen_engine, terminal_interactive, terminal_ask, overwrite_agreed, by_command, exit_code_for, terminal_print, log_write
 
   # --- the table that says what each command does -------------------------
 
-  dispatch by_command = { "diff" -> ask_what_would_change, "apply" -> ask_to_migrate, "validate" -> files_read_schema, "snapshot" -> write_snapshot, "generate" -> write_types }
+  dispatch by_command = { "diff" -> library_plan, "apply" -> library_migrate, "validate" -> files_read_schema, "snapshot" -> files_write_snapshot, "generate" -> files_write_types }
 
   # --- column 3: the pure core ---------------------------------------------
 
@@ -99,12 +99,12 @@ module declaro-persistum-cli
 
   # THE LIBRARY IS OUTSIDE THIS MODULE. Each of these is a call into
   # declaro-persistum, which from here is as foreign as a database.
-  boundary_out fn ask_what_would_change : (url: str, engine: Engine) -> Outcome | Fault side_effect reads_writes "declaro-persistum"
-  boundary_out fn ask_to_migrate : (url: str, engine: Engine) -> Outcome | Fault side_effect reads_writes "declaro-persistum"
-  boundary_out fn write_snapshot : (url: str, engine: Engine) -> Outcome | Fault side_effect writes "files"
-  boundary_out fn write_types : (url: str, engine: Engine) -> Outcome | Fault side_effect writes "files"
+  boundary_out fn library_plan : (url: str, engine: Engine) -> Outcome | Fault side_effect reads_writes "declaro-persistum"
+  boundary_out fn library_migrate : (url: str, engine: Engine) -> Outcome | Fault side_effect reads_writes "declaro-persistum"
+  boundary_out fn files_write_snapshot : (url: str, engine: Engine) -> Outcome | Fault side_effect writes "files"
+  boundary_out fn files_write_types : (url: str, engine: Engine) -> Outcome | Fault side_effect writes "files"
 
   # What the operator reads on their terminal.
-  boundary_out fn print_line : (line: str) -> NOTHING side_effect writes "terminal"
+  boundary_out fn terminal_print : (line: str) -> NOTHING side_effect writes "terminal"
 
-  boundary_out fn log_to_console : (event: dict<str, str>) -> NOTHING side_effect writes "log"
+  boundary_out fn log_write : (event: dict<str, str>) -> NOTHING side_effect writes "log"
