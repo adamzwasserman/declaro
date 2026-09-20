@@ -23,7 +23,7 @@ module declaro-persistum
   # together itself. That is what an orchestrator is: the thing that keeps what
   # each step returned.
   #
-  #   engine      `tests/bdd/features/opening/session_open.feature`: the
+  #   engine      `tests/bdd/features/opening/open_database.feature`: the
   #               database carries the engine, and that is the only place it is
   #               written down.
   #   connection  a replicated database connects at open and holds it for life.
@@ -36,7 +36,7 @@ module declaro-persistum
   # A FAULT SAYS WHAT TO DO DIFFERENTLY, AND THAT IS WHY IT HAS TWO FIELDS.
   # Naming what went wrong is half a fault. The other half is the edit the
   # programmer should make instead, which is the difference between "no such
-  # column" from an engine and "Person declares id and name, and you query_ask for
+  # column" from an engine and "Person declares id and name, and you asked for
   # nmae". A fault with one field would let the second half be forgotten.
   #
   # IT TRAVELS BY RETURN AND BY NOTHING ELSE. Every function below that can fail
@@ -87,8 +87,14 @@ module declaro-persistum
   # a join needs. `HOW-IT-SHOULD-WORK.md`: you declared the relationship once,
   # in the model, and naming it again in every query is the duplication this
   # library exists to remove.
+  # A MODEL DECLARES EVERYTHING ABOUT ITS TABLE, NOT ONLY ITS COLUMNS. An index
+  # is a promise about speed and a constraint is a rule about a column, and both
+  # are declared the way a column is. Without them here, the desired state could
+  # not hold what `Table` already knows how to carry.
   type Model = { table: str
                  columns: list<Column>
+                 indexes: list<Index>
+                 constraints: list<Constraint>
                  references: dict<str, str> } note "your description of one table, which is the only description there is"
 
   # --- the schema, which is the models and nothing else --------------------
@@ -145,7 +151,7 @@ module declaro-persistum
   # WHAT THE DIFFER EMITS. The words are `schema/diff.feature`'s own. Each
   # operation says whether carrying it out destroys something, because
   # `losing_data_is_said_out_loud.feature` asks the library to say which of them
-  # do, derived from the models rather than query_ask for.
+  # do, derived from the models rather than asked for.
   set operation_kinds = { "create_table", "drop_table", "add_column", "drop_column", "alter_column", "rename_column", "rename_table", "create_index", "drop_index", "create_view", "drop_view", "insert_enum_values" } note "every schema change the differ can emit"
   vocabulary OperationKind = { operation_kinds } note "which schema change this is"
 
@@ -228,7 +234,13 @@ module declaro-persistum
   # A BARE VALUE MEANS `eq`, AND THIS SHAPE DOES NOT SAY SO. Nor does it carry
   # `or` and `not`, which are keys holding a condition rather than a column. Two
   # known holes, left open rather than guessed at.
-  type Comparison = dict<Operator, Value> note "one operator and the value it compares against"
+  # IGNORE_CASE IS A COMPANION ON EVERY TEXT OPERATOR, AND THAT IS NOT A DETAIL.
+  # `HOW-IT-SHOULD-WORK.md`: the same `like` matched a name on one engine and
+  # nothing on another, silently, and it is the library's job to make the
+  # engines agree rather than the caller's job to learn which is which.
+  type Comparison = { operator: Operator
+                      value: Value
+                      ignore_case: bool } note "one comparison: an operator, the value bound to it, and whether case matters"
   type Condition = dict<str, Comparison> note "how a question narrows, as data in every grammar"
 
   set directions = { "ascending", "descending" } note "which way an order sorts"
@@ -248,18 +260,19 @@ module declaro-persistum
   type Statement = { text: str
                      parameters: dict<str, Value> } note "a statement for one engine, and the values kept beside it"
 
-  # Rows, or a number when you query_ask how many, or the ticket a write leaves
-  # with, or a named absence.
+  # Rows, or a number when you asked how many, or true or false when you asked
+  # only whether any exist, or the ticket a write leaves with, or a named
+  # absence. `exists` is the one that reads no rows at all.
   # `architecture.md:120`: absence is `NOTHING`, not `None` and not an empty
   # result, because `None` is also what a nullable column holds.
-  type Answer = Rows | int | Ticket | NOTHING note "what a caller gets back: rows, a number, a ticket, or NOTHING"
+  type Answer = Rows | int | bool | Ticket | NOTHING note "what a caller gets back: rows, a number, true or false, a ticket, or NOTHING"
 
   # THE WAITING ROOM, AND IT IS NOT A STORE. `architecture.md:140`: a room holds
   # the arrival order and the callers waiting on tickets, both empty whenever
   # nobody is mid-flight. A write waiting is a statement and its values, which is
   # the same pair `compile_statement` produces. The receipt a caller collects is
-  # written out at `architecture.md:244` and is not here, because nothing on this
-  # board collects one yet.
+  # written out at `architecture.md:244` and is declared below, reached through
+  # `query_collect`.
   type Ticket = str note "one caller's claim on one deposited write"
 
   # WHAT A CALLER READS WHEN IT COMES BACK FOR ITS WRITE. `architecture.md:244`
@@ -291,7 +304,7 @@ module declaro-persistum
                         attempts: int } note "what shutdown carries: when it began and how many pushes it has made"
 
   # `lifecycle_catch_up`'S OWN RECORD. Whether a writer was waiting decides whether the
-  # sync pass runs at all, so the query_answer is kept rather than query_ask twice.
+  # sync pass runs at all, so the answer is kept rather than asked twice.
   type CatchingUp = { db: Database
                       room: Room
                       writer_waiting: bool
@@ -300,6 +313,7 @@ module declaro-persistum
   # `schema_work_out`'S OWN RECORD.
   type Planning = { db: Database
                     models: list<Model>
+                    views: list<View>
                     live: Schema
                     target: Schema
                     plan: Plan } note "what working out a migration carries: live, target and plan"
@@ -308,6 +322,7 @@ module declaro-persistum
   # and what was going to run are the same list.
   type Migrating = { db: Database
                      models: list<Model>
+                     views: list<View>
                      plan: Plan
                      statements: list<Statement>
                      report: Report } note "what a migration carries, including the plan it is running"
@@ -367,13 +382,13 @@ module declaro-persistum
   # names four ways to spell it and one meaning: pseudo-SQL, Django, Prisma and
   # SQLAlchemy, each a thin skin over the same declaration.
   #
-  # ONE CARD HERE AND FOUR SPELLINGS, AND THAT IS NOT SETTLED. Four cards would
-  # say the door is four doors; one says the four are spellings of it. What it
-  # returns is left `any` until the function that consumes it is declared, which
-  # is the next decision rather than this one.
+  # ONE CARD HERE AND FOUR SPELLINGS, SETTLED BY THE TABLE. Four doors would say
+  # the caller entered four different buildings. One door carrying which entry
+  # point was used says the four are spellings of one question, and `by_grammar`
+  # is where that key is spent.
   boundary_in fn query_ask : (db: Database, room: Room, model: Model, grammar: Grammar, query_ask: Asked) -> Answer | Fault side_effect reads "caller" invokes query_answer note "takes a question or a declared write, in any of the four grammars"
 
-  # LIFECYCLE. The platform says stop, and nothing in the program query_ask for it. The
+  # LIFECYCLE. The platform says stop, and nothing in the program asked for it. The
   # other two doors open because a caller called; this one opens whether or not
   # anything was ready.
   #
@@ -382,7 +397,7 @@ module declaro-persistum
   # gone, and the window between the signal and the kill is all there is.
   boundary_in fn lifecycle_stop : (registered: list<Database>) -> NOTHING | Fault side_effect reads "signal" invokes lifecycle_shut_down note "receives the platform's shutdown signal"
 
-  # LIFECYCLE. The runtime hands us a turn, and nothing outside query_ask for that
+  # LIFECYCLE. The runtime hands us a turn, and nothing outside asked for that
   # either. `architecture.md:227` is a loop that runs until stop is set and
   # calls `drain` on every pass, so a caller's write does not travel on the door
   # the caller knocked on. `room_deposit` hands back a ticket and returns; the write
@@ -398,12 +413,12 @@ module declaro-persistum
   # `schema-declared/asking_what_would_change.feature`: nobody deploys a schema
   # change without reading it first, and no difference is an query_answer rather than
   # an empty effect.
-  boundary_in fn schema_plan : (db: Database, models: list<Model>) -> Plan | Fault side_effect reads "caller" invokes schema_work_out note "says what a migration would change, and changes nothing"
+  boundary_in fn schema_plan : (db: Database, models: list<Model>, views: list<View>) -> Plan | Fault side_effect reads "caller" invokes schema_work_out note "says what a migration would change, and changes nothing"
 
   # SCHEMA. A caller asks for the database to match the models. It writes no
   # migration script and never says "add a column"; reaching the declared state
   # is the library's problem.
-  boundary_in fn schema_apply : (db: Database, models: list<Model>) -> Report | Fault side_effect reads "caller" invokes schema_migrate note "makes the database match the models"
+  boundary_in fn schema_apply : (db: Database, models: list<Model>, views: list<View>) -> Report | Fault side_effect reads "caller" invokes schema_migrate note "makes the database match the models"
 
   # SCHEMA. A caller answers the one question the library refuses to guess.
   # `a_rename_is_asked_and_remembered.feature`: a column gone and another
@@ -419,6 +434,13 @@ module declaro-persistum
   # to query_deliver. Deposit hands out the ticket; this is where it is spent.
   boundary_in fn query_collect : (room: Room, ticket: Ticket) -> Receipt | Fault side_effect reads "caller" invokes query_deliver note "hands a caller the outcome of a write it deposited earlier"
 
+  # QUERY. A caller asks for a room to deposit writes into.
+  # `architecture.md:197`: `new_room`, `deposit`, `collect` and `drain` are the
+  # public vocabulary, and the room every other card takes as an argument has to
+  # be made somewhere. It holds nothing yet, so nothing about it can fail except
+  # being asked for twice by a caller that meant to share one.
+  boundary_in fn room_open : () -> Room | Fault side_effect reads "caller" invokes room_start note "makes the waiting room a caller deposits writes into"
+
   # LIFECYCLE. The server starts. The one place the signal handler goes in.
   boundary_in fn lifecycle_start : () -> NOTHING | Fault side_effect reads "caller" invokes lifecycle_install note "starts the library for this process; installs the one signal handler"
 
@@ -433,9 +455,8 @@ module declaro-persistum
   # --- column 2: one orchestrator per door --------------------------------
   #
   # A DOOR RECEIVES AND AN ORCHESTRATOR SEQUENCES, and each door reaches exactly
-  # one. What each of these invokes is the next decision rather than this one,
-  # so none of them has an `invokes` yet: the pure core arrives when it is
-  # declared, not before.
+  # one. Nine doors, nine orchestrators, and the family word is the same on both
+  # sides so a chain never changes vocabulary halfway down.
 
   # Works out which engine the target names, connects, copies the whole database
   # if this copy is cold, and hands back the handle everything downstream reads.
@@ -443,7 +464,7 @@ module declaro-persistum
 
   # Checks the columns against the model, builds the declaration, renders it for
   # this engine, runs it, and shapes what comes back.
-  orchestrator fn query_answer : (asking: Answering) -> Answering | Fault invokes by_grammar, refuse_undeclared_columns, join_between, compile_statement, by_wanted, answer_from_rows, log_write note "turns a caller's question into rows, a number, or a ticket"
+  orchestrator fn query_answer : (asking: Answering) -> Answering | Fault invokes by_grammar, refuse_undeclared_columns, join_between, compile_statement, by_wanted, answer_from_rows, answer_from_ticket, log_write note "turns a caller's question into rows, a number, or a ticket"
 
   # Pushes until Turso has everything, retrying rather than giving up,
   # then closes. The one place blocking is correct.
@@ -451,12 +472,12 @@ module declaro-persistum
 
   # Reads the live database, builds the target from the models, works out the
   # difference, refuses what is ambiguous and names what destroys data.
-  orchestrator fn schema_work_out : (planning: Planning) -> Planning | Fault invokes refuse_owned_names, schema_from_models, schema_inspect, difference, name_what_is_ambiguous, order_operations, name_what_destroys, log_write note "works out the difference between the models and the live database"
+  orchestrator fn schema_work_out : (planning: Planning) -> Planning | Fault invokes refuse_owned_names, schema_from_models, schema_inspect, schema_read_renames, difference, name_what_is_ambiguous, order_operations, name_what_destroys, log_write note "works out the difference between the models and the live database"
 
   # THE SAME PLANNING, THEN CARRIES IT OUT. It reaches the same pure functions
   # in the same order as `schema_work_out`, so what a caller was shown and what runs
   # cannot come apart, and then spells each operation for this engine.
-  orchestrator fn schema_migrate : (migrating: Migrating) -> Migrating | Fault invokes refuse_owned_names, schema_from_models, schema_inspect, difference, name_what_is_ambiguous, order_operations, name_what_destroys, capability_of, mechanism_for, spell_view, spell_operation, query_run_statement, log_write note "plans the same way, then carries the plan out"
+  orchestrator fn schema_migrate : (migrating: Migrating) -> Migrating | Fault invokes refuse_owned_names, schema_from_models, schema_inspect, schema_read_renames, difference, name_what_is_ambiguous, order_operations, name_what_destroys, capability_of, mechanism_for, spell_view, spell_operation, query_run_statement, log_write note "plans the same way, then carries the plan out"
 
   # Writes the query_answer down where the next deploy will find it.
   orchestrator fn schema_remember : (db: Database, gone: str, appeared: str) -> NOTHING | Fault invokes schema_store_rename, log_write note "writes a rename answer down where it outlives the run"
@@ -471,8 +492,11 @@ module declaro-persistum
   # TWO PATHS AND ONE ORCHESTRATOR, DELIBERATELY. Draining and syncing turn on
   # the same question: is a writer waiting. `architecture.md:308` has
   # `replicate_if_idle` ask it, and the drainer is what knows the query_answer. Split
-  # across two orchestrators, it gets query_ask twice and answered twice.
+  # across two orchestrators, it gets asked twice and answered twice.
   orchestrator fn lifecycle_catch_up : (catching_up: CatchingUp) -> CatchingUp | Fault invokes writer_waiting, next_in_order, query_run_statement, worth_retrying, budget_spent, clock_read, next_wait, receipt_for, room_post_receipt, replicates, turso_push, turso_pull, log_write note "spends a free turn draining the room, then syncing if nobody is writing"
+
+  # Hands back an empty room.
+  orchestrator fn room_start : () -> Room | Fault invokes room_make, log_write note "hands a caller an empty room"
 
   # Installs the one signal handler. Safe to call again: the second call finds it
   # installed and returns.
@@ -482,7 +506,7 @@ module declaro-persistum
   # --- column 3: output I/O, and there are four ways out ------------------
   #
   # AN OUTWARD CALL HANDS SOMETHING BACK, AND THAT RETURN IS NOT A DOOR. Rows
-  # arrive because we query_ask the driver for them. The world does not push them at
+  # arrive because we asked the driver for them. The world does not push them at
   # us, so reading is not a fourth entrance.
 
   # SESSION. Ask the driver for a connection. `architecture.md:96` says the handle
@@ -539,6 +563,12 @@ module declaro-persistum
   # own, so this is a reader rather than a door. It is the only place the
   # library asks a database what is there, and it asks so it can compare, never
   # so it can decide what belongs.
+  # SCHEMA. What a rename was answered as, last time somebody answered one.
+  # `schema_store_rename` writes these down; without this reader the answer
+  # would be kept where nothing could reach it, and every deploy would stop on
+  # the same question.
+  reader fn schema_read_renames : (db: Database) -> dict<str, str> | Fault side_effect reads "database" note "reads the rename answers a previous deploy left behind"
+
   reader fn schema_inspect : (db: Database) -> Schema | Fault side_effect reads "database" note "asks a database what it currently holds, so the two can be compared"
 
   # The remembered query_answer to a rename, kept in the library's own table so it
@@ -596,7 +626,13 @@ module declaro-persistum
   # `Declaration` comes from at all. A check answers whether something is wrong.
   fn refuse_undeclared_columns : (model: Model, declaration: Declaration) -> NOTHING | Fault note "refuses a column no model declares, naming the model and its columns"
 
-  # Driver rows in, and out comes what was query_ask for: instances of the model, a
+  # A WRITE'S ANSWER IS ITS TICKET, AND IT NEEDS SHAPING TOO. A read comes back
+  # through `answer_from_rows`; a write comes back from `room_deposit` holding a
+  # ticket. Both end as an `Answer`, which is what makes one door able to serve
+  # both halves of the vocabulary.
+  fn answer_from_ticket : (ticket: Ticket) -> Answer note "turns the ticket a deposit handed back into the caller's answer"
+
+  # Driver rows in, and out comes what was asked for: instances of the model, a
   # number, or `NOTHING`.
   fn answer_from_rows : (model: Model, rows: Rows, declaration: Declaration) -> Answer | Fault note "turns driver rows into instances of the model, a number, or NOTHING"
 
@@ -640,6 +676,10 @@ module declaro-persistum
   # the kill, so every line has to be fit to be the last one.
   fn progress_line : (db: Database, elapsed: float, done: bool) -> dict<str, Value> note "builds a shutdown log line naming the database and the time elapsed"
 
+  # An empty room: no arrivals, nobody waiting. Both lists are empty whenever
+  # nobody is mid-flight, so this is what the room looks like most of the time.
+  fn room_make : () -> Room note "builds an empty room"
+
   # `architecture.md:308`: the sync pass is dropped when a writer is waiting.
   fn writer_waiting : (room: Room) -> bool note "answers whether a writer is waiting for the connection"
 
@@ -672,7 +712,7 @@ module declaro-persistum
 
   # The models are the desired state, so the target schema is derived from them
   # and from nothing the database says.
-  fn schema_from_models : (models: list<Model>) -> Schema | Fault note "builds the target schema from the models, and from nothing else"
+  fn schema_from_models : (models: list<Model>, views: list<View>) -> Schema | Fault note "builds the target schema from the models, and from nothing else"
 
   # Set theory over two schemas: what is only in the target is created, what is
   # only in the live database is dropped, what differs is altered.
