@@ -295,6 +295,10 @@ module declaro-persistum
                       settings: dict<str, Value>
                       permitted: int
                       connection: Connection
+                      models: list<Model>
+                      live: Schema
+                      wanted_schema: Schema
+                      needs_migration: bool
                       database: Database } note "what session_connect carries while it opens a database"
 
   # `lifecycle_shut_down`'S OWN RECORD. When it started and how many pushes it has made,
@@ -458,9 +462,14 @@ module declaro-persistum
   # one. Nine doors, nine orchestrators, and the family word is the same on both
   # sides so a chain never changes vocabulary halfway down.
 
+  # THE MIGRATION RUNS BEFORE THE HANDLE COMES BACK. The models the code has and
+  # the schema the database has meet here, and a database still behind its models
+  # is brought up before any caller can ask it anything. Handing back a handle
+  # first would let the first question fail on a column the models declare.
+  #
   # Works out which engine the target names, connects, copies the whole database
   # if this copy is cold, and hands back the handle everything downstream reads.
-  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, replicates, lifecycle_register, turso_pull, log_write note "works out the engine, connects, and builds the handle everything downstream reads"
+  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, replicates, lifecycle_register, turso_pull, schema_read_models, schema_from_models, schema_inspect, migration_needed, schema_read_renames, difference, name_what_is_ambiguous, order_operations, name_what_destroys, capability_of, spell_operation, query_run_statement, log_write note "works out the engine, connects, and builds the handle everything downstream reads"
 
   # Checks the columns against the model, builds the declaration, renders it for
   # this engine, runs it, and shapes what comes back.
@@ -563,6 +572,11 @@ module declaro-persistum
   # own, so this is a reader rather than a door. It is the only place the
   # library asks a database what is there, and it asks so it can compare, never
   # so it can decide what belongs.
+  # SESSION. THE MODELS THE CODE HAS. They are not a door argument: a caller
+  # declares them and the library asks for them, the same way it asks a database
+  # what it holds. Both answers meet in `migration_needed`.
+  reader fn schema_read_models : () -> list<Model> | Fault side_effect reads "models" note "asks the code which models it declares"
+
   # SCHEMA. What a rename was answered as, last time somebody answered one.
   # `schema_store_rename` writes these down; without this reader the answer
   # would be kept where nothing could reach it, and every deploy would stop on
@@ -716,6 +730,11 @@ module declaro-persistum
   # The models are the desired state, so the target schema is derived from them
   # and from nothing the database says.
   fn schema_from_models : (models: list<Model>, views: list<View>) -> Schema | Fault note "builds the target schema from the models, and from nothing else"
+
+  # A HANDLE HANDED BACK BEFORE THE DATABASE MATCHES THE MODELS IS A HANDLE TO A
+  # DATABASE THAT WILL REFUSE THE FIRST QUESTION ASKED OF IT. So opening
+  # compares the two and says whether anything has to run first.
+  fn migration_needed : (live: Schema, target: Schema) -> bool note "answers whether the database still has to be brought up to the models"
 
   # Set theory over two schemas: what is only in the target is created, what is
   # only in the live database is dropped, what differs is altered.
