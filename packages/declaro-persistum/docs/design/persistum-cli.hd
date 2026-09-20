@@ -24,87 +24,87 @@ module declaro-persistum-cli
   type Command = { name: CommandName
                    url: str
                    engine: Engine | NOTHING
-                   options: dict<str, str> }
+                   options: dict<str, str> } note "what an operator typed, once it has been read"
 
-  set command_names = { "diff" : "say what would change", "apply" : "make the database match the models", "validate" : "read the schema files and say what is wrong", "snapshot" : "write the current schema down", "generate" : "write the types the models imply" }
-  vocabulary CommandName = { command_names }
+  set command_names = { "diff" : "say what would change", "apply" : "make the database match the models", "validate" : "read the schema files and say what is wrong", "snapshot" : "write the current schema down", "generate" : "write the types the models imply" } note "five commands and what each one is for"
+  vocabulary CommandName = { command_names } note "one of five, refused otherwise"
 
-  set engines = { "sqlite", "postgresql", "turso" }
-  vocabulary Engine = { engines }
+  set engines = { "sqlite", "postgresql", "turso" } note "the three the operator may name here"
+  vocabulary Engine = { engines } note "the one place a person may say it out loud"
 
   # THREE KINDS OF ENDING, AND A SCRIPT HAS TO TELL THEM APART.
   # `cli/command_dispatch.feature`: a command's own code comes back untouched,
   # an interrupt is 130 and says "Aborted", and anything else is 1 and prints
   # what it was.
   type Outcome = { code: int
-                   message: str }
+                   message: str } note "what a command did, before it becomes an exit code"
 
   type Fault = { what_went_wrong: str
-                 what_to_do_instead: str }
+                 what_to_do_instead: str } note "two fields, because naming the problem is only half of one"
 
   # `command_dispatch`'S OWN RECORD.
   type Running = { argv: list<str>
                    command: Command
                    engine: Engine
-                   outcome: Outcome }
+                   outcome: Outcome } note "what was typed, what was settled, what came back"
 
   # --- column 1: how the world gets in ------------------------------------
 
   # COMMAND. An operator types a command. The URL may be here or in the
   # environment, and if it is in neither this door refuses rather than guessing.
-  boundary_in fn command_run : (argv: list<str>) -> int | Fault side_effect reads "argv" side_effect reads "env:DECLARO_DATABASE_URL" invokes command_dispatch
+  boundary_in fn command_run : (argv: list<str>) -> int | Fault side_effect reads "argv" side_effect reads "env:DECLARO_DATABASE_URL" invokes command_dispatch note "an operator types; the URL may come from the environment instead"
 
   # THE OPERATOR IS ASKED ONLY IF THEY ARE THERE TO ANSWER.
   # `cli/overwriting_a_snapshot.feature`: an automated run must not stop on a
   # question nobody can hear. Both of these are the program asking rather than
   # the world arriving, so they are readers.
-  reader fn terminal_interactive : () -> bool side_effect reads "terminal"
-  reader fn terminal_ask : (question: str) -> str | Fault side_effect reads "terminal"
+  reader fn terminal_interactive : () -> bool side_effect reads "terminal" note "asked before asking, so an automated run never stops on a question"
+  reader fn terminal_ask : (question: str) -> str | Fault side_effect reads "terminal" note "only if somebody is there to answer"
 
   # The operator's own schema files, read so `validate` can say what is wrong
   # before anything reaches a database.
-  reader fn files_read_schema : (path: str) -> list<str> | Fault side_effect reads "files"
+  reader fn files_read_schema : (path: str) -> list<str> | Fault side_effect reads "files" note "the operator's own schema files, read before anything reaches a database"
 
   # --- column 2: one orchestrator, because there is one way in -------------
 
   # Reads what was typed, settles the engine, asks before overwriting a
   # snapshot when somebody is there to answer, runs the command the table names
   # and turns what came back into an exit code.
-  orchestrator fn command_dispatch : (running: Running) -> Running | Fault invokes parse_arguments, chosen_engine, terminal_interactive, terminal_ask, overwrite_agreed, by_command, exit_code_for, terminal_print, log_write
+  orchestrator fn command_dispatch : (running: Running) -> Running | Fault invokes parse_arguments, chosen_engine, terminal_interactive, terminal_ask, overwrite_agreed, by_command, exit_code_for, terminal_print, log_write note "settles the engine, runs the command, turns the result into an exit code"
 
   # --- the table that says what each command does -------------------------
 
-  dispatch by_command = { "diff" -> library_plan, "apply" -> library_migrate, "validate" -> files_read_schema, "snapshot" -> files_write_snapshot, "generate" -> files_write_types }
+  dispatch by_command = { "diff" -> library_plan, "apply" -> library_migrate, "validate" -> files_read_schema, "snapshot" -> files_write_snapshot, "generate" -> files_write_types } note "one row per command, and no command outside the table"
 
   # --- column 3: the pure core ---------------------------------------------
 
   # What the operator typed, as data. A word that is not one of the five is
   # refused naming the five.
-  fn parse_arguments : (argv: list<str>, from_environment: str | NOTHING) -> Command | Fault
+  fn parse_arguments : (argv: list<str>, from_environment: str | NOTHING) -> Command | Fault note "a word that is not one of the five is refused naming the five"
 
   # KEEP WHAT WAS TYPED, OR READ IT OFF THE URL. Two functions in the feature
   # file, one decision: an engine the operator named wins, and when they named
   # none the URL decides, exactly as the library's own `engine_of` does.
-  fn chosen_engine : (given: Engine | NOTHING, url: str) -> Engine | Fault
+  fn chosen_engine : (given: Engine | NOTHING, url: str) -> Engine | Fault note "what the operator typed wins; otherwise the URL decides"
 
   # A command's own code comes back untouched; an interrupt is 130; anything
   # else is 1. A script calling this can tell the three apart.
-  fn exit_code_for : (outcome: Outcome) -> int
+  fn exit_code_for : (outcome: Outcome) -> int note "0, 1 and 2, so a script can tell three endings apart"
 
   # Whether to go ahead with an overwrite, given what the terminal said and
   # whether anyone was there to say it.
-  fn overwrite_agreed : (answer: str | NOTHING, interactive: bool) -> bool
+  fn overwrite_agreed : (answer: str | NOTHING, interactive: bool) -> bool note "silence from an empty terminal is not agreement"
 
   # --- column 4: what it writes and who it asks ---------------------------
 
   # THE LIBRARY IS OUTSIDE THIS MODULE. Each of these is a call into
   # declaro-persistum, which from here is as foreign as a database.
-  boundary_out fn library_plan : (url: str, engine: Engine) -> Outcome | Fault side_effect reads_writes "declaro-persistum"
-  boundary_out fn library_migrate : (url: str, engine: Engine) -> Outcome | Fault side_effect reads_writes "declaro-persistum"
-  boundary_out fn files_write_snapshot : (url: str, engine: Engine) -> Outcome | Fault side_effect writes "files"
-  boundary_out fn files_write_types : (url: str, engine: Engine) -> Outcome | Fault side_effect writes "files"
+  boundary_out fn library_plan : (url: str, engine: Engine) -> Outcome | Fault side_effect reads_writes "declaro-persistum" note "from here the library is as foreign as a database"
+  boundary_out fn library_migrate : (url: str, engine: Engine) -> Outcome | Fault side_effect reads_writes "declaro-persistum" note "the same call the library's own door takes"
+  boundary_out fn files_write_snapshot : (url: str, engine: Engine) -> Outcome | Fault side_effect writes "files" note "the current schema, written where the operator asked"
+  boundary_out fn files_write_types : (url: str, engine: Engine) -> Outcome | Fault side_effect writes "files" note "the types the models imply"
 
   # What the operator reads on their terminal.
-  boundary_out fn terminal_print : (line: str) -> NOTHING side_effect writes "terminal"
+  boundary_out fn terminal_print : (line: str) -> NOTHING side_effect writes "terminal" note "what the operator reads"
 
-  boundary_out fn log_write : (event: dict<str, str>) -> NOTHING side_effect writes "log"
+  boundary_out fn log_write : (event: dict<str, str>) -> NOTHING side_effect writes "log" note "read afterwards, never instead of returning a fault"

@@ -14,8 +14,8 @@ module declaro-persistum-transfer
 
   layer tooling
 
-  set engines = { "sqlite", "postgresql", "turso" }
-  vocabulary Engine = { engines }
+  set engines = { "sqlite", "postgresql", "turso" } note "the three a transfer can move between"
+  vocabulary Engine = { engines } note "which engine the target speaks"
 
   # WHOSE FAULT A FAILED TABLE IS. `whose_fault_is_a_failed_table.feature`
   # measured what gets this wrong: on 2026-08-17 one TypeError was recorded
@@ -23,20 +23,20 @@ module declaro-persistum-transfer
   # on every table, so recording it per table turns one defect into forty and
   # names forty innocent tables. The engine refusing one table is that table's
   # problem, and the other thirty-nine still copy.
-  set blames = { "ours" : "a bug in this package; it reaches the caller whole and blames no table", "engine" : "the engine refused this table; record it and copy the rest" }
-  vocabulary Blame = { blames }
+  set blames = { "ours" : "a bug in this package; it reaches the caller whole and blames no table", "engine" : "the engine refused this table; record it and copy the rest" } note "ours fails every table; the engine's fails one"
+  vocabulary Blame = { blames } note "whose fault a failed table is"
 
   type Fault = { blame: Blame
                  what_went_wrong: str
-                 what_to_do_instead: str }
+                 what_to_do_instead: str } note "it carries the blame, so the report cannot get it wrong"
 
   type TableResult = { table: str
                        rows_copied: int
-                       failure: Fault | NOTHING }
+                       failure: Fault | NOTHING } note "one table, its rows, and what refused it"
 
   type Report = { tables: list<TableResult>
                   copied: int
-                  failed: int }
+                  failed: int } note "what an operator reads when forty tables have been copied"
 
   # `transfer_run`'S OWN RECORD.
   type Transferring = { source: str
@@ -44,47 +44,47 @@ module declaro-persistum-transfer
                         engine: Engine
                         tables: list<str>
                         results: list<TableResult>
-                        report: Report }
+                        report: Report } note "source, target, and what each table did"
 
   # --- column 1: how the work arrives -------------------------------------
 
   # An operator asks for one database to be copied into another.
-  boundary_in fn transfer_run : (source: str, target: str) -> Report | Fault side_effect reads "caller" invokes transfer_copy
+  boundary_in fn transfer_run : (source: str, target: str) -> Report | Fault side_effect reads "caller" invokes transfer_copy note "an operator asks for one database to be copied into another"
 
   # What the source holds, asked for rather than arriving.
-  reader fn source_list_tables : (source: str) -> list<str> | Fault side_effect reads "database"
-  reader fn source_read_rows : (source: str, table: str) -> Rows | Fault side_effect reads "database"
+  reader fn source_list_tables : (source: str) -> list<str> | Fault side_effect reads "database" note "what the source holds, asked for rather than arriving"
+  reader fn source_read_rows : (source: str, table: str) -> Rows | Fault side_effect reads "database" note "one table at a time"
 
-  type Row = dict<str, str>
-  type Rows = list<Row>
+  type Row = dict<str, str> note "a column name to a value"
+  type Rows = list<Row> note "one table's worth, on its way across"
 
   # --- column 2 ------------------------------------------------------------
 
   # Turns the target's checks off, copies each table, records what the engine
   # refused, puts the checks back and says what happened.
-  orchestrator fn transfer_copy : (transferring: Transferring) -> Transferring | Fault invokes source_list_tables, target_stop_checks, source_read_rows, target_write_rows, blame_for, result_for, report_from, target_restore_checks, log_write
+  orchestrator fn transfer_copy : (transferring: Transferring) -> Transferring | Fault invokes source_list_tables, target_stop_checks, source_read_rows, target_write_rows, blame_for, result_for, report_from, target_restore_checks, log_write note "checks off, copy each table, checks back, then say what happened"
 
   # --- column 3: the pure core ---------------------------------------------
 
   # ASKED OF THE FAILURE'S KIND, NEVER OF ITS MESSAGE. The two answers need
   # opposite handling, so telling them apart is the whole of this module's
   # error reporting.
-  fn blame_for : (failure: Fault) -> Blame
+  fn blame_for : (failure: Fault) -> Blame note "one bug of ours would otherwise be reported as forty broken tables"
 
   # One table's outcome, whether it copied or the engine refused it.
-  fn result_for : (table: str, rows_copied: int, failure: Fault | NOTHING) -> TableResult
+  fn result_for : (table: str, rows_copied: int, failure: Fault | NOTHING) -> TableResult note "one table's outcome, copied or refused"
 
   # What the operator reads: every table, and the two counts.
-  fn report_from : (results: list<TableResult>) -> Report
+  fn report_from : (results: list<TableResult>) -> Report note "every table, and the two counts an operator reads first"
 
   # --- column 4: what it writes -------------------------------------------
 
   # TWO TABLES THAT POINT AT EACH OTHER CANNOT BE LOADED IN ANY ORDER WITH THE
   # CHECKS ON. `preparing_the_target.feature`: the run stops if the target will
   # not drop them, rather than handing back a report naming healthy tables.
-  boundary_out fn target_stop_checks : (target: str) -> NOTHING | Fault side_effect writes "database"
-  boundary_out fn target_restore_checks : (target: str) -> NOTHING | Fault side_effect writes "database"
+  boundary_out fn target_stop_checks : (target: str) -> NOTHING | Fault side_effect writes "database" note "two tables pointing at each other load in no order with checks on"
+  boundary_out fn target_restore_checks : (target: str) -> NOTHING | Fault side_effect writes "database" note "put back whatever the run turned off"
 
-  boundary_out fn target_write_rows : (target: str, table: str, rows: Rows) -> int | Fault side_effect writes "database"
+  boundary_out fn target_write_rows : (target: str, table: str, rows: Rows) -> int | Fault side_effect writes "database" note "the rows this table's copy landed"
 
-  boundary_out fn log_write : (event: dict<str, str>) -> NOTHING side_effect writes "log"
+  boundary_out fn log_write : (event: dict<str, str>) -> NOTHING side_effect writes "log" note "read afterwards, never instead of returning a fault"
