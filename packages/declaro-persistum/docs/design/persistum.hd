@@ -26,6 +26,10 @@ module declaro-persistum
   #   engine      `tests/bdd/features/opening/open_database.feature`: the
   #               database carries the engine, and that is the only place it is
   #               written down.
+  #   room        the waiting room writes are deposited into. `HOW-IT-SHOULD-
+  #               WORK.md:184`: the library chooses the connection, opens it and
+  #               closes it, and the room is the same kind of machinery. A caller
+  #               that had to make one could make two and split its own writes.
   #   connection  a replicated database connects at open and holds it for life.
   #               `query_run_statement` has nothing to run on without it.
   #   shutdown    `architecture.md:314`: required at open, and `lifecycle_shut_down` is
@@ -78,6 +82,7 @@ module declaro-persistum
 
   type Database = { engine: Engine
                     connection: Connection
+                    room: Room
                     shutdown: Shutdown
                     primary: str | NOTHING } note "what opening gives you, and what every later call reads"
 
@@ -321,12 +326,11 @@ module declaro-persistum
   # `lifecycle_catch_up`'S OWN RECORD. Whether a writer was waiting decides whether the
   # sync pass runs at all, so the answer is kept rather than asked twice.
   type CatchingUp = { db: Database
-                      room: Room
                       writer_waiting: bool
                       attempts: int } note "what a free turn carries, including whether a writer was waiting"
 
   # `query_deliver`'S OWN RECORD.
-  type Collecting = { room: Room
+  type Collecting = { db: Database
                       ticket: Ticket
                       receipt: Receipt } note "what collecting a write carries: the ticket and what came back"
 
@@ -344,7 +348,6 @@ module declaro-persistum
   # returns it onward, so a fault is never something you have to remember to
   # look at afterwards.
   type Answering = { db: Database
-                     room: Room
                      model: Model
                      grammar: Grammar
                      query_ask: Asked
@@ -384,7 +387,7 @@ module declaro-persistum
   # the caller entered four different buildings. One door carrying which entry
   # point was used says the four are spellings of one question, and `by_grammar`
   # is where that key is spent.
-  boundary_in fn query_ask : (db: Database, room: Room, model: Model, grammar: Grammar, query_ask: Asked) -> Answer | Fault side_effect reads "caller" invokes query_answer note "takes a question or a declared write, in any of the four grammars"
+  boundary_in fn query_ask : (db: Database, model: Model, grammar: Grammar, query_ask: Asked) -> Answer | Fault side_effect reads "caller" invokes query_answer note "takes a question or a declared write, in any of the four grammars"
 
   # LIFECYCLE. The platform says stop, and nothing in the program asked for it. The
   # other two doors open because a caller called; this one opens whether or not
@@ -411,17 +414,7 @@ module declaro-persistum
   # a ticket belongs to exactly one caller, so a failure reaches that caller and
   # nobody else, and a caller draws its own atomicity boundary by choosing when
   # to query_deliver. Deposit hands out the ticket; this is where it is spent.
-  boundary_in fn query_collect : (room: Room, ticket: Ticket) -> Receipt | Fault side_effect reads "caller" invokes query_deliver note "hands a caller the outcome of a write it deposited earlier"
-
-  # QUERY. A caller asks for a room to deposit writes into.
-  # `architecture.md:197`: `new_room`, `deposit`, `collect` and `drain` are the
-  # public vocabulary, and the room every other card takes as an argument has to
-  # be made somewhere. It holds nothing yet, so nothing about it can fail except
-  # being asked for twice by a caller that meant to share one.
-  boundary_in fn room_open : () -> Room | Fault side_effect reads "caller" invokes room_start note "makes the waiting room a caller deposits writes into"
-
-  # LIFECYCLE. The server starts. The one place the signal handler goes in.
-  boundary_in fn lifecycle_start : () -> NOTHING | Fault side_effect reads "caller" invokes lifecycle_install note "starts the library for this process; installs the one signal handler"
+  boundary_in fn query_collect : (db: Database, ticket: Ticket) -> Receipt | Fault side_effect reads "caller" invokes query_deliver note "hands a caller the outcome of a write it deposited earlier"
 
   # NO FLUSH DOOR. Decided 2026-09-17. `architecture.md:308`: no caller waits for
   # the primary, with exactly two exceptions, a cold open and shutdown, both at
@@ -429,7 +422,7 @@ module declaro-persistum
   # awaits `flush`; that scenario contradicts the architecture and is the one to
   # change.
 
-  boundary_in fn lifecycle_turn : (db: Database, room: Room) -> NOTHING | Fault side_effect reads "scheduler" invokes lifecycle_catch_up note "receives a spare moment from the runtime"
+  boundary_in fn lifecycle_turn : (db: Database) -> NOTHING | Fault side_effect reads "scheduler" invokes lifecycle_catch_up note "receives a spare moment from the runtime"
 
   # --- column 2: one orchestrator per door --------------------------------
   #
@@ -444,7 +437,7 @@ module declaro-persistum
   #
   # Works out which engine the target names, connects, copies the whole database
   # if this copy is cold, and hands back the handle everything downstream reads.
-  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, replicates, lifecycle_register, turso_pull, schema_read_declared, refuse_owned_names, schema_from_declared, schema_inspect, migration_needed, difference, name_what_is_ambiguous, order_operations, name_what_destroys, capability_of, mechanism_for, spell_view, spell_operation, migration_report, query_run_statement, log_write note "works out the engine, connects, and builds the handle everything downstream reads"
+  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, room_make, replicates, lifecycle_install_handler, lifecycle_register, turso_pull, schema_read_declared, refuse_owned_names, schema_from_declared, schema_inspect, migration_needed, difference, name_what_is_ambiguous, order_operations, name_what_destroys, capability_of, mechanism_for, spell_view, spell_operation, migration_report, query_run_statement, log_write note "works out the engine, connects, and builds the handle everything downstream reads"
 
   # Checks the columns against the model, builds the declaration, renders it for
   # this engine, runs it, and shapes what comes back.
@@ -466,13 +459,6 @@ module declaro-persistum
   # `replicate_if_idle` ask it, and the drainer is what knows the query_answer. Split
   # across two orchestrators, it gets asked twice and answered twice.
   orchestrator fn lifecycle_catch_up : (catching_up: CatchingUp) -> CatchingUp | Fault invokes writer_waiting, next_in_order, query_run_statement, worth_retrying, budget_spent, clock_read, next_wait, receipt_for, room_post_receipt, replicates, turso_push, turso_pull, log_write note "spends a free turn draining the room, then syncing if nobody is writing"
-
-  # Hands back an empty room.
-  orchestrator fn room_start : () -> Room | Fault invokes room_make, log_write note "hands a caller an empty room"
-
-  # Installs the one signal handler. Safe to call again: the second call finds it
-  # installed and returns.
-  orchestrator fn lifecycle_install : () -> NOTHING | Fault invokes lifecycle_install_handler, log_write note "puts the process's one signal handler in; installing twice changes nothing"
 
 
   # --- column 3: output I/O, and there are four ways out ------------------
@@ -510,10 +496,10 @@ module declaro-persistum
   # why this is a door rather than a step.
   boundary_out fn room_deposit : (room: Room, statement: Statement) -> Ticket | Fault side_effect writes "room" note "puts a write in the room and takes a ticket for it"
 
-  # ONE HANDLER FOR THE PROCESS, INSTALLED AT STARTUP, AND INSTALLING IT TWICE
-  # CHANGES NOTHING. Decided 2026-09-17: a handler per open database would stack
-  # one on another, so it goes in once and a second call finds it there and
-  # returns. `replication.feature`: any handler the host application already set
+  # ONE HANDLER FOR THE PROCESS, PUT IN BY THE FIRST OPEN THAT NEEDS ONE, AND
+  # INSTALLING IT TWICE CHANGES NOTHING. No caller asks for this: a door that
+  # said "start the library" would be one more thing a program could forget,
+  # and forgetting it costs the data. The first open is startup. `replication.feature`: any handler the host application already set
   # still runs. It chains; it never replaces.
   boundary_out fn lifecycle_install_handler : () -> NOTHING | Fault side_effect writes "signal" note "installs the signal handler, chaining to whatever was already there"
 
