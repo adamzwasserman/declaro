@@ -81,11 +81,15 @@ module declaro-persistum
                     shutdown: Shutdown
                     primary: str | NOTHING }
 
-  # WHAT A MODEL SAYS, WHICH IS THE ONLY DESCRIPTION OF THE DATABASE. What each
-  # column MEANS is not here yet: `field` declares a floor, a key, a length, and
-  # none of that is written down until the schema half is declared.
+  # WHAT A MODEL SAYS, WHICH IS THE ONLY DESCRIPTION OF THE DATABASE. A column
+  # carries its facets, which is what `field` declares: a key, a floor, a
+  # length. One of those facets is a foreign key, and that is the whole of what
+  # a join needs. `HOW-IT-SHOULD-WORK.md`: you declared the relationship once,
+  # in the model, and naming it again in every query is the duplication this
+  # library exists to remove.
   type Model = { table: str
-                 columns: list<str> }
+                 columns: list<Column>
+                 references: dict<str, str> }
 
   # --- the schema, which is the models and nothing else --------------------
   #
@@ -172,7 +176,17 @@ module declaro-persistum
                        grouping: list<str>
                        having: Condition
                        paging: dict<str, int> | NOTHING
-                       rows: Rows | NOTHING }
+                       rows: Rows | NOTHING
+                       across: list<Join> | NOTHING }
+
+  # THE LIBRARY WORKS THE JOIN OUT, AND THIS IS WHAT IT WORKED OUT. Three ways
+  # to reach the other side, all of them reading the same foreign key: the rows
+  # that belong to a row, a condition on the far side, and a question used as a
+  # value inside another question.
+  type Join = { model: str
+                by_column: str
+                to_column: str
+                condition: Condition }
 
   # THE WHOLE VOCABULARY, IN TWO LISTS, BECAUSE THE TWO HALVES TRAVEL
   # DIFFERENTLY. A read runs now and answers now. A write is deposited and
@@ -394,7 +408,7 @@ module declaro-persistum
 
   # Checks the columns against the model, builds the declaration, renders it for
   # this engine, runs it, and shapes what comes back.
-  orchestrator fn answer : (asking: Answering) -> Answering | Fault invokes by_grammar, refuse_undeclared_columns, compile_statement, by_wanted, answer_from_rows, log_to_console
+  orchestrator fn answer : (asking: Answering) -> Answering | Fault invokes by_grammar, refuse_undeclared_columns, join_between, compile_statement, by_wanted, answer_from_rows, log_to_console
 
   # Pushes until Turso has everything, retrying rather than giving up,
   # then closes. The one place blocking is correct.
@@ -649,3 +663,11 @@ module declaro-persistum
   # One operation into the statements that carry it out on this engine. The
   # schema half's `compile_statement`.
   fn spell_operation : (operation: Operation, engine: Engine) -> list<Statement> | Fault
+
+  # --- what a question across models reaches -------------------------------
+
+  # THE FOREIGN KEY ALREADY SAID IT. Given the two models and the far-side
+  # condition a caller wrote, this works out the join rather than asking the
+  # caller to write it. A pair of models with no key between them is a fault
+  # naming both, since no join exists to work out.
+  fn join_between : (near: Model, far: Model, condition: Condition) -> Join | Fault
