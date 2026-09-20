@@ -112,8 +112,13 @@ module declaro-persistum
   # set of types a model may write is in
   # `schema-declared/every_column_type_is_declarable.feature`, which exists
   # because a type the loader cannot read is a model nobody can declare.
+  # A RENAME IS A DECLARATION LIKE EVERY OTHER. A column gone and another
+  # appeared is either a rename or a drop and an add, and the difference is your
+  # data. Nobody is there to be asked at a deploy, so the new model says which
+  # it is: the column that replaced the old one names what it replaced.
   type Column = { name: str
                   declared_type: str
+                  renamed_from: str | NOTHING
                   facets: dict<str, Value> } note "one column and what field() declared about it"
 
   type Index = { name: str
@@ -304,6 +309,7 @@ module declaro-persistum
                       live: Schema
                       wanted_schema: Schema
                       needs_migration: bool
+                      migration: Report
                       database: Database } note "what session_connect carries while it opens a database"
 
   # `lifecycle_shut_down`'S OWN RECORD. When it started and how many pushes it has made,
@@ -318,27 +324,6 @@ module declaro-persistum
                       room: Room
                       writer_waiting: bool
                       attempts: int } note "what a free turn carries, including whether a writer was waiting"
-
-  # `schema_work_out`'S OWN RECORD.
-  type Planning = { db: Database
-                    declared: Declared
-                    live: Schema
-                    target: Schema
-                    plan: Plan } note "what working out a migration carries: live, target and plan"
-
-  # `schema_migrate`'S OWN RECORD. It carries the plan it is carrying out, so what ran
-  # and what was going to run are the same list.
-  type Migrating = { db: Database
-                     declared: Declared
-                     plan: Plan
-                     statements: list<Statement>
-                     report: Report } note "what a migration carries, including the plan it is running"
-
-  # `schema_remember`'S OWN RECORD. Its two strings come from a person, so they
-  # are the one pair on this board a door is right to take.
-  type Remembering = { db: Database
-                       gone: str
-                       appeared: str } note "what remembering one rename carries"
 
   # `query_deliver`'S OWN RECORD.
   type Collecting = { room: Room
@@ -422,25 +407,6 @@ module declaro-persistum
   # time call it and hand its query_answer to the pure functions.
   reader fn clock_read : () -> float side_effect reads "clock" note "asks the clock what time it is"
 
-  # SCHEMA. A caller asks what would change, and nothing changes.
-  # `schema-declared/asking_what_would_change.feature`: nobody deploys a schema
-  # change without reading it first, and no difference is an query_answer rather than
-  # an empty effect.
-  boundary_in fn schema_plan : (db: Database) -> Plan | Fault side_effect reads "caller" invokes schema_work_out note "says what a migration would change, and changes nothing"
-
-  # SCHEMA. A caller asks for the database to match the models. It writes no
-  # migration script and never says "add a column"; reaching the declared state
-  # is the library's problem.
-  boundary_in fn schema_apply : (db: Database) -> Report | Fault side_effect reads "caller" invokes schema_migrate note "makes the database match the models"
-
-  # SCHEMA. A caller answers the one question the library refuses to guess.
-  # `a_rename_is_asked_and_remembered.feature`: a column gone and another
-  # appeared is either a rename or a drop and an add, and the difference is your
-  # data. The query_answer is remembered, because asking again on every deploy asks in
-  # the middle of a deploy, which is the worst moment and the one where people
-  # say yes to anything.
-  boundary_in fn schema_rename : (db: Database, gone: str, appeared: str) -> NOTHING | Fault side_effect reads "caller" invokes schema_remember note "records that a column was renamed, so the next deploy knows"
-
   # QUERY. A caller comes back for the write it deposited. `write_queue.feature`:
   # a ticket belongs to exactly one caller, so a failure reaches that caller and
   # nobody else, and a caller draws its own atomicity boundary by choosing when
@@ -478,7 +444,7 @@ module declaro-persistum
   #
   # Works out which engine the target names, connects, copies the whole database
   # if this copy is cold, and hands back the handle everything downstream reads.
-  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, replicates, lifecycle_register, turso_pull, schema_read_declared, schema_from_declared, schema_inspect, migration_needed, schema_read_renames, difference, name_what_is_ambiguous, order_operations, name_what_destroys, capability_of, spell_operation, query_run_statement, log_write note "works out the engine, connects, and builds the handle everything downstream reads"
+  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, replicates, lifecycle_register, turso_pull, schema_read_declared, refuse_owned_names, schema_from_declared, schema_inspect, migration_needed, difference, name_what_is_ambiguous, order_operations, name_what_destroys, capability_of, mechanism_for, spell_view, spell_operation, migration_report, query_run_statement, log_write note "works out the engine, connects, and builds the handle everything downstream reads"
 
   # Checks the columns against the model, builds the declaration, renders it for
   # this engine, runs it, and shapes what comes back.
@@ -487,18 +453,6 @@ module declaro-persistum
   # Pushes until Turso has everything, retrying rather than giving up,
   # then closes. The one place blocking is correct.
   orchestrator fn lifecycle_shut_down : (shutting_down: ShuttingDown) -> ShuttingDown | Fault invokes replicates, clock_read, turso_push, next_wait, progress_line, log_write note "gets every local commit to Turso before the process dies"
-
-  # Reads the live database, builds the target from the models, works out the
-  # difference, refuses what is ambiguous and names what destroys data.
-  orchestrator fn schema_work_out : (planning: Planning) -> Planning | Fault invokes refuse_owned_names, schema_read_declared, schema_from_declared, schema_inspect, schema_read_renames, difference, name_what_is_ambiguous, order_operations, name_what_destroys, log_write note "works out the difference between the models and the live database"
-
-  # THE SAME PLANNING, THEN CARRIES IT OUT. It reaches the same pure functions
-  # in the same order as `schema_work_out`, so what a caller was shown and what runs
-  # cannot come apart, and then spells each operation for this engine.
-  orchestrator fn schema_migrate : (migrating: Migrating) -> Migrating | Fault invokes refuse_owned_names, schema_read_declared, schema_from_declared, schema_inspect, schema_read_renames, difference, name_what_is_ambiguous, order_operations, name_what_destroys, capability_of, mechanism_for, spell_view, spell_operation, query_run_statement, log_write note "plans the same way, then carries the plan out"
-
-  # Writes the query_answer down where the next deploy will find it.
-  orchestrator fn schema_remember : (remembering: Remembering) -> NOTHING | Fault invokes schema_store_rename, log_write note "writes a rename answer down where it outlives the run"
 
   # Waits for the drainer to finish this caller's write, hands back the receipt
   # and drops the ticket, so a collected ticket leaves the room empty again.
@@ -588,17 +542,7 @@ module declaro-persistum
   # different set to each door and nothing would notice.
   reader fn schema_read_declared : () -> Declared | Fault side_effect reads "models" note "asks the code which models and views it declares"
 
-  # SCHEMA. What a rename was answered as, last time somebody answered one.
-  # `schema_store_rename` writes these down; without this reader the answer
-  # would be kept where nothing could reach it, and every deploy would stop on
-  # the same question.
-  reader fn schema_read_renames : (db: Database) -> dict<str, str> | Fault side_effect reads "database" note "reads the rename answers a previous deploy left behind"
-
   reader fn schema_inspect : (db: Database) -> Schema | Fault side_effect reads "database" note "asks a database what it currently holds, so the two can be compared"
-
-  # The remembered query_answer to a rename, kept in the library's own table so it
-  # outlives the run that answered it.
-  boundary_out fn schema_store_rename : (db: Database, gone: str, appeared: str) -> NOTHING | Fault side_effect writes "database" note "keeps a rename answer in the library's own table"
 
   boundary_out fn log_write : (event: dict<str, Value>) -> NOTHING side_effect writes "log" note "writes a line an operator reads afterwards; a failure never travels here"
 
@@ -755,7 +699,7 @@ module declaro-persistum
   # says it cannot tell, unless the query_answer was remembered. Choosing wrong
   # destroys a column, so the fault it returns names the two columns and the
   # door that answers.
-  fn name_what_is_ambiguous : (operations: list<Operation>, remembered: dict<str, str>) -> list<Operation> | Fault note "stops on a change that could be a rename or a drop and an add"
+  fn name_what_is_ambiguous : (operations: list<Operation>, declared: Declared) -> list<Operation> | Fault note "stops on a change that could be a rename or a drop and an add"
 
   # Dependencies decide the order: a table before the index on it, a parent
   # before the child that points at it.
@@ -764,6 +708,11 @@ module declaro-persistum
   # Dropping a column loses what was in it, dropping a table loses all of it,
   # and narrowing a type loses what no longer fits.
   fn name_what_destroys : (operations: list<Operation>) -> Plan note "marks which operations lose data"
+
+  # WHAT THE MIGRATION AT OPEN DID, so the log line can say it and the handle
+  # can carry it. Nobody is watching a deploy, so this is where the record of
+  # one lives.
+  fn migration_report : (plan: Plan, applied: int) -> Report note "says what the migration at open did"
 
   # Native here, built there, and the table says which.
   fn capability_of : (engine: Engine, feature: Feature) -> Capability note "answers whether an engine does this natively, and what builds it if not"
