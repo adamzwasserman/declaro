@@ -13,6 +13,12 @@ module declaro-persistum
 
   layer data
 
+  # HOW MANY DRAINERS THE CREW RUNS, AND WHERE THAT NUMBER COMES FROM. Not a
+  # caller's argument: it is a fact about the box this process runs on, and the
+  # deployment sets it. `Absent` says an unset variable is a case somebody has to
+  # handle rather than a silent default.
+  env DECLARO_CREW_SIZE : int | Absent
+
   # EVERY SIDE OF THE WORLD THIS MODULE TOUCHES, LISTED ONCE. A boundary naming
   # a side that is not here is a fault, and a side here that nothing touches is
   # one too, so the two lists and the cards cannot drift apart.
@@ -32,6 +38,11 @@ module declaro-persistum
   #   engine      `tests/bdd/features/opening/open_database.feature`: the
   #               database carries the engine, and that is the only place it is
   #               written down.
+  #   writers     one connection per drainer, opened once and held for life.
+  #               `architecture.md:142` and `:148`: a crew is N drainers over one
+  #               room, each holding one persistent connection, because every
+  #               connection is an OS thread and opening one per write pays for
+  #               that thread every time. Reuse alone is a 6x difference.
   #   room        the waiting room writes are deposited into. `HOW-IT-SHOULD-
   #               WORK.md:184`: the library chooses the connection, opens it and
   #               closes it, and the room is the same kind of machinery. A caller
@@ -88,6 +99,7 @@ module declaro-persistum
 
   type Database = { engine: Engine
                     connection: Connection
+                    writers: list<Connection>
                     room: Room
                     shutdown: Shutdown
                     primary: str | NOTHING } note "what opening gives you, and what every later call reads"
@@ -414,8 +426,8 @@ module declaro-persistum
   # SESSION. A caller asks for a database. The target says which engine is behind
   # it, so nobody names one. `shutdown` and the bound on connections are stated
   # here because this is the only place they can be, and `shutdown` has no
-  # default because there is no safe query_answer to whether your data survives.
-  boundary_in fn session_open : (target: str, shutdown: Shutdown, connections: int) -> Database | Fault side_effect reads "caller" invokes session_connect note "opens a database for a caller; the target says which engine, so nobody names one"
+  # default because there is no safe answer to whether your data survives.
+  boundary_in fn session_open : (target: str, shutdown: Shutdown, connections: int) -> Database | Fault side_effect reads "caller" side_effect reads "env:DECLARO_CREW_SIZE" invokes session_connect note "opens a database for a caller; the target says which engine, so nobody names one"
 
   # QUERY. A caller asks a question, or declares a write. `HOW-IT-SHOULD-WORK.md`
   # names four ways to spell it and one meaning: pseudo-SQL, Django, Prisma and
@@ -445,7 +457,7 @@ module declaro-persistum
   # pure function reads no clock. This is the fourth role, added 2026-09-17: the
   # program asks, rather than the world calling in. It stands with the doors,
   # calls nothing, and heads no chain, and the three orchestrators that need the
-  # time call it and hand its query_answer to the pure functions.
+  # time call it and hand its answer to the pure functions.
   # LIFECYCLE. THE DATABASES THAT ASKED TO REPLICATE AT EXIT. `lifecycle_register`
   # writes this list as each one opens, and nothing else reads it. The signal
   # carries no arguments, so without this reader the door would have to be handed
@@ -457,7 +469,7 @@ module declaro-persistum
   # QUERY. A caller comes back for the write it deposited. `write_queue.feature`:
   # a ticket belongs to exactly one caller, so a failure reaches that caller and
   # nobody else, and a caller draws its own atomicity boundary by choosing when
-  # to query_deliver. Deposit hands out the ticket; this is where it is spent.
+  # to collect. Deposit hands out the ticket; this is where it is spent.
   boundary_in fn query_collect : (db: Database, ticket: Ticket) -> Receipt | Fault side_effect reads "caller" invokes query_deliver note "hands a caller the outcome of a write it deposited earlier"
 
   # NO FLUSH DOOR. Decided 2026-09-17. `architecture.md:308`: no caller waits for
@@ -482,7 +494,7 @@ module declaro-persistum
   #
   # Works out which engine the target names, connects, copies the whole database
   # if this copy is cold, and hands back the handle everything downstream reads.
-  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, room_make, replicates, lifecycle_install_handler, lifecycle_register, turso_pull, schema_read_declared, refuse_owned_names, schema_from_declared, schema_inspect, migration_needed, difference, name_what_is_ambiguous, order_operations, name_what_destroys, refuse_undeclared_loss, capability_of, mechanism_for, spell_view, spell_operation, migration_report, query_run_statement, log_write note "works out the engine, connects, and builds the handle everything downstream reads"
+  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, crew_size, room_make, replicates, lifecycle_install_handler, lifecycle_register, turso_pull, schema_read_declared, refuse_owned_names, schema_from_declared, schema_inspect, migration_needed, difference, name_what_is_ambiguous, order_operations, name_what_destroys, refuse_undeclared_loss, capability_of, mechanism_for, spell_view, spell_operation, migration_report, query_run_statement, log_write note "works out the engine, connects, and builds the handle everything downstream reads"
 
   # Checks the columns against the model, builds the declaration, renders it for
   # this engine, runs it, and shapes what comes back.
@@ -503,7 +515,7 @@ module declaro-persistum
   # the same question: is a writer waiting. `architecture.md:308` has
   # `replicate_if_idle` ask it, and the drainer is what knows the query_answer. Split
   # across two orchestrators, it gets asked twice and answered twice.
-  orchestrator fn lifecycle_catch_up : (catching_up: CatchingUp) -> CatchingUp | Fault invokes writer_waiting, next_in_order, query_run_statement, worth_retrying, budget_spent, clock_read, next_wait, receipt_for, room_post_receipt, replicates, turso_push, turso_pull, log_write note "spends a free turn draining the room, then syncing if nobody is writing"
+  orchestrator fn lifecycle_catch_up : (catching_up: CatchingUp) -> CatchingUp | Fault invokes writer_waiting, next_in_order, query_begin_concurrent, query_run_statement, worth_retrying, budget_spent, clock_read, next_wait, receipt_for, room_post_receipt, replicates, turso_push, turso_pull, log_write note "spends a free turn draining the room, then syncing if nobody is writing"
 
 
   # --- column 3: output I/O, and there are four ways out ------------------
@@ -534,6 +546,12 @@ module declaro-persistum
   # as a value, never as a log line. `architecture.md:116` is why it can only be
   # reached from column 2: writing a log line is I/O, so a function in the
   # middle that logs has reached outside without changing its signature.
+  # WITHOUT THIS THE CREW IS ORDINARY LOCKING. `architecture.md:220`: BEGIN
+  # CONCURRENT is mandatory on a deposited write, and it is what lets several
+  # drainers overlap inside the engine instead of queueing behind one writer.
+  # Each drainer says it on its own connection, once per write.
+  boundary_out fn query_begin_concurrent : (writer: Connection) -> NOTHING | Fault side_effect writes "database" note "opens one write so drainers overlap rather than queue"
+
   # A WRITE LEAVES HERE AND THE CALLER DOES NOT WAIT. `architecture.md:201`: the
   # caller deposits and gets a ticket back immediately, and a crew of drainers
   # empties the queue afterwards. The room is not the outside world, but a value
@@ -554,7 +572,7 @@ module declaro-persistum
   boundary_out fn lifecycle_register : (db: Database) -> NOTHING | Fault side_effect writes "shutdown list" note "adds a replicating database to the list shutdown works through"
 
   # WAITS FOR THIS ONE TICKET AND TAKES IT OUT. The caller is parked here until
-  # the drainer posts what happened, which is why a room_deposit could return at once.
+  # the drainer posts what happened, which is why a deposit could return at once.
   boundary_out fn room_release_ticket : (room: Room, ticket: Ticket) -> Receipt | Fault side_effect reads_writes "room" note "waits for one ticket's outcome and takes it out of the room"
 
   # THE DRAINER PUTS THE OUTCOME WHERE THE WAITING CALLER WILL FIND IT. A
@@ -601,7 +619,13 @@ module declaro-persistum
   # rule of its own.
   fn refuse_unusable_settings : (engine: Engine, settings: dict<str, Value>) -> dict<str, Value> | Fault note "refuses a setting the detected engine cannot use, rather than ignoring it"
 
-  # The caller's number is a request, not the query_answer: a crew is local-only
+  # A CREW IS FOR A LOCAL DATABASE. `architecture.md:154`: a replicated database
+  # holds one connection by construction, so N drainers there are N coroutines
+  # queued behind one lock. Local runs what the deployment asked for; replicated
+  # runs one, whatever it asked for.
+  fn crew_size : (asked: int | NOTHING, replicated: bool) -> int note "settles how many drainers this database runs"
+
+  # The caller's number is a request, not the answer: a crew is local-only
   # (`architecture.md:154`) and a second sync connection to a replica fails
   # (`architecture.md:179`). WHAT POSTGRESQL PERMITS IS NOT WRITTEN ANYWHERE I
   # HAVE READ, so a third of this table is missing.
@@ -643,11 +667,11 @@ module declaro-persistum
   #
   # NO TABLE FOR THE READ AND WRITE FORK, BECAUSE THE VOCABULARY ALREADY SPLITS.
   # A `dispatch by_wanted` stood here with eighteen rows pointing at two sinks,
-  # which looked like eighteen decisions and was one: is this a read or a write.
-  # `readings` and `writings` are that column, written once. `query_answer`
-  # reaches both sinks, and which one runs is decided by the word it holds.
-  # What actually differs between `one`, `count` and `sum` is not a fork at all;
-  # it is inside `compile_statement`, where it belongs.
+  # which read as eighteen decisions and was one: is this a read or a write.
+  # `readings` and `writings` are that column, written once, and the orchestrator
+  # works from it. A two-row table was tried on 2026-09-20 and taken out the same
+  # hour: it changed no decision, and what it would have added is a picture of
+  # which branch runs, which is a runtime fact no edge on this map claims.
 
   # THIS IS WHAT KEEPS `query_ask` ONE DOOR. Four doors would say the caller entered
   # four different buildings. One door carrying which entry point was used says
@@ -692,7 +716,7 @@ module declaro-persistum
   # Asked of the fault's kind, never its message.
   fn worth_retrying : (fault: Fault) -> bool note "answers whether a failure is worth another attempt, asked of its kind"
 
-  # A bounded budget, and spending it is an query_answer of its own kind.
+  # A bounded budget, and spending it is an answer of its own kind.
   fn budget_spent : (attempts: int, budget: int) -> bool note "answers whether the retry budget is gone"
 
   # --- what `query_deliver` and the drainer reach -------------------------------
