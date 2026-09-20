@@ -19,6 +19,13 @@ module declaro-persistum
   # handle rather than a silent default.
   env DECLARO_CREW_SIZE : int | Absent
 
+  # HOW MANY CONNECTIONS THIS DEPLOYMENT MAY HOLD, FROM THE SAME PLACE. It was a
+  # door argument until 2026-09-20, which asked a caller for a number about the
+  # box rather than about the data. Taking it here also closes a hole: what
+  # PostgreSQL permits is written in none of the sources, and with the number
+  # declared by the deployment there is no per-engine table to invent.
+  env DECLARO_CONNECTIONS : int | Absent
+
   # EVERY SIDE OF THE WORLD THIS MODULE TOUCHES, LISTED ONCE. A boundary naming
   # a side that is not here is a fault, and a side here that nothing touches is
   # one too, so the two lists and the cards cannot drift apart.
@@ -364,7 +371,7 @@ module declaro-persistum
   # step returned, in the order the chain runs them.
   type Connecting = { target: str
                       shutdown: Shutdown
-                      connections: int
+                      connections: int | NOTHING
                       engine: Engine
                       settings: dict<str, Value>
                       permitted: int
@@ -441,9 +448,9 @@ module declaro-persistum
 
   # SESSION. A caller asks for a database. The target says which engine is behind
   # it, so nobody names one. `shutdown` and the bound on connections are stated
-  # here because this is the only place they can be, and `shutdown` has no
+  # here because this is the only place it can be, and `shutdown` has no
   # default because there is no safe answer to whether your data survives.
-  boundary_in fn session_open : (target: str, shutdown: Shutdown, connections: int) -> Database | Fault side_effect reads "caller" side_effect reads "env:DECLARO_CREW_SIZE" invokes session_connect note "opens a database for a caller; the target says which engine, so nobody names one"
+  boundary_in fn session_open : (target: str, shutdown: Shutdown) -> Database | Fault side_effect reads "caller" side_effect reads "env:DECLARO_CREW_SIZE" side_effect reads "env:DECLARO_CONNECTIONS" invokes session_connect note "opens a database for a caller; the target says which engine, so nobody names one"
 
   # QUERY. A caller asks a question, or declares a write. `HOW-IT-SHOULD-WORK.md`
   # names four ways to spell it and one meaning: pseudo-SQL, Django, Prisma and
@@ -670,11 +677,11 @@ module declaro-persistum
   # runs one, whatever it asked for.
   fn crew_size : (asked: int | NOTHING, replicated: bool) -> int note "settles how many drainers this database runs"
 
-  # The caller's number is a request, not the answer: a crew is local-only
-  # (`architecture.md:154`) and a second sync connection to a replica fails
-  # (`architecture.md:179`). WHAT POSTGRESQL PERMITS IS NOT WRITTEN ANYWHERE I
-  # HAVE READ, so a third of this table is missing.
-  fn permitted_connections : (engine: Engine, connections: int) -> int | Fault note "settles how many connections this engine actually permits"
+  # THE DEPLOYMENT ASKS AND ONE RULE OVERRIDES IT. A replicated database holds
+  # one sync connection, measured against a real primary
+  # (`architecture.md:179`), whatever the deployment set. Everything else gets
+  # what it asked for, and an unset variable is a case rather than a default.
+  fn permitted_connections : (asked: int | NOTHING, replicated: bool) -> int | Fault note "settles how many connections this engine actually permits"
 
   # --- what `query_answer` reaches ----------------------------------------------
 
