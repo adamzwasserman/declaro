@@ -13,6 +13,12 @@ module declaro-persistum
 
   layer data
 
+  # EVERY SIDE OF THE WORLD THIS MODULE TOUCHES, LISTED ONCE. A boundary naming
+  # a side that is not here is a fault, and a side here that nothing touches is
+  # one too, so the two lists and the cards cannot drift apart.
+  inputs = { "caller" : "a library call from the host program", "models" : "the Pydantic models the host declares", "database" : "what a database says it holds", "turso" : "the sync channel, inbound", "clock" : "the wall clock", "signal" : "the platform's shutdown", "scheduler" : "a spare turn from the runtime", "room" : "the waiting room, read by a caller collecting" }
+  outputs = { "database" : "statements, and the connection they run on", "turso" : "the sync channel, outbound", "room" : "writes deposited and outcomes posted", "signal" : "the process's one handler", "shutdown list" : "the databases shutdown works through", "log" : "what an operator reads afterwards" }
+
   # `Database` IS BACK, AND EVERY FIELD NOW HAS A LINE BEHIND IT. It was cut for
   # being assembled out of signatures I had just written. It returns because
   # `session_connect` is the function whose whole job is to produce it.
@@ -377,7 +383,7 @@ module declaro-persistum
   # it, so nobody names one. `shutdown` and the bound on connections are stated
   # here because this is the only place they can be, and `shutdown` has no
   # default because there is no safe query_answer to whether your data survives.
-  boundary_in fn session_open : (target: str, shutdown: Shutdown, connections: int) -> Database | Fault side_effect reads "network" invokes session_connect note "opens a database for a caller; the target says which engine, so nobody names one"
+  boundary_in fn session_open : (target: str, shutdown: Shutdown, connections: int) -> Database | Fault side_effect reads "caller" invokes session_connect note "opens a database for a caller; the target says which engine, so nobody names one"
 
   # QUERY. A caller asks a question, or declares a write. `HOW-IT-SHOULD-WORK.md`
   # names four ways to spell it and one meaning: pseudo-SQL, Django, Prisma and
@@ -480,7 +486,7 @@ module declaro-persistum
   # direction: a cold open copies the whole database before returning, and
   # shutdown pushes until Turso has everything. Two callers, two
   # directions, one connection. A card is a function, not a connection.
-  boundary_out fn turso_pull : (db: Database) -> NOTHING | Fault side_effect reads "turso" note "brings down what Turso has and this copy does not"
+  reader fn turso_pull : (db: Database) -> NOTHING | Fault side_effect reads "turso" note "brings down what Turso has and this copy does not"
   boundary_out fn turso_push : (db: Database) -> NOTHING | Fault side_effect writes "turso" note "sends local commits to Turso"
 
   # THE ODD ONE, AND IT RETURNS NOTHING. Every other outward call hands back a

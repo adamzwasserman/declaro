@@ -12,6 +12,10 @@ module declaro-ximinez
 
   layer tooling
 
+  # EVERY SIDE OF THE WORLD THIS MODULE TOUCHES, LISTED ONCE.
+  inputs = { "argv" : "what the operator or the hook typed", "files" : "the source and model files it was pointed at" }
+  outputs = { "terminal" : "what the developer reads", "log" : "what an operator reads afterwards" }
+
   # A LOCAL VARIABLE AS THE CHECKER SEES IT. Section 6.2: a per-function symbol
   # table tracking the name, the declared type, where it is, whether it was
   # given a value and whether anything reads it.

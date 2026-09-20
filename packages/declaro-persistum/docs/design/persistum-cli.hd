@@ -13,6 +13,10 @@ module declaro-persistum-cli
 
   layer tooling
 
+  # EVERY SIDE OF THE WORLD THIS MODULE TOUCHES, LISTED ONCE.
+  inputs = { "argv" : "what the operator typed", "files" : "the operator's own schema files", "terminal" : "the operator, when one is there", "declaro-persistum" : "what the library answers" }
+  outputs = { "declaro-persistum" : "what the library is asked to do", "files" : "snapshots and generated types", "terminal" : "what the operator reads", "log" : "what an operator reads afterwards" }
+
   # THE ONE PLACE THE ENVIRONMENT IS READ. `Absent` says the variable may be
   # missing, which is the whole point: an operator who typed no URL falls back
   # to this, and an operator who set neither gets a refusal naming both.

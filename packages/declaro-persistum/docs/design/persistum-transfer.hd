@@ -14,6 +14,10 @@ module declaro-persistum-transfer
 
   layer tooling
 
+  # EVERY SIDE OF THE WORLD THIS MODULE TOUCHES, LISTED ONCE.
+  inputs = { "caller" : "an operator asking for a copy", "database" : "the source's tables and rows" }
+  outputs = { "database" : "the target's rows, and its checks turned off and back", "log" : "what an operator reads afterwards" }
+
   set engines = { "sqlite", "postgresql", "turso" } note "the three engines a transfer moves between"
   vocabulary Engine = { engines } note "which engine the target speaks"
 

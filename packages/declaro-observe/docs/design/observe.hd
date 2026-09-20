@@ -14,6 +14,10 @@ module declaro-observe
 
   layer application
 
+  # EVERY SIDE OF THE WORLD THIS MODULE TOUCHES, LISTED ONCE.
+  inputs = { "HTTP" : "a request arriving at the application", "caller" : "the application saying an event happened", "files" : "the declared configuration and projections", "clock" : "the wall clock", "random" : "a new identity for an event" }
+  outputs = { "declaro-persistum" : "events written and projections declared", "log" : "what an operator reads afterwards" }
+
   # AN EVENT IS DATA, AND IT IS WRITTEN ONCE. The seven fields are the
   # document's own. Nothing updates an event; a correction is another event.
   type Event = { id: str
