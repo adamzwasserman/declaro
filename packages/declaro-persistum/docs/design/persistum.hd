@@ -340,6 +340,13 @@ module declaro-persistum
                      rows: Rows
                      query_answer: Answer }
 
+  # THE SAME QUESTION IS COMPILED ONCE. `running/a_statement_is_built_once.
+  # feature`: the same declaration asked a thousand times is a thousand
+  # identical statements, and building them is work nobody asked for. What is
+  # held is the compiling, never the rows and never the values: each asking
+  # binds its own, so a held statement can never answer with stale data.
+  store compiled = compile_statement "a statement is built once; running/a_statement_is_built_once.feature"
+
   # --- column 1: input I/O, and there are three ways in -------------------
   #
   # A LIBRARY'S WORLD IS ITS CALLER. It has no file waiting to be read, so the
@@ -433,7 +440,7 @@ module declaro-persistum
 
   # Checks the columns against the model, builds the declaration, renders it for
   # this engine, runs it, and shapes what comes back.
-  orchestrator fn query_answer : (asking: Answering) -> Answering | Fault invokes by_grammar, refuse_undeclared_columns, join_between, compile_statement, by_wanted, answer_from_rows, log_write
+  orchestrator fn query_answer : (asking: Answering) -> Answering | Fault invokes by_grammar, refuse_undeclared_columns, join_between, compile_statement, by_wanted, answer_from_rows, log_write side_effect reads_writes "store:compiled"
 
   # Pushes until Turso has everything, retrying rather than giving up,
   # then closes. The one place blocking is correct.
