@@ -102,6 +102,11 @@ module declaro-persistum
   # is a promise about speed and a constraint is a rule about a column, and both
   # are declared the way a column is. Without them here, the desired state could
   # not hold what `Table` already knows how to carry.
+  #
+  # `dropping` IS HOW LOSING DATA IS ASKED FOR. Decided 2026-09-20: a column
+  # absent from a model is not permission to drop it, because a typo is also a
+  # column absent from a model. Naming it here is the permission, and it is a
+  # declaration like every other, so nobody has to be at a deploy to give it.
   # EVERYTHING THE CODE DECLARES, IN ONE ANSWER. A view is declared against the
   # models, so the two arrive together or the target schema is half built.
   type Declared = { models: list<Model>
@@ -109,6 +114,7 @@ module declaro-persistum
 
   type Model = { table: str
                  columns: list<Column>
+                 dropping: list<str>
                  indexes: list<Index>
                  constraints: list<Constraint>
                  references: dict<str, str> } note "your description of one table, which is the only description there is"
@@ -454,7 +460,7 @@ module declaro-persistum
   #
   # Works out which engine the target names, connects, copies the whole database
   # if this copy is cold, and hands back the handle everything downstream reads.
-  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, room_make, replicates, lifecycle_install_handler, lifecycle_register, turso_pull, schema_read_declared, refuse_owned_names, schema_from_declared, schema_inspect, migration_needed, difference, name_what_is_ambiguous, order_operations, name_what_destroys, capability_of, mechanism_for, spell_view, spell_operation, migration_report, query_run_statement, log_write note "works out the engine, connects, and builds the handle everything downstream reads"
+  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, room_make, replicates, lifecycle_install_handler, lifecycle_register, turso_pull, schema_read_declared, refuse_owned_names, schema_from_declared, schema_inspect, migration_needed, difference, name_what_is_ambiguous, order_operations, name_what_destroys, refuse_undeclared_loss, capability_of, mechanism_for, spell_view, spell_operation, migration_report, query_run_statement, log_write note "works out the engine, connects, and builds the handle everything downstream reads"
 
   # Checks the columns against the model, builds the declaration, renders it for
   # this engine, runs it, and shapes what comes back.
@@ -689,6 +695,12 @@ module declaro-persistum
   # and from nothing the database says.
   fn schema_from_declared : (declared: Declared) -> Schema | Fault note "builds the target schema from what the code declares, and from nothing else"
 
+  # NOTHING IS DESTROYED THAT NOBODY DECLARED. A migration runs at open with no
+  # one watching, so an operation that loses data and is not named in `dropping`
+  # stops the open, and the fault says which column or table it was and what to
+  # write to allow it. The models stay the only place a decision is made.
+  fn refuse_undeclared_loss : (plan: Plan, declared: Declared) -> Plan | Fault note "stops a migration that would destroy something no model asked to lose"
+
   # A HANDLE HANDED BACK BEFORE THE DATABASE MATCHES THE MODELS IS A HANDLE TO A
   # DATABASE THAT WILL REFUSE THE FIRST QUESTION ASKED OF IT. So opening
   # compares the two and says whether anything has to run first.
@@ -713,7 +725,8 @@ module declaro-persistum
   fn order_operations : (operations: list<Operation>) -> list<Operation> | Fault note "puts the operations in an order their dependencies allow"
 
   # Dropping a column loses what was in it, dropping a table loses all of it,
-  # and narrowing a type loses what no longer fits.
+  # and narrowing a type loses what no longer fits. Each one is marked here, and
+  # `refuse_undeclared_loss` is what stops the unmarked ones running.
   fn name_what_destroys : (operations: list<Operation>) -> Plan note "marks which operations lose data"
 
   # WHAT THE MIGRATION AT OPEN DID, so the log line can say it and the handle
