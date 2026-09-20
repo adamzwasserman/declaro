@@ -340,12 +340,15 @@ module declaro-persistum
                      rows: Rows
                      query_answer: Answer } note "what answering a question carries, step by step in order"
 
-  # THE SAME QUESTION IS COMPILED ONCE. `running/a_statement_is_built_once.
-  # feature`: the same declaration asked a thousand times is a thousand
-  # identical statements, and building them is work nobody asked for. What is
-  # held is the compiling, never the rows and never the values: each asking
-  # binds its own, so a held statement can never answer with stale data.
-  store compiled = compile_statement "a statement is built once; running/a_statement_is_built_once.feature"
+  # NO STORE, AND THE REASON IS A MISSING NUMBER. `running/a_statement_is_built_
+  # once.feature` asks that the same question not be compiled twice, and a
+  # `store compiled = compile_statement` said so here until 2026-09-20. It came
+  # off because nothing has ever timed one compile. A store's reason string is
+  # meant to carry a measurement, and ours carried a feature reference, which
+  # made it the one card on the board resting on a claim nobody had checked.
+  #
+  # It comes back when somebody times a compile against a round trip to the
+  # engine and the number says it is worth keeping.
 
   # --- column 1: input I/O, and there are three ways in -------------------
   #
@@ -440,7 +443,7 @@ module declaro-persistum
 
   # Checks the columns against the model, builds the declaration, renders it for
   # this engine, runs it, and shapes what comes back.
-  orchestrator fn query_answer : (asking: Answering) -> Answering | Fault invokes by_grammar, refuse_undeclared_columns, join_between, compile_statement, by_wanted, answer_from_rows, log_write side_effect reads_writes "store:compiled" note "turns a caller's question into rows, a number, or a ticket"
+  orchestrator fn query_answer : (asking: Answering) -> Answering | Fault invokes by_grammar, refuse_undeclared_columns, join_between, compile_statement, by_wanted, answer_from_rows, log_write note "turns a caller's question into rows, a number, or a ticket"
 
   # Pushes until Turso has everything, retrying rather than giving up,
   # then closes. The one place blocking is correct.
