@@ -42,7 +42,7 @@ module declaro-persistum-cli
   type Fault = { what_went_wrong: str
                  what_to_do_instead: str }
 
-  # `run_command`'S OWN RECORD.
+  # `command_dispatch`'S OWN RECORD.
   type Running = { argv: list<str>
                    command: Command
                    engine: Engine
@@ -52,7 +52,7 @@ module declaro-persistum-cli
 
   # COMMAND. An operator types a command. The URL may be here or in the
   # environment, and if it is in neither this door refuses rather than guessing.
-  boundary_in fn command_run : (argv: list<str>) -> int | Fault side_effect reads "argv" side_effect reads "env:DECLARO_DATABASE_URL" invokes run_command
+  boundary_in fn command_run : (argv: list<str>) -> int | Fault side_effect reads "argv" side_effect reads "env:DECLARO_DATABASE_URL" invokes command_dispatch
 
   # THE OPERATOR IS ASKED ONLY IF THEY ARE THERE TO ANSWER.
   # `cli/overwriting_a_snapshot.feature`: an automated run must not stop on a
@@ -70,7 +70,7 @@ module declaro-persistum-cli
   # Reads what was typed, settles the engine, asks before overwriting a
   # snapshot when somebody is there to answer, runs the command the table names
   # and turns what came back into an exit code.
-  orchestrator fn run_command : (running: Running) -> Running | Fault invokes parse_arguments, chosen_engine, terminal_interactive, terminal_ask, overwrite_agreed, by_command, exit_code_for, print_line, log_to_console
+  orchestrator fn command_dispatch : (running: Running) -> Running | Fault invokes parse_arguments, chosen_engine, terminal_interactive, terminal_ask, overwrite_agreed, by_command, exit_code_for, print_line, log_to_console
 
   # --- the table that says what each command does -------------------------
 
