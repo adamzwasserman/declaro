@@ -20,3 +20,23 @@ Feature: session_open_connection -- Asking the driver for a connection
     When the driver is asked for a connection to a host that does not exist
     Then a fault comes back naming the target
     And no handle is returned
+
+  # MOVED HERE 2026-09-21 from `permitted_connections.feature`. That function
+  # settles a number and runs nothing: it reads no clock, opens nothing, and
+  # neither its arguments nor its answer can carry a connection. Whether a read
+  # waits, whether five overlap, and whether reads queue behind a sync are all
+  # answered by what this boundary opens, so they are asked here.
+
+  Scenario: a read does not wait for a writer
+    Given a write in flight
+    When a caller reads
+    Then the read answers without waiting for the write to finish
+
+  Scenario: reads run beside each other
+    When five callers read at once, each taking time
+    Then the five overlap rather than running one after another
+
+  Scenario: reads do not queue behind the sync connection
+    Given a replicated database
+    When many callers read and write at once
+    Then the reads did not queue behind it

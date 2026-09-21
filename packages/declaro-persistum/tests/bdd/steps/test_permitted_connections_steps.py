@@ -6,23 +6,21 @@ It settles a number and nothing else. It opens nothing, reads no environment,
 and never sees a connection. The number the deployment sets arrives as `asked`,
 already read by whoever opened the database.
 
-WHAT THE FEATURE ASKS THAT THIS FUNCTION CAN ANSWER. Six of the ten scenarios
-are about the number: a replica holds one, a local database holds what the
+WHAT THE FEATURE ASKS, ALL OF WHICH THIS FUNCTION ANSWERS. Every scenario is
+about the number: a replica holds one, a local database holds what the
 deployment set, an unset number is a case rather than a default, a thousand
 callers do not raise the number, the number is declared rather than measured off
 the machine, and a caller gets a count back instead of a connection.
 
-WHAT IT CANNOT ANSWER, AND WHY THOSE SCENARIOS SKIP. Four scenarios are about
+WHAT THIS FEATURE USED TO ASK AND NO LONGER DOES. Three scenarios were about
 what happens while a database is running: a read not waiting for a writer, five
-reads overlapping, a connection closed after a read raises, and reads not
-queueing behind the sync connection. Every one of them needs a connection to
-exist and time to pass. The declaration gives those to other functions --
-`session_open_connection` (line 552), `session_open_writer` (line 584),
-`session_close_connection` (line 528) and the room that `lifecycle_catch_up`
-drains (line 541) -- and all of them are `boundary_out`, which this one is not.
-A step here that pretended to measure overlap would be measuring a stub. Each
-such step calls `pytest.skip` naming the function that owes the answer, so the
-gap is printed rather than hidden inside a pass.
+reads overlapping, and reads not queueing behind the sync connection. Each
+needed a connection to exist and time to pass, so each step here called
+`pytest.skip` naming the function that owed the answer. A skip printed the gap
+rather than hiding it, but it left this feature describing somebody else's
+function. On 2026-09-21 the three moved to
+`features/session/session_open_connection.feature`, which is the boundary that
+opens what they are asking about.
 
 SCENARIO 10 DECIDES ONE CASE THE OTHERS LEAVE OPEN. "a replicated database" sets
 no number, and then asks for exactly one connection to the primary. So
@@ -82,22 +80,7 @@ def _replicated(asking: dict[str, Any]) -> None:
     asking["replicated"] = True
 
 
-@given("a write in flight")
-def _write_in_flight(asking: dict[str, Any]) -> None:
-    asking["needs"] = "a live writer, which this function never holds"
-
-
 # --- what the callers do ----------------------------------------------------
-
-
-@when("a caller reads")
-def _a_caller_reads(asking: dict[str, Any]) -> None:
-    asking["needs"] = "a read, which this function never performs"
-
-
-@when("five callers read at once, each taking time")
-def _five_callers_read(asking: dict[str, Any]) -> None:
-    asking["needs"] = "five reads and a clock, and this function reads no clock"
 
 
 @when("many callers read and write at once")
@@ -141,23 +124,6 @@ def _the_answer_says_so(asking: dict[str, Any]) -> None:
     assert answer["what_to_do_instead"]
 
 
-@then("the read answers without waiting for the write to finish")
-def _read_does_not_wait(asking: dict[str, Any]) -> None:
-    pytest.skip(
-        "permitted_connections settles a number and runs nothing. Whether a read "
-        "waits is owned by session_open_connection (persistum.hd line 552) and the "
-        "room lifecycle_catch_up drains (line 541)."
-    )
-
-
-@then("the five overlap rather than running one after another")
-def _five_overlap(asking: dict[str, Any]) -> None:
-    pytest.skip(
-        "Overlap needs five reads and a clock. This function reads no clock and "
-        "opens nothing; session_open_connection (persistum.hd line 552) owns it."
-    )
-
-
 @then("no connection reached any caller")
 def _no_connection_reached_a_caller(asking: dict[str, Any]) -> None:
     # What this function can prove: it deals in counts. Neither its arguments nor
@@ -191,12 +157,3 @@ def _exactly_one_to_the_primary(asking: dict[str, Any]) -> None:
     # Measured 2026-08-12 against a real primary: a second answers
     # "database tape error: database is busy".
     assert permitted_connections(asking["asked"], asking["replicated"]) == 1
-
-
-@then("the reads did not queue behind it")
-def _reads_did_not_queue(asking: dict[str, Any]) -> None:
-    pytest.skip(
-        "One sync connection is a fact about the channel to the primary and says "
-        "nothing about reads. Proving reads do not queue needs a running database; "
-        "session_open_connection (persistum.hd line 552) owns it."
-    )
