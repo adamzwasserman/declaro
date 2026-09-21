@@ -240,10 +240,31 @@ module declaro-persistum
   set operation_kinds = { "create_table", "drop_table", "add_column", "drop_column", "alter_column", "rename_column", "rename_table", "create_index", "drop_index", "create_view", "drop_view", "insert_enum_values" } note "every schema change the differ can emit"
   vocabulary OperationKind = { operation_kinds } note "which schema change this is"
 
+  # A MIGRATION COULD NOT CREATE A TABLE, AND THAT IS WHAT THESE FIVE FIELDS ARE
+  # FOR. `detail` holds single values, so a new table's columns had nowhere to
+  # sit: `difference` could say "create `people`" and `spell_operation` was handed
+  # a name with no way to learn that `people` has an `id` and a `name`. Thirty-six
+  # scenarios failed on it, all of them the first statement any migration runs.
+  #
+  # NAMED BY THE FUNCTION THAT READS THEM, on 2026-09-21, rather than guessed.
+  # `columns` carries a new table's columns and a changed one's whole after-shape.
+  # `indexes` and `constraints` are what a SQLite rebuild has to put back, because
+  # that engine alters a column by making a new table and copying into it.
+  # `copying` is which columns that rebuild carries across, and only `difference`
+  # can know it, because only `difference` holds both the live schema and the
+  # target. `values` is what `insert_enum_values` inserts.
+  #
+  # EACH ONE IS EMPTY ON EVERY KIND THAT NAMES NONE, which is a value rather than
+  # an absence, so nothing has to be looked up and found missing.
   type Operation = { kind: OperationKind
                      table: str
                      detail: dict<str, Value>
-                     destroys: bool } note "one schema change, and whether it destroys anything"
+                     columns: list<Column>
+                     indexes: list<Index>
+                     constraints: list<Constraint>
+                     copying: list<str>
+                     values: list<Value>
+                     destroys: bool } note "one schema change, everything it needs spelled out, and whether it destroys anything"
 
   # The operations in the order they would run.
   #

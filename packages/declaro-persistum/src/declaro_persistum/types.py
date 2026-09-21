@@ -256,10 +256,29 @@ class Schema(TypedDict):
     views: list[View]
 
 
+# A MIGRATION COULD NOT CREATE A TABLE UNTIL THESE FIVE FIELDS EXISTED. `detail`
+# holds single values, so a new table's columns had nowhere to sit: `difference`
+# could say "create `people`" and `spell_operation` was handed a name with no way
+# to learn that `people` has an `id` and a `name`. Thirty-six scenarios failed on
+# it, all of them the first statement any migration runs.
+#
+# EACH IS EMPTY ON EVERY KIND THAT NAMES NONE, which is a value rather than an
+# absence, so nothing has to be looked up and found missing.
 class Operation(TypedDict):
     kind: OperationKind
     table: str
     detail: dict[str, Value]
+    # A new table's columns, and a changed table's whole shape afterwards.
+    columns: list[Column]
+    # What a SQLite rebuild puts back: that engine alters a column by making a
+    # new table and copying into it, so its indexes and constraints come along.
+    indexes: list[Index]
+    constraints: list[Constraint]
+    # Which columns that rebuild carries across. Only `difference` can know it,
+    # because only `difference` holds both the live schema and the target.
+    copying: list[str]
+    # What `insert_enum_values` inserts.
+    values: list[Value]
     destroys: bool
 
 

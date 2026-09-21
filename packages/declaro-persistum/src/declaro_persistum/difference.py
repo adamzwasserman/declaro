@@ -30,14 +30,31 @@ later unless a model named it. Deciding here would need the models, which this
 function is not given.
 
 WHAT IT DOES NOT COMPARE, said out loud rather than left to be discovered.
-`Table` carries indexes and constraints and this reads neither, so a changed
-index emits nothing. `Column` carries facets and a reference and this compares
-only the declared type, so a column that keeps its type and changes its floor
-emits nothing either. Both are gaps in what `Operation` can carry: `detail` is
-a `dict<str, Value>`, and a `Value` is one of str, int, float, bool or nothing,
-so an index's list of columns has nowhere to sit. Widening that type is not
-this card's to do, and the gap is recorded here so it is not mistaken for a
-comparison that ran and found nothing.
+`Table` carries indexes and constraints and this reads neither as a comparison,
+so a changed index emits no operation of its own. `Column` carries facets and a
+reference and this compares only the declared type, so a column that keeps its
+type and changes its floor emits nothing either. Those are still gaps, and they
+are recorded here so neither is mistaken for a comparison that ran and found
+nothing.
+
+WHAT IT NOW HANDS OVER, WHICH IT COULD NOT BEFORE 2026-09-21. `Operation` grew
+`columns`, `indexes`, `constraints`, `copying` and `values`, so a `create_table`
+no longer arrives at `fn spell_operation` as a bare name. Every operation this
+function builds fills the fields its kind names and leaves the rest empty:
+
+  `create_table` carries the target table's columns, indexes and constraints.
+  `add_column` carries the one column being added.
+  `alter_column` and `drop_column` carry the target table's whole shape
+  afterwards, because SQLite and Turso carry either out by building a new table
+  and copying into it, and the new table needs every column, index and
+  constraint the old one is meant to end with.
+  `copying` is which columns that copy carries across, which is the columns the
+  live table and the target table both have. Only this function can say it,
+  because only this function holds both schemas.
+
+A COLUMN THAT DISAPPEARS IS NOT IN `copying`, which is how the rebuild loses it
+without being told to. A column being altered is, because the engine converts
+what is already stored.
 
 A RENAME IS NOT WORKED OUT HERE EITHER. A column gone and another appeared is
 either a rename or a drop and an add, and the difference is your data.
@@ -48,7 +65,17 @@ drop and an add come back, and that pair is exactly what that card is given.
 
 from __future__ import annotations
 
-from declaro_persistum.types import Column, Operation, OperationKind, Schema, Table, Value, View
+from declaro_persistum.types import (
+    Column,
+    Constraint,
+    Index,
+    Operation,
+    OperationKind,
+    Schema,
+    Table,
+    Value,
+    View,
+)
 
 # WHETHER CARRYING AN OPERATION OUT DESTROYS SOMETHING, ONE ROW PER KIND. The
 # table is total over `OperationKind`, so a kind added to the vocabulary and
@@ -75,14 +102,38 @@ DESTROYS: dict[OperationKind, bool] = {
 }
 
 
-def _operation(kind: OperationKind, name: str, detail: dict[str, Value]) -> Operation:
-    """One operation, carrying the name it acts on and whether it destroys.
+def _operation(
+    kind: OperationKind,
+    name: str,
+    detail: dict[str, Value],
+    columns: list[Column],
+    indexes: list[Index],
+    constraints: list[Constraint],
+    copying: list[str],
+    values: list[Value],
+) -> Operation:
+    """One operation, carrying everything its kind names and whether it destroys.
 
     `Operation` calls that name `table`, and a view operation puts the view's
     name there, because a view is the object the operation acts on and the type
     has one field for it.
+
+    EVERY CALLER WRITES ALL FIVE LISTS OUT, and most of them write `[]`. An
+    argument with a default would let a caller forget one and be answered with
+    an empty list that reads exactly like a table with no columns, which is the
+    shape this package already refuses in `src/`.
     """
-    return Operation(kind=kind, table=name, detail=detail, destroys=DESTROYS[kind])
+    return Operation(
+        kind=kind,
+        table=name,
+        detail=detail,
+        columns=columns,
+        indexes=indexes,
+        constraints=constraints,
+        copying=copying,
+        values=values,
+        destroys=DESTROYS[kind],
+    )
 
 
 def _by_name[Named: Table | Column | View](items: list[Named]) -> dict[str, Named]:
@@ -92,22 +143,44 @@ def _by_name[Named: Table | Column | View](items: list[Named]) -> dict[str, Name
 
 
 def _columns_of(live: Table, target: Table) -> list[Operation]:
-    """What turns one table's live columns into its declared ones."""
+    """What turns one table's live columns into its declared ones.
+
+    A DROP AND AN ALTER CARRY THE WHOLE TABLE AFTERWARDS, because SQLite and
+    Turso carry both out by building a new table and copying into it. An add
+    carries only the column added, because every engine adds one in place.
+    """
     name = target["name"]
     held = _by_name(live["columns"])
     wanted = _by_name(target["columns"])
+    # The columns both sides have, in the order the target declares them, which
+    # is the order the copy reads and writes them in.
+    carried_across = [column for column in wanted if column in held]
 
     added = [
         _operation(
             "add_column",
             name,
             {"column": column, "declared_type": wanted[column]["declared_type"]},
+            [wanted[column]],
+            [],
+            [],
+            [],
+            [],
         )
         for column in wanted
         if column not in held
     ]
     dropped = [
-        _operation("drop_column", name, {"column": column})
+        _operation(
+            "drop_column",
+            name,
+            {"column": column},
+            target["columns"],
+            target["indexes"],
+            target["constraints"],
+            carried_across,
+            [],
+        )
         for column in held
         if column not in wanted
     ]
@@ -120,6 +193,11 @@ def _columns_of(live: Table, target: Table) -> list[Operation]:
                 "from_type": held[column]["declared_type"],
                 "to_type": wanted[column]["declared_type"],
             },
+            target["columns"],
+            target["indexes"],
+            target["constraints"],
+            carried_across,
+            [],
         )
         for column in wanted
         if column in held and held[column]["declared_type"] != wanted[column]["declared_type"]
@@ -138,15 +216,21 @@ def _views_of(live: Schema, target: Schema) -> list[Operation]:
     held = _by_name(live["views"])
     wanted = _by_name(target["views"])
 
-    created = [_operation("create_view", name, {}) for name in wanted if name not in held]
-    dropped = [_operation("drop_view", name, {}) for name in held if name not in wanted]
+    created = [
+        _operation("create_view", name, {}, [], [], [], [], [])
+        for name in wanted
+        if name not in held
+    ]
+    dropped = [
+        _operation("drop_view", name, {}, [], [], [], [], []) for name in held if name not in wanted
+    ]
     replaced = [
         operation
         for name in wanted
         if name in held and held[name] != wanted[name]
         for operation in (
-            _operation("drop_view", name, {}),
-            _operation("create_view", name, {}),
+            _operation("drop_view", name, {}, [], [], [], [], []),
+            _operation("create_view", name, {}, [], [], [], [], []),
         )
     ]
     return created + dropped + replaced
@@ -165,8 +249,25 @@ def difference(live: Schema, target: Schema) -> list[Operation]:
     held = _by_name(live["tables"])
     wanted = _by_name(target["tables"])
 
-    created = [_operation("create_table", name, {}) for name in wanted if name not in held]
-    dropped = [_operation("drop_table", name, {}) for name in held if name not in wanted]
+    created = [
+        _operation(
+            "create_table",
+            name,
+            {},
+            wanted[name]["columns"],
+            wanted[name]["indexes"],
+            wanted[name]["constraints"],
+            [],
+            [],
+        )
+        for name in wanted
+        if name not in held
+    ]
+    dropped = [
+        _operation("drop_table", name, {}, [], [], [], [], [])
+        for name in held
+        if name not in wanted
+    ]
     columns = [
         operation
         for name in wanted

@@ -8,11 +8,19 @@ the change hands back a fault instead, and the fault comes back in the return
 rather than being raised.
 
 WHAT RUNS AGAINST A REAL DATABASE, AND WHY. A statement naming a column the
-table has not got is still a plausible string, so the scenarios about the enum
-lookup and about the stamp open an in-memory SQLite database, run the spelled
-statements on it, and read the answer out of the database. Nothing here opens a
-file, a server or a network connection, and the function under test is handed
-neither.
+table has not got is still a plausible string, so every scenario here that says
+anything about rows, keys or indexes opens an in-memory SQLite database, runs
+the spelled statements on it, and reads the answer out of the database. Nothing
+here opens a file, a server or a network connection, and the function under test
+is handed neither.
+
+THIS FILE PLAYS THE APPLIER, AND SAYS SO. `spell_operation` writes statements;
+somebody else runs them, in a transaction, with foreign key enforcement off
+while a table is being rebuilt and a `PRAGMA foreign_key_check` before the
+commit. That protocol is the applier's, because `PRAGMA foreign_keys` is a
+no-op inside a transaction and so can never be one of the statements that come
+back. `_carried_out` below is that applier, written once, and every rebuild
+scenario goes through it.
 
 NOTHING HERE READS THE PACKAGE'S SOURCE. A claim about how a module is written
 is a claim the gates over `src/` make. These steps call the function and read
@@ -22,15 +30,27 @@ WHAT IS NOT SATISFIED, and is failing rather than faked. Each of these is a
 disagreement between this feature and `fn spell_operation` as the declaration
 writes it, so each needs a decision rather than more code.
 
-THE REBUILD SCENARIOS, thirty of them, opening `Given a database connection`.
-They ask for a SQLite table rebuild that preserves the rows, the indexes, the
-unique constraints, the composite primary key and the foreign keys pointing in
-and out. An `Operation` carries a kind, a table name, `detail: dict<str, Value>`
-and a flag. It does not carry the table it rewrites, and a value is a scalar, so
-a column list cannot travel in one. A function handed none of that cannot
-preserve any of it. Their steps are undefined, so each scenario says which
-sentence it died on rather than reporting a green rebuild that preserved
-nothing.
+A COMPOSITE PRIMARY KEY. Two columns each marked `primary_key` become two
+inline PRIMARY KEY clauses, which no engine takes. A table-level
+`PRIMARY KEY (a, b)` needs a `Constraint` that is not a CHECK, and
+`Constraint.rule` is a `Condition`, which is comparisons. One scenario asks for
+it and dies in its own Given, naming the SQL.
+
+A RULE ABOUT WHAT HAPPENS TO A CHILD ROW. `Column.references` carries the
+`table.column` a column points at and nothing else, so ON DELETE CASCADE has
+nowhere to sit. One scenario asks for it.
+
+A WARNING IN A LOG. This package returns faults and logs nothing, by rule. One
+scenario asks for a warning to be logged when a rebuild copies no rows.
+
+THE PRAGMA ITSELF. One scenario asks that foreign keys be temporarily disabled
+by the change. They are disabled by whoever commits, for the reason above, so
+no statement that comes back can say it.
+
+A COPY THAT FAILS ON A TYPE. One scenario stores `invalid` in a TEXT column and
+asks that converting it to INTEGER fail during the copy. SQLite has type
+affinity rather than type enforcement and stores the text unchanged, so the
+copy succeeds.
 
 THE TWO QUOTE-DOUBLING ROWS. They ask for the enum value to reach the statement
 TEXT with its quote doubled. An enum value is bound and travels beside the
@@ -50,6 +70,7 @@ retry after a crash needs no tail to tell it apart.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from collections.abc import Callable
 from typing import Any
@@ -70,7 +91,7 @@ from declaro_persistum.spell_operation import (
     temporary_name,
     type_spelled,
 )
-from declaro_persistum.types import Column, Engine, Operation, Statement, Value
+from declaro_persistum.types import Column, Engine, Index, Operation, Statement, Table, Value
 
 pytestmark = [pytest.mark.bdd, pytest.mark.precommit]
 
@@ -98,9 +119,38 @@ def _column(name: str, declared_type: str, **facets: Value) -> Column:
     }
 
 
-def _operation(kind: str, table: str, detail: dict[str, Value]) -> Operation:
-    """One schema change, as the differ would hand it over."""
-    return {"kind": kind, "table": table, "detail": detail, "destroys": False}  # type: ignore[typeddict-item]
+def _pointing_at(column: Column, parent: str | None) -> Column:
+    """The same column, pointing at a parent key or at nothing."""
+    return {**column, "references": parent}
+
+
+def _operation(
+    kind: str,
+    table: str,
+    detail: dict[str, Value],
+    columns: list[Column],
+    indexes: list[Index],
+    constraints: list[Any],
+    copying: list[str],
+    values: list[Value],
+) -> Operation:
+    """One schema change, as the differ would hand it over.
+
+    EVERY FIELD IS WRITTEN OUT, including the empty ones. An argument with a
+    default would let a scenario forget a table's columns and be answered with
+    an empty list, which reads exactly like a table that has none.
+    """
+    return {
+        "kind": kind,  # type: ignore[typeddict-item]
+        "table": table,
+        "detail": detail,
+        "columns": columns,
+        "indexes": indexes,
+        "constraints": constraints,
+        "copying": copying,
+        "values": values,
+        "destroys": False,
+    }
 
 
 def _values(statement: Statement) -> tuple[Value, ...]:
@@ -130,13 +180,124 @@ def _a_database() -> sqlite3.Connection:
     SQLite leaves foreign keys off unless they are asked for, and a lookup
     table nothing enforces accepts every value, which is the shape that passes
     a test while refusing nothing.
+
+    IT COMMITS AS IT GOES, so that the applier below can say where a
+    transaction starts and ends. `PRAGMA foreign_keys` is a no-op inside one,
+    and the driver opens one of its own unless told not to.
     """
     connection = sqlite3.connect(":memory:")
+    connection.isolation_level = None
     connection.execute("PRAGMA foreign_keys = ON")
     return connection
 
 
-# --- what a scenario establishes --------------------------------------------
+# --- the applier this file stands in for -------------------------------------
+
+
+def _refuse_the_broken_keys(broken: list[Any]) -> None:
+    """A foreign key check that found something is a failed change."""
+    raise sqlite3.IntegrityError(f"foreign key check found {broken}")
+
+
+def _committed(connection: sqlite3.Connection, spelled: list[Statement]) -> list[str]:
+    """Run the statements in one transaction, keys checked before the commit.
+
+    WHY THE ENFORCEMENT GOES OFF. A rebuild drops the table it is rewriting,
+    and dropping a table another table points at is refused while enforcement
+    is on. So the applier turns it off, rebuilds, asks the engine to check
+    every key, and only then commits. A violation rolls the whole change back,
+    which is how the original table survives a rebuild that should not have
+    run.
+
+    AND WHY THE RENAME IS THE LEGACY ONE. Renaming a table makes SQLite read
+    the whole schema again, and between the drop and the rename another table
+    is pointing at a name that is not there yet, which it refuses with `error
+    in table books: no such table: main.authors`. The legacy rename renames the
+    table and leaves every other table's text alone, which is what a rebuild
+    wants: the name at the end is the name at the start.
+    """
+    connection.execute("PRAGMA foreign_keys = OFF")
+    connection.execute("PRAGMA legacy_alter_table = ON")
+    connection.execute("BEGIN")
+    refused: list[str] = []
+    try:
+        _run(connection, spelled)
+        broken = connection.execute("PRAGMA foreign_key_check").fetchall()
+        {True: lambda: None, False: lambda: _refuse_the_broken_keys(broken)}[broken == []]()
+        connection.execute("COMMIT")
+    except sqlite3.Error as complaint:
+        connection.execute("ROLLBACK")
+        refused.append(f"{type(complaint).__name__}: {complaint}")
+    connection.execute("PRAGMA legacy_alter_table = OFF")
+    connection.execute("PRAGMA foreign_keys = ON")
+    return refused
+
+
+def _carried_out(scenario: dict, operation: Operation) -> None:
+    """Spell one change for SQLite and let the applier above carry it out."""
+    spelled = spell_operation(operation, "sqlite")
+    scenario["answer"] = spelled
+    assert isinstance(spelled, list), f"the change could not be spelled: {spelled}"
+    scenario["before_schema"] = {
+        name: _schema_sql(scenario["connection"], name) for name in scenario["schema"]
+    }
+    scenario["refused"] = _committed(scenario["connection"], spelled)
+
+
+# --- what a table looks like, here and in the database -----------------------
+
+
+def _rows_of(connection: sqlite3.Connection, table: str) -> list[dict[str, Value]]:
+    """Every row of a table, under its column names."""
+    cursor = connection.execute(f'SELECT * FROM "{table}"')
+    names = [description[0] for description in cursor.description]
+    return [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
+
+
+def _schema_sql(connection: sqlite3.Connection, table: str) -> str:
+    """The CREATE TABLE the engine kept, which is the engine's own answer."""
+    kept = connection.execute(
+        'SELECT "sql" FROM "sqlite_master" WHERE "type" = ? AND "name" = ?', ("table", table)
+    ).fetchall()
+    return "".join(row[0] or "" for row in kept)
+
+
+def _index_names(connection: sqlite3.Connection, table: str) -> list[str]:
+    """The indexes a user made on a table, and not the ones SQLite made itself."""
+    return [
+        row[0]
+        for row in connection.execute(
+            'SELECT "name" FROM "sqlite_master" WHERE "type" = ? AND "tbl_name" = ?',
+            ("index", table),
+        ).fetchall()
+        if not row[0].startswith("sqlite_autoindex")
+    ]
+
+
+def _keys_of(connection: sqlite3.Connection, table: str) -> set[tuple[str, str, str]]:
+    """Every foreign key on a table, as child column, parent table, parent column."""
+    return {
+        (row[3], row[2], row[4])
+        for row in connection.execute(f'PRAGMA foreign_key_list("{table}")').fetchall()
+    }
+
+
+def _declared_keys(scenario: dict) -> set[tuple[str, str, str]]:
+    """Every foreign key the scenario's tables declare, in the same shape."""
+    return {
+        (column["name"], *str(column["references"]).rpartition(".")[::2])
+        for table in scenario["schema"].values()
+        for column in table["columns"]
+        if column["references"] is not None
+    }
+
+
+def _a_value_for(column: Column) -> Value:
+    """Something a column of this declared type will take."""
+    return {"integer": 9001, "float": 1.5, "boolean": 1}.get(column["declared_type"].lower(), "x")
+
+
+# --- what a scenario establishes: the enum and stamp tables ------------------
 
 
 @given(
@@ -156,16 +317,11 @@ def _a_table_whose_status_is_one_of(scenario: dict, table: str, one: str, other:
     scenario["table"] = table
 
     statuses = _column("value", "text", primary_key=True)
-    status = _column("status", "text")
-    status["references"] = f"{THE_STATUSES}.value"
+    status = _pointing_at(_column("status", "text"), f"{THE_STATUSES}.value")
 
     _spell_and_run(
         connection,
-        _operation(
-            "create_table",
-            THE_STATUSES,
-            {"definition": column_definition(statuses, "sqlite")},
-        ),
+        _operation("create_table", THE_STATUSES, {}, [statuses], [], [], [], []),
         "sqlite",
     )
     _spell_and_run(
@@ -173,23 +329,20 @@ def _a_table_whose_status_is_one_of(scenario: dict, table: str, one: str, other:
         _operation(
             "create_table",
             table,
-            {
-                "definition": ", ".join(
-                    [
-                        column_definition(_column("id", "integer", primary_key=True), "sqlite"),
-                        column_definition(status, "sqlite"),
-                    ]
-                )
-            },
+            {},
+            [_column("id", "integer", primary_key=True), status],
+            [],
+            [],
+            [],
+            [],
         ),
         "sqlite",
     )
-    for value in (one, other):
-        _spell_and_run(
-            connection,
-            _operation("insert_enum_values", table, {"column": "status", "value": value}),
-            "sqlite",
-        )
+    _spell_and_run(
+        connection,
+        _operation("insert_enum_values", table, {"column": "status"}, [], [], [], [], [one, other]),
+        "sqlite",
+    )
 
 
 @given(parsers.re(r'an order whose status is "(?P<value>[^"]+)"$'))
@@ -209,14 +362,12 @@ def _a_stamp_table(scenario: dict) -> None:
         _operation(
             "create_table",
             "_declaro_meta",
-            {
-                "definition": ", ".join(
-                    [
-                        column_definition(_column("key", "text", primary_key=True), "sqlite"),
-                        column_definition(_column("value", "text"), "sqlite"),
-                    ]
-                )
-            },
+            {},
+            [_column("key", "text", primary_key=True), _column("value", "text")],
+            [],
+            [],
+            [],
+            [],
         ),
         "sqlite",
     )
@@ -229,11 +380,322 @@ def _a_table_the_user_made(scenario: dict, table: str) -> None:
         _operation(
             "create_table",
             table,
-            {"definition": column_definition(_column("id", "integer", primary_key=True), "sqlite")},
+            {},
+            [_column("id", "integer", primary_key=True)],
+            [],
+            [],
+            [],
+            [],
         ),
         "sqlite",
     )
     scenario["table"] = table
+
+
+# --- what a scenario establishes: a table this file then rebuilds ------------
+
+
+@given("a database connection")
+def _a_database_connection(scenario: dict) -> None:
+    """An empty database, and nothing declared on it yet."""
+    scenario["connection"] = _a_database()
+    scenario["schema"] = {}
+    scenario["refused"] = []
+    scenario["answer"] = []
+
+
+# WHAT A CELL OF A COLUMN TABLE MEANS. The feature writes a column as a row of
+# a Gherkin table, and each heading is one thing a `Column` carries. `type` is
+# the declared type; the rest are facets, except `references`, which is the key
+# the column points at.
+_A_FACET: dict[str, Callable[[str], Value]] = {
+    "nullable": lambda cell: cell.strip().lower() == "true",
+    "primary_key": lambda cell: cell.strip().lower() == "true",
+    "unique": lambda cell: cell.strip().lower() == "true",
+    "default": lambda cell: cell.strip().strip("'"),
+}
+
+
+def _a_column_from(row: dict[str, str]) -> Column:
+    """One declared column, read off one row of a Gherkin table."""
+    column = _column(
+        row["name"],
+        row["type"],
+        **{
+            heading: _A_FACET[heading](row[heading])
+            for heading in _A_FACET
+            if row.get(heading, "").strip() != ""
+        },
+    )
+    points_at = row.get("references", "").strip()
+    return _pointing_at(column, points_at or None)
+
+
+def _read(datatable: list[list[str]]) -> list[dict[str, str]]:
+    """A Gherkin table as rows under its own headings."""
+    headings, *rows = datatable
+    return [dict(zip(headings, row, strict=True)) for row in rows]
+
+
+def _with_a_key(columns: list[Column]) -> list[Column]:
+    """The same columns, with the first one made the key if none is.
+
+    A FOREIGN KEY NEEDS A KEY TO POINT AT. Half the Gherkin tables in this
+    feature write `references | authors.id` and give `authors.id` no primary
+    key heading, and SQLite answers `foreign key mismatch` on the first insert,
+    because a parent column with nothing unique about it is not a parent. Every
+    one of those tables names its key first, so the first column is it.
+    """
+    declared = [column for column in columns if column["facets"].get("primary_key") is True]
+    return {
+        True: lambda: columns,
+        False: lambda: [
+            {**columns[0], "facets": {**columns[0]["facets"], "primary_key": True}},
+            *columns[1:],
+        ],
+    }[declared != []]()
+
+
+def _declared(scenario: dict, declaring: Table) -> None:
+    """Write the table down and make it, with the function under test.
+
+    IT KEEPS A COPY OF ITS OWN. A sentence that names a shape reaches the same
+    `Table` every time it is said, and an index added to one scenario's table
+    would otherwise be an index in the next scenario's.
+    """
+    table = Table(
+        name=declaring["name"],
+        columns=[{**column} for column in declaring["columns"]],
+        indexes=[{**index} for index in declaring["indexes"]],
+        constraints=[{**constraint} for constraint in declaring["constraints"]],
+    )
+    scenario["schema"][table["name"]] = table
+    scenario["table"] = table["name"]
+    # An empty table is still what the rows were before, for a scenario that
+    # declares a table and changes it without putting anything in it.
+    scenario["before"] = {name: [] for name in scenario["schema"]}
+    _spell_and_run(
+        scenario["connection"],
+        _operation(
+            "create_table",
+            table["name"],
+            {},
+            table["columns"],
+            table["indexes"],
+            table["constraints"],
+            [],
+            [],
+        ),
+        "sqlite",
+    )
+
+
+@given(parsers.re(r'a table "(?P<name>[^"]+)" with columns:$'))
+def _a_table_with_columns(scenario: dict, name: str, datatable: list[list[str]]) -> None:
+    """One table, its columns read off the Gherkin table under the sentence."""
+    _declared(
+        scenario,
+        Table(
+            name=name,
+            columns=_with_a_key([_a_column_from(row) for row in _read(datatable)]),
+            indexes=[],
+            constraints=[],
+        ),
+    )
+
+
+# THE TABLES A SENTENCE NAMES WITHOUT WRITING THEM OUT. Three scenarios say
+# "tables with foreign key relationships" and leave the shape to the reader, so
+# the shape is a row here rather than three step functions.
+_AUTHORS = Table(
+    name="authors",
+    columns=[_column("id", "integer", primary_key=True), _column("name", "text", nullable=True)],
+    indexes=[],
+    constraints=[],
+)
+_BOOKS = Table(
+    name="books",
+    columns=[
+        _column("id", "integer", primary_key=True),
+        _column("title", "text", nullable=True),
+        _pointing_at(_column("author_id", "integer", nullable=True), "authors.id"),
+    ],
+    indexes=[],
+    constraints=[],
+)
+_NEEDS_REBUILDING = Table(
+    name="widgets",
+    columns=[_column("id", "integer", primary_key=True), _column("label", "text", nullable=True)],
+    indexes=[],
+    constraints=[],
+)
+
+_TABLES_A_SENTENCE_MEANS: dict[str, list[Table]] = {
+    "tables with foreign key relationships": [_AUTHORS, _BOOKS],
+    "a table requiring reconstruction": [_NEEDS_REBUILDING],
+}
+
+
+def _one_of(sentences: Any) -> Any:
+    """A pattern matching exactly the sentences given, and nothing else."""
+    return parsers.re("^(?P<sentence>" + "|".join(re.escape(one) for one in sentences) + ")$")
+
+
+@given(_one_of(_TABLES_A_SENTENCE_MEANS))
+def _the_tables_a_sentence_means(scenario: dict, sentence: str) -> None:
+    """A sentence that names a shape instead of writing it out."""
+    for table in _TABLES_A_SENTENCE_MEANS[sentence]:
+        _declared(scenario, table)
+
+
+@given("foreign keys are enabled")
+def _foreign_keys_are_enabled(scenario: dict) -> None:
+    """The database this file opens enforces them, and says so when asked."""
+    ((enforced,),) = scenario["connection"].execute("PRAGMA foreign_keys").fetchall()
+    assert enforced == 1, "a lookup nothing enforces accepts every value"
+
+
+@given(
+    parsers.re(r'an? (?P<unique>unique )?index "(?P<name>[^"]+)" on column "(?P<column>[^"]+)"$')
+)
+def _an_index_on_a_column(scenario: dict, unique: str | None, name: str, column: str) -> None:
+    """One index, written down and made by the function under test."""
+    index = Index(name=name, columns=[column], unique=unique is not None)
+    table = scenario["schema"][scenario["table"]]
+    table["indexes"].append(index)
+    _spell_and_run(
+        scenario["connection"],
+        _operation("create_index", table["name"], {}, [], [index], [], [], []),
+        "sqlite",
+    )
+
+
+# --- what a scenario establishes: the rows in those tables -------------------
+
+
+def _insert(connection: sqlite3.Connection, table: str, row: dict[str, Value]) -> None:
+    """One row, bound, into whichever table the sentence named."""
+    columns = ", ".join(f'"{name}"' for name in row)
+    marks = ", ".join("?" for _ in row)
+    connection.execute(f'INSERT INTO "{table}" ({columns}) VALUES ({marks})', tuple(row.values()))
+
+
+def _cells(row: dict[str, str]) -> dict[str, Value]:
+    """The cells a row filled in, with the word NULL meaning nothing."""
+    return {
+        heading: {True: None, False: cell}[cell.strip() == "NULL"]
+        for heading, cell in row.items()
+        if heading != "table" and cell.strip() != ""
+    }
+
+
+def _rows_into_one_table(scenario: dict, datatable: list[list[str]]) -> None:
+    """Every row of a Gherkin table into the table the last Given named."""
+    for row in _read(datatable):
+        _insert(scenario["connection"], scenario["table"], _cells(row))
+
+
+def _rows_into_the_table_each_names(scenario: dict, datatable: list[list[str]]) -> None:
+    """Every row into the table its own first cell names."""
+    for row in _read(datatable):
+        _insert(scenario["connection"], row["table"], _cells(row))
+
+
+def _rows_nothing_should_have_accepted(scenario: dict, datatable: list[list[str]]) -> None:
+    """Rows that break a key, put in behind the engine's back.
+
+    A scenario about a database somebody has already corrupted cannot set that
+    database up while the keys are enforced, so enforcement goes off for the
+    length of the insert and back on afterwards.
+    """
+    connection: sqlite3.Connection = scenario["connection"]
+    connection.execute("PRAGMA foreign_keys = OFF")
+    _rows_into_one_table(scenario, datatable)
+    connection.execute("PRAGMA foreign_keys = ON")
+
+
+# THE SENTENCE A SCENARIO WRITES -> HOW ITS GHERKIN TABLE IS READ.
+_ROWS_ARRIVE: dict[str, Callable[[dict, list[list[str]]], None]] = {
+    "the table contains data:": _rows_into_one_table,
+    "the table contains hierarchical data:": _rows_into_one_table,
+    "the table contains data with incompatible types:": _rows_into_one_table,
+    "the tables contain related data:": _rows_into_the_table_each_names,
+    "the books table contains invalid foreign key data:": _rows_nothing_should_have_accepted,
+    "the books table has orphaned foreign keys (data corruption):": (
+        _rows_nothing_should_have_accepted
+    ),
+}
+
+
+@given(_one_of(_ROWS_ARRIVE))
+def _the_rows_a_scenario_writes_out(
+    scenario: dict, sentence: str, datatable: list[list[str]]
+) -> None:
+    """Every Given that writes its rows out as a Gherkin table."""
+    _ROWS_ARRIVE[sentence](scenario, datatable)
+    scenario["before"] = {
+        name: _rows_of(scenario["connection"], name) for name in scenario["schema"]
+    }
+
+
+def _one_row_with_a_hole(scenario: dict) -> None:
+    """One row whose second column is empty, for the scenarios about a copy
+    that has to fail: a NULL is what a NOT NULL column refuses."""
+    table = scenario["schema"][scenario["table"]]
+    first, second = table["columns"][0], table["columns"][1]
+    _insert(scenario["connection"], table["name"], {first["name"]: 1, second["name"]: None})
+
+
+def _a_hundred_rows(scenario: dict) -> None:
+    """A hundred rows, each value of a kind its own column will take."""
+    table = scenario["schema"][scenario["table"]]
+    for count in range(1, 101):
+        _insert(
+            scenario["connection"],
+            table["name"],
+            {
+                column["name"]: {True: count, False: f"{column['name']}-{count}"}[
+                    column["declared_type"].lower() == "integer"
+                ]
+                for column in table["columns"]
+            },
+        )
+
+
+def _a_parent_and_a_child(scenario: dict) -> None:
+    """One row in each table, the child pointing at the parent that exists."""
+    for table in scenario["schema"].values():
+        _insert(
+            scenario["connection"],
+            table["name"],
+            {column["name"]: 1 for column in table["columns"]},
+        )
+
+
+def _no_rows_at_all(scenario: dict) -> None:
+    ((count,),) = (
+        scenario["connection"].execute(f'SELECT count(*) FROM "{scenario["table"]}"').fetchall()
+    )
+    assert count == 0, f"the scenario says the table is empty and it holds {count} rows"
+
+
+# THE SENTENCES THAT DESCRIBE THEIR ROWS INSTEAD OF WRITING THEM OUT.
+_ROWS_A_SENTENCE_MEANS: dict[str, Callable[[dict], None]] = {
+    "the table contains data": _one_row_with_a_hole,
+    "the table contains 100 rows of test data": _a_hundred_rows,
+    "the tables contain related data": _a_parent_and_a_child,
+    "data that satisfies the foreign key constraints": _a_parent_and_a_child,
+    "the table has 0 rows": _no_rows_at_all,
+}
+
+
+@given(_one_of(_ROWS_A_SENTENCE_MEANS))
+def _the_rows_a_sentence_means(scenario: dict, sentence: str) -> None:
+    """Every Given that names a shape of data rather than writing it out."""
+    _ROWS_A_SENTENCE_MEANS[sentence](scenario)
+    scenario["before"] = {
+        name: _rows_of(scenario["connection"], name) for name in scenario["schema"]
+    }
 
 
 # --- what a scenario does ----------------------------------------------------
@@ -244,25 +706,28 @@ _A_CHANGE: dict[str, Operation] = {
     "adding a column": _operation(
         "add_column",
         "invoices",
-        {"column": "settled_on", "declared_type": "date", "nullable": True},
+        {"column": "settled_on"},
+        [_column("settled_on", "date", nullable=True)],
+        [],
+        [],
+        [],
+        [],
     ),
     "dropping a column": _operation(
         "drop_column",
         "invoices",
-        {
-            "column": "memo",
-            "keeping": "id,settled_on",
-            "definition": '"id" INTEGER NOT NULL, "settled_on" TEXT',
-        },
+        {"column": "memo"},
+        [_column("id", "integer"), _column("settled_on", "date", nullable=True)],
+        [],
+        [],
+        ["id", "settled_on"],
+        [],
     ),
 }
 
 
 @when(
-    parsers.re(
-        r"(?P<change>adding a column|dropping a column) is spelled "
-        r"for (?P<engine>[a-z]+)$"
-    )
+    parsers.re(r"(?P<change>adding a column|dropping a column) is spelled for (?P<engine>[a-z]+)$")
 )
 def _a_change_is_spelled_for(scenario: dict, change: str, engine: str) -> None:
     scenario["operation"] = _A_CHANGE[change]
@@ -277,7 +742,7 @@ def _an_operation_no_table_covers(scenario: dict) -> None:
     `bulldoze_table` is not in `OperationKind`, so no engine has a row for it
     and no engine ever will until somebody declares it.
     """
-    scenario["operation"] = _operation("bulldoze_table", "invoices", {})
+    scenario["operation"] = _operation("bulldoze_table", "invoices", {}, [], [], [], [], [])
     scenario["engine"] = "sqlite"
     scenario["answer"] = spell_operation(scenario["operation"], "sqlite")
 
@@ -362,7 +827,12 @@ def _a_boolean_column_is_spelled(scenario: dict, engine: str) -> None:
         _operation(
             "add_column",
             "invoices",
-            {"column": "settled", "declared_type": "boolean", "nullable": False},
+            {"column": "settled"},
+            [_column("settled", "boolean", nullable=False)],
+            [],
+            [],
+            [],
+            [],
         ),
         engine,
     )
@@ -391,7 +861,12 @@ def _a_status_is_changed(scenario: dict, value: str, change: str) -> None:
     operation = _operation(
         _A_LOOKUP_CHANGE[change],
         scenario.get("table", "orders"),
-        {"column": "status", "value": value},
+        {"column": "status"},
+        [],
+        [],
+        [],
+        [],
+        [value],
     )
     scenario["answer"] = spell_operation(operation, "sqlite")
     ran: dict[bool, Callable[[], None]] = {
@@ -452,6 +927,199 @@ def _the_user_tables_query_is_run(scenario: dict) -> None:
         row[0]
         for row in scenario["connection"].execute(statement["text"], _values(statement)).fetchall()
     ]
+
+
+# --- what a scenario does: the changes that rebuild a table ------------------
+
+
+def _facet(column: Column, facet: str, value: Value) -> Column:
+    return {**column, "facets": {**column["facets"], facet: value}}
+
+
+def _without_facet(column: Column, facet: str) -> Column:
+    return {**column, "facets": {n: v for n, v in column["facets"].items() if n != facet}}
+
+
+# THE PHRASE A SCENARIO WRITES -> WHAT IT DOES TO THE COLUMN IT NAMES. Every
+# alter in this feature is one of these seven, and each is one line, so they are
+# rows rather than seven step functions.
+_AN_ALTERATION: dict[str, Callable[[Column, str], Column]] = {
+    "to be NOT NULL": lambda column, _value: _facet(column, "nullable", False),
+    "to be nullable": lambda column, _value: _facet(column, "nullable", True),
+    "nullability": lambda column, _value: _facet(column, "nullable", True),
+    "to type": lambda column, value: {**column, "declared_type": value},
+    "to have default": lambda column, value: _facet(column, "default", value.strip("'")),
+    "to have no default": lambda column, _value: _without_facet(column, "default"),
+    "to be NOT NULL with default": lambda column, value: _facet(
+        _facet(column, "nullable", False), "default", value.strip("'")
+    ),
+}
+
+
+def _only(column: Column, named: str, change: Callable[[Column], Column]) -> Column:
+    """The column changed where the sentence named it, and left alone elsewhere."""
+    return {True: change, False: lambda held: held}[column["name"] == named](column)
+
+
+def _where(scenario: dict, name: str, table: str | None) -> tuple[str, str]:
+    """Which table a sentence means, and which column of it.
+
+    A scenario writes the column three ways: bare, `in "books"`, and
+    `"authors.bio"`. The bare one means the table the last Given declared.
+    """
+    qualified, _, bare = name.rpartition(".")
+    return (qualified or table or scenario["table"], bare)
+
+
+def _rebuilt(scenario: dict, table: str, columns: list[Column], detail: dict[str, Value]) -> None:
+    """Carry out the change that turns the live table into this shape."""
+    declared = scenario["schema"][table]
+    held = [column["name"] for column in declared["columns"]]
+    operation = _operation(
+        "alter_column",
+        table,
+        detail,
+        columns,
+        declared["indexes"],
+        declared["constraints"],
+        [column["name"] for column in columns if column["name"] in held],
+        [],
+    )
+    scenario["schema"][table] = {**declared, "columns": columns}
+    scenario["altered"] = detail["column"]
+    _carried_out(scenario, operation)
+
+
+@when(
+    parsers.re(
+        r'^I alter column "(?P<name>[^"]+)"(?: in "(?P<table>[^"]+)")? '
+        r"(?P<change>to be NOT NULL with default|to be NOT NULL|to be nullable|"
+        r"nullability|to type|to have default|to have no default)"
+        r'(?: "(?P<value>[^"]*)")?$'
+    )
+)
+def _a_column_is_altered(
+    scenario: dict, name: str, table: str | None, change: str, value: str | None
+) -> None:
+    """One column changed, and the whole table rebuilt around the change."""
+    where, column = _where(scenario, name, table)
+    scenario["default"] = (value or "").strip("'")
+    _rebuilt(
+        scenario,
+        where,
+        [
+            _only(declared, column, lambda held: _AN_ALTERATION[change](held, value or ""))
+            for declared in scenario["schema"][where]["columns"]
+        ],
+        {"column": column},
+    )
+
+
+@when(parsers.re(r'^I drop column "(?P<name>[^"]+)"$'))
+def _a_column_is_dropped(scenario: dict, name: str) -> None:
+    """The table without one of its columns, which SQLite reaches by rebuilding.
+
+    IT IS ALSO SPELLED FOR THE ENGINE THAT DROPS IN PLACE, because one scenario
+    asks whether a simple drop can be a single ALTER TABLE. The rows are read
+    on the engine this file can run.
+    """
+    where, column = _where(scenario, name, None)
+    declared = scenario["schema"][where]
+    columns = [held for held in declared["columns"] if held["name"] != column]
+    operation = _operation(
+        "drop_column",
+        where,
+        {"column": column},
+        columns,
+        declared["indexes"],
+        declared["constraints"],
+        [held["name"] for held in columns],
+        [],
+    )
+    scenario["elsewhere"] = spell_operation(operation, "postgresql")
+    scenario["schema"][where] = {**declared, "columns": columns}
+    _carried_out(scenario, operation)
+
+
+@when(
+    parsers.re(
+        r'^I (?P<change>add|drop) foreign key on "(?P<child>[^"]+)"'
+        r'(?: referencing "(?P<parent>[^"]+)")?(?P<cascade> with ON DELETE CASCADE)?$'
+    )
+)
+def _a_foreign_key_is_changed(
+    scenario: dict, change: str, child: str, parent: str | None, cascade: str | None
+) -> None:
+    """A column made to point at a parent key, or made to point at nothing."""
+    where, column = _where(scenario, child, None)
+    pointing: dict[str, str | None] = {"add": parent, "drop": None}
+    _rebuilt(
+        scenario,
+        where,
+        [
+            _only(declared, column, lambda held: _pointing_at(held, pointing[change]))
+            for declared in scenario["schema"][where]["columns"]
+        ],
+        {"column": column},
+    )
+
+
+def _the_first_table_loosened(scenario: dict) -> None:
+    """The first table declared, its last column made nullable.
+
+    Three scenarios ask for "a reconstruction" without saying which column, and
+    the parent of a foreign key is the one worth rebuilding, because that is the
+    table another table points at.
+    """
+    name = next(iter(scenario["schema"]))
+    columns = scenario["schema"][name]["columns"]
+    _rebuilt(
+        scenario,
+        name,
+        columns[:-1] + [_facet(columns[-1], "nullable", True)],
+        {"column": columns[-1]["name"]},
+    )
+
+
+def _entirely_new_column_names(scenario: dict) -> None:
+    """Every column renamed, so the rebuild has nothing to carry across."""
+    name = scenario["table"]
+    _rebuilt(
+        scenario,
+        name,
+        [
+            {**column, "name": f"fresh_{column['name']}"}
+            for column in scenario["schema"][name]["columns"]
+        ],
+        {"column": scenario["schema"][name]["columns"][0]["name"]},
+    )
+
+
+def _a_copy_that_cannot_work(scenario: dict) -> None:
+    """The second column made NOT NULL while a row holds nothing in it."""
+    name = scenario["table"]
+    columns = scenario["schema"][name]["columns"]
+    _rebuilt(
+        scenario,
+        name,
+        [columns[0], _facet(columns[1], "nullable", False), *columns[2:]],
+        {"column": columns[1]["name"]},
+    )
+
+
+# THE SENTENCES THAT ASK FOR A REBUILD WITHOUT NAMING A COLUMN.
+_A_REBUILD_A_SENTENCE_MEANS: dict[str, Callable[[dict], None]] = {
+    "I reconstruct a table with column changes": _the_first_table_loosened,
+    "I perform table reconstruction": _the_first_table_loosened,
+    "I reconstruct with entirely new column names": _entirely_new_column_names,
+    "reconstruction fails during data copy": _a_copy_that_cannot_work,
+}
+
+
+@when(_one_of(_A_REBUILD_A_SENTENCE_MEANS))
+def _the_rebuild_a_sentence_means(scenario: dict, sentence: str) -> None:
+    """Every When that asks for a rebuild by describing it."""
+    _A_REBUILD_A_SENTENCE_MEANS[sentence](scenario)
 
 
 # --- what has to be true -----------------------------------------------------
@@ -537,7 +1205,12 @@ def _the_statement_writes_that_engines_boolean(scenario: dict) -> None:
         _operation(
             "add_column",
             "invoices",
-            {"column": "settled", "declared_type": "boolean", "nullable": False},
+            {"column": "settled"},
+            [_column("settled", "boolean", nullable=False)],
+            [],
+            [],
+            [],
+            [],
         ),
         "sqlite",
     )
@@ -704,3 +1377,394 @@ def _the_tail_is_as_wide_as_the_constant_says(scenario: dict) -> None:
         "`fn spell_operation` is pure, so the rebuild drops a leftover "
         "temporary table instead of telling two of them apart"
     )
+
+
+# --- what has to be true of a rebuilt table ----------------------------------
+
+
+# WHAT A SENTENCE CLAIMS ABOUT ONE COLUMN'S DEFINITION -> the text the engine's
+# own CREATE TABLE has to carry, given the word the sentence quoted.
+_THE_DEFINITION_SAYS: dict[str, Callable[[str], str]] = {
+    "as NOT NULL": lambda _value: "NOT NULL",
+    "is now NOT NULL": lambda _value: "NOT NULL",
+    "as type": lambda value: value,
+    "with default": lambda value: f"DEFAULT {value}",
+}
+
+# The two sentences that claim a definition says NOTHING.
+_THE_DEFINITION_DOES_NOT_SAY: dict[str, Callable[[str], str]] = {
+    "as nullable": lambda _value: "NOT NULL",
+    "with no default": lambda _value: "DEFAULT",
+}
+
+
+def _definition_of(scenario: dict, table: str, column: str) -> str:
+    """The one clause of the engine's CREATE TABLE that defines this column."""
+    sql = _schema_sql(scenario["connection"], table)
+    body = sql.partition("(")[2].rpartition(")")[0]
+    named = [
+        clause.strip() for clause in body.split(",") if clause.strip().startswith(f'"{column}"')
+    ]
+    assert named != [], f"{column!r} is not in the table the engine kept: {sql!r}"
+    return named[0]
+
+
+@then(
+    parsers.re(
+        r'^(?:the table schema shows|the column) "(?P<column>[^"]+)" '
+        r"(?P<claim>as NOT NULL|as nullable|is now NOT NULL|as type|with default|"
+        r"with no default)"
+        r"(?: \"(?P<value>[^\"]*)\")?$"
+    )
+)
+def _the_definition_of_a_column(scenario: dict, column: str, claim: str, value: str | None) -> None:
+    """Every sentence about what one column's definition says, or does not."""
+    where, name = _where(scenario, column, None)
+    definition = _definition_of(scenario, where, name)
+    wanted = {**_THE_DEFINITION_SAYS, **_THE_DEFINITION_DOES_NOT_SAY}[claim](value or "")
+    carries = wanted.upper() in definition.upper()
+    assert carries is (claim in _THE_DEFINITION_SAYS), (
+        f"the engine kept {definition!r} for {name!r}, and the scenario says {claim} {value or ''}"
+    )
+
+
+@then(parsers.re(r'^the UNIQUE constraint on "(?P<column>[^"]+)" is preserved$'))
+def _the_unique_constraint_is_preserved(scenario: dict, column: str) -> None:
+    """A rebuild that loses a UNIQUE facet loses what the facet enforced, so
+    the engine is asked to store the same value twice."""
+    definition = _definition_of(scenario, scenario["table"], column)
+    assert "UNIQUE" in definition.upper(), (
+        f"the rebuild kept {definition!r}, and the scenario says {column!r} is still unique"
+    )
+
+
+@then(parsers.re(r'^the column "(?P<column>[^"]+)" does not exist$'))
+def _the_column_does_not_exist(scenario: dict, column: str) -> None:
+    where, name = _where(scenario, column, None)
+    held = [
+        row[1] for row in scenario["connection"].execute(f'PRAGMA table_info("{where}")').fetchall()
+    ]
+    assert name not in held, f"{where!r} still holds {held}, and the scenario drops {name!r}"
+
+
+# HOW MANY ROWS A SENTENCE SAYS THE TABLE ENDS WITH. An empty table says none,
+# so the count it names is nothing at all and the two numbers are one group.
+_HOW_MANY_ROWS = (
+    r"^(?:the table has (?P<held>\d+) rows|all (?P<kept>\d+) rows are preserved"
+    r"|the table remains empty)$"
+)
+
+
+@then(parsers.re(_HOW_MANY_ROWS))
+def _how_many_rows_are_left(scenario: dict, held: str | None, kept: str | None) -> None:
+    """Every sentence that counts the rows a rebuild left behind."""
+    ((count,),) = (
+        scenario["connection"].execute(f'SELECT count(*) FROM "{scenario["table"]}"').fetchall()
+    )
+    assert count == int(held or kept or 0), (
+        f"the table holds {count} rows and the scenario says {held or kept or 0}"
+    )
+
+
+# THE SENTENCES THAT SAY THE ROWS CAME THROUGH UNCHANGED. A type change rewrites
+# `1` as `'1'`, which the scenario that asked for it calls conversion, so the
+# comparison is on what each value reads as and not on its storage class.
+_NOTHING_WAS_LOST = (
+    "all existing data is preserved",
+    "all other data is preserved",
+    "the original data is intact",
+    "all hierarchical relationships are intact",
+)
+
+
+@then(_one_of(_NOTHING_WAS_LOST))
+def _nothing_was_lost(scenario: dict, sentence: str) -> None:
+    """Every column that survived holds what it held before the change."""
+    for table, before in scenario["before"].items():
+        now = _rows_of(scenario["connection"], table)
+        surviving = [column["name"] for column in scenario["schema"][table]["columns"]]
+        assert [{n: f"{v}" for n, v in row.items() if n in surviving} for row in before] == [
+            {n: f"{v}" for n, v in row.items() if n in surviving} for row in now
+        ], f"{sentence!r}, and {table!r} went from {before} to {now}"
+
+
+# WHAT `typeof` ANSWERS FOR THE TYPE A SCENARIO NAMES.
+_STORED_AS: dict[str, str] = {"TEXT": "text", "INTEGER": "integer"}
+
+
+@then(parsers.re(r"^the data values are converted to (?P<type>TEXT|INTEGER)$"))
+def _the_values_are_converted(scenario: dict, type: str) -> None:
+    """The engine's own answer for what it is now storing in that column."""
+    column = scenario["altered"]
+    kinds = {
+        row[0]
+        for row in scenario["connection"]
+        .execute(f'SELECT typeof("{column}") FROM "{scenario["table"]}"')
+        .fetchall()
+    }
+    assert kinds == {_STORED_AS[type]}, (
+        f"the column was rebuilt as {type} and the engine stores {kinds}"
+    )
+
+
+@then("new inserts use the default value")
+def _new_inserts_use_the_default(scenario: dict) -> None:
+    """A row that says nothing about the column comes back carrying the default."""
+    table = scenario["schema"][scenario["table"]]
+    altered = scenario["altered"]
+    _insert(
+        scenario["connection"],
+        table["name"],
+        {
+            column["name"]: _a_value_for(column)
+            for column in table["columns"]
+            if column["name"] != altered
+        },
+    )
+    stored = [row[altered] for row in _rows_of(scenario["connection"], table["name"])]
+    assert stored[-1] == scenario["default"], (
+        f"the row came back carrying {stored[-1]!r} where the default is {scenario['default']!r}"
+    )
+
+
+# THE SENTENCES THAT SAY THE CHANGE WAS REFUSED BY THE ENGINE.
+_THE_CHANGE_WAS_REFUSED = (
+    "the operation fails with constraint violation",
+    "the operation fails with foreign key violation",
+    "the operation fails during data copy",
+    "foreign key check fails after reconstruction",
+)
+
+
+@then(_one_of(_THE_CHANGE_WAS_REFUSED))
+def _the_change_was_refused(scenario: dict, sentence: str) -> None:
+    """The engine refused the change, which is what the applier rolls back on."""
+    assert scenario["refused"] != [], (
+        f"{sentence!r}, and the engine carried the change out without complaint. "
+        f"It was spelled as {[statement['text'] for statement in scenario['answer']]}"
+    )
+
+
+# THE SENTENCES THAT SAY NOTHING CHANGED, because the change was rolled back.
+_NOTHING_CHANGED = (
+    "the transaction is rolled back",
+    "the original table is unchanged",
+    "the original schema is unchanged",
+)
+
+
+@then(_one_of(_NOTHING_CHANGED))
+def _nothing_changed(scenario: dict, sentence: str) -> None:
+    """The engine's own CREATE TABLE is the one it had before the change."""
+    now = {name: _schema_sql(scenario["connection"], name) for name in scenario["before_schema"]}
+    assert now == scenario["before_schema"], (
+        f"{sentence!r}, and the engine now keeps {now} where it kept {scenario['before_schema']}"
+    )
+
+
+@then("the temp table is cleaned up")
+def _the_temp_table_is_cleaned_up(scenario: dict) -> None:
+    """A rolled-back rebuild leaves no half-built table behind."""
+    left = (
+        scenario["connection"]
+        .execute(
+            'SELECT "name" FROM "sqlite_master" WHERE "type" = ? AND "name" = ?',
+            ("table", temporary_name(scenario["table"])),
+        )
+        .fetchall()
+    )
+    assert left == [], f"the rebuild left {left} behind for the next attempt to trip over"
+
+
+# --- what has to be true of the keys and the indexes -------------------------
+
+# THE SENTENCES THAT SAY THE KEYS ARE WHAT THE SCHEMA DECLARES. A key that was
+# preserved, a key that was added and a key that was dropped are all this: the
+# engine holds exactly the keys the tables declare afterwards.
+_THE_KEYS_MATCH = (
+    "the foreign key relationship is preserved",
+    "the foreign key relationship exists",
+    "the foreign key relationship does not exist",
+    'the foreign key on "department_id" is preserved',
+    'the incoming foreign key from "books" is preserved',
+    "the self-referential foreign key is preserved",
+)
+
+
+@then(_one_of(_THE_KEYS_MATCH))
+def _the_keys_are_what_the_schema_declares(scenario: dict, sentence: str) -> None:
+    """Every foreign key the engine holds, against every one declared."""
+    held = {key for table in scenario["schema"] for key in _keys_of(scenario["connection"], table)}
+    assert held == _declared_keys(scenario), (
+        f"{sentence!r}, and the engine holds {sorted(held)} where the tables "
+        f"declare {sorted(_declared_keys(scenario))}"
+    )
+
+
+# THE SENTENCES THAT SAY A KEY IS STILL ENFORCED -> whether a child row pointing
+# at a parent that does not exist is refused.
+_A_BOGUS_CHILD_IS: dict[str, bool] = {
+    "foreign key constraints are still enforced": True,
+    "foreign key constraints are enforced": True,
+    "the foreign key relationships still work": True,
+    "the foreign key constraint still works": True,
+    "inserting invalid author_id raises foreign key error": True,
+    "inserting invalid author_id succeeds (no FK check)": False,
+}
+
+
+# THE CHILD A SCENARIO MEANS WHEN NO COLUMN POINTS ANYWHERE. One scenario drops
+# the key and then asks whether the same row goes in, so the column it names
+# survives the drop that made nothing point at it.
+_THE_CHILD_WHEN_NOTHING_POINTS = ("books", "author_id")
+
+
+@then(_one_of(_A_BOGUS_CHILD_IS))
+def _a_child_row_with_no_parent(scenario: dict, sentence: str) -> None:
+    """Insert a row pointing at a parent nothing has, and let the engine say."""
+    pointing = [
+        (table["name"], column["name"])
+        for table in scenario["schema"].values()
+        for column in table["columns"]
+        if column["references"] is not None
+    ]
+    where, child = {True: lambda: pointing[0], False: lambda: _THE_CHILD_WHEN_NOTHING_POINTS}[
+        pointing != []
+    ]()
+    row: dict[str, Value] = {
+        column["name"]: _a_value_for(column) for column in scenario["schema"][where]["columns"]
+    }
+    refused: list[str] = []
+    try:
+        _insert(scenario["connection"], where, {**row, child: 987654})
+    except sqlite3.Error as complaint:
+        refused.append(str(complaint))
+    assert (refused != []) is _A_BOGUS_CHILD_IS[sentence], (
+        f"{sentence!r}, and the engine answered {refused or 'by storing the row'}"
+    )
+
+
+# THE SENTENCES THAT ASK THE ENGINE WHETHER ANY KEY IS BROKEN.
+_NO_KEY_IS_BROKEN = (
+    "foreign key checks pass after reconstruction",
+    "no foreign key violations remain after reconstruction",
+    "foreign key checks are performed",
+)
+
+
+@then(_one_of(_NO_KEY_IS_BROKEN))
+def _no_key_is_broken(scenario: dict, sentence: str) -> None:
+    """`PRAGMA foreign_key_check` is the engine's own answer, not ours."""
+    broken = scenario["connection"].execute("PRAGMA foreign_key_check").fetchall()
+    assert broken == [], f"{sentence!r}, and the engine reports {broken}"
+
+
+@then(
+    parsers.re(
+        r'^(?:the (?:unique )?index "(?P<name>[^"]+)" still exists|both indexes are functional)$'
+    )
+)
+def _an_index_survived_the_rebuild(scenario: dict, name: str | None) -> None:
+    """An index belongs to its table, so a rebuild that forgets one loses it."""
+    held = _index_names(scenario["connection"], scenario["table"])
+    wanted = (
+        [index["name"] for index in scenario["schema"][scenario["table"]]["indexes"]],
+        [name],
+    )[name is not None]
+    assert [one for one in wanted if one not in held] == [], (
+        f"the rebuilt table carries {held} and the scenario asks for {wanted}"
+    )
+
+
+@then("only explicit CREATE INDEX statements are recreated")
+def _only_declared_indexes_are_recreated(scenario: dict) -> None:
+    """A UNIQUE facet makes SQLite an index of its own, and a rebuild that
+    wrote that one out again would make it twice."""
+    made = [
+        statement["text"] for statement in scenario["answer"] if "CREATE INDEX" in statement["text"]
+    ]
+    declared = scenario["schema"][scenario["table"]]["indexes"]
+    assert len(made) == len(declared), (
+        f"the rebuild spells {made} where the table declares {[i['name'] for i in declared]}"
+    )
+
+
+# THE SENTENCES THAT SAY THE REBUILD ITSELF CAME THROUGH.
+_THE_TABLE_IS_BACK = (
+    "the table is recreated",
+    "the table is reconstructed successfully",
+)
+
+
+@then(_one_of(_THE_TABLE_IS_BACK))
+def _the_table_is_back(scenario: dict, sentence: str) -> None:
+    """The change was not refused and the table is there under its own name."""
+    assert scenario["refused"] == [], f"{sentence!r}, and the engine said {scenario['refused']}"
+    assert _schema_sql(scenario["connection"], scenario["table"]) != "", (
+        f"{sentence!r}, and the engine has no table called {scenario['table']!r}"
+    )
+
+
+@then("no data is copied (no common columns)")
+def _no_data_is_copied(scenario: dict) -> None:
+    """A rebuild with nothing on both sides spells no INSERT at all."""
+    copying = [
+        statement["text"] for statement in scenario["answer"] if "INSERT INTO" in statement["text"]
+    ]
+    assert copying == [], f"the rebuild carries rows across with {copying}"
+
+
+@then("deleting category cascades to products")
+def _deleting_the_parent_cascades(scenario: dict) -> None:
+    """ON DELETE CASCADE, which `Column.references` cannot say."""
+    scenario["connection"].execute('DELETE FROM "categories" WHERE "id" = 1')
+    left = _rows_of(scenario["connection"], "products")
+    assert left == [], f"the child rows are still there: {left}"
+
+
+# THE SENTENCES NOTHING HERE CAN SATISFY, and what each is waiting on. A step
+# that asserted nothing would turn its scenario green on a body nobody wrote, so
+# each one fails naming the decision it needs.
+_NOBODY_CAN_ANSWER: dict[str, str] = {
+    "a warning is logged": (
+        "a failure comes back in the return here and is never logged, so "
+        "`fn spell_operation` writes nothing anywhere"
+    ),
+    "foreign keys are temporarily disabled": (
+        "`PRAGMA foreign_keys` is a no-op inside a transaction, so it cannot be "
+        "one of the statements that come back; the applier that owns the COMMIT "
+        "is what turns enforcement off"
+    ),
+}
+
+
+@then(_one_of(_NOBODY_CAN_ANSWER))
+def _a_sentence_nothing_here_satisfies(scenario: dict, sentence: str) -> None:
+    """Every line this function cannot answer, failing by name."""
+    pytest.fail(
+        f"{sentence!r}: {_NOBODY_CAN_ANSWER[sentence]}. The line needs a decision, not more code."
+    )
+
+
+@then("the composite primary key is preserved")
+@then("both columns remain part of primary key")
+def _the_composite_primary_key_is_preserved(scenario: dict) -> None:
+    """A table-level PRIMARY KEY, which no field of an `Operation` can carry."""
+    keys = [
+        row[1]
+        for row in scenario["connection"]
+        .execute(f'PRAGMA table_info("{scenario["table"]}")')
+        .fetchall()
+        if row[5] > 0
+    ]
+    assert len(keys) > 1, f"the rebuilt table has {keys} as its primary key"
+
+
+@then("the operation uses direct ALTER TABLE DROP COLUMN")
+def _the_drop_is_one_statement_where_the_engine_allows_it(scenario: dict) -> None:
+    """PostgreSQL drops a column in place, which is one statement and no copy."""
+    elsewhere = scenario["elsewhere"]
+    assert isinstance(elsewhere, list) and len(elsewhere) == 1, (
+        f"a simple drop is one statement on an engine that alters in place: {elsewhere}"
+    )
+    assert "DROP COLUMN" in elsewhere[0]["text"], elsewhere[0]["text"]

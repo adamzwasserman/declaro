@@ -29,21 +29,37 @@ to bind. The one exception is a DEFAULT clause and a CHECK clause, which no
 engine will take a placeholder in: those carry a literal, quoted here, and they
 carry what the author declared rather than anything a caller typed.
 
-TWO THINGS THE DECLARATION CANNOT CARRY YET, named here because a silent gap is
-worse than a loud one.
+WHERE A REBUILD GETS THE TABLE FROM, SINCE 2026-09-21. `Operation` carries
+`columns`, `indexes`, `constraints` and `copying`, so the new table is built
+from the columns and constraints the operation hands over, the rows are copied
+in the columns `copying` names, and the indexes are made again after the rename
+because SQLite drops an index with the table it is on. Until that day this was
+spelled from two strings the caller supplied, `definition` and `keeping`, which
+this function invented because the type was short. Both are gone: a structure
+squeezed into a string is a structure nothing can check.
 
-A REBUILD NEEDS THE TABLE AND IS HANDED AN `Operation`. Preserving the rows,
-the indexes, the unique constraints, the composite primary key and the foreign
-keys means knowing all of them, and an `Operation` carries a kind, a table name,
-`detail: dict<str, Value>` and a flag. A `Value` is a scalar, so a column list
-cannot travel in one. Until `fn spell_operation` is handed the `Table` it
-rewrites, the rebuild below is spelled from two strings the caller supplies:
-`definition`, the new table's column clause, and `keeping`, the columns to copy.
-Both are a structure squeezed into a string, and both should be a `Table`.
+WHAT STILL CANNOT BE SPELLED, named here because a silent gap is worse than a
+loud one.
+
+A TABLE-LEVEL PRIMARY KEY. `Constraint` carries a `rule: Condition`, and a
+condition is comparisons, so `constraint_clause` writes a CHECK and nothing
+else. A composite primary key is `PRIMARY KEY (a, b)` on the table, and there is
+no field it fits in. Two columns each marked `primary_key` come out as two
+inline PRIMARY KEY clauses, which no engine accepts.
+
+A RULE ABOUT WHAT HAPPENS TO A CHILD ROW. `Column.references` is the
+`table.column` a column points at and nothing more, so ON DELETE CASCADE, ON
+UPDATE and the rest have nowhere to sit.
 
 THERE IS NO WORD FOR TAKING A VALUE OUT OF A LOOKUP. `OperationKind` carries
 `insert_enum_values` and nothing that removes one, so a declared value that goes
 away cannot be spelled at all.
+
+THE PRAGMA THAT MAKES A REBUILD POSSIBLE BELONGS TO WHOEVER COMMITS. Dropping a
+table another table points at is refused while foreign keys are enforced, so the
+applier turns enforcement off around a rebuild and checks the keys before it
+commits. `PRAGMA foreign_keys` is a no-op inside a transaction, so it cannot be
+one of the statements returned here, and this function emits none.
 """
 
 from __future__ import annotations
@@ -52,10 +68,12 @@ from collections.abc import Callable
 from typing import Any, cast, get_args
 
 from declaro_persistum.types import (
+    NOTHING,
     Column,
     Constraint,
     Engine,
     Fault,
+    Index,
     Operation,
     OperationKind,
     Statement,
@@ -553,34 +571,70 @@ def _word(operation: Operation, key: str) -> str:
     return cast(str, operation["detail"][key])
 
 
-def _column_from(operation: Operation) -> Column:
-    """The column an add or an alter declares, as a `Column`."""
-    detail = operation["detail"]
-    return {
-        "name": _word(operation, "column"),
-        "declared_type": _word(operation, "declared_type"),
-        "renamed_from": None,
-        "references": cast("str | None", _one_of(_present(detail, "references"), None)),
-        "facets": {
-            "nullable": detail["nullable"],
-            **{key: detail[key] for key in filter(detail.__contains__, ("default", "unique"))},
-        },
+def _empty_handed(operation: Operation, engine: Engine, field: str) -> Fault:
+    return _refused(
+        f"A {operation['kind']} on {operation['table']} was handed to {engine} "
+        f"with an empty {field}.",
+        f"Send the operation again carrying the {field} it acts on.",
+    )
+
+
+def _carrying(
+    operation: Operation,
+    engine: Engine,
+    field: str,
+    build: Callable[[], list[Statement] | Fault],
+) -> list[Statement] | Fault:
+    """Spell the change when the field its spelling reads has something in it.
+
+    AN EMPTY LIST IS NOT AN ABSENCE HERE. Every field is present on every
+    operation, so what a missing column list looks like is `[]`, and a table
+    with no columns is a statement no engine takes.
+    """
+    held = cast("dict[str, list[Any]]", operation)[field]
+    return {True: lambda: _empty_handed(operation, engine, field), False: build}[held == []]()
+
+
+def _named_column(operation: Operation, engine: Engine) -> Column | Fault:
+    """The column an add or an alter names, out of the columns it carries.
+
+    An `add_column` carries the one column it adds. An `alter_column` carries
+    the whole table as it will be afterwards, and `detail` says which of them
+    changed, so one lookup answers for both.
+    """
+    wanted = _one_of(_present(operation["detail"], "column"), NOTHING)
+    found = [column for column in operation["columns"] if column["name"] == wanted]
+    answer: dict[bool, Callable[[], Column | Fault]] = {
+        True: lambda: found[0],
+        False: lambda: _refused(
+            f"A {operation['kind']} on {operation['table']} names the column "
+            f"{wanted!r}, and the columns it was handed to {engine} with are "
+            f"{[column['name'] for column in operation['columns']]}.",
+            f"Send the operation again with {wanted!r} among its columns.",
+        ),
     }
+    return answer[found != []]()
+
+
+def _table_body(operation: Operation, engine: Engine) -> str | Fault:
+    """What goes between the parentheses of a CREATE TABLE: every column, then
+    every constraint, in the order the operation carries them."""
+    pieces: list[Any] = [
+        *[column_definition(column, engine) for column in operation["columns"]],
+        *[constraint_clause(constraint, engine) for constraint in operation["constraints"]],
+    ]
+    return cast("str | Fault", _the_first_fault_or(pieces, lambda: ", ".join(pieces)))
 
 
 def _create_table(operation: Operation, engine: Engine) -> list[Statement] | Fault:
-    return _needing(
-        operation,
-        engine,
-        ("definition",),
-        lambda: [
-            _statement(
-                f"CREATE TABLE {QUOTE[engine](operation['table'])} "
-                f"({_word(operation, 'definition')})",
-                [],
-            )
-        ],
-    )
+    def spelled() -> list[Statement] | Fault:
+        body = _table_body(operation, engine)
+        return _the_first_fault_or(
+            [body],
+            lambda: [_statement(f"CREATE TABLE {QUOTE[engine](operation['table'])} ({body})", [])],
+        )
+
+    return _carrying(operation, engine, "columns", spelled)
 
 
 def _drop_table(operation: Operation, engine: Engine) -> list[Statement] | Fault:
@@ -589,9 +643,12 @@ def _drop_table(operation: Operation, engine: Engine) -> list[Statement] | Fault
 
 def _add_column(operation: Operation, engine: Engine) -> list[Statement] | Fault:
     def spelled() -> list[Statement] | Fault:
-        definition = column_definition(_column_from(operation), engine)
+        column = _named_column(operation, engine)
+        definition = _the_first_fault_or(
+            [column], lambda: column_definition(cast(Column, column), engine)
+        )
         return _the_first_fault_or(
-            [definition],
+            [column, definition],
             lambda: [
                 _statement(
                     f"ALTER TABLE {QUOTE[engine](operation['table'])} ADD COLUMN {definition}",
@@ -600,7 +657,7 @@ def _add_column(operation: Operation, engine: Engine) -> list[Statement] | Fault
             ],
         )
 
-    return _needing(operation, engine, ("column", "declared_type", "nullable"), spelled)
+    return _carrying(operation, engine, "columns", spelled)
 
 
 def _drop_column_directly(operation: Operation, engine: Engine) -> list[Statement] | Fault:
@@ -619,44 +676,76 @@ def _drop_column_directly(operation: Operation, engine: Engine) -> list[Statemen
     )
 
 
+def _copy(operation: Operation, engine: Engine) -> list[Statement]:
+    """The one statement that carries the rows across, or none at all.
+
+    A TABLE WITH NO COLUMN ON BOTH SIDES COPIES NOTHING, and `INSERT INTO t ()
+    SELECT FROM u` is not a statement, so the rebuild is four moves rather than
+    five. Nothing is lost that `copying` did not already say goes.
+    """
+    quote = QUOTE[engine]
+    carried = ", ".join(quote(column) for column in operation["copying"])
+    temporary = quote(temporary_name(operation["table"]))
+    table = quote(operation["table"])
+    return {
+        True: lambda: [],
+        False: lambda: [
+            _statement(f"INSERT INTO {temporary} ({carried}) SELECT {carried} FROM {table}", [])
+        ],
+    }[operation["copying"] == []]()
+
+
 def _rebuild(operation: Operation, engine: Engine) -> list[Statement] | Fault:
-    """Make a new table, copy the rows into it, drop the old, rename the new.
+    """Make a new table, copy the rows into it, drop the old, rename the new,
+    and make its indexes again.
 
     SQLITE AND TURSO CANNOT ALTER A COLUMN IN PLACE, so every alter and every
     drop of a column is this. The first statement clears a temporary table a
     previous attempt left behind, which is what lets the name be the same every
     time and this function read no random source.
+
+    THE INDEXES COME LAST BECAUSE THE DROP TOOK THEM. An index belongs to the
+    table it is on, so dropping the old table drops every index on it, and the
+    new table carries none until these run.
     """
 
-    def spelled() -> list[Statement]:
+    def spelled() -> list[Statement] | Fault:
         quote = QUOTE[engine]
         table = quote(operation["table"])
         temporary = quote(temporary_name(operation["table"]))
-        keeping = ", ".join(
-            quote(column.strip()) for column in _word(operation, "keeping").split(",")
+        body = _table_body(operation, engine)
+        return _the_first_fault_or(
+            [body],
+            lambda: [
+                _statement(f"DROP TABLE IF EXISTS {temporary}", []),
+                _statement(f"CREATE TABLE {temporary} ({body})", []),
+                *_copy(operation, engine),
+                _statement(f"DROP TABLE {table}", []),
+                _statement(f"ALTER TABLE {temporary} RENAME TO {table}", []),
+                *[
+                    _index_statement(index, operation["table"], engine)
+                    for index in operation["indexes"]
+                ],
+            ],
         )
-        return [
-            _statement(f"DROP TABLE IF EXISTS {temporary}", []),
-            _statement(f"CREATE TABLE {temporary} ({_word(operation, 'definition')})", []),
-            _statement(f"INSERT INTO {temporary} ({keeping}) SELECT {keeping} FROM {table}", []),
-            _statement(f"DROP TABLE {table}", []),
-            _statement(f"ALTER TABLE {temporary} RENAME TO {table}", []),
-        ]
 
-    return _needing(operation, engine, ("definition", "keeping"), spelled)
+    return _carrying(operation, engine, "columns", spelled)
 
 
-ALTERATION: dict[str, Callable[[Operation, Engine], str | Fault]] = {
-    "declared_type": lambda operation, engine: _the_first_fault_or(
-        [type_spelled(_word(operation, "declared_type"), engine)],
-        lambda: f"TYPE {type_spelled(_word(operation, 'declared_type'), engine)}",
+# WHAT ONE ALTERED COLUMN ASKS OF AN ENGINE THAT ALTERS IN PLACE, read off the
+# column rather than off `detail`. The column is the declaration, so the alter
+# makes the live column match it.
+ALTERATION: dict[str, Callable[[Column, Engine], str | Fault]] = {
+    "declared_type": lambda column, engine: _the_first_fault_or(
+        [type_spelled(column["declared_type"], engine)],
+        lambda: f"TYPE {type_spelled(column['declared_type'], engine)}",
     ),
-    "nullable": lambda operation, _engine: {True: "DROP NOT NULL", False: "SET NOT NULL"}[
-        operation["detail"]["nullable"] is True
+    "nullable": lambda column, _engine: {True: "DROP NOT NULL", False: "SET NOT NULL"}[
+        column["facets"]["nullable"] is True
     ],
-    "default": lambda operation, engine: _the_first_fault_or(
-        [default_clause(operation["detail"]["default"], engine)],
-        lambda: f"SET {default_clause(operation['detail']['default'], engine)}",
+    "default": lambda column, engine: _the_first_fault_or(
+        [default_clause(column["facets"]["default"], engine)],
+        lambda: f"SET {default_clause(column['facets']['default'], engine)}",
     ),
 }
 
@@ -664,35 +753,43 @@ ALTERATION: dict[str, Callable[[Operation, Engine], str | Fault]] = {
 # the same way round.
 ALTERATION_ORDER = ("declared_type", "nullable", "default")
 
+# A COLUMN ALWAYS NAMES ITS TYPE AND MAY NAME THE OTHER TWO. `declared_type` is
+# a field of `Column`, so every alter sets the type; `nullable` and `default`
+# are facets, and a column that declares neither is altered without them.
+DECLARED_ON_EVERY_COLUMN = ("declared_type",)
+
 
 def _alter_column_directly(operation: Operation, engine: Engine) -> list[Statement] | Fault:
-    """PostgreSQL alters a column in place, one statement per thing changed."""
+    """PostgreSQL alters a column in place, one statement per thing it names."""
 
     def spelled() -> list[Statement] | Fault:
-        detail = operation["detail"]
-        changes = list(filter(detail.__contains__, ALTERATION_ORDER))
-        clauses: list[Any] = [ALTERATION[change](operation, engine) for change in changes]
-        quote = QUOTE[engine]
-        return {
-            True: lambda: _refused(
-                f"An alter_column on {operation['table']} names no change to "
-                f"{_word(operation, 'column')}.",
-                f"Send the operation again carrying one of {', '.join(ALTERATION_ORDER)}.",
-            ),
-            False: lambda: _the_first_fault_or(
-                clauses,
-                lambda: [
-                    _statement(
-                        f"ALTER TABLE {quote(operation['table'])} ALTER COLUMN "
-                        f"{quote(_word(operation, 'column'))} {clause}",
-                        [],
-                    )
-                    for clause in clauses
-                ],
-            ),
-        }[changes == []]()
+        column = _named_column(operation, engine)
+        return _the_first_fault_or(
+            [column], lambda: _in_place(cast(Column, column), operation, engine)
+        )
 
-    return _needing(operation, engine, ("column",), spelled)
+    return _carrying(operation, engine, "columns", spelled)
+
+
+def _in_place(column: Column, operation: Operation, engine: Engine) -> list[Statement] | Fault:
+    changes = [
+        change
+        for change in ALTERATION_ORDER
+        if change in DECLARED_ON_EVERY_COLUMN or change in column["facets"]
+    ]
+    clauses: list[Any] = [ALTERATION[change](column, engine) for change in changes]
+    quote = QUOTE[engine]
+    return _the_first_fault_or(
+        clauses,
+        lambda: [
+            _statement(
+                f"ALTER TABLE {quote(operation['table'])} ALTER COLUMN "
+                f"{quote(column['name'])} {clause}",
+                [],
+            )
+            for clause in clauses
+        ],
+    )
 
 
 def _rename_column(operation: Operation, engine: Engine) -> list[Statement] | Fault:
@@ -730,22 +827,31 @@ def _rename_table(operation: Operation, engine: Engine) -> list[Statement] | Fau
 UNIQUENESS: dict[bool, str] = {True: "UNIQUE ", False: ""}
 
 
-def _create_index(operation: Operation, engine: Engine) -> list[Statement] | Fault:
+def _index_statement(index: Index, table: str, engine: Engine) -> Statement:
+    """One declared index, on the table it is on.
+
+    THE REBUILD AND `create_index` SPELL AN INDEX THE SAME WAY, so they spell it
+    here. An index made when a table is created and an index made again after a
+    rebuild that dropped it are the same statement about the same `Index`.
+    """
     quote = QUOTE[engine]
+    columns = ", ".join(quote(column) for column in index["columns"])
+    return _statement(
+        f"CREATE {UNIQUENESS[index['unique'] is True]}INDEX {quote(index['name'])} "
+        f"ON {quote(table)} ({columns})",
+        [],
+    )
 
-    def spelled() -> list[Statement]:
-        columns = ", ".join(
-            quote(column.strip()) for column in _word(operation, "columns").split(",")
-        )
-        return [
-            _statement(
-                f"CREATE {UNIQUENESS[operation['detail']['unique'] is True]}INDEX "
-                f"{quote(_word(operation, 'name'))} ON {quote(operation['table'])} ({columns})",
-                [],
-            )
-        ]
 
-    return _needing(operation, engine, ("name", "columns", "unique"), spelled)
+def _create_index(operation: Operation, engine: Engine) -> list[Statement] | Fault:
+    return _carrying(
+        operation,
+        engine,
+        "indexes",
+        lambda: [
+            _index_statement(index, operation["table"], engine) for index in operation["indexes"]
+        ],
+    )
 
 
 def _drop_index(operation: Operation, engine: Engine) -> list[Statement] | Fault:
@@ -787,25 +893,28 @@ def _lookup_table(table: str, column: str) -> str:
 
 
 def _insert_enum_values(operation: Operation, engine: Engine) -> list[Statement] | Fault:
-    """Put one declared value in the lookup the column's foreign key points at.
+    """Put the declared values in the lookup the column's foreign key points at.
 
-    The value is bound. It is a declared value rather than a caller's, and it
+    Each value is bound. It is a declared value rather than a caller's, and it
     could still carry a quote, so it travels beside the statement like every
     other value this package sends.
     """
     quote = QUOTE[engine]
 
-    def spelled() -> list[Statement]:
+    def spelled() -> list[Statement] | Fault:
         lookup = _lookup_table(operation["table"], _word(operation, "column"))
         (mark,) = _marks(engine, 1)
         return [
             _statement(
                 f"INSERT INTO {quote(lookup)} ({quote('value')}) VALUES ({mark})",
-                [operation["detail"]["value"]],
+                [value],
             )
+            for value in operation["values"]
         ]
 
-    return _needing(operation, engine, ("column", "value"), spelled)
+    return _needing(
+        operation, engine, ("column",), lambda: _carrying(operation, engine, "values", spelled)
+    )
 
 
 Speller = Callable[[Operation, Engine], "list[Statement] | Fault"]
