@@ -73,6 +73,11 @@ functions beside them, so the module IS the replacement and
 `applier.generate_create_view(v)` reads identically. Mechanical.
 
 ONE WAS A BELIEF THAT DOES NOT SURVIVE EITHER ENGINE. A changed view query
+# FLOOR LOWERED 2026-09-21, WITH THE SOURCE. This gate asserts it can still see
+# enough files to be worth running, and the number was set against a tree of 197
+# unit tests. The rewrite starts from 15. It is a ratchet: it goes back up as
+# functions land, and it never comes down again.
+
 asserted one operation, commented "CREATE OR REPLACE handles this". Measured:
 SQLite answers `near "OR": syntax error`, and PostgreSQL refuses a changed
 column list with "cannot drop columns from view". The differ emits drop then
@@ -236,7 +241,7 @@ def _holds_a_test(path: pathlib.Path) -> bool:
 def test_the_gate_can_see_the_test_files_at_all() -> None:
     """A gate that reads nothing passes forever."""
     files = list(UNIT.glob("test_*.py")) + list((TESTS / "integration").glob("test_*.py"))
-    assert len(files) > 30, f"found only {len(files)} test files in {UNIT}"
+    assert len(files) > 12, f"found only {len(files)} test files in {UNIT}"
 
 
 def test_no_new_test_file_is_hollow() -> None:

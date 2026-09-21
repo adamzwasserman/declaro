@@ -6,14 +6,6 @@ from typing import Any, TypedDict
 
 import pytest
 
-from declaro_persistum.types import Schema
-from tests.bdd.factories.data_factory import todos, users
-from tests.bdd.factories.schema_factory import (
-    complex_ecommerce_schema,
-    simple_todos_schema,
-    simple_users_schema,
-)
-
 # =============================================================================
 # Scenario context — data passed between Given, When and Then
 # =============================================================================
@@ -33,7 +25,6 @@ from tests.bdd.factories.schema_factory import (
 class ScenarioContext(TypedDict, total=False):
     """What one scenario knows so far. Every key optional; steps fill them in."""
 
-    schema: Schema | None
     results: list[dict[str, Any]]
     error: Exception | None
     connection: Any
@@ -51,7 +42,6 @@ def new_context() -> ScenarioContext:
     convention.
     """
     return {
-        "schema": None,
         "results": [],
         "error": None,
         "connection": None,
@@ -65,24 +55,6 @@ def new_context() -> ScenarioContext:
 # =============================================================================
 # Schema Fixtures
 # =============================================================================
-
-
-@pytest.fixture
-def todos_schema() -> Schema:
-    """Simple todos schema."""
-    return simple_todos_schema()
-
-
-@pytest.fixture
-def users_schema() -> Schema:
-    """Simple users schema."""
-    return simple_users_schema()
-
-
-@pytest.fixture
-def ecommerce_schema() -> Schema:
-    """Complex e-commerce schema."""
-    return complex_ecommerce_schema()
 
 
 # `schema_factory` returned the SchemaFactory CLASS so a step could call
@@ -120,15 +92,3 @@ def bdd_context() -> ScenarioContext:
 # `given_todos_with_rows(bdd_context, count, todo_factory)` needs a fixture
 # called `todo_factory`. It is the batch FUNCTION, not a class to call methods
 # on and not a row: the step asks for `count` rows and calls it with that.
-
-
-@pytest.fixture
-def todo_factory():
-    """`todos(n)` — n generated todos, every one distinct."""
-    return todos
-
-
-@pytest.fixture
-def user_factory():
-    """`users(n)` — n generated users, every email distinct."""
-    return users

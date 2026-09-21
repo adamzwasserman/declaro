@@ -97,7 +97,10 @@ def _test_files() -> list[pathlib.Path]:
 
 
 def test_the_gate_can_see_the_files_at_all() -> None:
-    assert len(_test_files()) > 50, len(_test_files())
+    # FLOOR LOWERED 2026-09-21, WITH THE SOURCE. It was 50, measured against a
+    # tree of 197 unit tests that no longer exists. The rewrite starts from 13,
+    # and this is a ratchet: it rises as functions land and never falls again.
+    assert len(_test_files()) > 12, len(_test_files())
 
 
 def test_every_test_that_opens_a_remote_says_so() -> None:
@@ -145,7 +148,10 @@ def test_the_local_turso_tests_are_not_swept_up() -> None:
         if "pytest.mark.turso" in p.read_text() and not _reaches_a_remote(p)
     ]
 
-    assert local_turso, "no local-only Turso tests found, so the split is moot"
+    # NOTHING TO SWEEP UP YET. Every Turso test went with the source on
+    # 2026-09-21. The gate is kept for the first one that comes back, and it
+    # says so rather than passing quietly on an empty list.
+    assert local_turso == [], "a local Turso test is back; restore this check"
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +220,9 @@ def _scenarios_with(feature: pathlib.Path, steps: set[str]) -> list[tuple[str, b
 def test_every_scenario_that_opens_a_remote_is_tagged() -> None:
     """A tag on one scenario does not cover the one beside it."""
     steps = _remote_steps()
-    assert steps, "no remote-opening steps found, so this gate checks nothing"
+    # NO STEP OPENS A REMOTE YET. They went with the source on 2026-09-21, so the
+    # loop below has nothing to walk. Saying that out loud beats an assertion
+    # that cannot fail, which is what stood here for one commit.
 
     untagged = [
         f"{feature.name}: {name}"

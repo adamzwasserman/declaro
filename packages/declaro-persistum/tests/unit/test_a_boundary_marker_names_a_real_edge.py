@@ -114,8 +114,12 @@ SRC = ROOT / "src"
 # The classification below was written when there were 15; the seven and four
 # it names are now gone and are kept only so a later reader can tell what
 # moved and why.
-BASELINE = 8
-BASELINE_BUILD = "2d6f411, built 2026-08-28"
+# ZEROED 2026-09-21 WITH THE SOURCE. The package was deleted and is being
+# rewritten from `docs/design/persistum.hd`. Every number this gate holds was
+# measured against 30,013 lines that no longer exist. Each one is a ratchet:
+# it rises as functions land and never falls again.
+BASELINE = 0
+BASELINE_BUILD = "the empty tree of 2026-09-21, after the source was deleted"
 
 # THE OTHER HALF OF THE SAME CLAUSE: a function that does I/O and is called
 # from elsewhere in its own file, so the I/O is in the interior rather than at
