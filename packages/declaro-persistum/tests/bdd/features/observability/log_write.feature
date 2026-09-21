@@ -18,45 +18,42 @@ Feature: log_write -- What an operator reads afterwards
     Then nothing in it wrote a line
 
   # ------------------------------------------------------------------
-  # FOLDED IN FROM `reporting/say.feature` on 2026-09-21, one feature
-  # per function. What that file said about why:
-  # `say` is the only function in this package that writes a line. Everything a
-  # caller hands it has to arrive at the standard library intact, and anything it
-  # cannot carry has to be refused rather than quietly turned into text.
-  # THE DEFECT THIS FEATURE EXISTS FOR. `say` rendered every keyword as
-  # "name=value" and appended it to the message. `exc_info=True` is not a fact,
-  # it is the standard library's own keyword for "attach the exception being
-  # handled". So a push failure that meant to record its cause wrote the literal
-  # words "exc_info=True" and threw the exception away. The comment above the
-  # call site said the opposite: "exc_info=True keeps the type and the
-  # traceback." Two call sites did this and neither ever carried a cause.
+  # FOLDED IN FROM `reporting/say.feature` on 2026-09-21, rewritten as results
+  # on the same day. What that file said about why:
+  #
+  # This is the only place in the package that writes a line, so everything a
+  # caller hands it has to arrive at the standard library intact, and anything
+  # it cannot carry has to be refused rather than quietly turned into text.
+  #
+  # THE DEFECT IT EXISTS FOR. The old writer rendered every keyword as
+  # "name=value" and appended it to the message. The standard library's own
+  # keyword for "attach the exception being handled" is not a fact, so a push
+  # failure meaning to record its cause wrote those words as text and threw the
+  # exception away. Two call sites did it and neither ever carried a cause. The
+  # comment above them said the opposite.
 
   Scenario: a line is written at the level the caller named
-    When say writes "the disk filled" at warning
-    Then a warning was written saying "the disk filled"
-
-  Scenario: named facts are written beside the message
-    When say writes "the disk filled" at warning with the fact path="/tmp/a.db"
-    Then the line written reads "the disk filled path=/tmp/a.db"
+    When a warning is written saying "the disk filled"
+    Then the line reads "the disk filled" and its level is warning
 
   Scenario: a level nobody declared is refused
-    When say writes "the disk filled" at catastrophe
-    Then it refuses
+    When a line is written at a level the vocabulary does not hold
+    Then it is refused, naming the levels there are
 
   Scenario: a keyword belonging to the standard library is refused as a fact
-    When say writes "the push failed" at warning with the fact exc_info=True
-    Then it refuses and names "exc_info"
+    When a line is written with a fact named for the standard library's own keyword
+    Then it is refused, naming that keyword
 
-  Scenario: say_because carries the exception, not a rendering of it
-    Given a ValueError reading "no such column"
-    When say_because writes "the push failed" at warning with that cause
-    Then the record carries that ValueError as the exception
+  Scenario: a cause is carried as an exception, not as words
+    Given a failure carrying a cause
+    When a line is written with that cause
+    Then the record carries the cause itself, and the message does not mention it
 
-  Scenario: say_because still writes the message and its facts
-    Given a ValueError reading "no such column"
-    When say_because writes "the push failed" at warning with that cause and the fact path="/tmp/a.db"
-    Then the line written reads "the push failed path=/tmp/a.db"
+  Scenario: a line carrying a cause still carries its facts
+    Given a failure carrying a cause
+    When a line is written with that cause and one fact
+    Then the line reads the message and the fact, and the record carries the cause
 
-  Scenario: say attaches no exception at all
-    When say writes "the disk filled" at warning
+  Scenario: a line with no cause carries none
+    When a line is written with no cause
     Then the record carries no exception

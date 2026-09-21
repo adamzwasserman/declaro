@@ -38,8 +38,8 @@ Feature: One function says things out loud
     When the gate runs
     Then it passes
 
-  Scenario: the saying function refuses a keyword the standard library owns
-    When a caller passes `exc_info` as a fact
+  Scenario: the one function that writes a line refuses a keyword the standard library owns
+    When a caller passes the standard library's own keyword as a fact
     Then it is refused and told to pass the cause instead
 
   Scenario: the gate counts what it read

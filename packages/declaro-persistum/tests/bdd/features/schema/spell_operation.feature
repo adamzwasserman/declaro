@@ -4,6 +4,13 @@ Feature: spell_operation -- One schema change into the statements that carry it 
   engine out, which may be several: a SQLite table rebuild is one operation and
   many statements.
 
+  # TWENTY-FOUR SCENARIOS WENT ON 2026-09-21, one per private helper of the
+  # deleted spelling code: _null_default, _wrapped_default, _check_clause and
+  # the rest. Each named a function rather than stating a result, so each
+  # described an implementation that no longer exists. What they were reaching
+  # for survives below, in the scenarios that say what a spelled statement has
+  # to contain.
+
   Scenario: an added column is one statement on PostgreSQL
     When adding a column is spelled for postgresql
     Then one statement comes back
@@ -46,42 +53,19 @@ Feature: spell_operation -- One schema change into the statements that carry it 
     Then it answers "uuid"
 
   @precommit
-  Scenario: map_type spells a type for the engine it is given
-    When map_type is given "boolean" for "postgresql"
-    Then it answers "boolean"
+  Scenario: a declared type is spelled the way one engine writes it
+    When a boolean column is spelled for postgresql
+    Then the statement writes it as that engine's own boolean
 
   @precommit
-  Scenario: _the_mappable_engine hands back an engine that has a mapper
-    When _the_mappable_engine is given "sqlite"
-    Then it answers "sqlite"
-
-  @precommit
-  Scenario: _refuse_unmappable_engine names the engines that do exist
-    When _refuse_unmappable_engine is given "mysql"
-    Then it refuses and names "sqlite"
-
-  # ============================================
-  # Comparing two declared types
-  # ============================================
+  Scenario: an engine nobody wrote a spelling for is refused
+    When a column is spelled for an engine this package does not ship
+    Then it is refused, naming the engines it has
 
   @precommit
   Scenario: same_type finds two spellings of one type equal on an engine
     When same_type compares "uuid" and "TEXT" on "sqlite"
     Then it answers that they are the same
-
-  @precommit
-  Scenario: _the_same_spelling compares two declared types as one engine writes them
-    When _the_same_spelling compares "int" and "integer" on "sqlite"
-    Then it answers that they are the same
-
-  @precommit
-  Scenario: _one_absence_is_not_the_other answers only when both sides are absent
-    When _one_absence_is_not_the_other compares nothing with "text"
-    Then it answers that they are not the same
-
-  # ============================================
-  # Spelling a default
-  # ============================================
 
   @precommit
   Scenario: sqlite_default writes the text that follows DEFAULT
@@ -94,106 +78,9 @@ Feature: spell_operation -- One schema change into the statements that carry it 
     Then it answers "DEFAULT (now())"
 
   @precommit
-  Scenario: _null_default writes NULL for a default nobody declared
-    When _null_default is given nothing
-    Then it answers "DEFAULT NULL"
-
-  @precommit
-  Scenario: _literal_default writes a number as it stands
-    When _literal_default is given the number 42
-    Then it answers "DEFAULT 42"
-
-  @precommit
-  Scenario: _wrapped_default wraps an expression a second time
-    When _wrapped_default is given "(now())"
-    Then it answers "DEFAULT ((now()))"
-
-  @precommit
-  Scenario: _bare_default leaves text that is not parenthesised alone
-    When _bare_default is given "'active'"
-    Then it answers "DEFAULT 'active'"
-
-  @precommit
-  Scenario: _text_default decides by whether the text is already an expression
-    When _text_default is given "(now())"
-    Then it answers "DEFAULT ((now()))"
-
-  @precommit
-  Scenario: _the_spellable_default hands back a default the table can write
-    When _the_spellable_default is given the number 1
-    Then it answers the number 1
-
-  @precommit
-  Scenario: _refuse_unspellable_default names the default nobody can write
-    When _refuse_unspellable_default is given an object nothing spells
-    Then it refuses
-
-  @precommit
-  Scenario: _the_renderable_engine hands back an engine that has a renderer
-    When _the_renderable_engine is given "postgresql"
-    Then it answers "postgresql"
-
-  @precommit
-  Scenario: _refuse_unrenderable_engine names the engines that do exist
-    When _refuse_unrenderable_engine is given "mysql"
-    Then it refuses and names "sqlite"
-
-  # ============================================
-  # Translating a default between engines
-  # ============================================
-
-  @precommit
-  Scenario: _translate_default spells a declared default for one engine
-    When _translate_default is given "now()" for "sqlite" on column "created"
-    Then it answers "(datetime('now'))"
-
-  @precommit
-  Scenario: _translate_text_default matches text against what the engine spells
-    When _translate_text_default is given "now()" for "sqlite" on column "created"
-    Then it answers "(datetime('now'))"
-
-  @precommit
-  Scenario: _untranslated_default leaves a number the same in every engine
-    When _untranslated_default is given the number 7 for "sqlite" on column "n"
-    Then it answers the number 7
-
-  @precommit
-  Scenario: _the_spellable_expression hands back an expression the engine writes
-    When _the_spellable_expression is given "now()" for "sqlite" on column "created"
-    Then it answers "now()"
-
-  @precommit
-  Scenario: _refuse_unspellable_expression names the column it could not spell
-    When _refuse_unspellable_expression is given "gen_random_uuid()" for "sqlite" on column "id"
-    Then it refuses and names "id"
-
-  @precommit
-  Scenario: _the_engines_spelling writes the expression this engine's own way
-    When _the_engines_spelling looks up "now()" in the sqlite spellings
-    Then it answers "CURRENT_TIMESTAMP"
-
-  @precommit
-  Scenario: _as_declared keeps what the author wrote when no engine differs
-    When _as_declared looks up "'x'" in the sqlite spellings
-    Then it answers "'x'"
-
-  # ============================================
-  # Writing a whole column
-  # ============================================
-
-  @precommit
   Scenario: column_definition spells one column for one engine
     When column_definition is given a text column "name" for "sqlite"
     Then it answers "name" TEXT
-
-  @precommit
-  Scenario: _foreign_key_clause writes REFERENCES with the cascades declared
-    When _foreign_key_clause is given a column referencing "users.id"
-    Then it answers a REFERENCES clause naming "users"
-
-  # ============================================
-  # Writing a table-level constraint
-  # ============================================
 
   @precommit
   Scenario: constraint_clause writes one constraint as a CREATE TABLE carries it
@@ -201,40 +88,6 @@ Feature: spell_operation -- One schema change into the statements that carry it 
     Then it answers a CHECK clause naming "ck_positive"
 
   @precommit
-  Scenario: _check_clause writes the expression the declaration carries
-    When _check_clause is given a check "ck_positive" on "id > 0"
-    Then it answers a CHECK clause naming "ck_positive"
-
-  @precommit
-  Scenario: _unique_clause writes a UNIQUE over the columns named
-    When _unique_clause is given a unique "uq_email" over "email"
-    Then it answers a UNIQUE clause naming "email"
-
-  @precommit
-  Scenario: _write_constraint hands a kind this renderer writes to its writer
-    When _write_constraint is given a check "ck_positive" on "id > 0"
-    Then it answers a CHECK clause naming "ck_positive"
-
-  @precommit
-  Scenario: _refuse_constraint names a kind this renderer does not write
-    When _refuse_constraint is given a constraint of kind "exclusion"
-    Then it refuses and names "exclusion"
-
-  # ------------------------------------------------------------------
-  # FOLDED IN FROM `enums/changing_an_enum_value.feature` on 2026-09-21, one feature
-  # per function. What that file said about why:
-  # As a schema author widening a Literal type
-  # I want the new value to reach the lookup table the column points at
-  # So that the column accepts it instead of refusing every row that uses it
-  # A `Literal["a", "b"]` becomes a lookup table plus a foreign key, because a
-  # CHECK constraint is not portable. Widening the Literal means inserting a
-  # row; narrowing it means deleting one.
-  #
-  # BOTH RUN AGAINST A REAL DATABASE with real foreign key enforcement, because
-  # the interesting half is what happens when a row still points at the value
-  # being removed. Reading the SQL string cannot see that.
-  # @precommit @sqlite
-
   Scenario: a value added to the lookup is a value the column accepts
     Given a table "orders" whose status is one of "new" and "paid"
     When "shipped" is added to the statuses
@@ -295,26 +148,26 @@ Feature: spell_operation -- One schema change into the statements that carry it 
     Then it names "orders" and not the stamp table
 
   @precommit
-  Scenario Outline: both builders answer for every engine we ship
-    When "<builder>" is asked for "<engine>"
-    Then it gives back a statement
+  Scenario Outline: every statement a migration needs exists for every engine
+    When <what> is spelled for <engine>
+    Then a statement comes back
 
     Examples:
-      | builder         | engine     |
-      | store_hash_sql  | sqlite     |
-      | store_hash_sql  | postgresql |
-      | user_tables_sql | sqlite     |
-      | user_tables_sql | postgresql |
+      | what                       | engine     |
+      | stamping the schema's hash | sqlite     |
+      | stamping the schema's hash | postgresql |
+      | listing the user's tables  | sqlite     |
+      | listing the user's tables  | postgresql |
 
   @precommit
-  Scenario Outline: an engine nobody wrote a statement for is refused
-    When "<builder>" is asked for "mysql"
-    Then it refuses and names the engines it has
+  Scenario Outline: an engine nobody wrote that statement for is refused
+    When <what> is spelled for an engine this package does not ship
+    Then it is refused, naming the engines it has
 
     Examples:
-      | builder         |
-      | store_hash_sql  |
-      | user_tables_sql |
+      | what                       |
+      | stamping the schema's hash |
+      | listing the user's tables  |
 
   # THE PLACEHOLDER IS THE SAME QUESTION, one fragment rather than a whole
   # statement: asyncpg numbers its parameters and SQLite marks them.

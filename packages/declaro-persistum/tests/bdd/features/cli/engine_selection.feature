@@ -60,11 +60,11 @@ Feature: Which engine the command line decides to talk to
     Then the engine is "sqlite"
 
   @precommit
-  Scenario: get_connection_string prefers the url the operator typed
+  Scenario: the url an operator typed wins over the environment
     When an operator types the url "sqlite:///typed.db" with "sqlite:///env.db" in the environment
-    Then the connection string is "sqlite:///typed.db"
+    Then the database opened is "sqlite:///typed.db"
 
   @precommit
-  Scenario: get_connection_string falls back to the environment
+  Scenario: an operator who types no url gets the one in the environment
     When an operator types no url with "sqlite:///env.db" in the environment
-    Then the connection string is "sqlite:///env.db"
+    Then the database opened is "sqlite:///env.db"
