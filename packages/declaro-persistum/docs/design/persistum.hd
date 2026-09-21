@@ -200,7 +200,7 @@ module declaro-persistum
   # caller say `on_commit` or `trigger`: those are mechanisms, and picking one
   # is the library's job. A caller who has to know which engine they are on has
   # been handed that job back.
-  set freshnesses = { "always current", "current when read", "refreshed when query_ask" } note "how fresh a materialized view must be, in requirements rather than mechanisms"
+  set freshnesses = { "always current", "current when read", "refreshed when asked" } note "how fresh a materialized view must be, in requirements rather than mechanisms"
   vocabulary Freshness = { freshnesses } note "how stale a materialized view may be"
 
   type Schema = { tables: list<Table>
@@ -423,11 +423,11 @@ module declaro-persistum
   type Answering = { db: Database
                      model: Model
                      grammar: Grammar
-                     query_ask: Asked
+                     asked: Asked
                      declaration: Declaration
                      statement: Statement
                      rows: Rows
-                     query_answer: Answer } note "what answering a question carries, step by step in order"
+                     answer: Answer } note "what answering a question carries, step by step in order"
 
   # NO STORE, AND THE REASON IS A MISSING NUMBER. `running/a_statement_is_built_
   # once.feature` asks that the same question not be compiled twice, and a
