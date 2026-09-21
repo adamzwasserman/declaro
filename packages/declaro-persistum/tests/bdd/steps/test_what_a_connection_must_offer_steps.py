@@ -20,7 +20,7 @@ from pytest_bdd import parsers, scenarios, then, when
 
 from declaro_persistum import writers
 
-scenarios("../features/writers/what_a_connection_must_offer.feature")
+scenarios("../features/query/query_run_together.feature")
 
 
 class Ctx(TypedDict, total=False):

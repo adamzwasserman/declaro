@@ -16,7 +16,7 @@ from pytest_bdd import given, parsers, scenarios, then, when
 
 from declaro_persistum import migration_sql as ms
 
-scenarios("../features/migration/statements_per_engine.feature")
+scenarios("../features/schema/spell_operation.feature")
 
 
 class Ctx(TypedDict, total=False):

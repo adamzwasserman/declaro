@@ -22,7 +22,7 @@ from pytest_bdd import parsers, scenarios, then, when
 
 from declaro_persistum.applier import spelling
 
-scenarios("../features/applier/spelling.feature")
+scenarios("../features/schema/spell_operation.feature")
 
 
 class Ctx(TypedDict, total=False):

@@ -31,7 +31,7 @@ from declaro_persistum.differ import (
 from declaro_persistum.differ.toposort import build_dependency_graph
 from declaro_persistum.types import NOTHING
 
-scenarios("../features/schema/diff.feature")
+scenarios("../features/core/difference.feature")
 
 
 class Ctx(TypedDict, total=False):

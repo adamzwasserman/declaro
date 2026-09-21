@@ -15,7 +15,7 @@ from pytest_bdd import given, scenarios, then, when
 
 from declaro_persistum.database import no_passes
 
-scenarios("../features/turso/closing_what_was_opened.feature")
+scenarios("../features/session/session_close_connection.feature")
 
 
 class _ARealFile:

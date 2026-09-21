@@ -16,7 +16,7 @@ from pytest_bdd import given, parsers, scenarios, then, when
 
 from declaro_persistum.abstractions import enums
 
-scenarios("../features/enums/changing_an_enum_value.feature")
+scenarios("../features/schema/spell_operation.feature")
 
 
 class Ctx(TypedDict, total=False):

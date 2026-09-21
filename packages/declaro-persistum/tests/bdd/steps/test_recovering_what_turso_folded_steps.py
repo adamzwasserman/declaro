@@ -14,7 +14,7 @@ from pytest_bdd import given, parsers, scenarios, then, when
 
 from declaro_persistum.inspector import turso as inspector
 
-scenarios("../features/inspector/recovering_what_turso_folded.feature")
+scenarios("../features/schema/schema_inspect.feature")
 
 # WHAT A PRAGMA HANDS BACK, and nothing more. If a rewrite drops a key, the
 # differ sees a column that changed and rebuilds a table that did not.

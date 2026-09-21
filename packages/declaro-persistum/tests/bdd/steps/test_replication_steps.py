@@ -39,7 +39,7 @@ from declaro_persistum.database import (
 from declaro_persistum.turso_database import open_turso, replicate_path
 from declaro_persistum.types import NOTHING
 
-scenarios("../features/replication.feature")
+scenarios("../features/lifecycle/lifecycle_shut_down.feature")
 
 
 class Ctx(TypedDict, total=False):

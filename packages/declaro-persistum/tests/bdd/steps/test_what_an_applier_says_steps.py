@@ -13,7 +13,7 @@ from typing import Any, TypedDict
 import pytest
 from pytest_bdd import parsers, scenarios, then, when
 
-scenarios("../features/applier/what_an_applier_says_about_itself.feature")
+scenarios("../features/session/session_connect.feature")
 
 ENGINES = ("sqlite", "turso", "postgresql")
 

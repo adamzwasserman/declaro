@@ -19,7 +19,7 @@ from pytest_bdd import given, scenarios, then, when
 from declaro_persistum.retry import NO_RETRY
 from declaro_persistum.write_queue import PendingWrite, collect, deposit, drain, new_room
 
-scenarios("../features/write_queue.feature")
+scenarios("../features/query/query_collect.feature")
 
 TABLE = "notes"
 

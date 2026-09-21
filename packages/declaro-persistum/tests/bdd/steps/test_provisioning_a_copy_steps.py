@@ -22,7 +22,7 @@ from pytest_bdd import given, scenarios, then, when
 
 pytestmark = pytest.mark.network
 
-scenarios("../features/replication/provisioning_a_copy.feature")
+scenarios("../features/turso/turso_pull.feature")
 
 
 class Ctx(TypedDict, total=False):

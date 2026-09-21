@@ -32,7 +32,7 @@ from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, MigrationError
 from declaro_persistum.types import NOTHING, Column, Operation
 
 # Load scenarios from feature file
-scenarios("../features/table_reconstruction.feature")
+scenarios("../features/schema/spell_operation.feature")
 
 
 # Event loop fixture for async operations

@@ -15,7 +15,7 @@ from pytest_bdd import parsers, scenarios, then, when
 from declaro_persistum.exceptions import MigrationError, RollbackError
 from declaro_persistum.types import NOTHING
 
-scenarios("../features/exceptions/what_a_failed_migration_says.feature")
+scenarios("../features/session/session_connect.feature")
 
 
 class Ctx(TypedDict, total=False):

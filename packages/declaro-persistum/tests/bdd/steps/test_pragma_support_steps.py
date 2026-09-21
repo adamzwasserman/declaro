@@ -21,7 +21,7 @@ from declaro_persistum.abstractions.pragma_compat import (
 )
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE as OUR_OWN_BUG
 
-scenarios("../features/pragma_support.feature")
+scenarios("../features/core/capability_of.feature")
 
 # Imported now rather than written out. This block used to define the tuple
 # locally, with a note saying `declaro_persistum.exceptions` had no such thing

@@ -16,7 +16,7 @@ from pytest_bdd import given, parsers, scenarios, then, when
 
 from declaro_persistum.abstractions import materialized_views as mv
 
-scenarios("../features/matview/asking_about_a_matview.feature")
+scenarios("../features/schema/mechanism_for.feature")
 
 
 class Ctx(TypedDict, total=False):

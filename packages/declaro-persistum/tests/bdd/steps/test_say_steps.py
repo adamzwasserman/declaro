@@ -16,7 +16,7 @@ from pytest_bdd import given, parsers, scenarios, then, when
 
 from declaro_persistum import reporting
 
-scenarios("../features/reporting/say.feature")
+scenarios("../features/observability/log_write.feature")
 
 MODULE = "declaro_persistum.test_say"
 

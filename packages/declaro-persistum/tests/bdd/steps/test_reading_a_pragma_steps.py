@@ -15,7 +15,7 @@ from pytest_bdd import given, parsers, scenarios, then, when
 
 from declaro_persistum.abstractions import pragma_compat
 
-scenarios("../features/pragma/reading_a_pragma.feature")
+scenarios("../features/schema/schema_inspect.feature")
 
 # A NAME WITH A QUOTE IN IT. `as_identifier` doubles it; a reader that forgets
 # hands the engine a broken statement.

@@ -34,7 +34,7 @@ from declaro_persistum.database import (
     writing,
 )
 
-scenarios("../features/replication/deciding_to_replicate.feature")
+scenarios("../features/lifecycle/lifecycle_catch_up.feature")
 
 
 class Ctx(TypedDict, total=False):
