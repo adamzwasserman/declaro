@@ -17,3 +17,44 @@ Feature: query_run_together -- Several writes that land together, or not at all
   Scenario: it does not go through the room
     When three rows are declared together
     Then no ticket was handed out
+
+  # ------------------------------------------------------------------
+  # FOLDED IN FROM `running/several_writes_travel_together.feature` on 2026-09-21, one feature
+  # per function. What that file said about why:
+  # "The library decides whether several writes travel as one transaction" is true for a
+  # list handed to one call. Two separate calls have no way to say they belong together,
+  # and that is the common case: change a row and remove another, both or neither.
+
+  Scenario: a list handed to one call lands together
+    When a caller declares two rows exist, as a list
+    And the second cannot be written
+    Then neither is in the database
+
+  Scenario: two separate calls are two separate writes
+    When a caller declares one row, and then another
+    And the second fails
+    Then the first is in the database
+
+  Scenario: a group is declared, and the calls inside it travel together
+    When a caller declares a group holding a change and a removal
+    And the removal fails
+    Then the change did not happen either
+
+  Scenario: a group reports what it did as one answer
+    When a group of three writes succeeds
+    Then the answer says three rows changed
+    And it is one answer, not three
+
+  Scenario: a group that cannot start says so before writing anything
+    Given a group naming a column no model declares
+    When it is declared
+    Then it is refused before any of its writes runs
+
+  Scenario: a read inside a group sees the group's own writes
+    When a caller declares a group that adds a row and then counts rows
+    Then the count includes the row the group added
+
+  Scenario: a group is not a connection
+    When a caller declares a group
+    Then nothing in the group's declaration is a connection
+    And the caller never holds one
