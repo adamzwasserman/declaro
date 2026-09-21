@@ -775,10 +775,39 @@ module declaro-persistum
   # the four are spellings, which is what `HOW-IT-SHOULD-WORK.md` says they are.
   dispatch by_grammar = { "pseudo_sql" -> declaration_from_pseudo_sql, "django" -> declaration_from_django, "prisma" -> declaration_from_prisma, "sqlalchemy" -> declaration_from_sqlalchemy } note "picks the builder for the grammar the call arrived in"
 
-  fn declaration_from_pseudo_sql : (asked: Asked) -> Declaration | Fault note "turns the library's own phrasing into a declaration"
-  fn declaration_from_django : (asked: Asked) -> Declaration | Fault note "turns Django's phrasing into a declaration"
-  fn declaration_from_prisma : (asked: Asked) -> Declaration | Fault note "turns Prisma's phrasing into a declaration"
-  fn declaration_from_sqlalchemy : (asked: Asked) -> Declaration | Fault note "turns SQLAlchemy's phrasing into a declaration"
+  # FOUR BUILDERS HELD ONE FUNCTION FOUR TIMES, AND THE FOURTH COPY IS WHAT
+  # NAMED IT. Measured 2026-09-21, after all four were written from their own
+  # features by four people who could not see each other's work: 1,330 lines, and
+  # every one of them separately invented the same things. Reading the caller's
+  # operator against the fifteen. The `ignore_case` companion. A bare value
+  # meaning eq. `or` and `not` becoming `any_of` and `none_of`. The refusal when
+  # a comparison names two operators or none. The refusal when no model is named.
+  #
+  # A condition is data, and data composes the same way whatever spelled it. So
+  # the shared work is one function, and a grammar is what it was supposed to be
+  # all along: a table of words. The four cards below each carry one table and
+  # nothing else.
+  #
+  # WHAT THIS DELETES BESIDES THE LINES. Four copies of one rule is four places
+  # for a decision, and the copies had already drifted before anyone finished
+  # writing them: three builders read the model under `model` and one under
+  # `from`, three took the vocabulary's own word and one translated its grammar's
+  # verb. Neither drift was a decision. Both were what happens when one rule has
+  # four homes.
+  fn condition_from_narrowing : (narrowing: AskedValue) -> Condition | Fault note "turns what a caller wrote into the condition this library holds: a bare value means eq, `or` and `not` become `any_of` and `none_of`"
+
+  # EVERY GRAMMAR REACHES ALL TEN FIELDS, INCLUDING THE WORDS IT DID NOT BRING.
+  # A caller who picked a spelling must not have picked a smaller library, so a
+  # field a grammar has no native word for is reached by the library's own word.
+  # Refusing four of them for one grammar, which is what `declaration_from_sqlalchemy`
+  # did on 2026-09-21, makes the four unequal and makes the claim in all four
+  # feature files false.
+  fn declaration_from_phrasing : (asked: Asked, phrasing: Phrasing) -> Declaration | Fault invokes condition_from_narrowing note "reads a caller's question through one grammar's words and builds the declaration all four produce"
+
+  fn declaration_from_pseudo_sql : (asked: Asked) -> Declaration | Fault invokes declaration_from_phrasing note "the library's own words, and nothing else"
+  fn declaration_from_django : (asked: Asked) -> Declaration | Fault invokes declaration_from_phrasing note "Django's words, and nothing else"
+  fn declaration_from_prisma : (asked: Asked) -> Declaration | Fault invokes declaration_from_phrasing note "Prisma's words, and nothing else"
+  fn declaration_from_sqlalchemy : (asked: Asked) -> Declaration | Fault invokes declaration_from_phrasing note "SQLAlchemy's words, and nothing else"
 
   # --- what `lifecycle_shut_down` and `lifecycle_catch_up` reach ------------------------------
 
