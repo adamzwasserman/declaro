@@ -241,6 +241,158 @@ def require_sqlite() -> None:
 # Sample schemas for testing
 
 
+# =============================================================================
+# The declaration's own shapes
+# =============================================================================
+#
+# WHAT THESE ARE FOR. `docs/design/persistum.hd` declares what this package is
+# built out of, and until 2026-09-21 no fixture produced any of it. A test
+# reaching for a schema got a finished one, which is the one thing the design
+# says nobody hands you: a schema is derived from what the code declares, by
+# `schema_from_declared`, so a fixture that hands one over skips the function
+# that makes it.
+#
+# These are plain dicts on purpose. They are the records the declaration names,
+# written out in the test suite so a test can say "given these models" without
+# reaching into a package that does not have them yet.
+
+
+@pytest.fixture
+def a_person_model() -> dict:
+    """One model: a table, its columns, and nothing the database was asked."""
+    return {
+        "table": "people",
+        "columns": [
+            {
+                "name": "id",
+                "declared_type": "int",
+                "renamed_from": None,
+                "references": None,
+                "facets": {"primary_key": True},
+            },
+            {
+                "name": "name",
+                "declared_type": "str",
+                "renamed_from": None,
+                "references": None,
+                "facets": {},
+            },
+        ],
+        "dropping": [],
+        "indexes": [],
+        "constraints": [],
+    }
+
+
+@pytest.fixture
+def an_order_model() -> dict:
+    """A second model, pointing at the first. The foreign key is on the column
+    that points, which is the only place a join is declared."""
+    return {
+        "table": "orders",
+        "columns": [
+            {
+                "name": "id",
+                "declared_type": "int",
+                "renamed_from": None,
+                "references": None,
+                "facets": {"primary_key": True},
+            },
+            {
+                "name": "person_id",
+                "declared_type": "int",
+                "renamed_from": None,
+                "references": "people.id",
+                "facets": {},
+            },
+            {
+                "name": "total",
+                "declared_type": "decimal",
+                "renamed_from": None,
+                "references": None,
+                "facets": {"floor": 0},
+            },
+        ],
+        "dropping": [],
+        "indexes": [{"name": "orders_by_person", "columns": ["person_id"], "unique": False}],
+        "constraints": [],
+    }
+
+
+@pytest.fixture
+def declared(a_person_model, an_order_model) -> dict:
+    """Everything the code declares, in one answer, the way `schema_read_declared`
+    hands it over: models and views together, and what it means to lose."""
+    return {
+        "models": [a_person_model, an_order_model],
+        "views": [],
+        "dropping_tables": [],
+        "dropping_views": [],
+    }
+
+
+@pytest.fixture
+def a_room() -> dict:
+    """An empty waiting room. Both lists are empty whenever nobody is
+    mid-flight, which is most of the time."""
+    return {"arrivals": [], "waiting": []}
+
+
+@pytest.fixture
+def a_handle():
+    """A real driver connection, held and never read.
+
+    Real rather than a stand-in, because a stand-in that gets the driver
+    contract wrong manufactures bugs: this package has twice chased a defect
+    that lived only in a double. Nothing here reads it, which is what `handle`
+    means in the declaration.
+    """
+    import sqlite3
+
+    connection = sqlite3.connect(":memory:")
+    try:
+        yield connection
+    finally:
+        connection.close()
+
+
+@pytest.fixture
+def a_database(a_handle, a_room) -> dict:
+    """What opening gives a caller, as the declaration describes it: the engine
+    decided once, the connection it reads on, one writer per drainer, the room,
+    the shutdown policy and the primary it derives replication from."""
+    return {
+        "engine": "sqlite",
+        "connection": a_handle,
+        "writers": [a_handle],
+        "room": a_room,
+        "shutdown": "exit_immediately",
+        "primary": None,
+    }
+
+
+@pytest.fixture
+def a_replicated_database(a_database) -> dict:
+    """The same, with a primary, which is the one thing replication is derived
+    from. A second flag saying "replicated" could disagree with this one."""
+    return {
+        **a_database,
+        "primary": "libsql://team-app.turso.io",
+        "shutdown": "replicate_then_exit",
+        "writers": [],
+    }
+
+
+# =============================================================================
+# The shapes the replaced design used
+# =============================================================================
+#
+# EVERY FIXTURE BELOW HANDS OVER A FINISHED `Schema`, which is what the
+# declaration says is derived rather than given. They are still here because
+# the tests that use them cover the code being rewritten, and they go when it
+# does.
+
+
 @pytest.fixture
 def empty_schema() -> Schema:
     """Empty schema."""

@@ -1,8 +1,13 @@
-"""
-BDD step definitions for table reconstruction testing.
+"""Steps for spell_operation.feature.
 
-This tests the table_reconstruction abstraction for SQLite/Turso ALTER COLUMN.
+Merged on 2026-09-21 from test_spelling_steps.py, test_changing_an_enum_value_steps.py, test_statements_per_engine_steps.py, test_table_reconstruction_steps.py.
+One feature, one step file: pytest-bdd resolves a step to whichever module
+imported last when two bind the same file, so exactly one is the rule.
+Each part keeps its own context type and fixture, under its own name,
+because all of them were called Ctx and ctx and the last would have won.
 """
+
+from __future__ import annotations
 
 import asyncio
 import contextlib
@@ -11,6 +16,8 @@ from typing import Any, TypedDict, cast
 import pytest
 from pytest_bdd import given, parsers, scenarios, then, when
 
+from declaro_persistum import migration_sql as ms
+from declaro_persistum.abstractions import enums
 from declaro_persistum.abstractions.pragma_compat import (
     pragma_foreign_key_list,
     pragma_index_list,
@@ -27,12 +34,604 @@ from declaro_persistum.abstractions.table_reconstruction import (
     reconstruct_table,
 )
 from declaro_persistum.applier import apply as apply_operations
+from declaro_persistum.applier import spelling
 from declaro_persistum.applier.spelling import column_definition
 from declaro_persistum.exceptions import A_BUG_IN_THIS_PACKAGE, MigrationError
 from declaro_persistum.types import NOTHING, Column, Operation
 
-# Load scenarios from feature file
 scenarios("../features/schema/spell_operation.feature")
+
+# ---- from test_spelling_steps.py ------------------------------------
+
+
+class Ctx_spelling(TypedDict, total=False):
+    answer: Any
+    refusal: Exception | None
+
+
+@pytest.fixture
+def ctx_spelling() -> Ctx_spelling:
+    return {"answer": None, "refusal": None}
+
+
+def _call(ctx_spelling: Ctx_spelling, name: str, *args: Any) -> None:
+    """Run one of the module's functions and keep whatever it did."""
+    try:
+        ctx_spelling["answer"] = getattr(spelling, name)(*args)
+        ctx_spelling["refusal"] = None
+    except Exception as refused:  # noqa: BLE001 - a refusal is an outcome here
+        ctx_spelling["answer"] = None
+        ctx_spelling["refusal"] = refused
+
+
+# ------------------------------------------------------------------ naming a type
+
+
+@when(parsers.parse('sqlite_type is given "{declared}"'))
+def _when_sqlite_type(ctx_spelling, declared):
+    _call(ctx_spelling, "sqlite_type", declared)
+
+
+@when(parsers.parse('postgresql_type is given "{declared}"'))
+def _when_postgresql_type(ctx_spelling, declared):
+    _call(ctx_spelling, "postgresql_type", declared)
+
+
+@when(parsers.parse('map_type is given "{declared}" for "{engine}"'))
+def _when_map_type(ctx_spelling, declared, engine):
+    _call(ctx_spelling, "map_type", declared, engine)
+
+
+@when(parsers.parse('_the_mappable_engine is given "{engine}"'))
+def _when_mappable(ctx_spelling, engine):
+    _call(ctx_spelling, "_the_mappable_engine", engine)
+
+
+@when(parsers.parse('_refuse_unmappable_engine is given "{engine}"'))
+def _when_unmappable(ctx_spelling, engine):
+    _call(ctx_spelling, "_refuse_unmappable_engine", engine)
+
+
+# --------------------------------------------------------- comparing two types
+
+
+@when(parsers.parse('same_type compares "{left}" and "{right}" on "{engine}"'))
+def _when_same_type(ctx_spelling, left, right, engine):
+    _call(ctx_spelling, "same_type", left, right, engine)
+
+
+@when(parsers.parse('_the_same_spelling compares "{left}" and "{right}" on "{engine}"'))
+def _when_same_spelling(ctx_spelling, left, right, engine):
+    _call(ctx_spelling, "_the_same_spelling", left, right, engine)
+
+
+@when(parsers.parse('_one_absence_is_not_the_other compares nothing with "{right}"'))
+def _when_one_absence(ctx_spelling, right):
+    _call(ctx_spelling, "_one_absence_is_not_the_other", None, right, "sqlite")
+
+
+# ------------------------------------------------------------ spelling a default
+
+
+@when(parsers.parse("sqlite_default is given the number {value:d}"))
+def _when_sqlite_default_number(ctx_spelling, value):
+    _call(ctx_spelling, "sqlite_default", value)
+
+
+@when(parsers.parse('postgresql_default is given "{value}"'))
+def _when_postgresql_default(ctx_spelling, value):
+    _call(ctx_spelling, "postgresql_default", value)
+
+
+@when("_null_default is given nothing")
+def _when_null_default(ctx_spelling):
+    _call(ctx_spelling, "_null_default", None)
+
+
+@when(parsers.parse("_literal_default is given the number {value:d}"))
+def _when_literal_default(ctx_spelling, value):
+    _call(ctx_spelling, "_literal_default", value)
+
+
+@when(parsers.parse('_wrapped_default is given "{value}"'))
+def _when_wrapped_default(ctx_spelling, value):
+    _call(ctx_spelling, "_wrapped_default", value)
+
+
+@when(parsers.parse('_bare_default is given "{value}"'))
+def _when_bare_default(ctx_spelling, value):
+    _call(ctx_spelling, "_bare_default", value)
+
+
+@when(parsers.parse('_text_default is given "{value}"'))
+def _when_text_default(ctx_spelling, value):
+    _call(ctx_spelling, "_text_default", value)
+
+
+@when(parsers.parse("_the_spellable_default is given the number {value:d}"))
+def _when_spellable_default(ctx_spelling, value):
+    _call(ctx_spelling, "_the_spellable_default", value)
+
+
+@when("_refuse_unspellable_default is given an object nothing spells")
+def _when_unspellable_default(ctx_spelling):
+    _call(ctx_spelling, "_refuse_unspellable_default", object())
+
+
+@when(parsers.parse('_the_renderable_engine is given "{engine}"'))
+def _when_renderable(ctx_spelling, engine):
+    _call(ctx_spelling, "_the_renderable_engine", engine)
+
+
+@when(parsers.parse('_refuse_unrenderable_engine is given "{engine}"'))
+def _when_unrenderable(ctx_spelling, engine):
+    _call(ctx_spelling, "_refuse_unrenderable_engine", engine)
+
+
+# --------------------------------------------------- translating between engines
+
+
+@when(parsers.parse('_translate_default is given "{value}" for "{engine}" on column "{column}"'))
+def _when_translate_default(ctx_spelling, value, engine, column):
+    _call(ctx_spelling, "_translate_default", value, engine, column)
+
+
+@when(
+    parsers.parse('_translate_text_default is given "{value}" for "{engine}" on column "{column}"')
+)
+def _when_translate_text(ctx_spelling, value, engine, column):
+    _call(ctx_spelling, "_translate_text_default", value, engine, column)
+
+
+@when(
+    parsers.parse(
+        '_untranslated_default is given the number {value:d} for "{engine}" on column "{column}"'
+    )
+)
+def _when_untranslated(ctx_spelling, value, engine, column):
+    _call(ctx_spelling, "_untranslated_default", value, engine, column)
+
+
+@when(
+    parsers.parse(
+        '_the_spellable_expression is given "{value}" for "{engine}" on column "{column}"'
+    )
+)
+def _when_spellable_expression(ctx_spelling, value, engine, column):
+    _call(ctx_spelling, "_the_spellable_expression", value, engine, column, "unused")
+
+
+@when(
+    parsers.parse(
+        '_refuse_unspellable_expression is given "{value}" for "{engine}" on column "{column}"'
+    )
+)
+def _when_unspellable_expression(ctx_spelling, value, engine, column):
+    _call(ctx_spelling, "_refuse_unspellable_expression", value, engine, column, "unused")
+
+
+@when(parsers.parse('_the_engines_spelling looks up "{value}" in the sqlite spellings'))
+def _when_engines_spelling(ctx_spelling, value):
+    _call(ctx_spelling, "_the_engines_spelling", {"now()": "CURRENT_TIMESTAMP"}, value, value)
+
+
+@when(parsers.parse('_as_declared looks up "{value}" in the sqlite spellings'))
+def _when_as_declared(ctx_spelling, value):
+    _call(ctx_spelling, "_as_declared", {"now()": "CURRENT_TIMESTAMP"}, value, value)
+
+
+# ------------------------------------------------------------- a whole column
+
+
+@when(parsers.parse('column_definition is given a text column "{name}" for "{engine}"'))
+def _when_column_definition(ctx_spelling, name, engine):
+    _call(ctx_spelling, "column_definition", name, {"type": "text"}, engine)
+
+
+@when(parsers.parse('_foreign_key_clause is given a column referencing "{reference}"'))
+def _when_foreign_key(ctx_spelling, reference):
+    _call(ctx_spelling, "_foreign_key_clause", {"references": reference}, reference)
+
+
+# ------------------------------------------------------------- a constraint
+
+
+@when(parsers.parse('constraint_clause is given a check "{name}" on "{expression}"'))
+def _when_constraint_clause(ctx_spelling, name, expression):
+    _call(ctx_spelling, "constraint_clause", name, {"type": "check", "expression": expression})
+
+
+@when(parsers.parse('_check_clause is given a check "{name}" on "{expression}"'))
+def _when_check_clause(ctx_spelling, name, expression):
+    _call(ctx_spelling, "_check_clause", name, {"type": "check", "expression": expression})
+
+
+@when(parsers.parse('_unique_clause is given a unique "{name}" over "{column}"'))
+def _when_unique_clause(ctx_spelling, name, column):
+    _call(ctx_spelling, "_unique_clause", name, {"type": "unique", "columns": [column]})
+
+
+@when(parsers.parse('_write_constraint is given a check "{name}" on "{expression}"'))
+def _when_write_constraint(ctx_spelling, name, expression):
+    _call(
+        ctx_spelling,
+        "_write_constraint",
+        name,
+        "check",
+        {"type": "check", "expression": expression},
+    )
+
+
+@when(parsers.parse('_refuse_constraint is given a constraint of kind "{kind}"'))
+def _when_refuse_constraint(ctx_spelling, kind):
+    _call(ctx_spelling, "_refuse_constraint", "c", kind, {"type": kind})
+
+
+# ------------------------------------------------------------------- answers
+
+
+@then(parsers.parse('it answers "{expected}"'))
+def _then_answers(ctx_spelling, expected):
+    assert ctx_spelling["refusal"] is None, ctx_spelling["refusal"]
+    assert ctx_spelling["answer"] == expected, ctx_spelling["answer"]
+
+
+@then(parsers.parse("it answers the number {expected:d}"))
+def _then_answers_number(ctx_spelling, expected):
+    assert ctx_spelling["refusal"] is None, ctx_spelling["refusal"]
+    assert ctx_spelling["answer"] == expected, ctx_spelling["answer"]
+
+
+@then("it answers that they are the same")
+def _then_same(ctx_spelling):
+    assert ctx_spelling["answer"] is True, ctx_spelling["answer"]
+
+
+@then("it answers that they are not the same")
+def _then_not_same(ctx_spelling):
+    assert ctx_spelling["answer"] is False, ctx_spelling["answer"]
+
+
+@then("it refuses")
+def _then_refuses(ctx_spelling):
+    assert ctx_spelling["refusal"] is not None, f"it answered {ctx_spelling['answer']!r} instead"
+
+
+@then(parsers.parse('it refuses and names "{named}"'))
+def _then_refuses_naming(ctx_spelling, named):
+    assert ctx_spelling["refusal"] is not None, f"it answered {ctx_spelling['answer']!r} instead"
+    assert named in str(ctx_spelling["refusal"]), ctx_spelling["refusal"]
+
+
+@then(parsers.parse('it answers "{name}" {sql_type}'))
+def _then_answers_column(ctx_spelling, name, sql_type):
+    assert ctx_spelling["refusal"] is None, ctx_spelling["refusal"]
+    assert f'"{name}"' in ctx_spelling["answer"], ctx_spelling["answer"]
+    assert sql_type in ctx_spelling["answer"].upper(), ctx_spelling["answer"]
+
+
+@then(parsers.parse('it answers a REFERENCES clause naming "{table}"'))
+def _then_references(ctx_spelling, table):
+    assert ctx_spelling["refusal"] is None, ctx_spelling["refusal"]
+    assert "REFERENCES" in ctx_spelling["answer"].upper(), ctx_spelling["answer"]
+    assert table in ctx_spelling["answer"], ctx_spelling["answer"]
+
+
+@then(parsers.parse('it answers a CHECK clause naming "{named}"'))
+def _then_check(ctx_spelling, named):
+    assert ctx_spelling["refusal"] is None, ctx_spelling["refusal"]
+    assert "CHECK" in ctx_spelling["answer"].upper(), ctx_spelling["answer"]
+    assert named in ctx_spelling["answer"], ctx_spelling["answer"]
+
+
+@then(parsers.parse('it answers a UNIQUE clause naming "{named}"'))
+def _then_unique(ctx_spelling, named):
+    assert ctx_spelling["refusal"] is None, ctx_spelling["refusal"]
+    assert "UNIQUE" in ctx_spelling["answer"].upper(), ctx_spelling["answer"]
+    assert named in ctx_spelling["answer"], ctx_spelling["answer"]
+
+
+# ---- from test_changing_an_enum_value_steps.py ----------------------
+
+
+class Ctx_changing_an_enum_value(TypedDict, total=False):
+    path: str
+    statements: list[str]
+    refused: Exception | None
+
+
+@pytest.fixture
+def ctx_changing_an_enum_value() -> Ctx_changing_an_enum_value:
+    return {"path": "", "statements": [], "refused": None}
+
+
+def _run(ctx_changing_an_enum_value: Ctx_changing_an_enum_value, *statements: str) -> None:
+    """Run statements against the real database, keeping any refusal."""
+
+    async def _go() -> None:
+        import aiosqlite
+
+        conn = await aiosqlite.connect(ctx_changing_an_enum_value["path"])
+        try:
+            await conn.execute("PRAGMA foreign_keys = ON")
+            for statement in statements:
+                await conn.execute(statement)
+            await conn.commit()
+            ctx_changing_an_enum_value["refused"] = None
+        except Exception as refused:  # noqa: BLE001 - the refusal is the answer
+            ctx_changing_an_enum_value["refused"] = refused
+        finally:
+            await conn.close()
+
+    asyncio.run(_go())
+
+
+@given(parsers.parse('a table "{table}" whose status is one of "{a}" and "{b}"'))
+def _given_table(ctx_changing_an_enum_value, table, a, b, tmp_path):
+    ctx_changing_an_enum_value["path"] = str(tmp_path / "t.db")
+    lookup = enums.enum_table_name(table, "status")
+    _run(
+        ctx_changing_an_enum_value,
+        f'CREATE TABLE "{lookup}" (value TEXT PRIMARY KEY)',
+        f"INSERT INTO \"{lookup}\" (value) VALUES ('{a}')",
+        f"INSERT INTO \"{lookup}\" (value) VALUES ('{b}')",
+        f'CREATE TABLE "{table}" (id INTEGER PRIMARY KEY, status TEXT '
+        f'REFERENCES "{lookup}" (value))',
+    )
+    assert ctx_changing_an_enum_value["refused"] is None, ctx_changing_an_enum_value["refused"]
+    ctx_changing_an_enum_value["table"] = table
+
+
+@given(parsers.parse('an order whose status is "{value}"'))
+def _given_a_row(ctx_changing_an_enum_value, value):
+    _run(
+        ctx_changing_an_enum_value,
+        f"INSERT INTO \"{ctx_changing_an_enum_value['table']}\" (id, status) VALUES (1, '{value}')",
+    )
+    assert ctx_changing_an_enum_value["refused"] is None, ctx_changing_an_enum_value["refused"]
+
+
+@when(parsers.parse('"{value}" is added to the statuses'))
+def _when_added(ctx_changing_an_enum_value, value):
+    ctx_changing_an_enum_value["statements"] = enums.add_enum_value_sql(
+        ctx_changing_an_enum_value.get("table", "orders"), "status", value
+    )
+    _run(
+        ctx_changing_an_enum_value, *ctx_changing_an_enum_value["statements"]
+    ) if ctx_changing_an_enum_value["path"] else None
+
+
+@when(parsers.parse('"{value}" is taken out of the statuses'))
+def _when_removed(ctx_changing_an_enum_value, value):
+    ctx_changing_an_enum_value["statements"] = enums.remove_enum_value_sql(
+        ctx_changing_an_enum_value.get("table", "orders"), "status", value
+    )
+    _run(
+        ctx_changing_an_enum_value, *ctx_changing_an_enum_value["statements"]
+    ) if ctx_changing_an_enum_value["path"] else None
+
+
+@then(parsers.parse('a row with status "{value}" is accepted'))
+def _then_accepted(ctx_changing_an_enum_value, value):
+    _run(
+        ctx_changing_an_enum_value,
+        f"INSERT INTO \"{ctx_changing_an_enum_value['table']}\" (id, status) VALUES (99, '{value}')",
+    )
+    assert ctx_changing_an_enum_value["refused"] is None, (
+        f"the column refuses {value!r} after it was added to the lookup: {ctx_changing_an_enum_value['refused']}"
+    )
+
+
+@then(parsers.parse('a row with status "{value}" is refused'))
+def _then_refused(ctx_changing_an_enum_value, value):
+    _run(
+        ctx_changing_an_enum_value,
+        f"INSERT INTO \"{ctx_changing_an_enum_value['table']}\" (id, status) VALUES (98, '{value}')",
+    )
+    assert ctx_changing_an_enum_value["refused"] is not None, (
+        f"the column accepted {value!r}, which is not one of its values"
+    )
+
+
+@then("the engine refuses, because a row still points at it")
+def _then_refused_in_use(ctx_changing_an_enum_value):
+    assert ctx_changing_an_enum_value["refused"] is not None, (
+        "the value was removed while a row still referenced it, and the database did not object"
+    )
+
+
+@then("the statement carries the value with its quote doubled")
+def _then_doubled(ctx_changing_an_enum_value):
+    (statement,) = ctx_changing_an_enum_value["statements"]
+    assert "it''s new" in statement, (
+        f"a quote in the value was not doubled, so the statement ends early: {statement}"
+    )
+
+
+# ---- from test_statements_per_engine_steps.py -----------------------
+
+
+class Ctx_statements_per_engine(TypedDict, total=False):
+    path: str
+    rows: Any
+    answer: str
+    refusal: Exception | None
+
+
+@pytest.fixture
+def ctx_statements_per_engine() -> Ctx_statements_per_engine:
+    return {"path": "", "rows": None, "answer": "", "refusal": None}
+
+
+@given("a stamp table on a real database")
+def _given_stamp_table(ctx_statements_per_engine, tmp_path):
+    ctx_statements_per_engine["path"] = str(tmp_path / "t.db")
+
+    async def _go() -> None:
+        import aiosqlite
+
+        conn = await aiosqlite.connect(ctx_statements_per_engine["path"])
+        try:
+            await conn.execute(ms.meta_table_sql())
+            await conn.commit()
+        finally:
+            await conn.close()
+
+    asyncio.run(_go())
+
+
+@given(parsers.parse('a table "{table}" that the user made'))
+def _given_user_table(ctx_statements_per_engine, table):
+    async def _go() -> None:
+        import aiosqlite
+
+        conn = await aiosqlite.connect(ctx_statements_per_engine["path"])
+        try:
+            await conn.execute(f'CREATE TABLE "{table}" (id INTEGER PRIMARY KEY)')
+            await conn.commit()
+        finally:
+            await conn.close()
+
+    asyncio.run(_go())
+
+
+@when("the same key is stamped twice with different values")
+def _when_stamped_twice(ctx_statements_per_engine):
+    async def _go() -> None:
+        import aiosqlite
+
+        conn = await aiosqlite.connect(ctx_statements_per_engine["path"])
+        try:
+            sql = ms.store_hash_sql("sqlite")
+            await conn.execute(sql, ("models.py", "first", "2026-01-01"))
+            await conn.execute(sql, ("models.py", "second", "2026-01-02"))
+            await conn.commit()
+            cursor = await conn.execute(ms.stored_hash_sql("sqlite"), ("models.py",))
+            ctx_statements_per_engine["answer"] = (await cursor.fetchone())[0]
+            counted = await conn.execute(f'SELECT count(*) FROM "{ms.META_TABLE}"')
+            ctx_statements_per_engine["rows"] = (await counted.fetchone())[0]
+        finally:
+            await conn.close()
+
+    asyncio.run(_go())
+
+
+@when("the user-tables query is run")
+def _when_user_tables(ctx_statements_per_engine):
+    async def _go() -> None:
+        import aiosqlite
+
+        conn = await aiosqlite.connect(ctx_statements_per_engine["path"])
+        try:
+            cursor = await conn.execute(ms.user_tables_sql("sqlite"))
+            ctx_statements_per_engine["rows"] = [row[0] for row in await cursor.fetchall()]
+        finally:
+            await conn.close()
+
+    asyncio.run(_go())
+
+
+@when(parsers.parse('"{builder}" is asked for "{engine}"'))
+def _when_asked(ctx_statements_per_engine, builder, engine):
+    try:
+        ctx_statements_per_engine["answer"] = getattr(ms, builder)(engine)
+        ctx_statements_per_engine["refusal"] = None
+    except Exception as refused:  # noqa: BLE001 - a refusal is an outcome here
+        ctx_statements_per_engine["answer"] = ""
+        ctx_statements_per_engine["refusal"] = refused
+
+
+@then("the second value is what is stored")
+def _then_second(ctx_statements_per_engine):
+    assert ctx_statements_per_engine["answer"] == "second", (
+        f"the stamp says {ctx_statements_per_engine['answer']!r}; a second boot left the database reporting the first one"
+    )
+
+
+@then("there is one row, not two")
+def _then_one_row(ctx_statements_per_engine):
+    assert ctx_statements_per_engine["rows"] == 1, ctx_statements_per_engine["rows"]
+
+
+@then(parsers.parse('it names "{wanted}" and not the stamp table'))
+def _then_names_only_user(ctx_statements_per_engine, wanted):
+    assert wanted in ctx_statements_per_engine["rows"], ctx_statements_per_engine["rows"]
+    assert ms.META_TABLE not in ctx_statements_per_engine["rows"], (
+        f"our own table is counted as the user's: {ctx_statements_per_engine['rows']}"
+    )
+
+
+@then("it gives back a statement")
+def _then_a_statement(ctx_statements_per_engine):
+    assert ctx_statements_per_engine["refusal"] is None, ctx_statements_per_engine["refusal"]
+    assert ctx_statements_per_engine["answer"].strip(), "the builder handed back nothing"
+
+
+@then("it refuses and names the engines it has")
+def _then_refuses(ctx_statements_per_engine):
+    assert ctx_statements_per_engine["refusal"] is not None, (
+        f"it answered {ctx_statements_per_engine['answer']!r}"
+    )
+    said = str(ctx_statements_per_engine["refusal"])
+    assert "sqlite" in said and "postgresql" in said, said
+
+
+@then(parsers.parse('it gives back "{expected}"'))
+def _then_gives_back(ctx_statements_per_engine, expected):
+    assert ctx_statements_per_engine["refusal"] is None, ctx_statements_per_engine["refusal"]
+    assert ctx_statements_per_engine["answer"] == expected, ctx_statements_per_engine["answer"]
+
+
+@when(parsers.parse('a temporary name is made for "{table}"'))
+def _when_temp_name(ctx_statements_per_engine, table):
+    ctx_statements_per_engine["names"] = [ms.temp_table_name(table)]
+    ctx_statements_per_engine["table"] = table
+
+
+@when(parsers.parse('two temporary names are made for "{table}"'))
+def _when_two_temp_names(ctx_statements_per_engine, table):
+    ctx_statements_per_engine["names"] = [ms.temp_table_name(table), ms.temp_table_name(table)]
+    ctx_statements_per_engine["table"] = table
+
+
+@then("it begins with the temporary prefix")
+def _then_prefixed(ctx_statements_per_engine):
+    assert ctx_statements_per_engine["names"][0].startswith(ms.TMP_PREFIX), (
+        ctx_statements_per_engine["names"][0]
+    )
+
+
+@then("it carries the table's own name")
+def _then_carries_table(ctx_statements_per_engine):
+    assert ctx_statements_per_engine["table"] in ctx_statements_per_engine["names"][0], (
+        ctx_statements_per_engine["names"][0]
+    )
+
+
+@then("they are not the same name")
+def _then_differ(ctx_statements_per_engine):
+    first, second = ctx_statements_per_engine["names"]
+    assert first != second, (
+        f"two rebuilds of the same table got the same temporary name "
+        f"({first!r}), so a retry collides with what the last attempt left"
+    )
+
+
+@then("the tail is exactly as wide as the constant says")
+def _then_width(ctx_statements_per_engine):
+    name = ctx_statements_per_engine["names"][0]
+    tail = name[len(ms.TMP_PREFIX) + len(ctx_statements_per_engine["table"]) :]
+    assert len(tail) == ms._SUFFIX_WIDTH, (
+        f"the tail {tail!r} is {len(tail)} characters and _SUFFIX_WIDTH says "
+        f"{ms._SUFFIX_WIDTH}. Orphan recovery strips that many BY POSITION, so "
+        f"a mismatch takes the wrong characters off every recovered name."
+    )
+
+
+# ---- from test_table_reconstruction_steps.py ------------------------
+
+
+# Load scenarios from feature file
 
 
 # Event loop fixture for async operations
@@ -75,7 +674,7 @@ class ReconContext(TypedDict, total=False):
 @pytest.fixture
 def recon_context(event_loop):
     """A scenario context, with `run` bound to this scenario's loop."""
-    ctx: ReconContext = {
+    ctx_table_reconstruction: ReconContext = {
         "conn": None,
         "table_name": None,
         "columns": {},
@@ -87,13 +686,13 @@ def recon_context(event_loop):
         "rows_snapshot": None,
         "run": event_loop.run_until_complete,
     }
-    yield ctx
+    yield ctx_table_reconstruction
 
-    if ctx["conn"]:
+    if ctx_table_reconstruction["conn"]:
         # Each scenario opens its own database, so a connection that will not
         # close leaves nothing for the next one to trip over.
         with contextlib.suppress(Exception):
-            event_loop.run_until_complete(ctx["conn"].close())
+            event_loop.run_until_complete(ctx_table_reconstruction["conn"].close())
 
 
 # ============================================
