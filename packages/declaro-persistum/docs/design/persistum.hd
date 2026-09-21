@@ -358,11 +358,18 @@ module declaro-persistum
   # becomes a receipt, it is raised, and telling those two apart is the caller's
   # whole reason to read this.
   #
+  # HOW MANY TIMES IT TRIED IS IN THE ANSWER. `retrying_is_the_librarys_job`
+  # asks for it in those words, and until 2026-09-21 no declared type could
+  # carry it: a caller told its write landed could not tell a first attempt from
+  # a fourth. Found by giving that scenario one home and watching the only
+  # function that could own it fail.
+  #
   # THE FAILURE IS A FAULT, NOT A SENTENCE. It carried a bare string until
   # 2026-09-20, which made a receipt the one place in this module that said what
   # went wrong without saying what to do about it.
   type Receipt = { id: str
                    ok: bool
+                   attempts: int
                    failure: Fault | NOTHING } note "what a write did; ok false means the engine stayed busy, nothing else"
   type Room = { arrivals: list<Statement>
                 waiting: list<Ticket> } note "the waiting room between callers and drainers; empty when nobody is mid-flight"

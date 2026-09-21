@@ -11,3 +11,7 @@ Feature: receipt_for -- What the engine did, in what a caller reads
     Given a write that conflicted past the budget
     Then the receipt says it did not land
     And its failure says what to do differently
+
+  Scenario: how many times it tried is in the answer
+    Given a write that succeeded on the third attempt
+    Then the answer says it took three

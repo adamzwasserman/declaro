@@ -101,3 +101,13 @@ Feature: open_database -- One door, and the target says what is behind it
     When a caller opens "postgresql://unreachable.invalid/todo"
     Then the engine was decided first, and postgresql
     And what failed is the connection, and the failure says so
+
+  Scenario: the budget has no default
+    When a database is opened
+    Then the retry budget is part of that declaration
+    And omitting it is refused rather than filled in
+
+  Scenario: the bound is stated where the database is opened
+    When a database is opened
+    Then how many connections it may use is part of that declaration
+    And it has no default, because the right number is a property of the machine

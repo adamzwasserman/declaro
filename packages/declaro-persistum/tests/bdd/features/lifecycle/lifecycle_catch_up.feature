@@ -210,3 +210,7 @@ Feature: lifecycle_catch_up -- What a free turn is spent on
     Given a database that trapped the shutdown signal
     When the handlers are put back somewhere the platform refuses
     Then it refuses, naming the handler still installed
+
+  Scenario: a caller never writes a retry loop
+    When a caller declares a write that conflicts once and then succeeds
+    Then the caller wrote no loop and saw no conflict

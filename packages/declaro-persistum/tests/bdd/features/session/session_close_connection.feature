@@ -52,3 +52,7 @@ Feature: session_close_connection -- What was opened is closed
     Given a database with no primary
     When it is released
     Then no connection was closed
+
+  Scenario: a connection is closed even when the work fails
+    Given a read that raises partway
+    Then the connection it used was closed

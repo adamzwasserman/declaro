@@ -42,15 +42,6 @@ Feature: permitted_connections -- How many connections this database may hold
     Then the number of connections opened stays under a stated bound
     And the bound is a declared number, not whatever the machine allowed
 
-  Scenario: the bound is stated where the database is opened
-    When a database is opened
-    Then how many connections it may use is part of that declaration
-    And it has no default, because the right number is a property of the machine
-
-  Scenario: a connection is closed even when the work fails
-    Given a read that raises partway
-    Then the connection it used was closed
-
   Scenario: a replicated database still holds one sync connection
     Given a replicated database
     When many callers read and write at once

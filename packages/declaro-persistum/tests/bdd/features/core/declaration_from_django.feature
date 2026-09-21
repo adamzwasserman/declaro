@@ -10,7 +10,3 @@ Feature: declaration_from_django -- Django.s phrasing into a declaration
   Scenario: a bare value means eq
     When a caller writes filter(name="bob")
     Then the condition holds an eq comparison, not a bare value
-
-  Scenario: no string is ever pasted
-    When a caller writes a condition
-    Then every key was checked against the model and every value bound

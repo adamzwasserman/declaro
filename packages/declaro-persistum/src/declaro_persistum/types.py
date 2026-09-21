@@ -232,6 +232,7 @@ class Capability(TypedDict):
 class Receipt(TypedDict):
     id: str
     ok: bool
+    attempts: int
     failure: Fault | None
 
 
