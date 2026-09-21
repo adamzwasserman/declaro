@@ -22,7 +22,7 @@ declaration gives it.
 """
 
 import pytest
-from pytest_bdd import given, scenarios, then
+from pytest_bdd import given, parsers, scenarios, then
 
 scenarios("../features/core/receipt_for.feature")
 
@@ -50,10 +50,16 @@ def a_budget_spent_fault() -> dict:
     }
 
 
-@given("a write that ran on the first attempt")
-def _ran_on_the_first_attempt(outcome: dict, a_ticket: str) -> None:
+# TWO SENTENCES, ONE NUMBER APART. How many attempts a write took is the only
+# thing that differs, so the sentence carries it and the step reads the row.
+ATTEMPTS_TAKEN = {"first": 1, "third": 3}
+
+
+@given(parsers.parse("a write that ran on the {which} attempt"))
+@given(parsers.parse("a write that succeeded on the {which} attempt"))
+def _a_write_that_succeeded(outcome: dict, a_ticket: str, which: str) -> None:
     outcome["ticket"] = a_ticket
-    outcome["attempts"] = 1
+    outcome["attempts"] = ATTEMPTS_TAKEN[which]
     outcome["failure"] = None
 
 
@@ -62,13 +68,6 @@ def _conflicted_past_the_budget(outcome: dict, a_ticket: str, a_budget_spent_fau
     outcome["ticket"] = a_ticket
     outcome["attempts"] = 5
     outcome["failure"] = a_budget_spent_fault
-
-
-@given("a write that succeeded on the third attempt")
-def _succeeded_on_the_third_attempt(outcome: dict, a_ticket: str) -> None:
-    outcome["ticket"] = a_ticket
-    outcome["attempts"] = 3
-    outcome["failure"] = None
 
 
 @then("the receipt says it succeeded and carries no failure")

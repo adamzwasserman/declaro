@@ -141,14 +141,14 @@ def _the_same_question_in_four_grammars(scenario: dict) -> None:
     from declaro_persistum.declaration_from_pseudo_sql import declaration_from_pseudo_sql
     from declaro_persistum.declaration_from_sqlalchemy import declaration_from_sqlalchemy
 
-    # Each grammar spells the narrowing under its own word, and prisma spells
-    # the asking word `find_many`. The question underneath is the one question.
+    # Each grammar spells the narrowing under its own word, and all four carry
+    # the asking word under `wanted`. The question underneath is the one question.
     asked = {
         declaration_from_pseudo_sql: {"model": "people", "wanted": "all", "where": {"name": "bob"}},
         declaration_from_django: {"model": "people", "wanted": "all", "filter": {"name": "bob"}},
         declaration_from_prisma: {
             "model": "people",
-            "wanted": "find_many",
+            "wanted": "all",
             "where": {"name": "bob"},
         },
         declaration_from_sqlalchemy: {

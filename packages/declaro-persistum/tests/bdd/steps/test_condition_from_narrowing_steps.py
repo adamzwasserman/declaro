@@ -357,32 +357,32 @@ def _names_what_they_wrote_and_lists_the_fifteen(scenario: dict, narrow) -> None
     assert missing == [], f"the refusal does not list {missing}: {refusal}"
 
 
-@then("the refusal says a comparison names one operator")
-def _says_a_comparison_names_one_operator(scenario: dict, narrow) -> None:
-    """Two operators and none at all are the same refusal: a comparison holds
-    one operator and one value, so a second has nowhere to go and a zeroth
-    leaves the value with nothing to be compared by."""
+# THREE SENTENCES ASKING ONE THING: does the refusal say this, in this half of
+# it. A refusal carries what went wrong and what to write instead, and which half
+# a phrase belongs in is the whole of what these three rows differ by.
+#
+# Two operators and none at all are one refusal, because a comparison holds one
+# operator and one value: a second has nowhere to go and a zeroth leaves the
+# value with nothing to compare it by. A caller who wanted both comparisons can
+# have both, so the refusal says how rather than leaving them to find it. And a
+# narrowing written as a sentence is neither a name this library can look up nor
+# a value it can bind, so it stops rather than being carried.
+WHAT_THE_REFUSAL_SAYS: dict[str, tuple[str, str]] = {
+    "the refusal says a comparison names one operator": (
+        "what_went_wrong",
+        "names one operator",
+    ),
+    "it says two keys are how you ask for both": ("what_to_do_instead", "two keys"),
+    "the refusal says a condition is data": ("what_went_wrong", "a condition is data"),
+}
+
+
+@then(parsers.re(f"^(?P<sentence>{'|'.join(WHAT_THE_REFUSAL_SAYS)})$"))
+def _what_the_refusal_says(scenario: dict, narrow, sentence: str) -> None:
+    half, phrase = WHAT_THE_REFUSAL_SAYS[sentence]
     refusal = _the_refusal(scenario, narrow)
 
-    assert "names one operator" in refusal["what_went_wrong"], refusal
-
-
-@then("it says two keys are how you ask for both")
-def _says_two_keys_are_how_you_ask_for_both(scenario: dict, narrow) -> None:
-    """The caller wanted both comparisons, and there is a way to have both, so
-    the refusal says which one rather than leaving them to find it."""
-    refusal = _the_refusal(scenario, narrow)
-
-    assert "two keys" in refusal["what_to_do_instead"], refusal
-
-
-@then("the refusal says a condition is data")
-def _says_a_condition_is_data(scenario: dict, narrow) -> None:
-    """A narrowing written as a sentence is neither a name this library can
-    look up nor a value it can bind, so it stops here."""
-    refusal = _the_refusal(scenario, narrow)
-
-    assert "a condition is data" in refusal["what_went_wrong"], refusal
+    assert phrase in refusal[half], refusal
 
 
 @then("nothing was pasted into a statement")

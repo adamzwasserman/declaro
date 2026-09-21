@@ -189,7 +189,7 @@ def _the_condition_holds_an_eq_comparison(scenario: dict[str, object]) -> None:
     )
     assert invented["kind"] == "refused", f"an invented operator was accepted: {invented}"
     assert "roughly" in invented["what_went_wrong"], invented["what_went_wrong"]
-    assert "gt" in invented["what_went_wrong"], "the refusal lists the operators it declares"
+    assert "gt" in invented["what_to_do_instead"], "the refusal lists the operators it declares"
 
     # `or` IS A WORD, NOT A COLUMN. It carries a condition, so reading it as a
     # column called "or" narrowed by a list is the silent wrong answer, and the

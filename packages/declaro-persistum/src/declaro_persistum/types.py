@@ -153,6 +153,16 @@ type AskedValue = (
 )
 type Asked = dict[str, AskedValue]
 
+# A GRAMMAR IS A SET OF WORDS AND NOTHING ELSE. Django says `filter`, Prisma and
+# the library's own phrasing say `where`, SQLAlchemy says `filter_by`, and all
+# four mean `condition`. That difference is a table: a field of a `Declaration`
+# on the left, the word this grammar spells it with on the right.
+#
+# A FIELD WITH NO ROW IS REACHED BY THE LIBRARY'S OWN WORD. Written this way
+# round so that a grammar writes down only what it spells differently, and a
+# caller who picked a spelling has not picked a smaller library.
+type Phrasing = dict[str, str]
+
 
 class Join(TypedDict):
     model: str

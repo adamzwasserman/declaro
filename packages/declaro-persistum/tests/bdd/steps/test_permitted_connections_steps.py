@@ -51,31 +51,25 @@ def asking() -> dict[str, Any]:
 # --- what the deployment and the engine are ---------------------------------
 
 
-@given("a replicated database and a deployment asking for eight")
-def _replicated_asking_eight(asking: dict[str, Any]) -> None:
-    asking["asked"] = 8
-    asking["replicated"] = True
+# FOUR SENTENCES, TWO FACTS, ONE STEP. Each Given says what the deployment asked
+# for and whether the database replicates, and nothing else. Written as four
+# functions they were the same two assignments four times over, differing only in
+# the words. `NOTHING` is the named absence here, never a zero and never a number
+# to invent: a deployment that set nothing is a case of its own.
+#
+# The last row names no number and still expects one connection, because on a
+# replica the number is measured rather than configured.
+WHAT_WAS_ASKED: dict[str, tuple[int | None, bool]] = {
+    "a replicated database and a deployment asking for eight": (8, True),
+    "a local database and a deployment asking for eight": (8, False),
+    "no number set": (NOTHING, False),
+    "a replicated database": (NOTHING, True),
+}
 
 
-@given("a local database and a deployment asking for eight")
-def _local_asking_eight(asking: dict[str, Any]) -> None:
-    asking["asked"] = 8
-    asking["replicated"] = False
-
-
-@given("no number set")
-def _no_number_set(asking: dict[str, Any]) -> None:
-    # NOTHING is the named absence, not a zero and not a number to invent.
-    asking["asked"] = NOTHING
-    asking["replicated"] = False
-
-
-@given("a replicated database")
-def _replicated(asking: dict[str, Any]) -> None:
-    # This scenario names no number, and still expects one connection. The
-    # measured rule answers it without the deployment saying anything.
-    asking["asked"] = NOTHING
-    asking["replicated"] = True
+@given(parsers.re(f"^(?P<sentence>{'|'.join(WHAT_WAS_ASKED)})$"))
+def _what_the_deployment_and_the_engine_are(asking: dict[str, Any], sentence: str) -> None:
+    asking["asked"], asking["replicated"] = WHAT_WAS_ASKED[sentence]
 
 
 # --- what the callers do ----------------------------------------------------

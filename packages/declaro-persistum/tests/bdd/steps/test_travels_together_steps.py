@@ -85,20 +85,24 @@ def _a_declaration_asking_for_every_person(seen: dict) -> None:
     seen["declarations"] = [_a_declaration("all", None)]
 
 
-@then("it does not have to travel together")
-def _it_does_not_have_to_travel_together(seen: dict) -> None:
-    (declaration,) = seen["declarations"]
-    assert _answer_for(declaration) is False, (
-        "one row is a deposit and a ticket, so nothing has to land beside it"
-    )
+# TWO SENTENCES, ONE ANSWER APART, and each row carries why that answer is right.
+MUST_TRAVEL_TOGETHER: dict[str, tuple[bool, str]] = {
+    "it does not have to travel together": (
+        False,
+        "one row is a deposit and a ticket, so nothing has to land beside it",
+    ),
+    "they have to land together": (
+        True,
+        "the caller asked for all of these rows or none, so they are a transaction",
+    ),
+}
 
 
-@then("they have to land together")
-def _they_have_to_land_together(seen: dict) -> None:
+@then(parsers.re(f"^(?P<sentence>{'|'.join(MUST_TRAVEL_TOGETHER)})$"))
+def _whether_they_travel_together(seen: dict, sentence: str) -> None:
+    expected, why = MUST_TRAVEL_TOGETHER[sentence]
     (declaration,) = seen["declarations"]
-    assert _answer_for(declaration) is True, (
-        "the caller asked for all of these rows or none, so they are a transaction"
-    )
+    assert _answer_for(declaration) is expected, why
 
 
 @then("the question does not arise")

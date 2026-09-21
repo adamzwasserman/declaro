@@ -72,13 +72,41 @@ NARROWINGS = {
     '{"age": {"roughly": 18}}': {"age": {"roughly": 18}},
 }
 
-# The words this grammar has no phrasing for, each with something a caller
-# would plausibly write under it. Refused by name rather than passed over.
+# A part no word in this grammar points at, and something a caller would
+# plausibly write under it. Refused by name rather than passed over.
 NOT_IN_THIS_GRAMMAR = {
-    "order_by": {"name": "ascending"},
-    "group_by": ["status"],
-    "having": {"count": {"gt": 5}},
-    "page": {"size": 10, "number": 1},
+    "only": ["id"],
+}
+
+# THE FOUR WORDS THIS GRAMMAR DOES NOT BRING, each reached by the library's own.
+# For each: the field it fills, what a caller writes under it, and what the
+# declaration carries once it has been read. `having` is the one whose two
+# differ, because a narrowing becomes a condition on the way.
+THE_LIBRARY_WORD = {
+    "ordered_by": {
+        "field": "order",
+        "written": {"name": "ascending"},
+        "carried": {"name": "ascending"},
+    },
+    "grouped_by": {
+        "field": "grouping",
+        "written": ["status"],
+        "carried": ["status"],
+    },
+    "having": {
+        "field": "having",
+        "written": {"total": {"gt": 5}},
+        "carried": {
+            "each": {"total": {"operator": "gt", "value": 5, "ignore_case": False}},
+            "any_of": [],
+            "none_of": [],
+        },
+    },
+    "page": {
+        "field": "paging",
+        "written": {"size": 10, "number": 1},
+        "carried": {"size": 10, "number": 1},
+    },
 }
 
 # The two parts a caller writes that come back unchanged: the word they are
@@ -136,9 +164,17 @@ def _a_caller_narrows_by(scenario: dict, narrowing: str) -> None:
 
 
 @when(parsers.parse("a caller writes the word {word}"))
-def _a_word_this_grammar_does_not_have(scenario: dict, word: str) -> None:
+def _a_part_no_word_points_at(scenario: dict, word: str) -> None:
     scenario["word"] = word
     scenario["asked"] = _person_query(**{word: NOT_IN_THIS_GRAMMAR[word]})
+
+
+@when(parsers.parse("a caller writes the library's own {word}"))
+def _the_library_s_own_word(scenario: dict, word: str) -> None:
+    row = THE_LIBRARY_WORD[word]
+    scenario["field"] = row["field"]
+    scenario["carried"] = row["carried"]
+    scenario["asked"] = _person_query(**{word: row["written"]})
 
 
 @when(parsers.parse('a caller asks for "{word}"'))
@@ -258,7 +294,17 @@ def _all_ten_fields_are_present(scenario: dict) -> None:
     )
 
 
-@then("the six this grammar has no phrasing for are empty")
+@then("the declaration carries what they asked for")
+def _the_backfilled_field_carries_it(scenario: dict) -> None:
+    declaration = _answer_for(scenario["asked"])
+
+    assert declaration[scenario["field"]] == scenario["carried"], (
+        "a field this grammar brings no word for is reached by the library's "
+        "own word, so a caller who picked this spelling has all ten"
+    )
+
+
+@then("the six the caller did not name are empty")
 def _the_six_are_empty(scenario: dict) -> None:
     declaration = _answer_for(scenario["asked"])
 
@@ -292,22 +338,6 @@ def _what_was_written_comes_back(scenario: dict, part: str) -> None:
     )
 
 
-@then(parsers.parse("it is refused, naming {word} and the words this grammar does have"))
-def _an_unknown_word_is_refused(scenario: dict, word: str) -> None:
-    refusal = _answer_for(scenario["asked"])
-
-    assert refusal["kind"] == "refused"
-    assert word in refusal["what_went_wrong"], (
-        f"{word!r} was dropped rather than refused, which answers a question "
-        f"nobody asked: {refusal['what_went_wrong']}"
-    )
-    for has in ["model", "wanted", "filter_by", "with_only"]:
-        assert has in refusal["what_went_wrong"], (
-            "a refusal that does not list the words this grammar does have "
-            "leaves the caller guessing which one they meant"
-        )
-
-
 @then(parsers.parse("it is refused, naming the {part} it needs"))
 def _a_missing_part_is_refused(scenario: dict, part: str) -> None:
     refusal = _answer_for(scenario["asked"])
@@ -333,19 +363,7 @@ def _an_undeclared_operator_is_refused(scenario: dict) -> None:
 
     assert refusal["kind"] == "refused"
     assert "roughly" in refusal["what_went_wrong"]
-    assert "gt" in refusal["what_went_wrong"], "it lists the operators it does declare"
-
-
-@then("it is refused, saying the phrasing carries no rows")
-def _a_writing_word_is_refused(scenario: dict) -> None:
-    refusal = _answer_for(scenario["asked"])
-
-    assert refusal["kind"] == "refused"
-    assert scenario["word"] in refusal["what_went_wrong"]
-    assert "no rows" in refusal["what_went_wrong"], (
-        "a write needs rows and this phrasing has nowhere to put them, so the "
-        "gap is named rather than answered with an empty write"
-    )
+    assert "gt" in refusal["what_to_do_instead"], "it lists the operators it does declare"
 
 
 @then("a fault is returned, and nothing was raised")

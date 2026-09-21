@@ -21,3 +21,13 @@ Feature: refuse_undeclared_loss -- Nothing is destroyed that nobody declared
   Scenario: a change that loses nothing is not touched by this
     Given a plan that only adds a column
     Then it runs
+
+  # ADDED 2026-09-21. The four scenarios above each hold one loss, so all four
+  # pass against a check that stops at the first operation it approves. A
+  # deploy carries several changes at once, and one column somebody meant to
+  # lose beside one they did not is the shape that loses data quietly.
+  Scenario: one declared loss does not carry the next
+    Given a plan that would drop the column "nickname" and the column "phone"
+    And a model naming only "nickname" as one it means to lose
+    Then the migration is refused
+    And the fault names "phone" and not "nickname"

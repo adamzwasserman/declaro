@@ -7,15 +7,17 @@ condition.
 
 WHAT THE `When` HAD TO DECIDE. `declaration_from_prisma` is handed an `Asked`,
 and `Asked` is the call as the caller phrased it. Prisma phrases one call with
-named arguments, so the call above arrives as the model it was made on, the
-method that was reached for, and each named argument under its own name. That is
-written out here rather than hidden in a helper, because it is the contract
-between the entry point and the builder and a reader of this file has to see it.
+named arguments, so the call above arrives as the model it was made on, the word
+it asked for, and each named argument under its own name. That is written out
+here rather than hidden in a helper, because it is the contract between the
+entry point and the builder and a reader of this file has to see it.
 
-THE VERB IS PRISMA'S, NOT THE VOCABULARY'S. `find_many` is what a caller writes
-and `all` is what the declaration says, and translating it is the builder's job.
-If the entry point translated it, the same table would live in two places and
-the second one would go stale.
+THE VERB IS TRANSLATED BEFORE THIS FUNCTION IS REACHED. `find_many` is what a
+caller writes and `all` is what a declaration says. A `Phrasing` is a word for
+each field of a declaration and nothing else, so it has nowhere to carry that
+pair, and whatever builds the `Asked` puts one of the eighteen words in it. The
+other three grammars already arrived that way; this one carried `find_many` into
+the builder until 2026-09-21, which put one table in two places.
 
 WHAT THE `Then` CHECKS BEYOND THE THREE THINGS NAMED. A question that asked for
 nothing else declares nothing else, so the whole declaration is compared and not
@@ -74,7 +76,7 @@ def _every_string(value: object) -> list[str]:
 def _a_caller_writes_that_call(scenario: dict) -> None:
     scenario["asked"] = {
         "model": "Person",
-        "wanted": "find_many",
+        "wanted": "all",
         "where": {"name": "bob"},
         "select": ["id", "name"],
     }
@@ -105,7 +107,7 @@ def _the_declaration_names_them(scenario: dict) -> None:
     elsewhere = declaration_from_prisma(
         {
             "model": "Order",
-            "wanted": "find_many",
+            "wanted": "all",
             "where": {"status": "paid"},
             "select": ["id"],
         }

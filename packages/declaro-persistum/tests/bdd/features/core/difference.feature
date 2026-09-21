@@ -75,25 +75,15 @@ Feature: difference -- What turns the live schema into the target
     When the schemas are diffed
     Then there is a drop_table operation for "user"
     And there is a create_table operation for "users"
-    But an ambiguity is also reported, because a drop-and-create that was meant to be a rename is silent data loss and the differ cannot tell the two apart on its own
 
-  # ============================================================
-  # Ambiguity — what the differ refuses to decide alone
-  # ============================================================
-
-  Scenario: a column that disappears and one that appears is reported as a possible rename
-    Given a current schema with a table "users" having a column "name"
-    And a target schema with a table "users" having a column "full_name" instead
-    When ambiguities are detected
-    Then a "possible_rename" ambiguity is reported from "name" to "full_name"
-    And it carries no confidence score, because the differ does not know, which is why it is asking
-
-  Scenario: a decision already made is not asked about again
-    Given a current schema with a table "users" having a column "name"
-    And a target schema with a table "users" having a column "full_name" instead
-    And a decision has already been recorded for that change
-    When ambiguities are detected
-    Then no ambiguity is reported for it, because re-asking a question the operator has already answered is how a review gets skipped
+  # AN EIGHTH LINE WENT WITH THEM, the `But` on the scenario above. It asked
+  # that an ambiguity be reported beside the drop and the create.
+  # `fn name_what_is_ambiguous` pairs a column gone with a column appeared
+  # inside one table and pairs no tables at all, so nothing reports this one,
+  # and moving the line into that feature would plant a claim that is false
+  # there too. What does stop a table drop nobody declared is
+  # `fn refuse_undeclared_loss` reading `dropping_tables`, which is a refusal
+  # rather than a question, and `refuse_undeclared_loss.feature` says so.
 
   # THE THREE CONFIDENCE SCENARIOS ARE GONE WITH THE FUNCTION THEY DESCRIBED.
   # `calculate_rename_confidence` scored a dropped name against an added one,
@@ -102,35 +92,30 @@ Feature: difference -- What turns the live schema into the target
   # the drop ran, and the rows went without the operator being asked.
   # Measured 2026-08-21. A drop beside an add is ambiguous by construction now.
 
-  # ============================================================
-  # Ordering — the part that makes valid SQL fail
-  # ============================================================
-
-  Scenario: drops run before creates
-    Given operations that drop a foreign key, drop a table, and create a table
-    When the operations are ordered
-    Then every drop is ordered before every create, because a create that collides with a name not yet dropped fails, and the failure lands halfway through a migration
-
-  Scenario: the full drop order runs from the most dependent inward
-    Given one operation of every drop kind
-    When the operations are ordered
-    Then they run foreign keys, then indexes, then constraints, then views, then columns, then tables — each one removing a thing that depends on the next
-
-  Scenario: views are created after every table and index
-    Given operations that create a table, add an index, and create a view
-    When the operations are ordered
-    Then create_view is last, because a view that references a table or index that does not exist yet fails at creation
-
-  Scenario: additions run after the tables they attach to
-    Given operations that create a table and add a foreign key
-    When the operations are ordered
-    Then create_table comes before add_foreign_key
-
-  Scenario: a dependency cycle is refused rather than half-run
-    Given operations whose dependencies form a cycle
-    When the operations are ordered
-    Then a CycleError is raised naming the cycle, because there is no order that works and running some prefix of it leaves the database in a state neither schema describes
-
+  # ------------------------------------------------------------------
+  # SEVEN MORE SCENARIOS WENT ON 2026-09-21, when this feature was bound. Two
+  # asked about ambiguity and five about ordering, and `difference` returns
+  # `list<Operation>` with no ordering and no refusal in it, so nothing it can
+  # answer was among them. Both owning functions are written and both features
+  # already say these things in the vocabulary the declaration has:
+  #
+  # THE TWO AMBIGUITY SCENARIOS -> `name_what_is_ambiguous.feature`. They asked
+  # for a "possible_rename" ambiguity carrying no confidence score, and for a
+  # recorded decision not to be asked about twice. `fn name_what_is_ambiguous`
+  # reads `renamed_from` off the column that replaced the old one and refuses
+  # when nothing is declared. There is no ambiguity object, no score, and
+  # nothing remembers a decision, because remembering one needs somebody at a
+  # deploy and nobody is there.
+  #
+  # THE FIVE ORDERING SCENARIOS -> `order_operations.feature`. Three named
+  # `add_foreign_key`, `drop_foreign_key` and a constraint operation, and
+  # `OperationKind` has none of the three. One said a cycle raises a
+  # `CycleError`; `fn order_operations` returns a `Fault`, because a failure
+  # comes back in the return here and is never raised. The two claims that were
+  # neither stale nor already written down -- every drop before every create,
+  # and `create_view` last -- are answered differently on purpose: that
+  # function orders by the tables an operation needs, not by the kind it is.
+  #
   # ============================================================
   # Views. Enums, triggers and procedures were here and their diffs are
   # gone: they emitted operations no applier could execute. See

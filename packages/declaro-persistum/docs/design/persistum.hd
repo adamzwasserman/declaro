@@ -887,6 +887,19 @@ module declaro-persistum
   # column says, it stops rather than guessing, and the fault names both columns
   # and the declaration to write.
   #
+  # `dropping` SETTLES IT THE OTHER WAY, AND WITHOUT THAT THE REFUSAL IS
+  # INESCAPABLE. Added 2026-09-21 on building it: with `renamed_from` as the only
+  # signal, no model could ever add a column and drop one from the same table, in
+  # any change, because every such pair reads as a possible rename and no line
+  # anybody could write would clear it. `Model.dropping` already says the column's
+  # contents are meant to be lost, which is exactly the statement that this is not
+  # a rename. Two declarations, one for each reading, and a pair carrying neither
+  # is the only one that stops.
+  #
+  # A PAIR IS ONLY A PAIR WITHIN ONE TABLE, because a rename moves a column inside
+  # one. A column gone from `people` and one appeared on `orders` are two changes
+  # and never a question.
+  #
   # `a_rename_is_asked_and_remembered.feature` DESCRIBES THE OLD ANSWER. It has
   # a person answering once and the library remembering it, which needs somebody
   # at a deploy. That scenario is the one to change, like the awaited flush.

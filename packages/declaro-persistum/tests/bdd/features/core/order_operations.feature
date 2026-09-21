@@ -13,3 +13,16 @@ Feature: order_operations -- The order dependencies allow
   Scenario: two tables that reference each other are refused
     Given a cycle between two tables
     Then a fault comes back naming both
+
+  # ------------------------------------------------------------------
+  # ADDED 2026-09-21 WHILE THIS WAS BEING BUILT. The three scenarios above ask
+  # only about things arriving. Every one of them runs at a deploy beside
+  # things going away, and going away reverses the order: a table nothing
+  # points at any more can be dropped, and a table something still points at
+  # cannot. Without this scenario, an ordering that walked creates correctly
+  # and left drops in the order they were written would pass, and the failure
+  # would land halfway through a migration.
+
+  Scenario: a child is dropped before the parent it points at
+    Given a drop for a table and a drop for the table pointing at it
+    Then the pointing one runs first

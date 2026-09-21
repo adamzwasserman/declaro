@@ -4,8 +4,13 @@ Feature: declaration_from_sqlalchemy -- SQLAlchemy.s phrasing into a declaration
   same declaration for the same question.
 
   The call arrives as data, under the four words this grammar spells a question with:
-  the model, the asking word, filter_by and with_only. A word it does not have is
+  the model, the asking word, filter_by and with_only. A part no word points at is
   refused by name, because dropping one answers a question nobody asked.
+
+  WHERE THIS GRAMMAR HAS NO WORD, THE LIBRARY SUPPLIES ONE. The ORM this surface
+  imitates has no phrasing it copies for an order, a grouping, a having or a page,
+  and a caller who picked this spelling must not have picked a smaller library.
+  So all ten fields are reached here, four of them by the library's own word.
 
   Scenario: columns and a condition become a declaration
     When a caller writes Person.query.filter_by(name="bob").with_only("id", "name")
@@ -44,7 +49,7 @@ Feature: declaration_from_sqlalchemy -- SQLAlchemy.s phrasing into a declaration
   Scenario: every field of a declaration is there to be read
     When a caller writes Person.query.filter_by(name="bob").with_only("id", "name")
     Then all ten fields are present
-    And the six this grammar has no phrasing for are empty
+    And the six the caller did not name are empty
 
   Scenario: the question does not remember which grammar built it
     When a caller writes Person.query.filter_by(name="bob").with_only("id", "name")
@@ -59,16 +64,21 @@ Feature: declaration_from_sqlalchemy -- SQLAlchemy.s phrasing into a declaration
       | model   |
       | columns |
 
-  Scenario Outline: a word this grammar does not have is refused by name
-    When a caller writes the word <word>
-    Then it is refused, naming <word> and the words this grammar does have
+  # THE BACKFILL. Until 2026-09-21 this scenario asked that ordered_by, grouped_by,
+  # having and page be refused here, because the ORM this surface imitates has no
+  # phrasing it copies for them. That made a caller who chose this spelling a caller
+  # with a smaller library, and made the claim this file opens with -- all four
+  # produce the same declaration for the same question -- false. Adam ruled on it.
+  Scenario Outline: a field this grammar has no word for is reached by the library's word
+    When a caller writes the library's own <word>
+    Then the declaration carries what they asked for
 
     Examples:
-      | word     |
-      | order_by |
-      | group_by |
-      | having   |
-      | page     |
+      | word       |
+      | ordered_by |
+      | grouped_by |
+      | having     |
+      | page       |
 
   Scenario Outline: a question missing something a declaration needs is refused
     When a caller writes a question naming no <part>
@@ -87,12 +97,8 @@ Feature: declaration_from_sqlalchemy -- SQLAlchemy.s phrasing into a declaration
     When a caller narrows by {"age": {"roughly": 18}}
     Then it is refused, naming that operator
 
-  Scenario: a writing word is refused, because this phrasing carries no rows
-    When a caller asks for "add"
-    Then it is refused, saying the phrasing carries no rows
-
   Scenario: a failure comes back in the return
-    When a caller writes the word order_by
+    When a caller writes the word only
     Then a fault is returned, and nothing was raised
 
   Scenario: nothing outside the question is read
