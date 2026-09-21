@@ -8,7 +8,3 @@ Feature: room_make -- An empty waiting room
   Scenario: a new room holds nothing
     When a room is made
     Then it has no arrivals and nobody waiting
-
-  Scenario: the library makes it, not the caller
-    When a database is opened
-    Then the room came with the handle

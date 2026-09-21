@@ -46,7 +46,7 @@ Feature: query_collect -- Coming back for a write you deposited
   # independent writes, whoever made them. A write that has landed stays landed when a
   # later one fails, because the earlier one is already in the log and nothing in this
   # module has the standing to take it back. A caller who needs several statements to
-  # land together holds the connection instead: `async with writing(db)` is one
+  # land together holds the connection instead: `query_run_together` is one
   # transaction, and that is the only thing here that is. Decided 2026-08-29; the last
   # scenario below is what holds it.
   # These scenarios run against a real SQLite database. A claim about what an engine

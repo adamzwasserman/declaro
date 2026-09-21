@@ -86,7 +86,6 @@ KNOWN_UNBOUND: dict[str, str] = {
     "absence_survives_the_boundary.feature": _ONE_EACH,
     "add.feature": _ONE_EACH,
     "all.feature": _ONE_EACH,
-    "answer_from_rows.feature": _ONE_EACH,
     "answer_from_ticket.feature": _ONE_EACH,
     "average.feature": _ONE_EACH,
     "capability_of.feature": _ONE_EACH,
@@ -94,13 +93,8 @@ KNOWN_UNBOUND: dict[str, str] = {
     "change_all.feature": _ONE_EACH,
     "clock_read.feature": _ONE_EACH,
     "command_dispatch.feature": _ONE_EACH,
-    "compile_statement.feature": _ONE_EACH,
     "count.feature": _ONE_EACH,
     "count_distinct.feature": _ONE_EACH,
-    "declaration_from_django.feature": _ONE_EACH,
-    "declaration_from_prisma.feature": _ONE_EACH,
-    "declaration_from_pseudo_sql.feature": _ONE_EACH,
-    "declaration_from_sqlalchemy.feature": _ONE_EACH,
     "difference.feature": _ONE_EACH,
     "distinct.feature": _ONE_EACH,
     "engine_selection.feature": _ONE_EACH,
@@ -110,7 +104,6 @@ KNOWN_UNBOUND: dict[str, str] = {
     "first.feature": _ONE_EACH,
     "grouped_by.feature": _ONE_EACH,
     "having.feature": _ONE_EACH,
-    "join_between.feature": _ONE_EACH,
     "largest.feature": _ONE_EACH,
     "lifecycle_catch_up.feature": _ONE_EACH,
     "lifecycle_install_handler.feature": _ONE_EACH,
@@ -124,7 +117,6 @@ KNOWN_UNBOUND: dict[str, str] = {
     "migration_report.feature": _ONE_EACH,
     "name_what_destroys.feature": _ONE_EACH,
     "name_what_is_ambiguous.feature": _ONE_EACH,
-    "next_in_order.feature": _ONE_EACH,
     "nothing_reaches_past_the_surface.feature": _ONE_EACH,
     "nothing_takes_a_default.feature": _ONE_EACH,
     "of.feature": _ONE_EACH,
@@ -144,13 +136,11 @@ KNOWN_UNBOUND: dict[str, str] = {
     "query_run_statement.feature": _ONE_EACH,
     "query_run_together.feature": _ONE_EACH,
     "refuse_owned_names.feature": _ONE_EACH,
-    "refuse_undeclared_columns.feature": _ONE_EACH,
     "refuse_undeclared_loss.feature": _ONE_EACH,
     "remove.feature": _ONE_EACH,
     "remove_all.feature": _ONE_EACH,
     "replace.feature": _ONE_EACH,
     "room_deposit.feature": _ONE_EACH,
-    "room_make.feature": _ONE_EACH,
     "room_post_receipt.feature": _ONE_EACH,
     "room_release_ticket.feature": _ONE_EACH,
     "room_run_write.feature": _ONE_EACH,
@@ -176,7 +166,6 @@ KNOWN_UNBOUND: dict[str, str] = {
     "values.feature": _ONE_EACH,
     "what_the_library_owns.feature": _ONE_EACH,
     "whose_fault_is_a_failed_table.feature": _ONE_EACH,
-    "writer_waiting.feature": _ONE_EACH,
 }
 
 # `scenarios("../features/x.feature")` and `scenarios("../features")` both bind.
@@ -185,15 +174,24 @@ KNOWN_UNBOUND: dict[str, str] = {
 _SCENARIOS_CALL = re.compile(r"""scenarios\(\s*['"]([^'"]+)['"]""")
 
 
-def _feature_files() -> list[pathlib.Path]:
-    return sorted(_FEATURES.rglob("*.feature"))
+# THE FIXTURE IS THE EDGE, AND IT IS THE ONLY THING HERE THAT TOUCHES A DISK.
+# This gate is about files, so it cannot avoid reading them. What it can do is
+# read them in one place that every test is handed, and let every decision below
+# be a function of the text rather than of the filesystem.
+@pytest.fixture(scope="module")
+def on_disk() -> tuple[dict[pathlib.Path, str], dict[pathlib.Path, str]]:
+    """Every feature file and every step file, as path to text."""
+    features = {f: f.read_text(encoding="utf-8") for f in sorted(_FEATURES.rglob("*.feature"))}
+    steps = {s: s.read_text(encoding="utf-8") for s in sorted(_STEPS.rglob("*.py"))}
+    return features, steps
 
 
-def _bindings() -> dict[pathlib.Path, list[pathlib.Path]]:
+def _bindings(
+    features: dict[pathlib.Path, str], steps: dict[pathlib.Path, str]
+) -> dict[pathlib.Path, list[pathlib.Path]]:
     """feature file -> the step files that bind it."""
-    bound: dict[pathlib.Path, list[pathlib.Path]] = {f: [] for f in _feature_files()}
-    for step_file in _STEPS.rglob("*.py"):
-        text = step_file.read_text(encoding="utf-8")
+    bound: dict[pathlib.Path, list[pathlib.Path]] = {f: [] for f in features}
+    for step_file, text in steps.items():
         for raw in _SCENARIOS_CALL.findall(text):
             target = (step_file.parent / raw).resolve()
             for feature in bound:
@@ -202,19 +200,14 @@ def _bindings() -> dict[pathlib.Path, list[pathlib.Path]]:
     return bound
 
 
-def _scenario_count(path: pathlib.Path) -> int:
-    return len(
-        [
-            line
-            for line in path.read_text(encoding="utf-8").splitlines()
-            if line.strip().startswith("Scenario")
-        ]
-    )
+def _scenario_count(text: str) -> int:
+    return len([line for line in text.splitlines() if line.strip().startswith("Scenario")])
 
 
-def test_no_feature_file_is_unbound():
+def test_no_feature_file_is_unbound(on_disk):
     """A specification nobody runs is prose claiming to be a test."""
-    bound = _bindings()
+    features, steps = on_disk
+    bound = _bindings(features, steps)
     unbound = [f for f, binders in bound.items() if not binders and f.name not in KNOWN_UNBOUND]
 
     assert not unbound, (
@@ -222,7 +215,7 @@ def test_no_feature_file_is_unbound():
         "executed — they read as specified-and-covered while asserting "
         "nothing:\n"
         + "\n".join(
-            f"    {f.relative_to(_FEATURES)}  ({_scenario_count(f)} scenarios)"
+            f"    {f.relative_to(_FEATURES)}  ({_scenario_count(features[f])} scenarios)"
             for f in sorted(unbound)
         )
         + "\n\nBind it from a step file, delete it, or add it to KNOWN_UNBOUND "
@@ -230,14 +223,15 @@ def test_no_feature_file_is_unbound():
     )
 
 
-def test_no_feature_file_is_bound_twice():
+def test_no_feature_file_is_bound_twice(on_disk):
     """Twice is not safer than once; it is a silent step-collision.
 
     Two step files calling scenarios() on one feature run every scenario
     twice, and a step defined in both resolves to whichever module pytest
     imported last — which is import order, not intent.
     """
-    doubled = {f: binders for f, binders in _bindings().items() if len(binders) > 1}
+    features, steps = on_disk
+    doubled = {f: binders for f, binders in _bindings(features, steps).items() if len(binders) > 1}
 
     assert not doubled, (
         "these .feature files are bound more than once, so their scenarios run "
@@ -249,16 +243,16 @@ def test_no_feature_file_is_bound_twice():
     )
 
 
-def test_the_ratchet_can_actually_see_a_feature_file():
+def test_the_ratchet_can_actually_see_a_feature_file(on_disk):
     """The guard above is worthless if it finds nothing to guard.
 
     A discovery bug — wrong directory, wrong glob — would make both tests pass
     by examining an empty set. That is the vacuous-pass shape this package has
     shipped repeatedly, so the ratchet asserts its own reach.
     """
-    features = _feature_files()
+    features, _steps = on_disk
     assert features, f"no .feature files found under {_FEATURES}"
-    assert any(_scenario_count(f) > 0 for f in features), (
+    assert any(_scenario_count(text) > 0 for text in features.values()), (
         "every feature file parsed as zero scenarios, so the counter is broken "
         "and the reports above would be meaningless"
     )

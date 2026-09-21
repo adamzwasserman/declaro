@@ -1,5 +1,5 @@
 @bdd @specification
-Feature: open_database -- One door, and the target says what is behind it
+Feature: session_open -- One door, and the target says what is behind it
   You hand it where the database is. It works out what the database is, opens it,
   and gives you back a `Database` carrying the engine it found. Nothing in the
   call names an engine.

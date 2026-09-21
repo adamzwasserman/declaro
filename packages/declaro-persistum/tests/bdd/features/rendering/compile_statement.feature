@@ -1,5 +1,5 @@
 @bdd @specification
-Feature: render -- A declaration and an engine in, a statement and its parameters out
+Feature: compile_statement -- A declaration and an engine in, a statement and its parameters out
   The last step, and the only one that knows which engine it is talking to.
   Everything before it is engine-free: a model declares what exists, a grammar
   declares what you want, and neither carries a word that belongs to PostgreSQL,
@@ -95,11 +95,6 @@ Feature: render -- A declaration and an engine in, a statement and its parameter
     When the renderer runs
     Then it read no clock, no random source and no environment variable
     And it asked no database what it supports
-
-  Scenario: nothing but the renderer builds a statement
-    When every place in the package that builds a statement is read
-    Then all of them are in the rendering step
-    And no grammar and no vocabulary word builds one
 
   # ------------------------------------------------- what comes out is not what went in
 

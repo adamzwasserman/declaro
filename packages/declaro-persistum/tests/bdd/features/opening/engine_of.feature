@@ -4,7 +4,7 @@ Feature: engine_of -- Which engine a target names
   three. It opens nothing, sends nothing and asks nobody, so it can run in a test,
   in a loop, or on a target that points at a host which does not exist.
 
-  One function, one feature. The door that uses it is `open_database`, and its own
+  One function, one feature. The door that uses it is `session_open`, and its own
   feature is beside this one.
 
   WHY IT IS SEPARATE FROM THE DOOR. Opening a database does I/O and detecting an

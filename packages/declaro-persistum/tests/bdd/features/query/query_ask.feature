@@ -142,7 +142,7 @@ Feature: query_ask -- The door a caller asks a question or declares a write at
   # the entry point: `Person.objects`, `Person.query`, `Person.find_many` and the table
   # proxy are four different names on one model. A guess is only needed where the
   # information was thrown away, and none is thrown away here.
-  # IT IS THE SAME MOVE AS THE ENGINE, one axis over. `open_database` reads the target
+  # IT IS THE SAME MOVE AS THE ENGINE, one axis over. `session_open` reads the target
   # rather than asking the caller to name an engine; a grammar is read off the call
   # rather than asked for. Both replace a thing the caller had to state and could state
   # wrongly. See `tests/bdd/features/opening/engine_of.feature`.

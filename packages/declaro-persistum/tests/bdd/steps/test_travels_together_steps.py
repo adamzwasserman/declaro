@@ -215,8 +215,8 @@ def _the_change_did_not_happen_either(seen: dict) -> None:
         "NOT THE ROLLBACK ITSELF. Two separate calls have no way to say they "
         "belong together, and this function is handed one declaration at a "
         "time, so it answers no for each. The group's rollback comes from "
-        "holding one connection -- `writing(db)` -- and a test of that belongs "
-        "beside `writing`, not here."
+        "holding one connection -- `query_run_together` -- and a test of that "
+        "belongs beside it, not here."
     )
     assert seen["the_failure"] == "the removal"
 

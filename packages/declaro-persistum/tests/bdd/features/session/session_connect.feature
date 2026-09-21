@@ -23,6 +23,14 @@ Feature: session_connect -- Everything that has to be true before a handle goes 
     Then no statement was run against it
     And the handle comes back
 
+  # MOVED HERE 2026-09-21 from `room_make.feature`. `room_make` takes no
+  # arguments, opens nothing and never sees a database, so it cannot answer what
+  # a caller gets back. Building the handle is this orchestrator's work.
+  Scenario: the library makes the waiting room, not the caller
+    When a caller opens it
+    Then the room came with the handle
+    And nobody had to make one
+
   Scenario: the engine is worked out before anything is opened
     When a caller opens "postgresql://localhost/todo"
     Then the engine was decided from the target

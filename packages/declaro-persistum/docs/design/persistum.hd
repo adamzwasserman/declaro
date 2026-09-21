@@ -101,8 +101,35 @@ module declaro-persistum
   # the vocabulary's own words; its values are the six things below and nothing
   # else, so a call of bare integers is not one of them.
   type Connection = handle note "the driver's connection, held and passed onward but never read"
-  type AskedValue = Value | Row | Rows | Condition | list<str> | dict<str, Direction> note "what may stand beside a key in a caller's question"
+  # A NARROWING IS WIDER THAN A CONDITION, AND THAT IS THE WHOLE POINT OF THE
+  # BUILDERS. A `Condition` is what this library holds: every comparison spelled
+  # out, `any_of` and `none_of` present whether or not anybody used them. A
+  # `Narrowing` is what a caller wrote, which is a bare value where they meant
+  # eq, `or` and `not` where they meant `any_of` and `none_of`, and a named
+  # operator where they wanted one. `condition_from_narrowing` is the one place
+  # the second becomes the first.
+  #
+  # ADDED 2026-09-21, BECAUSE FOUR BUILDERS WERE HANDED SOMETHING THEIR ARGUMENT
+  # TYPE DID NOT ADMIT. `{"age": {"gt": 18}}` and `{"or": [...]}` are neither a
+  # `Row` nor a `Condition`, so every builder was taking data the declaration
+  # said could not arrive. Found by building against the types rather than by
+  # reading them.
+  type Narrowing = dict<str, AskedValue> note "a caller's narrowing as they wrote it: a bare value, a named operator, or `or` and `not` holding more of the same"
+  type AskedValue = Value | Row | Rows | Condition | Narrowing | list<Narrowing> | list<str> | list<Value> | dict<str, Direction> note "what may stand beside a key in a caller's question"
   type Asked = dict<str, AskedValue> note "a caller's question, as they phrased it"
+
+  # A GRAMMAR IS A SET OF WORDS AND NOTHING ELSE. Django says `filter`, Prisma
+  # and the library's own phrasing say `where`, SQLAlchemy says `filter_by`, and
+  # all four mean `condition`. That difference is a table, so each builder is its
+  # own table and `declaration_from_phrasing` is the reader they share.
+  #
+  # WHERE A GRAMMAR HAS NO WORD, THE LIBRARY SUPPLIES ONE. SQLAlchemy's own API
+  # has no phrasing this surface imitates for `having` or `page`. Refusing those
+  # four words for that grammar would make the four grammars unequal, and a
+  # caller who picked a spelling would have picked a smaller library. So a word
+  # a grammar does not bring is the library's own word, and every grammar reaches
+  # all ten fields.
+  type Phrasing = dict<str, str> note "a grammar's word for each field of a declaration, and nothing else"
 
   type Database = { engine: Engine
                     connection: Connection
@@ -313,9 +340,14 @@ module declaro-persistum
   # `HOW-IT-SHOULD-WORK.md`: the same `like` matched a name on one engine and
   # nothing on another, silently, and it is the library's job to make the
   # engines agree rather than the caller's job to learn which is which.
+  # `between` TAKES TWO VALUES AND `in` TAKES A LIST, SO ONE VALUE IS NOT ENOUGH.
+  # Widened 2026-09-21: `{"age": {"between": [18, 30]}}` built a comparison the
+  # type did not describe, and the builder carried it through untouched rather
+  # than say so. A list here is still bound by the driver, one parameter per
+  # member, and still never pasted into the text.
   type Comparison = { operator: Operator
-                      value: Value
-                      ignore_case: bool } note "one comparison: an operator, the value bound to it, and whether case matters"
+                      value: Value | list<Value>
+                      ignore_case: bool } note "one comparison: an operator, the value or values bound to it, and whether case matters"
   type Condition = { each: dict<str, Comparison>
                      any_of: list<Condition>
                      none_of: list<Condition> } note "how a question narrows, as data in every grammar"
@@ -776,7 +808,7 @@ module declaro-persistum
   fn writer_waiting : (room: Room) -> bool note "answers whether a writer is waiting for the connection"
 
   # The room drains one write at a time, in arrival order.
-  fn next_in_order : (room: Room) -> Statement | NOTHING note "takes the next write out of the room, in arrival order"
+  fn next_in_order : (room: Room) -> Statement | NOTHING note "answers which write is next, in arrival order; taking it out is the boundary's work"
 
   # Asked of the fault's kind, never its message.
   fn worth_retrying : (fault: Fault) -> bool note "answers whether a failure is worth another attempt, asked of its kind"

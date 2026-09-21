@@ -265,7 +265,7 @@ def a_database_is_opened() -> None:
     pytest.skip(
         NOT_THIS_FUNCTION.format(
             behaviour="the retry budget arriving in the declaration",
-            owner="open_sqlite, open_turso and open_postgresql",
+            owner="session_open",
         )
     )
 
