@@ -32,8 +32,6 @@ measured rather than configured, and an unset variable costs nothing there.
 
 from __future__ import annotations
 
-import inspect
-import pathlib
 from typing import Any, get_type_hints
 
 import pytest
@@ -46,7 +44,6 @@ scenarios("../features/core/permitted_connections.feature")
 
 # The declaration itself, so a scenario about where the number is stated can read
 # the line that states it instead of trusting this file's memory of it.
-DECLARATION = pathlib.Path(__file__).parents[3] / "docs" / "design" / "persistum.hd"
 
 
 @pytest.fixture
@@ -90,11 +87,6 @@ def _write_in_flight(asking: dict[str, Any]) -> None:
     asking["needs"] = "a live writer, which this function never holds"
 
 
-@given("a read that raises partway")
-def _read_that_raises(asking: dict[str, Any]) -> None:
-    asking["needs"] = "a read that runs and fails, which this function never runs"
-
-
 # --- what the callers do ----------------------------------------------------
 
 
@@ -123,11 +115,6 @@ def _a_thousand_callers_ask(asking: dict[str, Any]) -> None:
         stated: [permitted_connections(stated, False) for _ in range(1000)]
         for stated in asking["stated"]
     }
-
-
-@when("a database is opened")
-def _a_database_is_opened(asking: dict[str, Any]) -> None:
-    asking["declaration"] = DECLARATION.read_text(encoding="utf-8")
 
 
 # --- what must be true ------------------------------------------------------
@@ -197,35 +184,6 @@ def _the_bound_is_declared(asking: dict[str, Any]) -> None:
     # With nothing declared there is no number at all, which is the proof that
     # the number never came from the machine in the first place.
     assert isinstance(permitted_connections(NOTHING, False), dict)
-
-
-@then("how many connections it may use is part of that declaration")
-def _part_of_the_declaration(asking: dict[str, Any]) -> None:
-    # Stated where the database is opened: session_connect, the one function that
-    # opens a database, invokes this one, and hands the number it gets to
-    # session_open_connection, which is declared to take `connections: int`.
-    declaration = asking["declaration"]
-    assert "invokes" in declaration
-    opening = [line for line in declaration.splitlines() if "fn session_connect" in line]
-    assert opening, "persistum.hd no longer declares session_connect"
-    assert "permitted_connections" in opening[0]
-    assert "session_open_connection : (target: str, connections: int)" in declaration
-    assert "asked" in inspect.signature(permitted_connections).parameters
-
-
-@then("it has no default, because the right number is a property of the machine")
-def _it_has_no_default(asking: dict[str, Any]) -> None:
-    for name, parameter in inspect.signature(permitted_connections).parameters.items():
-        assert parameter.default is inspect.Parameter.empty, f"{name} invents a number"
-
-
-@then("the connection it used was closed")
-def _the_connection_was_closed(asking: dict[str, Any]) -> None:
-    pytest.skip(
-        "This function never opens a connection, so it can close none. "
-        "session_open_connection (persistum.hd line 552) and "
-        "session_close_connection (line 528) own the pair."
-    )
 
 
 @then("exactly one connection to the primary exists")

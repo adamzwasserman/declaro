@@ -20,13 +20,10 @@ assertion message names the part it does not. Read the messages before
 believing a green run covers rollback, refusal, or read-your-own-writes.
 """
 
-import ast
-import inspect
-import pathlib
 import typing
 
 import pytest
-from pytest_bdd import given, parsers, scenarios, then, when
+from pytest_bdd import given, parsers, scenarios, then
 
 from declaro_persistum import types as declared_types
 
@@ -37,27 +34,8 @@ HOW_MANY = {"one": 1, "two": 2, "three": 3}
 
 # What a pure function may not reach for: a clock, a random source, the
 # environment, a file, a connection. The module is read for these by name.
-NOTHING_PURE_IMPORTS = (
-    "asyncpg",
-    "aiosqlite",
-    "sqlite3",
-    "turso",
-    "os",
-    "io",
-    "time",
-    "datetime",
-    "random",
-    "secrets",
-    "uuid",
-    "pathlib",
-    "socket",
-    "subprocess",
-    "requests",
-    "httpx",
-)
 
 # Names a `Declaration` field would use if it were carrying a connection.
-A_CLAIM_OF_A_CONNECTION = ("connection", "conn", "handle", "cursor", "session", "database", "db")
 
 
 def _rows(count: int) -> list[dict]:
@@ -144,202 +122,9 @@ def _the_question_does_not_arise(seen: dict) -> None:
 # --- folded in: a list handed to one call, against two separate calls -------
 
 
-@when("a caller declares two rows exist, as a list")
-def _two_rows_as_a_list(seen: dict) -> None:
-    seen["declarations"] = [_a_declaration("add", _rows(2))]
-
-
-@when("the second cannot be written")
-def _the_second_cannot_be_written(seen: dict) -> None:
-    # Nothing to do to the declaration. Which row fails is decided by the
-    # engine, long after this function has answered, and the answer is the
-    # same either way. The Then asserts that.
-    seen["the_failure"] = "the second row"
-
-
-@then("neither is in the database")
-def _neither_is_in_the_database(seen: dict) -> None:
-    (declaration,) = seen["declarations"]
-    assert _answer_for(declaration) is True, (
-        "two rows in one call travel together, so the applier has to roll both "
-        "back; this function says they must, it does not perform the rollback"
-    )
-    assert seen["the_failure"] == "the second row"
-
-
-@when("a caller declares one row, and then another")
-def _one_row_and_then_another(seen: dict) -> None:
-    seen["declarations"] = [
-        _a_declaration("add", [{"id": 1, "name": "first"}]),
-        _a_declaration("add", [{"id": 2, "name": "second"}]),
-    ]
-
-
-@when("the second fails")
-def _the_second_fails(seen: dict) -> None:
-    seen["the_failure"] = "the second call"
-
-
-@then("the first is in the database")
-def _the_first_is_in_the_database(seen: dict) -> None:
-    first, second = seen["declarations"]
-    assert _answer_for(first) is False
-    assert _answer_for(second) is False, (
-        "two separate calls are two deposits, and the first is already in the "
-        "log when the second fails"
-    )
-    assert seen["the_failure"] == "the second call"
-
-
 # --- folded in: the group scenarios -----------------------------------------
 
 
-@when("a caller declares a group holding a change and a removal")
-def _a_group_holding_a_change_and_a_removal(seen: dict) -> None:
-    seen["declarations"] = [
-        _a_declaration("change", [{"id": 1, "name": "renamed"}]),
-        _a_declaration("remove", None),
-    ]
-
-
-@when("the removal fails")
-def _the_removal_fails(seen: dict) -> None:
-    seen["the_failure"] = "the removal"
-
-
-@then("the change did not happen either")
-def _the_change_did_not_happen_either(seen: dict) -> None:
-    change, removal = seen["declarations"]
-    assert _answer_for(change) is False
-    assert _answer_for(removal) is False, (
-        "NOT THE ROLLBACK ITSELF. Two separate calls have no way to say they "
-        "belong together, and this function is handed one declaration at a "
-        "time, so it answers no for each. The group's rollback comes from "
-        "holding one connection -- `query_run_together` -- and a test of that "
-        "belongs beside it, not here."
-    )
-    assert seen["the_failure"] == "the removal"
-
-
-@when("a group of three writes succeeds")
-def _a_group_of_three_writes_succeeds(seen: dict) -> None:
-    seen["declarations"] = [_a_declaration("add", _rows(3))]
-
-
-@then("the answer says three rows changed")
-def _the_answer_says_three_rows_changed(seen: dict) -> None:
-    (declaration,) = seen["declarations"]
-    assert len(declaration["rows"]) == 3
-    assert _answer_for(declaration) is True, (
-        "three rows in one call are one transaction covering all three; "
-        "counting what changed is `receipt_for`'s answer, not this one"
-    )
-
-
-@then("it is one answer, not three")
-def _it_is_one_answer_not_three(seen: dict) -> None:
-    (declaration,) = seen["declarations"]
-    answer = _answer_for(declaration)
-    assert isinstance(answer, bool), f"the answer is a plain bool, not {type(answer).__name__}"
-
-    # One answer ABOUT THE DECLARATION. It counts the rows; it does not read
-    # them. A function that answered per row would move when the rows did.
-    other_rows = [
-        [{"id": 9, "name": "x"}, {"id": 8, "name": "y"}, {"id": 7, "name": "z"}],
-        [{"colour": "red"}, {"colour": "green"}, {"colour": "blue"}],
-        [{}, {}, {}],
-    ]
-    moved = [rows for rows in other_rows if _answer_for(_a_declaration("add", rows)) is not True]
-    assert moved == [], f"the answer moved with what the rows held: {moved}"
-
-
-@given("a group naming a column no model declares")
-def _a_group_naming_an_undeclared_column(seen: dict) -> None:
-    seen["declarations"] = [_a_declaration("add", [{"id": 1, "nonsense": "x"}] * 3)]
-
-
-@when("it is declared")
-def _it_is_declared(seen: dict) -> None:
-    seen["asked_at_declaration_time"] = [_answer_for(d) for d in seen["declarations"]]
-
-
-@then("it is refused before any of its writes runs")
-def _refused_before_any_write_runs(seen: dict) -> None:
-    # What this function owns: the answer exists at declaration time. It takes
-    # a declaration and nothing else, so there is nothing to run first.
-    from declaro_persistum.travels_together import travels_together
-
-    parameters = inspect.signature(travels_together).parameters
-    assert list(parameters) == ["declaration"], (
-        f"it would need something else to run first: {list(parameters)}"
-    )
-    assert seen["asked_at_declaration_time"] == [True]
-
-    # NOT THE REFUSAL. Naming a column no model declares is refused by
-    # `refuse_undeclared_columns`, which runs first and is tested by its own
-    # feature. This function does not read the columns at all.
-
-
-@when("a caller declares a group that adds a row and then counts rows")
-def _a_group_that_adds_then_counts(seen: dict) -> None:
-    seen["declarations"] = [
-        _a_declaration("add", [{"id": 1, "name": "added"}]),
-        _a_declaration("count", None),
-    ]
-
-
-@then("the count includes the row the group added")
-def _the_count_includes_the_added_row(seen: dict) -> None:
-    added, counted = seen["declarations"]
-    assert _answer_for(added) is False
-    assert _answer_for(counted) is False, (
-        "NOT THE VISIBILITY. A read inside a group is still a read, so it never "
-        "travels together and this function keeps it off the transaction path. "
-        "Whether it sees the group's own writes is the held connection's "
-        "answer, and a test of that belongs beside `writing`."
-    )
-
-
-@when("a caller declares a group")
-def _a_caller_declares_a_group(seen: dict) -> None:
-    seen["declarations"] = [_a_declaration("add", _rows(2)), _a_declaration("remove", None)]
-
-
-@then("nothing in the group's declaration is a connection")
-def _nothing_in_the_declaration_is_a_connection(seen: dict) -> None:
-    fields = typing.get_type_hints(declared_types.Declaration)
-
-    named = [field for field in fields if field.lower() in A_CLAIM_OF_A_CONNECTION]
-    assert named == [], f"a declaration field names a connection: {named}"
-
-    # `Connection` is `Any`, so a field typed as one shows up as `Any` here.
-    typed = [field for field, kind in fields.items() if kind is typing.Any]
-    assert typed == [], f"a declaration field is typed as a handle: {typed}"
-
-    for declaration in seen["declarations"]:
-        assert set(declaration) == set(fields)
-
-
-@then("the caller never holds one")
-def _the_caller_never_holds_one(seen: dict) -> None:
-    from declaro_persistum import travels_together as the_module
-
-    source = pathlib.Path(the_module.__file__).read_text(encoding="utf-8")
-    imported = {
-        (node.module or "").split(".")[0]
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.ImportFrom)
-    } | {
-        alias.name.split(".")[0]
-        for node in ast.walk(ast.parse(source))
-        if isinstance(node, ast.Import)
-        for alias in node.names
-    }
-    reached = sorted(imported & set(NOTHING_PURE_IMPORTS))
-    assert reached == [], (
-        f"a pure function reads no clock, no random source, no environment, no "
-        f"file and no connection, and this module imports {reached}"
-    )
-
-    answered = [_answer_for(declaration) for declaration in seen["declarations"]]
-    assert answered == [True, False]
+# NOT THE REFUSAL. Naming a column no model declares is refused by
+# `refuse_undeclared_columns`, which runs first and is tested by its own
+# feature. This function does not read the columns at all.

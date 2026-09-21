@@ -236,11 +236,6 @@ def _every_step_before_rendering_is_read(scenario: dict) -> None:
     }
 
 
-@when("every place in the package that builds a statement is read")
-def _every_place_that_builds_a_statement(scenario: dict) -> None:
-    scenario["builders"] = "a claim about every module, not about one answer"
-
-
 @when("the steps between a grammar and a statement are counted")
 def _the_steps_between_a_grammar_and_a_statement(scenario: dict) -> None:
     from declaro_persistum.compile_statement import compile_statement
@@ -544,17 +539,6 @@ def _no_earlier_step_takes_an_engine(scenario: dict) -> None:
     # same question compile to one statement, which they could not do if any of
     # them had already spelled something an engine's way.
     assert len(scenario["before_rendering"]) == 6, sorted(scenario["before_rendering"])
-
-
-@then("all of them are in the rendering step")
-@then("no grammar and no vocabulary word builds one")
-def _not_something_a_result_can_answer(scenario: dict) -> None:
-    raise NotImplementedError(
-        f"CODE NOT WRITTEN: this asks about {scenario['builders']}. A claim "
-        "about how every module in the package is written belongs in a gate "
-        "over src/ that reads all of them, not in one function's feature, and "
-        "no result this function returns answers it."
-    )
 
 
 @then("what came back is a statement and its parameters")

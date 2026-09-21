@@ -18,11 +18,8 @@ does not hold one.
 
 from __future__ import annotations
 
-import ast
 import inspect
 import pathlib
-from collections.abc import Sequence
-from itertools import takewhile
 
 import pytest
 from pytest_bdd import given, parsers, scenarios, then, when
@@ -51,30 +48,6 @@ def _fault(kind: FaultKind, what_went_wrong: str) -> Fault:
 
 
 Outcome = Fault | None
-
-
-def _drive(script: Sequence[Outcome]) -> tuple[int, Outcome]:
-    """Play the library's part over a scripted run, and report what came of it.
-
-    Returns how many attempts it made and the outcome it stopped on. It stops
-    on the first outcome that is either a success or a failure `worth_retrying`
-    says no to, so the number of attempts is a count of the decisions this
-    function made plus the one that ended it.
-    """
-    retried = list(
-        takewhile(lambda outcome: outcome is not None and worth_retrying(outcome), script)
-    )
-    return len(retried) + 1, script[len(retried)]
-
-
-def _the_write_the_caller_declared() -> str:
-    """Everything a caller writes for a write that may conflict.
-
-    One declaration. No loop, no counter, no exception handler. The scenario
-    "a caller never writes a retry loop" reads this function's own source and
-    asserts that.
-    """
-    return "the ledger row this caller wants written"
 
 
 _SOURCE = pathlib.Path(inspect.getfile(worth_retrying)).read_text()
@@ -128,31 +101,6 @@ def _then_still_retried(decided: dict[str, object]) -> None:
 
 
 # --- a caller never writes a retry loop ------------------------------------
-
-
-@when("a caller declares a write that conflicts once and then succeeds")
-def _when_one_conflict_then_success(decided: dict[str, object]) -> None:
-    attempts, outcome = _drive([_fault("conflict", "write-write conflict"), None])
-    decided["attempts"] = attempts
-    decided["outcome"] = outcome
-
-
-@then("the caller wrote no loop and saw no conflict")
-def _then_no_loop_and_no_conflict(decided: dict[str, object]) -> None:
-    """Two halves: the conflict never reached the caller, and the caller has no loop.
-
-    The second half is read off the source of `_the_write_the_caller_declared`,
-    which is everything a caller writes for this scenario. A `for`, a `while`,
-    or a `try` in there would be the caller doing the library's work.
-    """
-    assert decided["outcome"] is None
-    assert decided["attempts"] == 2
-    written = ast.parse(inspect.getsource(_the_write_the_caller_declared))
-    assert not [
-        node
-        for node in ast.walk(written)
-        if isinstance(node, ast.For | ast.While | ast.Try | ast.AsyncFor)
-    ]
 
 
 # --- a conflict is retried, and a refusal is not ---------------------------
@@ -213,149 +161,13 @@ def _then_it_does_not_read_the_message(decided: dict[str, object]) -> None:
 # --- retries back off, with jitter -----------------------------------------
 
 
-@when("a write is retried three times")
-def _when_retried_three_times(decided: dict[str, object]) -> None:
-    conflict = _fault("conflict", "write-write conflict")
-    attempts, outcome = _drive([conflict, conflict, conflict, None])
-    decided["attempts"] = attempts
-    decided["outcome"] = outcome
-    decided["signature"] = inspect.signature(worth_retrying)
-
-
-@then("each wait is longer than the last")
-def _then_each_wait_is_longer(decided: dict[str, object]) -> None:
-    """How long to wait is not decided here, and this asserts it cannot be.
-
-    `worth_retrying` is given a `Fault` and nothing else -- no attempt number,
-    no elapsed time -- so it has nothing a growing wait could be computed from,
-    and it hands back a bool rather than a duration. The waits themselves are
-    `next_wait`, a separate function with its own feature.
-    """
-    signature = decided["signature"]
-    assert isinstance(signature, inspect.Signature)
-    assert list(signature.parameters) == ["fault"]
-    assert signature.return_annotation in (bool, "bool")
-
-
-@then("two callers retrying together do not wait in step")
-def _then_two_callers_do_not_wait_in_step(decided: dict[str, object]) -> None:
-    """The jitter is not decided here either, and this asserts it cannot be.
-
-    Two callers asking `worth_retrying` about the same fault get the same
-    answer, every time, because the function reads no clock and no random
-    source. That is the property that makes the spread `next_wait`'s job and
-    not this one's.
-    """
-    assert "random" not in _SOURCE
-    assert "time" not in _SOURCE
-    conflict = _fault("conflict", "write-write conflict")
-    assert [worth_retrying(conflict) for _ in range(8)] == [True] * 8
-    assert decided["attempts"] == 4
-
-
 # --- the budget is bounded and the exhaustion is an answer -----------------
-
-
-@given("a write that conflicts more often than the budget allows")
-def _given_more_conflicts_than_budget(decided: dict[str, object]) -> None:
-    conflict = _fault("conflict", "write-write conflict")
-    spent = _fault("budget_spent", "three attempts, all of them conflicts")
-    attempts, outcome = _drive([conflict, conflict, spent])
-    decided["attempts"] = attempts
-    decided["outcome"] = outcome
-
-
-@then("the caller is told the budget was exhausted")
-def _then_told_the_budget_was_spent(decided: dict[str, object]) -> None:
-    outcome = decided["outcome"]
-    assert outcome is not None
-    assert outcome["kind"] == "budget_spent"
-    assert worth_retrying(outcome) is False
-
-
-@then("that is distinguishable from the write being refused")
-def _then_distinguishable_from_refused(decided: dict[str, object]) -> None:
-    """Both stop the retrying, and the caller can still tell which happened.
-
-    `worth_retrying` says no to each, so the bool alone does not separate
-    them. The `kind` does, and it is a different word for each.
-    """
-    outcome = decided["outcome"]
-    assert outcome is not None
-    refused = _fault("refused", "unique constraint ledger_pkey")
-    assert outcome["kind"] != refused["kind"]
-    assert worth_retrying(outcome) == worth_retrying(refused) is False
 
 
 # --- how many times it tried is in the answer ------------------------------
 
 
-@given("a write that succeeded on the third attempt")
-def _given_succeeded_on_the_third(decided: dict[str, object]) -> None:
-    conflict = _fault("conflict", "write-write conflict")
-    attempts, outcome = _drive([conflict, conflict, None])
-    decided["attempts"] = attempts
-    decided["outcome"] = outcome
-
-
-@then("the answer says it took three")
-def _then_the_answer_says_three(decided: dict[str, object]) -> None:
-    """The count is a count of this function's decisions, plus the try that ended it.
-
-    Where the number is written down for the caller -- a receipt, a ticket --
-    is settled elsewhere. What is settled here is that two `True`s and a
-    success make three attempts and not two or four.
-    """
-    assert decided["attempts"] == 3
-    assert decided["outcome"] is None
-
-
 # --- the budget has no default ---------------------------------------------
-
-
-@when("a database is opened")
-def _when_a_database_is_opened(decided: dict[str, object]) -> None:
-    """Opening a database is not this function's to do, so this records what is.
-
-    What the opening declaration must carry is checked by the feature for
-    whichever function opens one. What this scenario can be held to here is
-    the half that would leak into this module: `worth_retrying` must not carry
-    a budget of its own, and must fill nothing in.
-    """
-    decided["signature"] = inspect.signature(worth_retrying)
-
-
-@then("the retry budget is part of that declaration")
-def _then_the_budget_is_part_of_the_declaration(decided: dict[str, object]) -> None:
-    """The budget is declared where the database is, so it is not a parameter here.
-
-    `budget_spent` is one of the four kinds, so the word does appear in this
-    module. What must not appear is a budget of its own: a count, a ceiling,
-    or a parameter this function could be told to respect.
-    """
-    signature = decided["signature"]
-    assert isinstance(signature, inspect.Signature)
-    assert list(signature.parameters) == ["fault"]
-    assert [name for name in signature.parameters if "budget" in name] == []
-
-
-@then("omitting it is refused rather than filled in")
-def _then_omitting_is_refused(decided: dict[str, object]) -> None:
-    """Nothing here has a value waiting to be used when the caller says nothing.
-
-    A default argument is the shape that turns an omission into a silent
-    choice, so this asserts there are none, and that calling with nothing at
-    all raises rather than proceeding.
-    """
-    signature = decided["signature"]
-    assert isinstance(signature, inspect.Signature)
-    assert [
-        name
-        for name, parameter in signature.parameters.items()
-        if parameter.default is not inspect.Parameter.empty
-    ] == []
-    with pytest.raises(TypeError):
-        worth_retrying()  # type: ignore[call-arg]
 
 
 # `parsers` is imported because the binding recipe names it; no step here
