@@ -7,7 +7,7 @@ to say it again. `HOW-IT-SHOULD-WORK.md` line 178: "You declared the
 relationship once, in the model, and naming it again in every query is the
 duplication this library exists to remove."
 
-WHERE THE RELATIONSHIP IS WRITTEN DOWN. `docs/design/persistum.hd` line 125: a
+WHERE THE RELATIONSHIP IS WRITTEN DOWN. `docs/design/persistum.hd`, `type Column`: a
 foreign key is declared once, on the column that points, and that is
 `Column.references`. Nothing else in the package records a relationship, so
 these Thens move that one field and watch the answer move with it. A function

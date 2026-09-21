@@ -10,7 +10,7 @@ does, and what is left when the caller says nothing.
 WHAT THE SCENARIOS LEAVE OPEN, AND HOW IT IS SETTLED HERE. The feature writes
 the expression a caller types; this function is handed the call as a dict, so
 something has to say which dict that expression is. `docs/design/persistum.hd`
-line 105 says `Asked` is the call as the caller phrased it, and the phrasing
+calls `Asked` the call as the caller phrased it, and the phrasing
 here is SQLAlchemy's own method names, so the four words are `model`, `wanted`,
 `filter_by` and `with_only`. `wanted` is in that dict although the scenarios'
 expressions do not write `.all()`, because a `Declaration` names one of the

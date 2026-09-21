@@ -19,8 +19,7 @@ NO STEP HERE REACHES A MODEL, AND THAT IS THE POINT.
 `declaration_from_pseudo_sql` takes one argument and no model, so it cannot look
 a column up. What it can do is put every key in a position that gets looked up
 and every value in a position that gets bound, which is what the Thens read. The
-lookup itself happens later, against the model, and `docs/design/persistum.hd`
-line 711 names the function that does it.
+lookup itself happens later, against the model, in `fn refuse_undeclared_columns`.
 
 NO STEP HERE CALLS A DATABASE, a clock or a file. The function is pure, so a
 scenario is an `Asked` in and a `Declaration` or a `Fault` out.

@@ -7,7 +7,7 @@ room, and each takes one write at a time in arrival order. So the whole of this
 function is the order, and the two scenarios ask for the two answers it has: the
 first write deposited, and NOTHING when none were.
 
-IT ANSWERS, IT DOES NOT TAKE. `docs/design/persistum.hd` line 779 declares it a
+IT ANSWERS, IT DOES NOT TAKE. `docs/design/persistum.hd`, `fn next_in_order`, declares it a
 pure `fn` with no side effect, and a pure function cannot remove anything from a
 room. So the drain loop below does what the boundary does: it asks, it takes the
 answer out itself, and it asks again. Each Then asserts that the room still

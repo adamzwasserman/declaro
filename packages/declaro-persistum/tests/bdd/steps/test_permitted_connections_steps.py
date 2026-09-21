@@ -1,6 +1,6 @@
 """Bind `features/core/permitted_connections.feature` to the function.
 
-WHAT THE FUNCTION IS. `docs/design/persistum.hd` line 684 declares
+WHAT THE FUNCTION IS. `docs/design/persistum.hd`, `fn permitted_connections`, declares
 `permitted_connections : (asked: int | NOTHING, replicated: bool) -> int | Fault`.
 It settles a number and nothing else. It opens nothing, reads no environment,
 and never sees a connection. The number the deployment sets arrives as `asked`,
@@ -22,7 +22,8 @@ function. On 2026-09-21 the three moved to
 `features/session/session_open_connection.feature`, which is the boundary that
 opens what they are asking about.
 
-SCENARIO 10 DECIDES ONE CASE THE OTHERS LEAVE OPEN. "a replicated database" sets
+ONE SCENARIO DECIDES A CASE THE OTHERS LEAVE OPEN. "a replicated database still
+holds one sync connection" sets
 no number, and then asks for exactly one connection to the primary. So
 `(NOTHING, replicated=True)` is one, not a refusal: on a replica the number is
 measured rather than configured, and an unset variable costs nothing there.
@@ -39,9 +40,6 @@ from declaro_persistum.permitted_connections import permitted_connections
 from declaro_persistum.types import NOTHING
 
 scenarios("../features/core/permitted_connections.feature")
-
-# The declaration itself, so a scenario about where the number is stated can read
-# the line that states it instead of trusting this file's memory of it.
 
 
 @pytest.fixture

@@ -4,7 +4,8 @@ WHAT THIS FILE CAN PROVE, AND WHAT IT CANNOT. The feature has nine scenarios.
 Three of them ask about `budget_spent`, which the declaration writes as
 `(attempts: int, budget: int) -> bool`. The other six were folded in on
 2026-09-21 from a file about the whole retry mechanism, and each of those
-belongs to a different function that `docs/design/persistum.hd` line 541 names
+belongs to a different function that `docs/design/persistum.hd` names under
+`orchestrator fn lifecycle_catch_up`,
 beside this one: `worth_retrying` decides conflict from refusal, `next_wait`
 and `clock_read` produce the backoff, and `lifecycle_catch_up` runs the loop
 the caller never writes. A predicate over two integers cannot answer any of
