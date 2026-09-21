@@ -98,7 +98,13 @@ Ticket = str
 
 class Comparison(TypedDict):
     operator: Operator
-    value: Value
+    # `between` TAKES TWO VALUES AND `in` TAKES A LIST, SO ONE VALUE IS NOT
+    # ENOUGH. Widened 2026-09-21 to match the declaration:
+    # `{"age": {"between": [18, 30]}}` built a comparison this type did not
+    # describe, and every builder carried it through untouched rather than say
+    # so. A list here is still bound by the driver, one parameter per member,
+    # and still never pasted into the text.
+    value: Value | list[Value]
     ignore_case: bool
 
 
@@ -108,7 +114,47 @@ class Condition(TypedDict):
     none_of: list["Condition"]
 
 
-AskedValue = Value | Row | Rows | Condition | list[str] | dict[str, Direction]
+# A NARROWING IS WIDER THAN A CONDITION. A `Condition` is what this library
+# holds: every comparison spelled out, `any_of` and `none_of` present whether or
+# not anybody used them. A `Narrowing` is what a caller wrote, which is a bare
+# value where they meant eq, `or` and `not` where they meant `any_of` and
+# `none_of`, and a named operator where they wanted one.
+#
+# ADDED 2026-09-21, BECAUSE FOUR BUILDERS WERE HANDED SOMETHING THIS TYPE DID
+# NOT ADMIT. `{"age": {"gt": 18}}` and `{"or": [...]}` are neither a `Row` nor a
+# `Condition`, so every builder was taking data the declaration said could not
+# arrive. `condition_from_narrowing` is the one place a narrowing becomes a
+# condition.
+# THE NESTING IS A RULE A READER KEEPS, NOT A SHAPE THIS FILE CAN WRITE DOWN
+# TODAY. The declaration says `Narrowing = dict<str, AskedValue>` and
+# `AskedValue` names `Narrowing` back, because `or` and `not` hold more
+# narrowings. Python 3.11, which this package still supports, has no lazy type
+# alias, so that circle has no spelling here.
+#
+# WHY THE OBVIOUS FIX DOES NOT WORK, MEASURED TWICE ON 2026-09-21 so nobody
+# spends a third afternoon on it. `Narrowing = dict[str, "AskedValue"]` builds a
+# `ForwardRef` carrying no module. It resolves against whichever module calls
+# `get_type_hints`, and the four grammar builders import `Asked` without
+# importing `AskedValue`, so the call raises `NameError: name 'AskedValue' is
+# not defined`. A single-module test of the same spelling passes, which is why
+# it looks like it works: the names are in scope there and nowhere else.
+#
+# So the value inside a narrowing is `Any` here, and the recursion lives in the
+# declaration, beside `handle` and `NOTHING`, which are already kept that way.
+# Raising the floor to 3.12 would let `type Narrowing = dict[str, AskedValue]`
+# say it properly, and that is a packaging decision rather than this file's.
+Narrowing = dict[str, Any]
+AskedValue = (
+    Value
+    | Row
+    | Rows
+    | Condition
+    | Narrowing
+    | list[Narrowing]
+    | list[str]
+    | list[Value]
+    | dict[str, Direction]
+)
 Asked = dict[str, AskedValue]
 
 
