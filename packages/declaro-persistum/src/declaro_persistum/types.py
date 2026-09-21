@@ -125,26 +125,22 @@ class Condition(TypedDict):
 # `Condition`, so every builder was taking data the declaration said could not
 # arrive. `condition_from_narrowing` is the one place a narrowing becomes a
 # condition.
-# THE NESTING IS A RULE A READER KEEPS, NOT A SHAPE THIS FILE CAN WRITE DOWN
-# TODAY. The declaration says `Narrowing = dict<str, AskedValue>` and
-# `AskedValue` names `Narrowing` back, because `or` and `not` hold more
-# narrowings. Python 3.11, which this package still supports, has no lazy type
-# alias, so that circle has no spelling here.
+# THE TWO NAME EACH OTHER, BECAUSE `or` AND `not` HOLD MORE NARROWINGS. A lazy
+# type alias is what lets a circle be written down: the right-hand side is not
+# evaluated until something asks for it, by which point both names exist.
 #
-# WHY THE OBVIOUS FIX DOES NOT WORK, MEASURED TWICE ON 2026-09-21 so nobody
-# spends a third afternoon on it. `Narrowing = dict[str, "AskedValue"]` builds a
-# `ForwardRef` carrying no module. It resolves against whichever module calls
-# `get_type_hints`, and the four grammar builders import `Asked` without
-# importing `AskedValue`, so the call raises `NameError: name 'AskedValue' is
-# not defined`. A single-module test of the same spelling passes, which is why
-# it looks like it works: the names are in scope there and nowhere else.
+# WHY THE OLD SPELLING FAILED, recorded so nobody spends a third afternoon on it.
+# Before the floor moved, this said `Narrowing = dict[str, Any]` and the nesting
+# was a rule a reader kept. The obvious repair, `dict[str, "AskedValue"]`, builds
+# a `ForwardRef` carrying no module: it resolves against whichever module calls
+# `get_type_hints`, and the grammar builders import `Asked` without importing
+# `AskedValue`, so the call raises `NameError`. A single-module test of that
+# spelling passes, which is exactly what makes it look like it works.
 #
-# So the value inside a narrowing is `Any` here, and the recursion lives in the
-# declaration, beside `handle` and `NOTHING`, which are already kept that way.
-# Raising the floor to 3.12 would let `type Narrowing = dict[str, AskedValue]`
-# say it properly, and that is a packaging decision rather than this file's.
-Narrowing = dict[str, Any]
-AskedValue = (
+# The floor moved to 3.13 on 2026-09-21 for this and for the free-threaded build
+# the crew of drainers is written against.
+type Narrowing = dict[str, AskedValue]
+type AskedValue = (
     Value
     | Row
     | Rows
@@ -155,7 +151,7 @@ AskedValue = (
     | list[Value]
     | dict[str, Direction]
 )
-Asked = dict[str, AskedValue]
+type Asked = dict[str, AskedValue]
 
 
 class Join(TypedDict):

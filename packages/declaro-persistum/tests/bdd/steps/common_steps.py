@@ -3,7 +3,6 @@ Common BDD step definitions used across features.
 """
 
 from pytest_bdd import given, parsers, then
-
 from tests.bdd.factories.schema_factory import (
     complex_ecommerce_schema,
 )

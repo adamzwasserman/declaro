@@ -4,7 +4,7 @@ version = "0.3.1"
 description = "Pure functional SQL library with declarative schema migrations"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 authors = [{ name = "Adam" }]
 keywords = ["sql", "database", "migrations", "functional", "postgresql", "sqlite"]
 classifiers = [
@@ -12,8 +12,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Topic :: Database",
@@ -79,7 +77,7 @@ allow-direct-references = true
 packages = ["src/declaro_persistum"]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py313"
 line-length = 100
 
 [tool.ruff.lint]
@@ -116,7 +114,7 @@ ignore = [
 known-first-party = ["declaro_persistum"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.13"
 strict = true
 warn_return_any = true
 warn_unused_ignores = true

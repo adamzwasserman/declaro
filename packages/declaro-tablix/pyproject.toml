@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Declarative table and filter system with CSS Grid layouts"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 authors = [{ name = "Adam" }]
 keywords = ["tables", "filters", "css-grid", "htmx", "jinja2", "pydantic"]
 classifiers = [
@@ -12,8 +12,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
     "Topic :: Internet :: WWW/HTTP",
     "Typing :: Typed",
 ]
@@ -54,7 +52,7 @@ build-backend = "hatchling.build"
 packages = ["src/declaro_tablix"]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py313"
 line-length = 100
 
 [tool.ruff.lint]
@@ -78,7 +76,7 @@ ignore = [
 known-first-party = ["declaro_tablix"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.13"
 strict = true
 warn_return_any = true
 warn_unused_ignores = true
