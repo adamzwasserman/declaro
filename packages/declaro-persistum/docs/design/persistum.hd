@@ -792,7 +792,7 @@ module declaro-persistum
   fn refusal_reaches_caller : (fault: Fault) -> bool note "decides whether a fault is raised or comes back as a receipt"
 
   # Builds what the caller will read out of what the engine did.
-  fn receipt_for : (ticket: Ticket, failure: NOTHING | Fault) -> Receipt note "builds the receipt a caller reads for its write"
+  fn receipt_for : (ticket: Ticket, failure: NOTHING | Fault, attempts: int) -> Receipt note "builds the receipt a caller reads for its write"
 
   # --- what the schema half reaches ---------------------------------------
 
