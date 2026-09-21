@@ -467,7 +467,7 @@ module declaro-persistum
   # the caller entered four different buildings. One door carrying which entry
   # point was used says the four are spellings of one question, and `by_grammar`
   # is where that key is spent.
-  boundary_in fn query_ask : (db: Database, model: Model, grammar: Grammar, query_ask: Asked) -> Answer | Fault side_effect reads "caller" invokes query_answer note "takes a question or a declared write, in any of the four grammars"
+  boundary_in fn query_ask : (db: Database, model: Model, grammar: Grammar, asked: Asked) -> Answer | Fault side_effect reads "caller" invokes query_answer note "takes a question or a declared write, in any of the four grammars"
 
   # LIFECYCLE. The platform says stop, and nothing in the program asked for it. The
   # other two doors open because a caller called; this one opens whether or not
@@ -743,10 +743,10 @@ module declaro-persistum
   # the four are spellings, which is what `HOW-IT-SHOULD-WORK.md` says they are.
   dispatch by_grammar = { "pseudo_sql" -> declaration_from_pseudo_sql, "django" -> declaration_from_django, "prisma" -> declaration_from_prisma, "sqlalchemy" -> declaration_from_sqlalchemy } note "picks the builder for the grammar the call arrived in"
 
-  fn declaration_from_pseudo_sql : (query_ask: Asked) -> Declaration | Fault note "turns the library's own phrasing into a declaration"
-  fn declaration_from_django : (query_ask: Asked) -> Declaration | Fault note "turns Django's phrasing into a declaration"
-  fn declaration_from_prisma : (query_ask: Asked) -> Declaration | Fault note "turns Prisma's phrasing into a declaration"
-  fn declaration_from_sqlalchemy : (query_ask: Asked) -> Declaration | Fault note "turns SQLAlchemy's phrasing into a declaration"
+  fn declaration_from_pseudo_sql : (asked: Asked) -> Declaration | Fault note "turns the library's own phrasing into a declaration"
+  fn declaration_from_django : (asked: Asked) -> Declaration | Fault note "turns Django's phrasing into a declaration"
+  fn declaration_from_prisma : (asked: Asked) -> Declaration | Fault note "turns Prisma's phrasing into a declaration"
+  fn declaration_from_sqlalchemy : (asked: Asked) -> Declaration | Fault note "turns SQLAlchemy's phrasing into a declaration"
 
   # --- what `lifecycle_shut_down` and `lifecycle_catch_up` reach ------------------------------
 

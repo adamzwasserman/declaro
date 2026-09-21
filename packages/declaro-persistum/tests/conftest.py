@@ -257,68 +257,6 @@ def require_sqlite() -> None:
 
 
 @pytest.fixture
-def a_person_model() -> dict:
-    """One model: a table, its columns, and nothing the database was asked."""
-    return {
-        "table": "people",
-        "columns": [
-            {
-                "name": "id",
-                "declared_type": "int",
-                "renamed_from": None,
-                "references": None,
-                "facets": {"primary_key": True},
-            },
-            {
-                "name": "name",
-                "declared_type": "str",
-                "renamed_from": None,
-                "references": None,
-                "facets": {},
-            },
-        ],
-        "dropping": [],
-        "indexes": [],
-        "constraints": [],
-    }
-
-
-@pytest.fixture
-def an_order_model() -> dict:
-    """A second model, pointing at the first. The foreign key is on the column
-    that points, which is the only place a join is declared."""
-    return {
-        "table": "orders",
-        "columns": [
-            {
-                "name": "id",
-                "declared_type": "int",
-                "renamed_from": None,
-                "references": None,
-                "facets": {"primary_key": True},
-            },
-            {
-                "name": "person_id",
-                "declared_type": "int",
-                "renamed_from": None,
-                "references": "people.id",
-                "facets": {},
-            },
-            {
-                "name": "total",
-                "declared_type": "decimal",
-                "renamed_from": None,
-                "references": None,
-                "facets": {"floor": 0},
-            },
-        ],
-        "dropping": [],
-        "indexes": [{"name": "orders_by_person", "columns": ["person_id"], "unique": False}],
-        "constraints": [],
-    }
-
-
-@pytest.fixture
 def declared(a_person_model, an_order_model) -> dict:
     """Everything the code declares, in one answer, the way `schema_read_declared`
     hands it over: models and views together, and what it means to lose."""
