@@ -25,7 +25,7 @@ Feature: A condition is data
     When a caller narrows by {"or": [{"name": "alice"}, {"name": "carol"}]}
     Then it is given alice and carol
 
-  Scenario: the same condition means the same thing in every engine
+  Scenario: the same condition means the same thing in every grammar
     When the condition {"age": {"gt": 18}} is used in all four grammars
     Then all four answers are equal
 

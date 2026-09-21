@@ -24,13 +24,19 @@ Feature: Absence is an answer
     Then it is given no people
     And that is a different answer from the named absence
 
-  Scenario: a function that cannot do its job returns that fact
-    Given a teardown that cannot finish
-    When the library runs it
+  # A CARD, NOT A CATEGORY. Rewritten 2026-09-21: these said "a teardown", which
+  # names nothing the declaration has, so whoever bound them would pick a card
+  # and could pick the one where it is false. `boundary_in fn lifecycle_stop` is
+  # opened by a signal and has no caller to return anything to, which is why
+  # `fn progress_line` and `boundary_out fn log_write` exist. A caller's own
+  # question is where a failure has somewhere to go.
+  Scenario: a question that cannot be answered comes back as a failure
+    Given a question the engine refuses
+    When a caller asks it
     Then the failure comes back as a value to the caller
     And it is not written to a log instead
 
   Scenario: a failure is never reported as success
-    Given a teardown that cannot finish
-    When the library runs it
-    Then the caller can tell that from a teardown that worked
+    Given a question the engine refuses
+    When a caller asks it
+    Then the caller can tell that answer from one that worked

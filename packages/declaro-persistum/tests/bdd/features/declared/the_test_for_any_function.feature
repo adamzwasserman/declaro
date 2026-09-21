@@ -89,15 +89,28 @@ Feature: Every string is checked or bound, never interpolated
 
   # --------------------------------------------- the other two the caller must not do
 
-  Scenario: no public function takes a live connection
-    When every public function's arguments are read
+  # A DOOR IS THE CALLER'S SURFACE, AND THERE ARE FIVE OF THEM. Rewritten
+  # 2026-09-21: these three said "every public function", which names no set the
+  # declaration has. Read as written they were false, because several declared
+  # functions behind the doors do take a connection or an engine, on purpose:
+  # `fn room_run_write` and `boundary_out fn query_begin_concurrent` are handed a
+  # writer, and `fn compile_statement` is handed the engine because it is the one
+  # thing that has to know. What the caller may not be given is the claim, and
+  # "door" is the declaration's own word for what the caller touches.
+  Scenario: no door takes a live connection
+    When the arguments of all five doors are read
     Then none of them takes a connection or a cursor
 
-  Scenario: no public function hands a connection back
-    When every public function's return is read
-    Then none of them yields or returns a connection
+  # A HANDLE CARRIES ONE AND IS NEVER OPENED UP. `fn session_open` hands back a
+  # database, and a database holds the connection it reads on. That is the
+  # distinction this scenario is about: a caller holds the handle and has no way
+  # to run anything on what is inside it.
+  Scenario: no door hands a caller a connection to use
+    When the return of all five doors is read
+    Then no door returns a bare connection
+    And the caller never reads or runs anything on the one inside its handle
 
-  Scenario: no public function takes the name of an engine
-    When every public function's arguments are read
+  Scenario: no door takes the name of an engine
+    When the arguments of all five doors are read
     Then none of them takes an engine or an engine name
     And the engine is decided once, where the database is opened

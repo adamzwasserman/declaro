@@ -47,11 +47,22 @@ Feature: What the library owns
     Then the statement the engine received used that engine's own placeholders
     And the caller wrote no placeholder
 
-  Scenario: the library opens and closes the connection
+  # A CONNECTION IS OPENED ONCE AND HELD FOR LIFE, NOT OPENED PER QUESTION.
+  # Rewritten 2026-09-21: this used to ask that a connection be opened and closed
+  # around the question, which is the arm that measured 250 writes a second
+  # against 1,505. Every connection is an operating system thread, and reusing
+  # one is six times faster on its own. The claim underneath was always about who
+  # owns it rather than how often it opens.
+  Scenario: the library owns the connection and the caller never touches it
     Given a sqlite database holding alice, bob and carol
     When a caller asks for people named "bob"
-    Then a connection was opened and closed around the question
-    And the caller never held it
+    Then the library chose the connection and opened it
+    And the caller never held it, read it, or ran anything on it
+
+  Scenario: the connection a question runs on was already open
+    Given a sqlite database holding alice, bob and carol
+    When a caller asks two questions one after the other
+    Then the second did not open a connection of its own
 
   Scenario: several writes declared together travel as one transaction
     Given a sqlite database holding no people

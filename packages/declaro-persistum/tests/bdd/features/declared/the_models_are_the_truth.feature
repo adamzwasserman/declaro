@@ -1,10 +1,19 @@
 @bdd @specification
 Feature: The models are the truth
   Pydantic models are the only description of the database. They say which tables
-  exist, which columns each has, and what each column means. The library never asks
-  the database what is there, because the models already said.
+  exist, which columns each has, and what each column means. No question a caller
+  asks is answered by reading the database's own schema, because the models
+  already said.
 
   Section "The models are the truth" of HOW-IT-SHOULD-WORK.md.
+
+  WHAT THIS DOES NOT SAY, corrected 2026-09-21. The narrative here used to read
+  "the library never asks the database what is there", and the library does ask,
+  once, when the database is opened: `fn schema_inspect` reads the live schema so
+  it can be compared with the models, and `orchestrator fn session_connect`
+  reaches it on every open. What is true is narrower and is what these scenarios
+  test: the models decide what should exist, and nothing a caller asks is
+  answered by consulting the database instead of them.
 
   Background:
     Given a model Person declaring the table "people" with columns id and name
@@ -16,7 +25,7 @@ Feature: The models are the truth
   Scenario: the columns come from the declaration
     When the library is asked which columns Person declares
     Then it answers id and name, and nothing else
-    And it never asks the database what columns exist
+    And it answered without opening a database
 
   Scenario: a column the model does not declare is refused
     When a caller asks for people narrowed by "nickname"
