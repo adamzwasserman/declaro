@@ -44,14 +44,18 @@ twenty-eight functions behind this door can hand back a `Fault`, and it travels
 out of here untouched. A refusal reworded twice is a refusal whose author
 nobody can find.
 
-WHAT `DECLARO_CREW_SIZE` HAS NOWHERE TO GO, said out loud rather than dropped
-quietly. The card above declares that this door reads two variables. `type
-Connecting` carries one number, `connections`, and `orchestrator fn
-session_connect` hands that one number to both `fn permitted_connections` and
-`fn crew_size`. So there is one slot for two numbers, and a deployment that set
-`DECLARO_CREW_SIZE` to something of its own would have it silently replaced by
-the other. This door reads `DECLARO_CONNECTIONS` and stops there, and the
-missing field is a hole in the record rather than a decision taken here.
+TWO VARIABLES, AND EACH HAS ITS OWN FIELD SINCE 2026-09-22. `type Connecting`
+carried one number for both until then, so `orchestrator fn session_connect`
+handed it to `fn permitted_connections` and to `fn crew_size` alike. Measured by
+opening a database with the crew set to 2 and the connections to 4: four writers
+opened, and the crew size a deployment had asked for was gone without a word.
+`crew_asked` is what the deployment said and `crew` is what was settled, the way
+`connections` and `permitted` already sat beside each other.
+
+A VARIABLE NOBODY SET IS ABSENCE AND NOT A NUMBER. Both come through as
+`NOTHING`, and `fn permitted_connections` and `fn crew_size` each take that as a
+case of its own. Inventing a number here would make a deployment that chose one
+and a deployment that forgot look the same.
 """
 
 from __future__ import annotations
@@ -105,6 +109,7 @@ WHAT_THE_ORCHESTRATOR_ANSWERED: dict[bool, Callable[[Any], Database | Fault]] = 
 # Absent` is the declaration's own word for the same thing.
 
 WHAT_THE_DEPLOYMENT_STATED_THE_CONNECTIONS_IN = "DECLARO_CONNECTIONS"
+WHAT_THE_DEPLOYMENT_STATED_THE_CREW_IN = "DECLARO_CREW_SIZE"
 
 
 def _nothing_was_stated(_said: str | None) -> int | None:
@@ -149,6 +154,7 @@ async def session_open(target: str, shutdown: Shutdown, **settings: Value) -> Da
         "connections": _a_number_the_deployment_stated(
             WHAT_THE_DEPLOYMENT_STATED_THE_CONNECTIONS_IN
         ),
+        "crew_asked": _a_number_the_deployment_stated(WHAT_THE_DEPLOYMENT_STATED_THE_CREW_IN),
         "settings": settings,
     }
     answered = await session_connect(what_the_caller_said)

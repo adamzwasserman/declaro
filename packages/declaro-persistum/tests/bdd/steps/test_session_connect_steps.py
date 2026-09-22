@@ -312,6 +312,10 @@ def _what_a_caller_says(bench: dict[str, Any]) -> dict[str, Any]:
         "target": bench["target"],
         "shutdown": "exit_immediately",
         "connections": 1,
+        # WHAT THE DEPLOYMENT ASKED FOR THE CREW, beside what it asked for the
+        # connections. The two shared one field until 2026-09-22, so a crew size
+        # of its own was silently replaced by the connection count.
+        "crew_asked": 1,
         "settings": bench["settings"],
     }
 

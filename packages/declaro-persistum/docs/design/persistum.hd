@@ -469,9 +469,20 @@ module declaro-persistum
 
   # `session_connect`'S OWN RECORD. The caller's three arguments on top, then what each
   # step returned, in the order the chain runs them.
+  # TWO VARIABLES ARRIVE AND THERE WAS ONE FIELD FOR THEM. `boundary_in fn
+  # session_open` declares that it reads `DECLARO_CREW_SIZE` and
+  # `DECLARO_CONNECTIONS`, and this record carried only `connections`, so the
+  # orchestrator handed that one number to `fn permitted_connections` and to
+  # `fn crew_size` alike. Measured 2026-09-22 by opening a database with the
+  # crew set to 2 and the connections to 4: four writers opened, and the crew
+  # size a deployment had asked for was gone without a word.
+  #
+  # `crew_asked` IS WHAT THE DEPLOYMENT SAID AND `crew` IS WHAT WAS SETTLED, the
+  # same way `connections` and `permitted` already sit beside each other.
   type Connecting = { target: str
                       shutdown: Shutdown
                       connections: int | NOTHING
+                      crew_asked: int | NOTHING
                       engine: Engine
                       settings: dict<str, Value>
                       permitted: int

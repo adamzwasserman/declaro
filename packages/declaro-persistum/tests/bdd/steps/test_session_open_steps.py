@@ -367,7 +367,9 @@ def _opened(bench: dict[str, Any], target: str, **settings: Any) -> Any:
         session_open(target, WHAT_HAPPENS_AT_EXIT, **settings)
     )
     bench["scenario"].setdefault("answers", []).append(answered)
-    WHETHER_IT_CAME_BACK_REFUSED[_is_a_fault(answered)](bench, answered)
+    bench["scenario"]["refusals_from_this_call"] = WHETHER_IT_CAME_BACK_REFUSED[
+        _is_a_fault(answered)
+    ](bench, answered)
     return answered
 
 
@@ -388,18 +390,25 @@ def _the_last_refusal(bench: dict[str, Any]) -> tuple[str, str]:
     return bench["scenario"]["refusals"][-1]
 
 
-def _it_worked(_bench: dict[str, Any], _answered: Any) -> None:
-    """A handle came back, so there are no words of refusal to keep."""
-    return None
+def _it_worked(_bench: dict[str, Any], _answered: Any) -> int:
+    """A handle came back, so there are no words of refusal to keep.
+
+    ANSWERS HOW MANY REFUSALS THIS CALL ADDED, which is none. Both halves of
+    this pair hand back that number, so the caller reads an answer rather than
+    trusting a side effect, and an empty body cannot be mistaken for a function
+    nobody finished.
+    """
+    return 0
 
 
-def _the_words_of_the_fault(bench: dict[str, Any], answered: Any) -> None:
+def _the_words_of_the_fault(bench: dict[str, Any], answered: Any) -> int:
     bench["scenario"].setdefault("refusals", []).append(
         (answered["what_went_wrong"], answered["what_to_do_instead"])
     )
+    return 1
 
 
-WHETHER_IT_CAME_BACK_REFUSED: dict[bool, Callable[[dict[str, Any], Any], None]] = {
+WHETHER_IT_CAME_BACK_REFUSED: dict[bool, Callable[[dict[str, Any], Any], int]] = {
     True: _the_words_of_the_fault,
     False: _it_worked,
 }

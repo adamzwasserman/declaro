@@ -269,7 +269,7 @@ async def _the_crew(carried: Connecting) -> Any:
     """
     return {
         **carried,
-        "crew": crew_size(carried["connections"], replicates(carried["database"])),
+        "crew": crew_size(carried["crew_asked"], replicates(carried["database"])),
     }
 
 

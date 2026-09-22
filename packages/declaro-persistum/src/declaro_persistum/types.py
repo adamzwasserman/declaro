@@ -382,6 +382,12 @@ class Connecting(TypedDict):
     target: str
     shutdown: Shutdown
     connections: int | None
+    # WHAT THE DEPLOYMENT ASKED FOR, beside what was settled. Added 2026-09-22:
+    # `session_open` declares that it reads DECLARO_CREW_SIZE and
+    # DECLARO_CONNECTIONS, and this record held one number for both, so the
+    # orchestrator gave `crew_size` the connection count. Opening with the crew
+    # set to 2 and the connections to 4 opened four writers.
+    crew_asked: int | None
     engine: Engine
     settings: dict[str, Value]
     permitted: int
