@@ -123,8 +123,6 @@ KNOWN_UNBOUND: dict[str, str] = {
     "remove.feature": _ONE_EACH,
     "remove_all.feature": _ONE_EACH,
     "replace.feature": _ONE_EACH,
-    "room_post_receipt.feature": _ONE_EACH,
-    "room_release_ticket.feature": _ONE_EACH,
     "room_run_write.feature": _ONE_EACH,
     "session_close_connection.feature": _ONE_EACH,
     "smallest.feature": _ONE_EACH,

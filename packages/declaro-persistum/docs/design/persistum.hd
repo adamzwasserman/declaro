@@ -632,7 +632,7 @@ module declaro-persistum
   # a ticket belongs to exactly one caller, so a failure reaches that caller and
   # nobody else, and a caller draws its own atomicity boundary by choosing when
   # to collect. Deposit hands out the ticket; this is where it is spent.
-  boundary_in fn query_collect : (db: Database, ticket: Ticket) -> Receipt | Fault side_effect reads "caller" invokes query_deliver note "hands a caller the outcome of a write it deposited earlier"
+  boundary_in fn query_collect : (db: Database, ticket: Ticket) -> Receipt | Fault awaited side_effect reads "caller" invokes query_deliver note "hands a caller the outcome of a write it deposited earlier"
 
   # NO FLUSH DOOR. Decided 2026-09-17. `architecture.md:308`: no caller waits for
   # the primary, with exactly two exceptions, a cold open and shutdown, both at
@@ -668,7 +668,7 @@ module declaro-persistum
 
   # Waits for the drainer to finish this caller's write, hands back the receipt
   # and drops the ticket, so a collected ticket leaves the room empty again.
-  orchestrator fn query_deliver : (query_collect: Collecting) -> Collecting | Fault invokes room_release_ticket, refusal_reaches_caller, log_write note "waits for the drainer and hands back the receipt"
+  orchestrator fn query_deliver : (query_collect: Collecting) -> Collecting | Fault awaited invokes room_release_ticket, refusal_reaches_caller, log_write note "waits for the drainer and hands back the receipt"
 
   # Empties the room one write at a time in arrival order, and, if nothing else
   # wants the connection, pushes and pulls on it.
@@ -782,7 +782,14 @@ module declaro-persistum
 
   # WAITS FOR THIS ONE TICKET AND TAKES IT OUT. The caller is parked here until
   # the drainer posts what happened, which is why a deposit could return at once.
-  boundary_out fn room_release_ticket : (room: Room, ticket: Ticket) -> Receipt | Fault side_effect reads_writes "room" note "waits for one ticket's outcome and takes it out of the room"
+  #
+  # `awaited` SAID 2026-09-22, BECAUSE THE WAIT IS THE WHOLE FUNCTION. The
+  # drainer that posts the outcome runs on the same event loop as the caller
+  # waiting for it. A wait that did not yield would hold the loop, the drainer
+  # would never get a turn, and the outcome this function is waiting for could
+  # never be posted. So it is a coroutine, and every caller of it out to the
+  # door is awaited too.
+  boundary_out fn room_release_ticket : (room: Room, ticket: Ticket) -> Receipt | Fault awaited side_effect reads_writes "room" note "waits for one ticket's outcome and takes it out of the room"
 
   # THE DRAINER PUTS THE OUTCOME WHERE THE WAITING CALLER WILL FIND IT. A
   # failure whose caller has already gone has nowhere to go, so the drainer logs
