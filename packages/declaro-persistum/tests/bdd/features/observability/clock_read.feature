@@ -8,7 +8,10 @@ Feature: clock_read -- Asking the clock what time it is
     When a shutdown line is built
     Then the elapsed time came from this reader, not from inside the pure function
 
-  Scenario: two callers reading at once get the same answer
-    When two retries read the clock in the same instant
-    Then they get the same time
-    And what keeps them from waiting in step is the ticket, not the clock
+  # DELETED 2026-09-21: "two callers reading at once get the same answer". No
+  # clock can be built that fails it, and "the same instant" is not a state a
+  # test can put two processes into, so it asserted nothing either way. The
+  # claim it was reaching for -- two retries that read one time still wait
+  # different amounts, because the ticket is what separates them -- belongs to
+  # the function that works out a wait, and it is already a scenario there, in
+  # `tests/bdd/features/core/next_wait.feature`. It is not repeated here.

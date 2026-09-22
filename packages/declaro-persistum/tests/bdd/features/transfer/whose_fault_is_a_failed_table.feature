@@ -44,9 +44,3 @@ Feature: Whether a failed table is the engine's fault or ours
     When one table is copied
     Then the table is recorded as transferred
     And it reports 7 rows
-
-  @precommit
-  Scenario: _record_a_failed_table blames one table and no other
-    When _record_a_failed_table is given a refusal for "orders"
-    Then the table is recorded as failed
-    And it reports 0 rows

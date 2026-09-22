@@ -93,11 +93,14 @@ Feature: query_collect -- Coming back for a write you deposited
     Then it is refused before it takes a ticket
     And the appender is given nothing to do
 
-  Scenario: a deposited write reaches the engine exactly once
+  # RESTATED 2026-09-21. This asked that the engine was called exactly once,
+  # which counts calls rather than saying what a caller can see. Its second line
+  # was already the caller-visible form of the same claim, so that line is the
+  # scenario now: a write deposited once appends one row, not two.
+  Scenario: a deposited write appends one row, not two
     Given an empty write queue and a real database
     When a caller deposits an appending write and the appender drains once
-    Then the engine was asked to run it exactly once
-    And the table holds one row
+    Then the table holds one row
 
   Scenario: a collected ticket is dropped, so the room does not grow
     Given an empty write queue and a real database

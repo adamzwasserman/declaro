@@ -47,38 +47,60 @@ Feature: lifecycle_shut_down -- Getting every local commit to Turso before the p
   # The function itself
   # ============================================================
 
-  Scenario: replicate moves data in both directions in one pass
+  # RESTATED 2026-09-21. This said a single pull fetches one batch and returns
+  # "there may be more", which pins the driver's batching contract: a driver
+  # that fetched everything in one call would fail it while the caller saw the
+  # same two copies agree. What a caller can see is that both copies hold the
+  # same commits once the pass is over, however many batches that took.
+  Scenario: one pass leaves both copies holding the same commits
     Given a local copy and its primary
-    When replicate runs
-    Then local commits the primary has not seen go up first, and only then do the primary's changes come down, so a write waiting since the last shutdown is never overwritten by what follows it
-    And it keeps bringing changes down until the primary reports nothing further, because a single pull fetches one batch and returns "there may be more"
+    When replication runs
+    Then the primary holds every commit made locally, and the local copy holds every commit made on the primary
+    And a write waiting since the last shutdown is still there, not overwritten by what came down after it
 
-  Scenario: a local-only database refuses to replicate rather than pretending
+  # RESTATED 2026-09-21. This said it raises. A failure in this package travels
+  # by return: every function that can fail says so in its return type, and
+  # sending to the cloud is one of them. So the result is a fault coming back,
+  # and the line about what the previous version returned is gone, because what
+  # some deleted code did is not something a caller can observe.
+  Scenario: a local-only database says it cannot replicate
     Given a database with no primary
-    When replicate is asked for on a path with no primary
-    Then it raises, naming the database, because a local-only database has nothing to bring into conformity
-    And the previous version returned True "by vacuity rather than by success", which a caller cannot tell apart from a replication that worked
+    When replication is asked for on it
+    Then a fault comes back naming the database, and nothing reports success
 
   # ============================================================
   # Opportunistic — replication yields to real work
   # ============================================================
 
-  Scenario: replication runs only when no write is in flight
-    Given a replicated database whose background replication is running
+  # RESTATED 2026-09-21, AS TWO SCENARIOS. The original named a lock as the
+  # thing being measured and then argued about which signal to measure it with.
+  # A caller never sees a lock. A caller sees whether its own work waited, and
+  # the two halves of the claim are two different callers: a writer must never
+  # queue behind a round trip to the cloud, and a reader must never hold one
+  # off. Both are below, and neither survives replication being made to wait on
+  # the wrong thing.
+  Scenario: a waiting writer never waits for a round trip to the primary
+    Given a replicated database with a write waiting to go out
     When a replication pass is considered
-    Then it proceeds only when no write is in flight, because replication goes out on the held connection and every write in flight is a request paying for the round trip
-    And load is counted as writers waiting for that lock, NOT as CPU and NOT as active readers — a reader takes no lock at all and never contends with replication
-    And it is the exact resource replication takes rather than a cheaper signal standing in for it, which is the substitution that has already cost this package three production incidents
+    Then the write lands without waiting for the primary to answer
+
+  Scenario: readers do not hold replication off
+    Given a replicated database serving reads and nothing else
+    When a replication pass is considered
+    Then the pass runs, because no reader ever has to wait for it
 
   Scenario: a pass that finds a writer waiting defers instead of queueing
     Given a replicated database under sustained write load
     When ten replication passes are considered while a writer waits
     Then none of them run, and when the load clears exactly one pass runs rather than ten, because a deferred pass is dropped and not accumulated
 
-  Scenario: nothing is on a clock
-    Given a replicated database with no pending writes and no waiters
-    When time passes
-    Then no timer wakes to take the connection and discover there is nothing to do
+  # DELETED 2026-09-21: "nothing is on a clock". It asked that no timer wakes,
+  # which names a timer as the thing being measured, and an implementation that
+  # woke on a timer and found nothing to do would be indistinguishable from one
+  # that did not. The result underneath it -- a database with nothing pending
+  # takes no connection and makes no round trip -- is already a scenario in
+  # `tests/bdd/features/lifecycle/lifecycle_catch_up.feature`, so it is not
+  # said twice.
 
   # ============================================================
   # Non-blocking — no caller ever waits for the network
@@ -94,11 +116,15 @@ Feature: lifecycle_shut_down -- Getting every local commit to Turso before the p
     When the database is opened on it
     Then the open does not replicate before returning, because the schema is already on disk and only DATA can be behind — which is the eventual consistency the caller asked for, not a weakening of it
 
-  Scenario: opening a copy that does not exist locally must wait, and that is the engine
+  # RESTATED 2026-09-21. Its own second line said the copying belongs to the
+  # engine, and then pinned two of the engine's timings, 2.8 seconds for one
+  # cold open and 20 to 25 seconds for 25 at once. A driver release moves both
+  # numbers without changing anything a caller asked for. One line is left, and
+  # it is the one this library owes: the open does not come back early.
+  Scenario: opening a copy that is not on disk yet waits for the whole database
     Given no local copy
     When the database is opened against a primary
-    Then the whole database is copied before the open returns, because a database with no schema is unusable rather than merely stale
-    And that copy is the engine's, not persistum's — measured 2026-08-13 at 2.8s alone and 20-25s when 25 cold opens are issued at once, because they serialize
+    Then the open returns only once the whole database is on disk, because a database with no schema is unusable rather than merely stale
 
   # ============================================================
   # Shutdown — the durability guarantee, and the one place blocking is correct
@@ -122,8 +148,8 @@ Feature: lifecycle_shut_down -- Getting every local commit to Turso before the p
     Then it ignores load entirely and takes the connection, because the politeness that is correct during service is data loss during shutdown
     And it blocks until the primary has every local commit, because on ephemeral disk anything not replicated when the process dies is gone
 
-  Scenario: the delay explains itself while it is happening
-    Given a shutdown that is taking a long time
-    When shutdown replication is running
-    Then it logs when it starts and keeps logging as it goes, so an operator watching a process refuse to exit can see it is working rather than hung
-    And every line names the database and the elapsed time, because "replicating" alone does not distinguish progress from a stall, and does not say WHICH database is holding up the exit
+  # DELETED 2026-09-21: "the delay explains itself while it is happening". It
+  # pinned how often a line is written, which is a cadence no caller reads and
+  # no honest rewrite has to keep. Its surviving half, that every line names the
+  # database and the time elapsed, is word for word the scenario "it says what
+  # it is doing while it does it" at the top of this same file.

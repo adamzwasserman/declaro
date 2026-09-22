@@ -23,35 +23,23 @@ Feature: session_close_connection -- What was opened is closed
   # FOLDED IN FROM `turso/closing_what_was_opened.feature` on 2026-09-21, one feature
   # per function. What that file said about why:
   # As a caller that has finished with a database
-  # I want the close to report that it happened
-  # So that "nothing was open" and "nothing was closed" are different answers
-  # TWO FUNCTIONS, ONE BODY: close the thing and return one. What differed was
-  # where the thing came from -- one takes it as an argument, the other closes
-  # the connection a replicated database holds.
+  # I want the connection I handed over to be shut when the call comes back
+  # So that a finished database leaves no OS thread running
   #
-  # THE COUNT IS WHY THEY RETURN ANYTHING. A local file has no held connection
-  # and answers zero, so a caller reading the number can tell a release that
-  # closed something from one that had nothing to close.
-  # @precommit
+  # REWRITTEN 2026-09-21. Three scenarios demanded a count back -- one closed,
+  # one closed, none closed -- and the declaration's card takes one connection
+  # and answers NOTHING or a `Fault`. There is no number for a caller to read,
+  # and a scenario that asks for one describes a function nobody declared.
+  # Which connection to close is the caller's to decide before it calls, so the
+  # three collapse into the one thing a caller can observe: the connection it
+  # handed over comes back shut.
 
-  Scenario: closing a connection reports that one closed
+  @precommit
+  Scenario: the connection handed over comes back shut
     Given a connection that is open
     When it is closed
-    Then one connection was closed
-    And the connection is shut
-
-  @precommit
-  Scenario: releasing a replica closes the connection it holds
-    Given a replicated database holding a connection
-    When it is released
-    Then one connection was closed
-    And the connection is shut
-
-  @precommit
-  Scenario: releasing a local database closes nothing, and says so
-    Given a database with no primary
-    When it is released
-    Then no connection was closed
+    Then the connection is shut
+    And nothing came back with it
 
   Scenario: a connection is closed even when the work fails
     Given a read that raises partway

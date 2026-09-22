@@ -47,8 +47,3 @@ Feature: A model declares, and does nothing else
     Given a model carrying a validator and a method
     Then it is refused
     And both are named
-
-  Scenario: the rules are a table, so the checker knows nothing about validators
-    When the rules are read
-    Then each row carries what to look for and what to say
-    And the checker names none of them

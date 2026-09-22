@@ -48,7 +48,3 @@ Feature: refuse_owned_names -- A name the library or an engine owns
     Given a model declaring the table "shop_dp_orders"
     When it is declared
     Then it is accepted, because the prefix is not at the start
-
-  Scenario: the reserved names are one table, not a pattern in the code
-    When the reserved names are read
-    Then they are rows carrying the name and who owns it

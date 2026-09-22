@@ -19,37 +19,31 @@ Feature: schema_inspect -- Asking a database what it currently holds
     Then the table is not adopted into the target schema
 
   # ------------------------------------------------------------------
-  # FOLDED IN FROM `inspector/recovering_what_turso_folded.feature` on 2026-09-21, one feature
-  # per function. What that file said about why:
+  # FOLDED IN FROM `inspector/recovering_what_turso_folded.feature` on 2026-09-21,
+  # one feature per function. What that file said about why:
   # As the differ, comparing what is declared against what is there
   # I want a column carrying its reference and its CHECK
   # So that a constraint the engine keeps only in the DDL is not read as absent
   # TURSO FOLDS SOME NAMES TO LOWER CASE AND KEEPS OTHERS. What a pragma hands
-  # back is not always what was written, and a reference or a CHECK read only
-  # from the original DDL has to be put back onto the column the pragma gave.
+  # back is not always what was written, and a reference or a CHECK the engine
+  # keeps only in the DDL still has to reach the caller.
   #
-  # Two functions did that, each adding one key. The key was the only thing
-  # that differed.
-  # @precommit
+  # REWRITTEN AS RESULTS on 2026-09-21. Two of its scenarios put a column
+  # through one internal step and read the next one back, which fixes the order
+  # of two steps inside one function and says nothing a caller can see. A third
+  # asked whether a helper copied rather than mutated, and the declaration has
+  # no such helper, so it was deleted.
 
-  Scenario: a column gains the reference the DDL declared
-    Given a column read back from a pragma
-    When the reference "people.id" is put back on it
-    Then it carries reference "people.id"
-    And everything the pragma said is still there
+  Scenario: a column comes back carrying where its key points
+    Given a database holding a table whose column points at another table
+    When it is inspected
+    Then the column comes back naming that table, that column, and what a delete
+      does to the child
 
-  @precommit
-  Scenario: a column gains the CHECK the DDL declared
-    Given a column read back from a pragma
-    When the check "age > 0" is put back on it
-    Then it carries check "age > 0"
-    And everything the pragma said is still there
-
-  @precommit
-  Scenario: putting one back does not disturb the column it was given
-    Given a column read back from a pragma
-    When the reference "people.id" is put back on it
-    Then the column it was given is unchanged
+  Scenario: a rule declared on a table comes back as a condition
+    Given a database holding a table with a declared rule on one column
+    When it is inspected
+    Then the rule comes back as a condition rather than as a string
 
   # ------------------------------------------------------------------
   # FOLDED IN FROM `pragma/reading_a_pragma.feature` on 2026-09-21, one feature
@@ -57,48 +51,41 @@ Feature: schema_inspect -- Asking a database what it currently holds
   # As the differ, deciding what a migration must do
   # I want the table's columns, indexes and keys read back
   # So that what I compare against the schema is what the engine actually has
-  # FOUR READERS, ONE SHAPE. Each names a pragma, quotes the identifier it is
-  # given and hands the rows back. The pragma is the only thing that differs.
-  #
-  # THE QUOTING IS THE PART THAT BITES. A pragma takes a quoted identifier and
-  # a double-quote inside a name has to be doubled, or half the names come
+  # THE QUOTING IS WHAT BITES. An identifier is quoted on the way to the engine
+  # and a double quote inside a name has to be doubled, or half the names come
   # back broken and the differ rebuilds a table on every deploy.
   #
-  # These run against a REAL SQLite database, because a pragma is the engine
-  # answering and there is nothing to stand in for it.
+  # REWRITTEN AS RESULTS on 2026-09-21. Four scenarios named four internal
+  # readers and attributed the answer to them; one Scenario Outline ran over
+  # three pragma names as its examples. A caller sees one answer about one
+  # database, so that is what these ask for.
+  #
+  # ALSO FOLDED IN, from `core/capability_of.feature` on 2026-09-21: four
+  # scenarios there asked SQLite whether SQLite answers its own PRAGMAs, which
+  # measures the engine rather than this package. What they were reaching for is
+  # the last scenario below, which this package can own: what comes back is what
+  # the engine really holds, on each of the three engines.
   # @precommit @sqlite
 
-  Scenario: the column reader names every column the table has
-    Given a table "people" with columns id and name
-    When its columns are read back
-    Then the answer names id and name
+  Scenario: an index comes back naming the columns it covers
+    Given a database holding a table with an index over one of its columns
+    When it is inspected
+    Then the index comes back under its declared name, naming that column
 
   @precommit @sqlite
-  Scenario: the index reader names an index that was declared
-    Given a table "people" with an index "by_name" over name
-    When its indexes are read back
-    Then the answer names "by_name"
+  Scenario: a table named with a quote in it is described like any other
+    Given a database holding a table whose name carries a double quote
+    When it is inspected
+    Then that table and its columns come back, and nothing was refused
 
-  @precommit @sqlite
-  Scenario: the index-column reader names what one index covers
-    Given a table "people" with an index "by_name" over name
-    When the columns of "by_name" are read back
-    Then the answer names name
-
-  @precommit @sqlite
-  Scenario: the foreign-key reader names the table a key points at
-    Given a table "orders" whose customer references "people"
-    When its foreign keys are read back
-    Then the answer names "people"
-
-  @precommit @sqlite
-  Scenario Outline: every reader survives a name with a quote in it
-    Given a table named with a quote in it
-    When "<reader>" is asked about it
-    Then it answers without raising
+  @precommit
+  Scenario Outline: what comes back is what the engine holds
+    Given a table on <engine> with three columns, an index and a key pointing at another table
+    When the database is inspected
+    Then all three columns come back, with the index and the key the table declares
 
     Examples:
-      | reader                   |
-      | pragma_table_info        |
-      | pragma_index_list        |
-      | pragma_foreign_key_list  |
+      | engine     |
+      | postgresql |
+      | sqlite     |
+      | turso      |

@@ -20,7 +20,7 @@ Feature: session_connect -- Everything that has to be true before a handle goes 
   Scenario: a database already matching its models is not migrated
     Given a database whose schema already matches the models
     When a caller opens it
-    Then no statement was run against it
+    Then no statement changed it
     And the handle comes back
 
   # MOVED HERE 2026-09-21 from `room_make.feature`. `room_make` takes no
@@ -57,20 +57,40 @@ Feature: session_connect -- Everything that has to be true before a handle goes 
   # FOLDED IN FROM `applier/what_an_applier_says_about_itself.feature` on 2026-09-21, one feature
   # per function. What that file said about why:
   # As the migration runner, deciding how to handle a failed operation
-  # I want the applier to say which engine it is and how it scopes a batch
-  # So that one bad operation on Turso does not roll back the thirty before it
-  # THE TRANSACTION MODE IS THE PART THAT MATTERS. SQLite and PostgreSQL wrap
-  # the whole batch, so one failure undoes all of it. Turso commits per
-  # operation, so a failure keeps what already landed. Reading the wrong one
-  # for an engine either loses work or reports work that was undone.
+  # I want one bad operation on Turso not to undo the thirty before it
+  # So that a stopped deploy is repaired from what the database actually holds
   #
-  # Six functions across three modules, each returning a constant. The engine
-  # and the mode were the only things that differed.
-  # @precommit
+  # SQLite and PostgreSQL wrap the whole batch, so one failure undoes all of
+  # it. Turso commits as it goes, so a failure keeps what already landed. That
+  # difference is what an operator finds the next morning, so it is stated as
+  # what survives rather than as the word an engine answers with.
+  #
+  # REWRITTEN 2026-09-21. Six scenarios read the migration machinery itself:
+  # which engine each piece of it names, which words it uses for the scope of a
+  # batch, and whether each engine's table of spellings covers every operation.
+  # Replace those tables with anything else and all six break, although no
+  # caller sees a change. What a caller does see is below.
 
-  Scenario Outline: each applier names its own engine
-    When the "<engine>" applier is asked which engine it is
-    Then it says "<engine>"
+  @precommit
+  Scenario Outline: what a failed migration leaves behind depends on the engine
+    Given models whose migration is thirty operations on "<engine>"
+    And the engine refuses the thirtieth
+    When a caller opens the database
+    Then the twenty-nine before it are "<survives>"
+    And a fault comes back instead of a handle
+
+    Examples:
+      | engine     | survives |
+      | sqlite     | undone   |
+      | turso      | kept     |
+      | postgresql | undone   |
+
+  @precommit
+  Scenario Outline: no change a model declares is refused for want of a spelling
+    Given models declaring every kind of change a migration can plan
+    When a caller opens a "<engine>" database
+    Then every change reached the database
+    And none came back refused as one this engine cannot write
 
     Examples:
       | engine     |
@@ -78,98 +98,44 @@ Feature: session_connect -- Everything that has to be true before a handle goes 
       | turso      |
       | postgresql |
 
-  @precommit
-  Scenario Outline: each applier says how it scopes a batch
-    When the "<engine>" applier is asked how it scopes a batch
-    Then it says "<mode>"
-
-    Examples:
-      | engine     | mode            |
-      | sqlite     | all_or_nothing  |
-      | turso      | per_operation   |
-      | postgresql | all_or_nothing  |
+  # WHAT THE HANDLE CARRIES ABOUT THE MIGRATION IT JUST RAN. The declaration's
+  # `Report` is the plan and a count of what ran, and nothing else. It has no
+  # error string, so the two scenarios that read one are gone. How much of the
+  # plan ran is what a caller can still tell, and it is stated on the report the
+  # declaration actually has.
 
   @precommit
-  Scenario: every applier answers both questions
-    When the appliers are listed
-    Then each one says which engine it is and how it scopes a batch
-
-  @precommit
-  Scenario: the mode is one of the two the runner knows
-    When the appliers are listed
-    Then no applier names a mode the runner cannot act on
-
-  # WHAT THE RESULT SAYS WHEN NOTHING WENT WRONG. `ApplyResult["error"]` is
-  # declared `str | None`, and None is that field's own vocabulary for "no
-  # error" rather than a function forgetting to answer. These two scenarios
-  # make it a tested answer: the checker cannot tell a declared None from an
-  # unwritten one, and only a caller reading the field can.
-
-  @precommit
-  Scenario: a batch with nothing skipped reports no error
-    When the skip summary is asked about an empty list
-    Then the error field is empty
-
-  @precommit
-  Scenario: a batch with skips names every one of them
-    When the skip summary is asked about two skipped operations
-    Then the error field counts them and names both
-
-  # THE RENDERING TABLES. Each engine has one, and PostgreSQL's is built from
-  # SQLite's with the rows that differ replaced. That reuse is the thing worth
-  # holding: an operation added to SQLite's table and forgotten for PostgreSQL
-  # would be an operation the runner cannot render on that engine.
-
-  @precommit
-  Scenario: every engine can render every operation the differ emits
-    When the rendering tables are compared with the operations the differ emits
-    Then each engine can render every one of them
-
-  @precommit
-  Scenario: PostgreSQL alters a column in place rather than rebuilding
-    When the PostgreSQL rendering table is read
-    Then it has no whole-table rebuild for a column change
+  Scenario: the report says how much of the plan actually ran
+    Given a plan of five operations, two of which the database already has
+    When a caller opens it
+    Then the report names all five operations it planned
+    And the report says three of them ran
 
   # ------------------------------------------------------------------
   # FOLDED IN FROM `exceptions/what_a_failed_migration_says.feature` on 2026-09-21, one feature
   # per function. What that file said about why:
   # As an operator whose deploy stopped
-  # I want the message to name the operation, the SQL and what the engine said
+  # I want to be told which operation stopped it and what the engine said
   # So that I am not left to work out where it went wrong from a stack trace
-  # A ROLLBACK THAT ALSO FAILED IS THE WORSE CASE, and it says so: the database
-  # may be part-migrated and needs looking at by hand. It is a MigrationError
-  # with one more thing to report, which is what makes it a subclass rather
-  # than a second error.
   #
-  # EVERY FIELD IS REQUIRED AND MAY BE ABSENT. Absence is passed in as NOTHING
-  # rather than left off, so a caller who has no SQL to report says so, and one
-  # who forgot cannot be mistaken for one who chose.
-  # @precommit
-
-  Scenario: a failed migration names the operation, the SQL and the cause
-    When a migration fails on "create_table" running "CREATE TABLE users" with a disk error
-    Then the message names the operation
-    And the message names the SQL
-    And the message names what the engine said
+  # REWRITTEN 2026-09-21. Five scenarios described a migration error class and
+  # a subclass of it, and the declaration replaced both: a failure is a `Fault`
+  # that comes back by return, carrying its kind, what went wrong and what to do
+  # instead. Which class inherits from which is not something a caller can see.
+  # What stopped the deploy, and whether the database was left part way through,
+  # is.
 
   @precommit
-  Scenario: a failure with nothing to report says only what it knows
-    When a migration fails with nothing else to report
-    Then the message carries no operation, SQL or cause
+  Scenario: a stopped migration says which operation stopped it and what the engine said
+    Given a database whose disk fills partway through the migration
+    When a caller opens it
+    Then a fault comes back instead of a handle
+    And it names the operation it stopped on and what the engine said
+    And it says what to do instead
 
   @precommit
-  Scenario: a rollback that also failed says the database needs looking at
-    When a migration fails and the rollback fails too
-    Then the message names the operation
-    And it says the rollback also failed
-    And it says a person has to look at the database
-
-  @precommit
-  Scenario: a rollback that worked is not reported as one that failed
-    When a migration fails and the rollback works
-    Then it does not say the rollback failed
-
-  @precommit
-  Scenario: a rollback failure is still a migration failure
-    When a migration fails and the rollback fails too
-    Then catching a migration failure catches it
+  Scenario: a database left part way through says a person has to look at it
+    Given a migration that stops on an engine that cannot undo what already ran
+    When a caller opens it
+    Then the fault says the database is part way through its migration
+    And it tells the operator to look at the database by hand

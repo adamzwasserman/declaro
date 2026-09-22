@@ -82,11 +82,6 @@ Feature: Every string is checked or bound, never interpolated
     When a caller passes "created_at" as a column
     Then it is accepted, because the model declares it
 
-  Scenario: the gate never scans for SQL verbs
-    When the gate's own source is read
-    Then it names no SQL verb
-    And it decides by following an argument rather than by matching text
-
   # --------------------------------------------- the other two the caller must not do
 
   # A DOOR IS THE CALLER'S SURFACE, AND THERE ARE FIVE OF THEM. Rewritten

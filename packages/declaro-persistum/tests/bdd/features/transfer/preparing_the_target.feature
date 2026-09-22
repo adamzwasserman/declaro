@@ -10,69 +10,57 @@ Feature: Turning off the target's foreign key checks before a transfer
   # row, each failure is recorded against that table, and the operator reads
   # "2 tables failed" about two tables that are fine.
   #
-  # WHY THIS FILE EXISTS. Three tests made that failure happen by swapping the
-  # whole loader table on the module. The functions take the loader as an
-  # argument, so nothing had to be swapped: the test can hand one in.
+  # `target_stop_checks` and `target_restore_checks` are the two doors in
+  # `docs/design/persistum-transfer.hd` that this feature is about. Each hands
+  # back nothing or a fault, so every scenario below reads a return value.
 
   @precommit
-  Scenario: _turn_fk_checks_off says one connection had its checks dropped
-    Given a loader whose target drops its checks
+  Scenario: the target's checks are off for the run
+    Given a target that drops its checks
     When the checks are turned off for two tables that reference each other
-    Then it answers 1 connection
+    Then nothing came back
 
   @precommit
-  Scenario: _turn_fk_checks_off stops the run when the target refuses
-    Given a loader whose target refuses to drop its checks
+  Scenario: the run stops when the target refuses to drop its checks
+    Given a target that refuses to drop its checks
     When the checks are turned off for two tables that reference each other
     Then it refuses
     And it names both tables
     And it says transferring now would blame those tables
 
   @precommit
-  Scenario: _leave_fk_checks_on says no connection was touched
-    Given a loader whose target drops its checks
-    When there is no cycle so nothing is turned off
-    Then it answers 0 connections
-
-  @precommit
-  Scenario: _turn_fk_checks_back_on says nothing went wrong
-    Given a loader whose target restores its checks
+  Scenario: the checks go back on when the run is over
+    Given a target that restores its checks
     When the checks are turned back on
     Then nothing came back
 
   @precommit
-  Scenario: _turn_fk_checks_back_on hands back what stopped it
-    Given a loader whose target refuses to restore its checks
+  Scenario: a target that will not put its checks back says so
+    Given a target that refuses to restore its checks
     When the checks are turned back on
     Then the refusal came back
 
-  @precommit
-  Scenario: _leave_the_checks_as_they_are has nothing to hand back
-    Given a loader whose target restores its checks
-    When nothing was turned off so nothing is restored
-    Then nothing came back
-
-  # WHERE A FAILED RESTORE ENDS UP. The rows did transfer, so `success` stays
-  # true about the rows, and the target left unenforced goes into `errors`,
-  # which is the field that already exists for a failure the transfer survived.
+  # WHERE A FAILED RESTORE ENDS UP. The rows did transfer, so every table is
+  # still counted as copied and no `TableResult` carries a failure. What the
+  # operator has to be told is that the target is left unenforced, and
+  # `transfer_run` says so the only way it can: by handing back a `Fault`.
 
   @precommit
-  Scenario: _left_unenforced hands a failed restore back when nothing else failed
-    When _left_unenforced is given a refusal and nothing else is going wrong
+  Scenario: a failed restore reaches the operator even though every table copied
+    Given a target that refuses to restore its checks
+    When every table copies and the checks are put back
     Then the refusal came back
 
   @precommit
-  Scenario: _left_unenforced has nothing to hand back when the restore worked
-    When _left_unenforced is given no refusal
-    Then nothing came back
+  Scenario: the refusal names the target and what the target said
+    Given a target that refuses to restore its checks
+    When every table copies and the checks are put back
+    Then the refusal names the target as left unchecked
+    And it says what the target said
 
   @precommit
-  Scenario: the result names the unenforced target and what caused it
-    When the result is built from a refusal
-    Then it names the target as unchecked
-    And it names what the target said
-
-  @precommit
-  Scenario: the result says nothing extra when the restore worked
-    When the result is built from no refusal
-    Then it adds nothing to the errors
+  Scenario: a run whose checks went back on blames no table
+    Given a target that restores its checks
+    When every table copies and the checks are put back
+    Then every table is counted as copied
+    And no table carries a failure

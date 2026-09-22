@@ -32,17 +32,12 @@ _ROOT = pathlib.Path(__file__).resolve().parents[2]
 _FEATURES = _ROOT / "tests" / "bdd" / "features"
 _DESIGN = _ROOT / "docs" / "design"
 
-# A RATCHET, NOT AN ALLOWLIST. These features describe the command line and the
-# transfer tool, whose modules are not being rewritten yet, and their scenarios
-# still name the private helpers of the source deleted on 2026-09-21. Each file
-# comes off this list when its module is rewritten, and nothing goes on it.
-STILL_NAMING_CODE = {
-    "cli/command_dispatch.feature": 9,
-    "cli/engine_selection.feature": 7,
-    "cli/validating_a_schema.feature": 5,
-    "transfer/preparing_the_target.feature": 8,
-    "transfer/whose_fault_is_a_failed_table.feature": 1,
-}
+# A RATCHET, NOT AN ALLOWLIST. It held five files on 2026-09-21, all of them
+# describing the command line or the transfer tool and all of them naming the
+# private helpers of the source deleted that day. All five were rewritten
+# against their declarations the same day, so it is empty and stays empty: a
+# file comes off this list when it is rewritten, and nothing goes on it.
+STILL_NAMING_CODE: dict[str, int] = {}
 
 _HEAD = re.compile(r"^\s*(Scenario Outline|Scenario|Background|Rule)\b")
 _DECLARED = re.compile(

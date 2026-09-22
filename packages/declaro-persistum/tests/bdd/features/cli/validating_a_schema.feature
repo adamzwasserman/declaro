@@ -4,14 +4,20 @@ Feature: What `declaro validate` tells an operator about their schema files
   I want validate to read my actual schema files and say what is wrong
   So that I find a broken reference before it reaches a database
 
-  # ONE SCENARIO PER FUNCTION on the path from a folder of files to an exit
-  # code. The files are real: a schema is TOML on disk, and every scenario
-  # below writes some and points validate at it.
+  # EVERY SCENARIO RUNS THE COMMAND ON REAL FILES. A schema is TOML on disk,
+  # and each scenario below writes some and points validate at it, then reads
+  # the exit code and the terminal.
   #
   # WHY THIS FILE EXISTS. Ten tests replaced the schema reader with a fake
   # that handed back a dictionary, so nothing ever read a file. A schema
   # that will not load, a bad reference and an unknown type are all things a
   # real file can say, which I checked before writing any of this.
+  #
+  # WHAT WAS DELETED, 2026-09-21. Five scenarios took the single exit-code card
+  # `docs/design/persistum-cli.hd` declares, `fn exit_code_for`, and asked five
+  # private helpers of a `cli/main.py` the declaration does not have. Each one
+  # repeated a scenario above it one level down: the strict warning exiting two
+  # and the clean schema exiting zero are already stated as runs of the command.
 
   @precommit
   Scenario: a schema that reads and validates exits zero
@@ -72,31 +78,3 @@ Feature: What `declaro validate` tells an operator about their schema files
     When validate runs on it verbosely
     Then the exit code is 0
     And it lists the table and its column count
-
-  # The four functions the exit code is chosen from, asked directly.
-
-  @precommit
-  Scenario: _report_the_errors exits one and prints every error
-    When _report_the_errors is given two errors
-    Then the exit code is 1
-    And both errors were printed
-
-  @precommit
-  Scenario: _print_the_warnings prints each one
-    When _print_the_warnings is given one warning
-    Then the warning was printed
-
-  @precommit
-  Scenario: _print_no_warnings prints nothing
-    When _print_no_warnings is given no warnings
-    Then nothing was printed
-
-  @precommit
-  Scenario: _warnings_are_fatal exits two
-    When _warnings_are_fatal answers a strict run
-    Then the exit code is 2
-
-  @precommit
-  Scenario: _schema_passes exits zero
-    When _schema_passes answers a run that was not strict
-    Then the exit code is 0

@@ -10,7 +10,7 @@ Feature: refuse_undeclared_columns -- Stopping a caller in their own process
     Then the refusal names Person and lists id and name
 
   Scenario: nothing reached the database
-    Then no statement was compiled and no connection was used
+    Then no connection was used
 
   Scenario: every grammar refuses the same column
     Then the four grammars give the same refusal

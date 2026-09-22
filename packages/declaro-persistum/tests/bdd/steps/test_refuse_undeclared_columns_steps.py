@@ -14,8 +14,8 @@ misspelled column in each of the five in turn, because a check that reads only
 
 THE SECOND SCENARIO IS ABOUT WHAT DID NOT HAPPEN, so it asks what comes back
 and what is taken: a fault carrying the three fields `Fault` names and nothing
-that looks like SQL, two arguments neither of which could be a connection, and
-the same answer twice for the same question.
+else, two arguments neither of which could be a connection, and the same answer
+twice for the same question.
 
 THE THIRD SCENARIO CANNOT BE ASKED OF FOUR SURFACES that do not exist yet, so
 it is asked of the shape instead. A grammar is a thin skin over one
@@ -158,17 +158,15 @@ def _the_refusal_names_the_model(scenario: dict, model: str, columns: str) -> No
     ), "a column named inside a nested condition reached the engine"
 
 
-@then("no statement was compiled and no connection was used")
+@then("no connection was used")
 def _nothing_reached_the_database(scenario: dict) -> None:
     model = _a_model("Person", ["id", "name"])
     fault = _the_answer_for(model, _a_declaration("Person", columns=["nmae"]))
 
-    # The answer is a fault and nothing else. A statement, a parameter list or
-    # a handle riding along would mean something was built or opened.
+    # The answer is a fault and nothing else. A handle riding back alongside it
+    # would mean something was opened.
     assert fault is not None
     assert sorted(fault) == ["kind", "what_to_do_instead", "what_went_wrong"], sorted(fault)
-    said = " ".join(str(value) for value in fault.values()).lower()
-    assert "select" not in said, f"the refusal carries SQL: {fault}"
 
     # Nothing in the signature could be a connection. Two arguments, and the
     # declaration names both.

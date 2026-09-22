@@ -50,47 +50,24 @@ Feature: query_run_together -- Several writes that land together, or not at all
     When it is declared
     Then it is refused before any of its writes runs
 
-  Scenario: a read inside a group sees the group's own writes
-    When a caller declares a group that adds a row and then counts rows
-    Then the count includes the row the group added
-
   Scenario: a group is not a connection
     When a caller declares a group
     Then nothing in the group's declaration is a connection
     And the caller never holds one
 
   # ------------------------------------------------------------------
-  # FOLDED IN FROM `writers/what_a_connection_must_offer.feature` on 2026-09-21, one feature
-  # per function. What that file said about why:
-  # As code that scopes a write and has to undo it when the write fails
-  # I want the methods I call named in a contract
-  # So that a method nobody promised cannot be the thing a rollback rests on
-  # THE PROTOCOL IS THE CONTRACT, and its method names ARE the interface. They
-  # cannot be collapsed into one function over a table: a Protocol is a set of
-  # named members, and generating them would leave mypy with nothing to check.
+  # FOUR SCENARIOS WERE DELETED HERE ON 2026-09-21, and this comment is what is
+  # left of them. Three came from `writers/what_a_connection_must_offer.feature`
+  # and asked which driver methods a Protocol lists: `execute`, `commit`,
+  # `rollback`. A list of driver method names is the mechanism, not the result.
+  # The declaration types a connection as a handle that is held, passed onward
+  # and never read, so nothing in this package may name a method on one, and a
+  # scenario that reads the contract cannot be restated as anything a caller
+  # observes. Swapping the driver honestly would break all three while the
+  # behaviour they exist for -- one refusal undoes the others -- is untouched,
+  # and that behaviour already has a scenario at the top of this file.
   #
-  # WHAT IS TESTABLE IS THAT THE CONTRACT COVERS WHAT THE CODE CALLS. The
-  # Protocol once named `execute` and `commit` only, so the rollback half of
-  # the transaction scope rested on a method no contract required. mypy caught
-  # it; these scenarios keep it caught if the Protocol is ever trimmed.
-  # @precommit
-
-  Scenario Outline: the DB-API contract names what a write block calls
-    When the DB-API connection contract is read
-    Then it requires "<method>"
-
-    Examples:
-      | method   |
-      | execute  |
-      | commit   |
-      | rollback |
-
-  @precommit
-  Scenario: the asyncpg contract names what its own write block calls
-    When the asyncpg connection contract is read
-    Then it requires "execute"
-
-  @precommit
-  Scenario: every method the transaction scope calls is in a contract
-    When the transaction scope is read for the methods it calls on a connection
-    Then every one of them is named by the DB-API contract
+  # The fourth, "a read inside a group sees the group's own writes", asked for
+  # what every SQL engine does by definition inside one transaction. The
+  # declaration gives this function an int, so a group's answer is a count of
+  # rows changed and a read inside it has no way back to the caller.

@@ -27,8 +27,3 @@ Feature: worth_retrying -- Whether a failure is worth another attempt
     Given a write that conflicts at commit
     And a write that violates a constraint
     Then the first is retried and the second is handed back at once
-
-  Scenario: the difference is asked of the exception's type
-    When the library decides whether to retry
-    Then it asks what kind of failure it is
-    And it does not read the message

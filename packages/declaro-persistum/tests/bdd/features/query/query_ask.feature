@@ -94,11 +94,16 @@ Feature: query_ask -- The door a caller asks a question or declares a write at
     Then what they hold can be read, compared and stored
     And building it opened no connection
 
-  Scenario: the pseudo-SQL grammar reads in SQL's word order
+  # RESTATED 2026-09-21. This asked that the library accept select, then from,
+  # then where, in that order. A question is a dictionary and its keys carry no
+  # order that any implementation could get wrong, so the claim was unfailable.
+  # Its second line is the one a caller can see, and it is the whole point of
+  # the grammar: the words read like SQL and none of them is SQL.
+  Scenario: a pseudo-SQL question holds no SQL
     Given a model Person declaring the table "people" with columns id and name
     And a database holding alice, bob and carol
-    When a caller writes select, then from, then where
-    Then the library accepts it in that order
+    When a caller asks for people named "bob" in the pseudo-sql grammar
+    Then it is given one person, and that person is bob
     And no part of what the caller wrote is a string of SQL
 
   Scenario: a grammar brings no session
@@ -154,19 +159,23 @@ Feature: query_ask -- The door a caller asks a question or declares a write at
     Then nothing was configured first
     And the call names no grammar, only the way it is written
 
-  Scenario: a file says nothing about which grammar it speaks
-    Given a model Person declaring the table "people" with columns id and name
-    And a database holding alice, bob and carol
-    When a file that asks questions is read
-    Then it carries no import, setting or declaration naming a grammar
-    And removing every comment from it changes nothing about how it runs
+  # DELETED 2026-09-21: "a file says nothing about which grammar it speaks". It
+  # opened a file on disk and asked that stripping its comments changed how it
+  # ran, which is a claim about Python rather than about this library, and no
+  # caller can see it. What it was reaching for -- a caller never names a
+  # grammar anywhere but at the call -- is said by "no mode is set anywhere"
+  # above and by the scenario below.
 
-  Scenario: nothing on the database says which grammar it expects
+  # RESTATED 2026-09-21. This read the fields of the database record and asked
+  # that none of them names a grammar, which inspects the implementation's own
+  # data. Its second line is the result that follows from it, and that line is
+  # the scenario now.
+  Scenario: two callers on one database use different grammars
     Given a model Person declaring the table "people" with columns id and name
     And a database holding alice, bob and carol
-    When the database's fields are read
-    Then none of them names a grammar
-    And two callers on one database may use different ones
+    When one caller asks in django and another asks in prisma on that one database
+    Then both are answered
+    And neither caller had to tell the database which grammar it was using
   # -------------------------------------------- one file, four grammars, any order
 
   Scenario: four grammars in one file, one after another
@@ -217,12 +226,13 @@ Feature: query_ask -- The door a caller asks a question or declares a write at
       | prisma     |
       | sqlalchemy |
 
-  Scenario: nothing guesses
-    Given a model Person declaring the table "people" with columns id and name
-    And a database holding alice, bob and carol
-    When every function that decides a grammar is read
-    Then none of them inspects a value to work out what was meant
-    And none of them has a fallback for a shape it does not know
+  # DELETED 2026-09-21: "nothing guesses". It read the source of every function
+  # that decides a grammar and asked that none inspects a value or carries a
+  # fallback. Reading the implementation is the mechanism itself, and an honest
+  # rewrite that recognized a grammar some other way would fail it while every
+  # caller saw the same answers. The result it wanted is already here: each
+  # grammar has exactly one entry point, and a name that starts no grammar is
+  # refused by name.
   # ------------------------------------------------ what comes out is the same
 
   Scenario: four grammars build one kind of value

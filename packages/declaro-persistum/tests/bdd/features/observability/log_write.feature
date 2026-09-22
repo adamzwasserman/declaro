@@ -31,6 +31,18 @@ Feature: log_write -- What an operator reads afterwards
   # failure meaning to record its cause wrote those words as text and threw the
   # exception away. Two call sites did it and neither ever carried a cause. The
   # comment above them said the opposite.
+  #
+  # FOUR OF THOSE SCENARIOS CHANGED ON 2026-09-21: three were restated and are
+  # below, and one was deleted. They described Python's logging module: a
+  # reserved keyword, an
+  # exception attached to a record, an empty exception slot. This function is
+  # declared to take one event whose values are a string, a number, a bool or
+  # nothing, so an exception cannot arrive here at all and there is no keyword
+  # for one to collide with. A failure travels as a fault, and a fault is three
+  # strings: which kind it is, what went wrong, and what to do instead. So the
+  # scenarios now ask what an operator finds on the line. The fourth, "a line
+  # with no cause carries none", asked that an absent exception left an empty
+  # slot; with no exception in the vocabulary there is no slot to be empty.
 
   Scenario: a line is written at the level the caller named
     When a warning is written saying "the disk filled"
@@ -40,20 +52,16 @@ Feature: log_write -- What an operator reads afterwards
     When a line is written at a level the vocabulary does not hold
     Then it is refused, naming the levels there are
 
-  Scenario: a keyword belonging to the standard library is refused as a fact
-    When a line is written with a fact named for the standard library's own keyword
-    Then it is refused, naming that keyword
+  Scenario: every fact the caller named is on the line, whatever it is called
+    When a line is written with a fact whose name is one the logging vocabulary uses
+    Then the line reads that name and its value, like any other fact
 
-  Scenario: a cause is carried as an exception, not as words
-    Given a failure carrying a cause
-    When a line is written with that cause
-    Then the record carries the cause itself, and the message does not mention it
+  Scenario: a failure reaches the line as its own three words
+    Given a failure carrying its kind, what went wrong and what to do instead
+    When that failure is written
+    Then the line names all three
 
-  Scenario: a line carrying a cause still carries its facts
-    Given a failure carrying a cause
-    When a line is written with that cause and one fact
-    Then the line reads the message and the fact, and the record carries the cause
-
-  Scenario: a line with no cause carries none
-    When a line is written with no cause
-    Then the record carries no exception
+  Scenario: a line about a failure still carries the facts beside it
+    Given a failure carrying its kind, what went wrong and what to do instead
+    When that failure is written beside the name of the database it happened on
+    Then the line names all three and the database

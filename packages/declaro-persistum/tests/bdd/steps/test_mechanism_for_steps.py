@@ -21,19 +21,14 @@ words into the capability it hands over. So the Then below reads every key of
 the answer's detail EXCEPT `built_from`, which leaves only words the function
 chose itself.
 
-THE FOUR REGISTRY SCENARIOS BELONG TO ANOTHER FUNCTION, and their Given calls
-`pytest.xfail` naming it. They were folded in on 2026-09-21 from
-`matview/asking_about_a_matview.feature` and ask what a registry already holds:
-is this name a view, what was registered under it, and list them all. Those are
-questions put to a database, and `reader fn schema_inspect` is the declared
-function that puts them -- `docs/architecture.md` says an emulated materialized
-view is a table, so the inspector has to recognise it as a view or the next
-difference proposes dropping it. `mechanism_for` sees no database and returns
-operations, so no assertion about it would make any of those four true. They
-`xfail` rather than skip or pass: a skip says the line was not worth running,
-and a green assertion rewritten until it passes says the line was satisfied
-when it was not. The Then steps under them are written to fail loudly, so
-deleting the `xfail` turns the scenario red rather than green.
+THE FOUR REGISTRY SCENARIOS WERE DELETED ON 2026-09-21, and their steps with
+them. They asked what a hand-built registry table already held -- is this name a
+view, what was registered under it, list them all -- and asserted on the rows
+that came back. `mechanism_for` opens no database and answers with operations,
+so no assertion about its answer could have made any of them true, and they had
+been carrying an `xfail` naming `reader fn schema_inspect` instead. What they
+were reaching for is already stated here as a result: an engine without a
+materialized view gets a table, its triggers and a registry row.
 """
 
 from __future__ import annotations
@@ -145,41 +140,17 @@ def said_by(operations: list[dict[str, Any]]) -> str:
     )
 
 
-# --- the steps that only write down what the sentence said -------------------
-#
-# FOUR SENTENCES, ONE FUNCTION. Each of these puts what its sentence said into
-# the scenario and does nothing else, so written out they would be four bodies
-# differing in a key and a word. They are a table instead: the step type, the
-# pattern with one capture called `said`, and the key it is written under.
-#
-# `a materialized view declared ...` is the freshness a later When reaches for.
-# The other three name a query put to the registry, and their scenarios `xfail`
-# in the Given below, so they record what was asked and go no further.
-
-RECORDED: tuple[tuple[str, str, str], ...] = (
-    ("given", r"a materialized view declared (?P<said>.+)", "freshness"),
-    ("when", r'the is-it-one query is run for "(?P<said>[^"]+)"', "asked"),
-    ("when", r'the metadata query is run for "(?P<said>[^"]+)"', "asked"),
-    ("when", r"the (?P<said>list) query is run", "asked"),
-)
-
-REGISTER = {"given": given, "when": when}
-
-
-def records_what_was_said(under: str) -> Callable[[dict[str, Any], str], None]:
-    """Build the step that writes what its sentence said under one key."""
-
-    def step(scenario: dict[str, Any], said: str) -> None:
-        scenario[under] = said
-
-    return step
-
-
-for step_type, step_pattern, step_key in RECORDED:
-    REGISTER[step_type](parsers.re(step_pattern))(records_what_was_said(step_key))
-
-
 # --- what a scenario establishes -------------------------------------------
+
+
+@given(parsers.re(r"a materialized view declared (?P<said>.+)"))
+def a_materialized_view_declared(scenario: dict[str, Any], said: str) -> None:
+    """The freshness a later When reaches for, and nothing else.
+
+    This used to be one row of a table of four such steps. The other three read
+    a registry, and they went with the scenarios that asked for them.
+    """
+    scenario["freshness"] = said
 
 
 @given(parsers.re(r'(?P<phrase>a view declared "[^"]+"|the same declaration) on (?P<engine>\w+)'))
@@ -405,51 +376,3 @@ def it_does_not_report_success_while_changing_nothing(scenario: dict[str, Any]) 
     assert isinstance(after, list) and after, (
         f"the freshness changed and no operation came back: {after!r}"
     )
-
-
-# --- the four scenarios another function answers ---------------------------
-
-
-@given(parsers.re(r"a registry holding (?:a view|views) (?P<names>.+)"))
-def a_registry_holding(scenario: dict[str, Any], names: str) -> None:
-    """One step for both registry lines; they differ only in how many views.
-
-    `mechanism_for` is handed a freshness, an engine and a capability and
-    answers with operations. A registry that already holds rows is a database,
-    and asking it what it holds is `reader fn schema_inspect`.
-    """
-    scenario["registered"] = names
-    pytest.xfail(
-        "CODE NOT WRITTEN: asking a registry what it already holds is "
-        "`reader fn schema_inspect`, which is declared in "
-        "docs/design/persistum.hd and not built. mechanism_for(freshness, "
-        "engine, capability) -> list[Operation] | Fault sees no database and "
-        "answers with operations, so nothing it returns can answer this."
-    )
-
-
-ANSWERS: dict[str, bool] = {"it answers yes": True, "it answers no": False}
-"""The two answers the is-it-one question can give."""
-
-
-@then(parsers.re(r"(?P<sentence>it answers yes|it answers no)"))
-def the_is_it_one_question_answers(scenario: dict[str, Any], sentence: str) -> None:
-    """Never reached today, and written to fail when it is.
-
-    `mechanism_for` returns operations, so there is no yes or no in its answer
-    at all. Deleting the xfail above has to turn this red.
-    """
-    assert scenario["registry_says"] is ANSWERS[sentence]
-
-
-@then("it gives back the name, the query and how it refreshes")
-def it_gives_back_the_name_the_query_and_how_it_refreshes(scenario: dict[str, Any]) -> None:
-    """Never reached today, and written to fail when it is."""
-    registered = scenario["registry_says"]
-    assert set(registered) == {"name", "query", "refreshes"}
-
-
-@then("it names both, in order")
-def it_names_both_in_order(scenario: dict[str, Any]) -> None:
-    """Never reached today, and written to fail when it is."""
-    assert scenario["registry_says"] == ["a_view", "b_view"]

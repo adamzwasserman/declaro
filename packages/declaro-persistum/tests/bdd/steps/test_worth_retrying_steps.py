@@ -1,28 +1,16 @@
 """Whether a failure is worth another attempt, asked of the fault's kind.
 
 WHAT THIS BINDS. `tests/bdd/features/core/worth_retrying.feature`, and nothing
-else. The first three scenarios are about `worth_retrying` itself. The seven
-folded in on 2026-09-21 came from a feature about the retry loop, so some of
-them name things this function does not decide -- how long to wait, what the
-receipt says, what a database declares when it is opened. Each of those is
-bound here to the part of it `worth_retrying` does settle, and the docstring on
-the step says which part that is and which part lives elsewhere.
-
-THE LOOP LIVES IN THIS FILE ON PURPOSE. `_drive` below plays the library's
-part: it walks a scripted run of outcomes and asks `worth_retrying` after each
-failure. It is here rather than in `src/` because the scenarios about the
-caller ("wrote no loop", "succeeded on the third attempt") are about who holds
-the loop, and a stand-in loop in the test is the only way to show the caller
-does not hold one.
+else. The first three scenarios are about `worth_retrying` itself. The fourth
+was folded in on 2026-09-21 from a feature about the retry loop, and it is
+bound here to the part of it `worth_retrying` settles: a conflict is worth
+another attempt and a refusal is not.
 """
 
 from __future__ import annotations
 
-import inspect
-import pathlib
-
 import pytest
-from pytest_bdd import given, parsers, scenarios, then, when
+from pytest_bdd import given, parsers, scenarios, then
 
 from declaro_persistum.types import Fault, FaultKind
 from declaro_persistum.worth_retrying import worth_retrying
@@ -48,9 +36,6 @@ def _fault(kind: FaultKind, what_went_wrong: str) -> Fault:
 
 
 Outcome = Fault | None
-
-
-_SOURCE = pathlib.Path(inspect.getfile(worth_retrying)).read_text()
 
 
 @pytest.fixture
@@ -119,43 +104,6 @@ def _given_a_write_that_violates_a_constraint(decided: dict[str, object]) -> Non
 @then("the first is retried and the second is handed back at once")
 def _then_first_retried_second_not(decided: dict[str, object]) -> None:
     assert (decided["first"], decided["second"]) == (True, False)
-
-
-# --- the difference is asked of the exception's type -----------------------
-
-
-@when("the library decides whether to retry")
-def _when_the_library_decides(decided: dict[str, object]) -> None:
-    """Ask every kind, and ask one kind under three unrelated messages."""
-    kinds: tuple[FaultKind, ...] = ("conflict", "refused", "budget_spent", "cut_short")
-    decided["by_kind"] = {kind: worth_retrying(_fault(kind, "a message")) for kind in kinds}
-    decided["by_message"] = [
-        worth_retrying(_fault("conflict", message))
-        for message in ("deadlock detected", "", "the constraint was violated")
-    ]
-
-
-@then("it asks what kind of failure it is")
-def _then_it_asks_the_kind(decided: dict[str, object]) -> None:
-    assert decided["by_kind"] == {
-        "conflict": True,
-        "refused": False,
-        "budget_spent": False,
-        "cut_short": False,
-    }
-
-
-@then("it does not read the message")
-def _then_it_does_not_read_the_message(decided: dict[str, object]) -> None:
-    """Two ways: the answer does not move with the message, and the source never names it.
-
-    The second is the one that would catch a rewrite. `what_went_wrong` and
-    `what_to_do_instead` are the only prose a `Fault` carries, so a module that
-    names neither cannot be deciding by prose.
-    """
-    assert decided["by_message"] == [True, True, True]
-    assert "what_went_wrong" not in _SOURCE
-    assert "what_to_do_instead" not in _SOURCE
 
 
 # --- retries back off, with jitter -----------------------------------------

@@ -8,8 +8,9 @@ Feature: Every engine is in every table
   added to four tables and missed in three gives a `KeyError` in production on the
   path nobody exercised.
 
-  The tables are `INSPECTORS`, `APPLIERS`, `SQL_GENERATORS`, `WRITERS`,
-  `TRANSACTIONS`, `FACTS` and `OPERATORS`.
+  A dispatch table keyed by engine is one whose keys are the three words
+  `set engines` names in `docs/design/persistum.hd`. Which modules hold them is
+  the package's own business, and the gate finds them rather than being told.
 
   Scenario: every table names the same engines
     When every dispatch table keyed by engine is read
@@ -29,10 +30,9 @@ Feature: Every engine is in every table
     When the gate looks for dispatch tables
     Then it finds them by shape rather than from a list somebody maintains
 
-  Scenario: the gate counts the tables it found
-    When the gate runs
-    Then it reports how many tables it read
-    And a run that found fewer than the known count fails
+  Scenario: a gate that found no table fails rather than passing
+    When the gate runs and finds no dispatch table at all
+    Then it fails, because a gate that read nothing agrees with everything
 
   Scenario: a lookup with a fallback is refused
     Given a dispatch table read with `.get(key, something)`

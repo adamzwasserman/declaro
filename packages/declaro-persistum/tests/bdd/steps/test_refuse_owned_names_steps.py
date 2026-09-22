@@ -1,6 +1,6 @@
 """Bind `tests/bdd/features/core/refuse_owned_names.feature`.
 
-WHAT THE FEATURE ASKS FOR. Seven scenarios and one decision: a model that
+WHAT THE FEATURE ASKS FOR. Six scenarios and one decision: a model that
 declares a name the library or an engine already uses is stopped where the
 models are read, and the refusal says which name, which prefix, and who owns
 it. `fn refuse_owned_names` declares the answer as an absence or a fault, so
@@ -9,9 +9,8 @@ and no scenario needs a database.
 
 WHERE THE PREFIXES COME FROM. The feature's own description names five:
 `_declaro_meta`, `_dp_`, `_declaro_tmp_`, and `sqlite_` and `turso_`, which
-belong to the engines. `THE_FEATURE_NAMES` below is that sentence copied into
-data, so the last scenario compares the module's table against the
-specification rather than against itself.
+belong to the engines. `CLAIMED` below reads each table name the feature writes
+against that sentence, so the two can disagree and say so.
 
 THE TWO `Then` FAMILIES ARE ONE FUNCTION EACH. The feature writes "it is
 refused" three ways and "it is accepted" two ways, and the differences are
@@ -30,17 +29,13 @@ from collections.abc import Callable
 import pytest
 from pytest_bdd import given, parsers, scenarios, then, when
 
-from declaro_persistum.refuse_owned_names import OWNED_NAMES, refuse_owned_names
+from declaro_persistum.refuse_owned_names import refuse_owned_names
 from declaro_persistum.types import NOTHING, Declared, Fault
 
 pytestmark = [pytest.mark.bdd, pytest.mark.precommit]
 
 scenarios("../features/core/refuse_owned_names.feature")
 
-
-# The prefixes the feature's description names, in its own words. Kept here so
-# the last scenario has an oracle the module under test did not supply.
-THE_FEATURE_NAMES = ("_declaro_meta", "_dp_", "_declaro_tmp_", "sqlite_", "turso_")
 
 # Every table name the feature writes -> the owned prefix that name claims, or
 # NOTHING when it claims none. Read off the scenarios and the description, not
@@ -121,12 +116,6 @@ def _it_is_declared(scenario: dict[str, object]) -> None:
     scenario["refusal"] = refuse_owned_names(scenario["declared"])
 
 
-@when("the reserved names are read")
-def _the_reserved_names_are_read(scenario: dict[str, object]) -> None:
-    """Take the table itself, which is what the scenario is about."""
-    scenario["names"] = OWNED_NAMES
-
-
 @then(parsers.re(r"it is refused(?P<rest>.*)$"))
 def _it_is_refused(scenario: dict[str, object], rest: str) -> None:
     """A fault comes back naming the model, the name and, where the scenario
@@ -182,23 +171,3 @@ def _it_is_accepted(scenario: dict[str, object], rest: str) -> None:
     for prefix in ACCEPTED_THOUGH_IT_HOLDS[rest]:
         assert prefix in table, f"{table} does not hold {prefix} at all, so it proves nothing"
         assert not table.startswith(prefix), f"{table} does start {prefix}"
-
-
-@then("they are rows carrying the name and who owns it")
-def _they_are_rows_carrying_the_name_and_the_owner(scenario: dict[str, object]) -> None:
-    """The reserved names are data with two columns, and the rows are the five
-    the feature names.
-
-    A function that matched the prefixes with a hand-written chain of
-    comparisons would pass every other scenario in this file and leave nobody
-    able to read, extend or print the list.
-    """
-    names = scenario["names"]
-
-    assert isinstance(names, dict), f"the reserved names are not rows: {names!r}"
-    assert set(names) == set(THE_FEATURE_NAMES), (
-        f"the feature names {sorted(THE_FEATURE_NAMES)} and the table holds {sorted(names)}"
-    )
-    for name, owner in names.items():
-        assert isinstance(name, str) and name.strip(), f"a row has no name: {name!r}"
-        assert isinstance(owner, str) and owner.strip(), f"{name} says nobody owns it: {owner!r}"

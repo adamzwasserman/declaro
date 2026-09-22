@@ -68,40 +68,12 @@ Feature: mechanism_for -- Picking what a caller refused to name
     And it does not report success while changing nothing
 
   # ------------------------------------------------------------------
-  # FOLDED IN FROM `matview/asking_about_a_matview.feature` on 2026-09-21, one feature
-  # per function. What that file said about why:
-  # As code deciding whether a table is a view this package maintains
-  # I want to ask the registry rather than guess from the name
-  # So that a real table called `sales_summary` is not mistaken for a view
-  # SQLite HAS NO MATERIALIZED VIEWS, so this package emulates one with a real
-  # table plus a row in a registry. Three questions get asked of that registry
-  # and each had its own function returning fixed SQL. The SQL was the only
-  # thing that differed.
-  #
-  # Every scenario runs the SQL against a REAL SQLite database holding a real
-  # registry, because a query that names a column the table does not have is
-  # exactly the failure worth catching, and reading the string cannot see it.
-  # @precommit @sqlite
-
-  Scenario: the is-it-one question finds a view that was registered
-    Given a registry holding a view "sales_summary"
-    When the is-it-one query is run for "sales_summary"
-    Then it answers yes
-
-  @precommit @sqlite
-  Scenario: the is-it-one question does not find a table nobody registered
-    Given a registry holding a view "sales_summary"
-    When the is-it-one query is run for "orders"
-    Then it answers no
-
-  @precommit @sqlite
-  Scenario: the metadata question gives back what was registered
-    Given a registry holding a view "sales_summary"
-    When the metadata query is run for "sales_summary"
-    Then it gives back the name, the query and how it refreshes
-
-  @precommit @sqlite
-  Scenario: the list question names every view in the registry
-    Given a registry holding views "a_view" and "b_view"
-    When the list query is run
-    Then it names both, in order
+  # FOLDED IN FROM `matview/asking_about_a_matview.feature` on 2026-09-21, and
+  # DELETED on 2026-09-21. Its four scenarios ran three hand-written queries
+  # against a hand-built registry table and asserted on the rows that came back:
+  # is this name a view, what was registered under it, and list them all. Those
+  # describe the inside of a table this feature's function never opens -- it is
+  # handed a freshness, an engine and a capability, and answers with operations.
+  # What they were reaching for survives above: an engine without a materialized
+  # view gets a table, its triggers and a registry row, and a caller who changes
+  # the freshness changes what the engine holds.

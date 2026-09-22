@@ -1,117 +1,107 @@
 @bdd
-Feature: What the command line does with what a command returns or raises
+Feature: What an operator gets back when a command returns, is interrupted, or fails
   As an operator whose command failed
   I want the exit code and the message to say what happened
   So that a script calling this can tell the three kinds of ending apart
 
-  # ONE SCENARIO PER FUNCTION in the dispatch path of `cli/main.py`.
+  # WHAT THIS FILE IS ABOUT. `docs/design/persistum-cli.hd` declares one door,
+  # `boundary_in fn command_run`, which takes what an operator typed and answers
+  # with an exit code. Everything below runs that door and reads the two things
+  # an operator can see: the code the shell gets, and the lines on the terminal.
   #
-  # WHY THIS FILE EXISTS. Eleven tests answered these questions by replacing
-  # `cmd_diff` on the module with a fake that raised or returned a code. That
-  # is a mock: the real function is prevented from running. The reason it was
-  # the only way is that `_dispatch` read its command table off module scope,
-  # so the only handle a test had on "a command that raises" was the module
-  # attribute.
+  # WHY IT WAS REWRITTEN, 2026-09-21. Every scenario here used to name a private
+  # helper of a `cli/main.py` the declaration does not have: `_dispatch`,
+  # `_print_traceback`, `_run_diff`, `_refuse_missing_connection`. Two of them
+  # asserted that a lookup answered a helper's name, which is a fact about a
+  # table rather than about a run, and one listed a `migrate-remote` command the
+  # declaration's five command words do not include. A reader cannot type a
+  # helper, so a helper is not a result.
   #
-  # `_dispatch` takes the table as an argument now. Handing it a table is not
-  # replacing anything of ours: it is calling the function with its input,
-  # exactly as `Database` carries the callables it needs rather than reaching
-  # for them by name.
+  # THE FIVE COMMANDS are diff, apply, validate, snapshot and generate.
 
   @precommit
-  Scenario: _dispatch returns the code the command returned
+  Scenario: a command's own code comes back as the exit code
     Given a command that returns 2
-    When _dispatch runs it
+    When an operator runs it
     Then the exit code is 2
 
   @precommit
-  Scenario: _dispatch turns an interrupt into 130
-    Given a command that raises KeyboardInterrupt
-    When _dispatch runs it
+  Scenario: an interrupt is 130 and says the run was aborted
+    Given a command that is interrupted at the keyboard
+    When an operator runs it
     Then the exit code is 130
     And "Aborted" was printed
 
   @precommit
-  Scenario: _dispatch turns any other failure into 1 and says what it was
-    Given a command that raises RuntimeError with "the disk went away"
-    When _dispatch runs it
+  Scenario: any other failure is 1 and the operator reads what broke
+    Given a command that fails with "the disk went away"
+    When an operator runs it
     Then the exit code is 1
     And "the disk went away" was printed
 
   @precommit
-  Scenario: _dispatch refuses a command its table does not hold
-    Given a command named "invent" that no table holds
-    When _dispatch runs it
+  Scenario: a word that is not one of the five commands is refused
+    When an operator types "invent"
     Then the exit code is 1
+    And the refusal names diff, apply, validate, snapshot and generate
+
+  # HOW MUCH OF A FAILURE THE OPERATOR READS is the one thing -v changes. Two
+  # scenarios used to assert which helper the verbose case selected, which is
+  # the same claim one level down and survives no rename.
 
   @precommit
-  Scenario: _print_traceback prints where the failure came from
-    When _print_traceback runs inside a failure
-    Then a traceback was printed
-
-  @precommit
-  Scenario: _keep_the_traceback prints nothing at all
-    When _keep_the_traceback runs inside a failure
-    Then nothing was printed
-
-  # THE ROUTING TABLE IS DATA, so the question "does this subcommand reach its
-  # own implementation" is answered by reading it. Four tests answered it by
-  # replacing each handler in turn with a recorder and running the program.
-
-  @precommit
-  Scenario Outline: every subcommand an operator can type reaches its own runner
-    When the command table is asked for "<typed>"
-    Then it answers the runner named "<runner>"
+  Scenario Outline: -v decides whether the operator also reads where a failure came from
+    Given a command that fails with "the disk went away"
+    When an operator runs it <switch>
+    Then the exit code is 1
+    And "the disk went away" was printed
+    And the stack of the failure <stack>
 
     Examples:
-      | typed          | runner              |
-      | diff           | _run_diff           |
-      | apply          | _run_apply          |
-      | snapshot       | _run_snapshot       |
-      | migrate-remote | _run_migrate_remote |
-      | validate       | _run_validate       |
-      | generate       | _run_generate       |
+      | switch     | stack           |
+      | with -v    | was printed     |
+      | without -v | was not printed |
+
+  # NO COMMAND WORD IS ACCEPTED AND THEN IGNORED. The old scenario answered this
+  # by comparing the parser's subcommands against a routing table, which is two
+  # internal structures agreeing with each other. Running each command says it.
 
   @precommit
-  Scenario: the table holds every subcommand the parser offers and no others
-    When the parser's subcommands are compared with the command table
-    Then the two name exactly the same commands
-
-  # WHICH COMMANDS NEED A DATABASE. `validate` reads schema files off disk and
-  # `migrate-remote` is told its target another way, so neither is refused for
-  # want of -c. One test asserted this by replacing `cmd_validate` with a fake
-  # that returned zero, which proves the fake returned zero.
-
-  @precommit
-  Scenario Outline: a command that reads no database runs without one
-    When _run_command is asked whether "<typed>" can run with no connection
-    Then the answer is "<verdict>"
+  Scenario Outline: every command an operator can type does its own work
+    Given a database the command can reach
+    When an operator types "<typed>"
+    Then the exit code is 0
+    And the operator is told "<report>"
 
     Examples:
-      | typed          | verdict  |
-      | validate       | runs     |
-      | migrate-remote | runs     |
-      | diff           | refused  |
-      | apply          | refused  |
-      | snapshot       | refused  |
-      | generate       | refused  |
+      | typed    | report                             |
+      | diff     | what a migration would change      |
+      | apply    | what the migration changed         |
+      | validate | whether the schema files are sound |
+      | snapshot | where the schema was written       |
+      | generate | where the types were written       |
+
+  # WHICH COMMANDS NEED A DATABASE. `validate` reads schema files off disk, so
+  # it is the one command a missing url does not stop.
 
   @precommit
-  Scenario: _refuse_missing_connection names both ways to supply one
-    When _refuse_missing_connection answers a command that needed a database
+  Scenario Outline: only a command that talks to a database is refused for want of one
+    Given a folder holding a table with one column
+    And no url was typed and none is in the environment
+    When an operator types "<typed>"
+    Then the exit code is <code>
+
+    Examples:
+      | typed    | code |
+      | validate | 0    |
+      | diff     | 1    |
+      | apply    | 1    |
+      | snapshot | 1    |
+      | generate | 1    |
+
+  @precommit
+  Scenario: a command refused for want of a database names both ways to give it one
+    Given no url was typed and none is in the environment
+    When an operator types "diff"
     Then the exit code is 1
-    And "DECLARO_DATABASE_URL" was printed
-
-  # THE TABLE THAT PICKS BETWEEN THEM, which is a different claim from what
-  # each half does. Testing only the halves let a swap of the two entries pass
-  # unnoticed, measured 2026-08-27 by making the verbose case print nothing.
-
-  @precommit
-  Scenario: -v picks the half that prints the stack
-    When the traceback table is asked what verbose does
-    Then it answers "_print_traceback"
-
-  @precommit
-  Scenario: without -v it picks the half that prints nothing
-    When the traceback table is asked what quiet does
-    Then it answers "_keep_the_traceback"
+    And the refusal names "-c" and "DECLARO_DATABASE_URL"

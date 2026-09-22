@@ -15,9 +15,9 @@ Feature: schema_read_declared -- Asking the code what it declares
     Then that permission is part of the answer
 
   Scenario: a model that cannot be read is a fault
-    Given a models file that does not parse
+    Given a model the reader cannot make sense of
     When the declarations are read
-    Then a fault comes back naming the file
+    Then a fault comes back naming that model
 
   # ------------------------------------------------------------------
   # FOLDED IN FROM `schema-declared/every_column_type_is_declarable.feature` on 2026-09-21, one feature
@@ -57,11 +57,6 @@ Feature: schema_read_declared -- Asking the code what it declares
     Given a model declaring a column of type `tuple[int, int]`
     When the loader reads it
     Then it refuses, names the type, and lists the ones it understands
-
-  Scenario: the set of accepted types is one table
-    When the accepted types are read
-    Then they are rows in one table
-    And a test can enumerate them without reading the loader
 
   Scenario: every accepted type has a spelling on every engine
     When each accepted type is rendered for each engine
