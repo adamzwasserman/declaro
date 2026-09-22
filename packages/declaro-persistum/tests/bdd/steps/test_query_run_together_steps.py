@@ -673,6 +673,19 @@ WHAT_EACH_THEN_CHECKS: dict[str, Callable[[str, dict], None]] = {
 
 @then(parsers.re(_one_of(tuple(sorted(WHAT_EACH_THEN_CHECKS, key=len, reverse=True)))))
 def _what_must_be_true(scenario: dict, sentence: str) -> None:
-    """Twelve sentences, one function over a table, asked of all three engines."""
-    for engine, outcome in _outcomes(scenario).items():
+    """Twelve sentences, one function over a table, asked of all three engines.
+
+    IT SAYS HOW MANY IT ASKED, because a loop over nothing passes. Every check
+    here runs inside the loop below, so an empty set of outcomes would satisfy
+    this step without asking anything, and the scenario would read as green on a
+    batch that never ran. That is the shape this package has shipped before.
+    """
+    outcomes = _outcomes(scenario)
+
+    assert len(outcomes) == len(THE_THREE_ENGINES), (
+        f"{sentence!r} was asked of {sorted(outcomes)}, and this file runs every "
+        f"scenario against {sorted(THE_THREE_ENGINES)}. A check nobody ran is a check "
+        "that passed."
+    )
+    for engine, outcome in outcomes.items():
         WHAT_EACH_THEN_CHECKS[sentence](engine, outcome)
