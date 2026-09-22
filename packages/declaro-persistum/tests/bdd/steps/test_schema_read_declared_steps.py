@@ -15,21 +15,19 @@ autouse fixture below collects what the last scenario let go before the next one
 declares anything. That is a property of a zero-argument reader rather than a
 wrinkle of this test: nothing can scope what nobody passes.
 
-WHERE THE FEATURE AND THE PACKAGE DISAGREE, and what the last scenario does
-about it. The Examples table names the declared type a host's annotation
-becomes: `float` becomes `real`, `bytes` becomes `blob`, `Decimal` becomes
-`numeric`, `datetime` becomes `timestamp`, and a list or a map becomes `jsonb`.
-`fn spell_operation` carries the tables that turn a declared type into an
-engine's storage class, and it has no row for any of those five: it keys on
-`float`, `bytes`, `decimal`, `datetime` and `json` instead. Six of the eleven
-declared types agree; five do not.
+WHAT THE LAST SCENARIO FOUND, AND WHY IT IS WORTH KEEPING. "Every accepted type
+has a spelling on every engine" crosses this function and `fn spell_operation`,
+and for one day it could not pass. This function was producing `real`, `blob`,
+`numeric`, `timestamp` and `jsonb`, and the renderer keys on `float`, `bytes`,
+`decimal`, `datetime` and `json`. Five of eleven declared types could not be
+spelled for any engine, and nothing else in the suite could see it, because the
+two functions were each tested against their own idea of the names.
 
-So the scenario that crosses the two, "every accepted type has a spelling on
-every engine", cannot pass today, and it is the scenario written to catch
-exactly this. It calls `pytest.xfail` naming the five pairs. A skip would say
-the line was satisfied; the xfail says which function owes it. Its Then steps
-are written to assert properly, so deleting the xfail turns the scenario red on
-the real disagreement rather than green on nothing.
+`DeclaredType` settled it on 2026-09-22: eleven words, none of them any engine's,
+declared once in `docs/design/persistum.hd` and read by both. `real` and `blob`
+are SQLite's words and `numeric`, `timestamp` and `jsonb` are PostgreSQL's, and a
+declared type is supposed to carry no engine at all. Before that it was a bare
+`str`, so nothing could have caught the drift.
 """
 
 from __future__ import annotations
@@ -210,12 +208,15 @@ def _each_accepted_type_is_rendered(scenario: dict[str, object]) -> None:
         for declared in accepted
         for engine in get_args(Engine)
     }
-    pytest.xfail(
-        "fn spell_operation has no row for real, blob, numeric, timestamp or "
-        "jsonb: its tables key on float, bytes, decimal, datetime and json. "
-        "Five of the eleven declared types this feature names cannot be spelled "
-        "for any engine."
-    )
+    # THIS WAS AN `xfail` FOR ONE DAY, and it was the scenario that found the
+    # defect. `fn schema_read_declared` was producing `real`, `blob`, `numeric`,
+    # `timestamp` and `jsonb`, and `fn spell_operation` keys on `float`, `bytes`,
+    # `decimal`, `datetime` and `json`, so five of eleven declared types could
+    # not be spelled for any engine. Nothing else could see it: the two
+    # functions were each tested against their own idea of the names.
+    #
+    # `DeclaredType` settled it on 2026-09-22. Eleven words, none of them any
+    # engine's, declared once and read by both.
 
 
 # --- Then --------------------------------------------------------------------

@@ -30,6 +30,29 @@ Direction = Literal["ascending", "descending"]
 Freshness = Literal["always current", "current when read", "refreshed when asked"]
 FaultKind = Literal["conflict", "refused", "budget_spent", "cut_short"]
 Feature = Literal["materialized_view", "check_constraint", "partial_index", "enum", "range_type"]
+
+# ELEVEN WORDS, NONE OF THEM ANY ENGINE'S. A declared type says what a column
+# holds, and `spell_operation` is the one place it becomes an engine's own word.
+# Added 2026-09-22 after the reader and the renderer were found disagreeing on
+# five of eleven: the reader said `real`, `blob`, `numeric`, `timestamp` and
+# `jsonb`, which are SQLite's and PostgreSQL's words, in a place that has none.
+#
+# THIS WAS A BARE `str`, so nothing could catch that, and a `"str"` that is not a
+# member of anything had been sitting in the tests unnoticed. Each word is a
+# Python type a person already writes in a model.
+DeclaredType = Literal[
+    "text",
+    "integer",
+    "float",
+    "decimal",
+    "boolean",
+    "bytes",
+    "date",
+    "time",
+    "datetime",
+    "uuid",
+    "json",
+]
 Operator = Literal[
     "eq",
     "ne",
@@ -220,7 +243,7 @@ class Reference(TypedDict):
 
 class Column(TypedDict):
     name: str
-    declared_type: str
+    declared_type: DeclaredType
     renamed_from: str | None
     references: Reference | None
     facets: dict[str, Value]

@@ -203,8 +203,21 @@ module declaro-persistum
                      column: str
                      on_delete: OnDelete } note "where a foreign key points and what a delete does to the child"
 
+  # ELEVEN WORDS, NONE OF THEM ANY ENGINE'S. A declared type says what a column
+  # holds, and `fn spell_operation` is the one place it becomes an engine's own
+  # word. Approved 2026-09-22 after the reader and the renderer were found
+  # disagreeing on five of eleven: the reader was saying `real`, `blob`,
+  # `numeric`, `timestamp` and `jsonb`, which are SQLite's and PostgreSQL's
+  # words, in a place that is supposed to have none.
+  #
+  # IT WAS A BARE `str` UNTIL TODAY, so nothing could catch the disagreement, and
+  # a `"str"` that is not a member of anything had been sitting in the tree
+  # unnoticed. Each word is a Python type a person already writes in a model.
+  set declared_types = { "text", "integer", "float", "decimal", "boolean", "bytes", "date", "time", "datetime", "uuid", "json" } note "what a column may hold, in words no engine uses"
+  vocabulary DeclaredType = { declared_types } note "what one column holds"
+
   type Column = { name: str
-                  declared_type: str
+                  declared_type: DeclaredType
                   renamed_from: str | NOTHING
                   references: Reference | NOTHING
                   facets: dict<str, Value> } note "one column and what field() declared about it"

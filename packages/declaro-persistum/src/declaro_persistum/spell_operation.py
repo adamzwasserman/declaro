@@ -197,7 +197,6 @@ QUOTE: dict[Engine, Callable[[str], str]] = {
 SQLITE_TYPES: dict[str, str] = {
     "uuid": "TEXT",
     "text": "TEXT",
-    "string": "TEXT",
     "json": "TEXT",
     "date": "TEXT",
     "time": "TEXT",
@@ -212,7 +211,6 @@ SQLITE_TYPES: dict[str, str] = {
 POSTGRESQL_TYPES: dict[str, str] = {
     "uuid": "uuid",
     "text": "text",
-    "string": "text",
     "json": "jsonb",
     "date": "date",
     "time": "time",

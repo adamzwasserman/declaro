@@ -116,7 +116,7 @@ def _a_schema(columns: list[str]) -> dict:
                 "columns": [
                     {
                         "name": column,
-                        "declared_type": "str",
+                        "declared_type": "text",
                         "renamed_from": None,
                         "references": None,
                         "facets": {},

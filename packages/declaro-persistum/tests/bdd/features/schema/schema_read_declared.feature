@@ -36,16 +36,16 @@ Feature: schema_read_declared -- Asking the code what it declares
       | declared        | becomes   |
       | str             | text      |
       | int             | integer   |
-      | float           | real      |
+      | float           | float     |
       | bool            | boolean   |
-      | bytes           | blob      |
-      | Decimal         | numeric   |
+      | bytes           | bytes     |
+      | Decimal         | decimal   |
       | date            | date      |
-      | datetime        | timestamp |
+      | datetime        | datetime  |
       | time            | time      |
       | UUID            | uuid      |
-      | list[str]       | jsonb     |
-      | dict[str, str]  | jsonb     |
+      | list[str]       | json      |
+      | dict[str, str]  | json      |
       | Literal["a","b"]| text      |
 
   Scenario: a nullable type is a column that may be absent

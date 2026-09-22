@@ -73,12 +73,12 @@ type Held = tuple[str, bool]
 ACCEPTED: dict[Any, str] = {
     str: "text",
     int: "integer",
-    float: "real",
+    float: "float",
     bool: "boolean",
-    bytes: "blob",
-    Decimal: "numeric",
+    bytes: "bytes",
+    Decimal: "decimal",
     date: "date",
-    datetime: "timestamp",
+    datetime: "datetime",
     time: "time",
     UUID: "uuid",
 }
@@ -172,7 +172,7 @@ def _some_words(_annotation: Any) -> Held:
 
 def _carried_as_json(_annotation: Any) -> Held:
     """A list and a map both travel as one JSON value in one column."""
-    return ("jsonb", False)
+    return ("json", False)
 
 
 def _the_one_member(members: list[Any], absent: bool, _annotation: Any) -> Held | Fault:
