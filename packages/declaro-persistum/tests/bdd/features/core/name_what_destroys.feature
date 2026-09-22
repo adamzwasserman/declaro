@@ -30,18 +30,15 @@ Feature: name_what_destroys -- Saying which operations lose data
     When the library works out that it would add a column
     Then the answer does not say it loses data
 
-  Scenario: a destructive change is refused unless it is asked for
-    Given a model change that would drop a column
-    When the library is asked to bring the database up to date
-    Then it refuses and says which operation loses what
+  # TWO SCENARIOS LEFT HERE ON 2026-09-22, for the function that refuses rather
+  # than the one that marks. Refusing an undeclared loss, and one declared loss
+  # not carrying the next, are both stated in
+  # `features/schema/refuse_undeclared_loss.feature`, which is where that
+  # function's own feature is. They arrived here in the September fold and stayed
+  # as scenarios this function could never answer.
 
-  Scenario: saying yes is per operation, not a blanket
-    Given two changes, one of which drops a column
-    When a caller allows the drop by naming it
-    Then both are applied
-    And allowing one drop does not allow the next
-
-  Scenario: how many rows it would lose is in the answer
-    Given a column with rows in it
-    When the library says the drop loses data
-    Then it says how many rows carry a value in that column
+  # COUNTING THE ROWS A CHANGE WOULD LOSE WAS ASKED FOR HERE AND IS NOT DECLARED
+  # ANYWHERE. Deleted 2026-09-22. It needs to read the table, and no function the
+  # map names carries a row count into a plan; this one is pure and holds no
+  # connection. Left as a scenario it could never pass, in a file it does not
+  # belong to.

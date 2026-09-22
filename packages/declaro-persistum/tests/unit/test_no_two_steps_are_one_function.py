@@ -51,7 +51,6 @@ KNOWN_DUPLICATE_SHAPES: dict[str, int] = {
     "test_budget_spent_steps.py": 1,
     "test_crew_size_steps.py": 1,
     "test_declaration_from_phrasing_steps.py": 1,
-    "test_name_what_destroys_steps.py": 2,
     "test_spell_view_steps.py": 1,
     "test_worth_retrying_steps.py": 2,
 }

@@ -239,7 +239,7 @@ def _with_no_indexes(declared: Declared) -> Declared:
 # functions that would differ only in the sentence above them.
 WHAT_HAPPENS: dict[str, object] = {
     "the target schema is built": _unchanged,
-    "the schema is brought to the declared state": _unchanged,
+    "the database is opened": _unchanged,
     "it is declared": _unchanged,
     "the model no longer declares it": _with_no_indexes,
 }

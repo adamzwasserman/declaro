@@ -25,7 +25,7 @@ Feature: spell_view -- Writing the SELECT a declared view stands for
 
   Scenario: the library writes the statement
     Given a declared view "paid_orders"
-    When the schema is brought to the declared state
+    When the database is opened
     Then the database holds a view, and the library wrote its SELECT
 
   Scenario: a view naming a column no model declares is refused

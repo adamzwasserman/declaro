@@ -231,7 +231,7 @@ WHAT_HAPPENS: dict[str, Callable[[dict], None]] = {
 # holds no connection, so nothing it returns reaches a database; and it writes
 # the SELECT a view stands for rather than running one.
 WHAT_SPELL_VIEW_IS_NOT_HANDED: dict[str, str] = {
-    "the schema is brought to the declared state": (
+    "the database is opened": (
         "spell_view writes a SELECT and holds no connection. Carrying a view "
         "into a database is `fn spell_operation` over a create_view operation, "
         "run by `orchestrator fn session_connect`."

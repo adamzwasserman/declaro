@@ -46,7 +46,7 @@ Feature: mechanism_for -- Picking what a caller refused to name
 
   Scenario Outline: the same freshness reaches every engine
     Given a materialized view declared always current
-    When the schema is brought to the declared state on <engine>
+    When the database is opened on <engine>
     Then reading it gives the current answer
 
     Examples:
@@ -57,7 +57,7 @@ Feature: mechanism_for -- Picking what a caller refused to name
 
   Scenario: an engine that cannot meet the freshness says so
     Given a freshness an engine cannot provide
-    When the schema is brought to the declared state there
+    When the database is opened there
     Then it refuses and names the engine and the freshness
     And it does not quietly provide a weaker one
 

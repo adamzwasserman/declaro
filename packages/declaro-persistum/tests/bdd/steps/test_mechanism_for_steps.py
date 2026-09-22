@@ -219,7 +219,7 @@ go with it. "there" is the engine the Given already named, which is why every
 row is a function of the scenario rather than a pair sitting in a table."""
 
 
-@when(parsers.re(r"the schema is brought to the declared state (?P<where>on \w+|there)"))
+@when(parsers.re(r"the database is opened (?P<where>on \w+|there)"))
 def the_schema_is_brought_to_the_declared_state(scenario: dict[str, Any], where: str) -> None:
     engine, capability = WHERE[where](scenario)
     scenario["engine"] = engine

@@ -27,12 +27,12 @@ Feature: schema_from_declared -- The target schema, derived from the declaration
 
   Scenario: an index over one column is declared on the column
     Given a model declaring a column with an index
-    When the schema is brought to the declared state
+    When the database is opened
     Then the database holds that index
 
   Scenario: an index over two columns is declared on the model
     Given a model declaring an index over status and created_at
-    When the schema is brought to the declared state
+    When the database is opened
     Then the database holds one index over both, in that order
 
   Scenario: the order of the columns is kept
@@ -46,7 +46,7 @@ Feature: schema_from_declared -- The target schema, derived from the declaration
 
   Scenario: a unique index is a promise as well as a constraint
     Given an index declared unique over two columns
-    When the schema is brought to the declared state
+    When the database is opened
     Then the engine refuses a second row with the same pair
 
   Scenario: removing an index from the model removes it from the database
