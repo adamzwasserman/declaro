@@ -117,8 +117,6 @@ KNOWN_UNBOUND: dict[str, str] = {
     "overwriting_a_snapshot.feature": _ONE_EACH,
     "page.feature": _ONE_EACH,
     "preparing_the_target.feature": _ONE_EACH,
-    "query_answer.feature": _ONE_EACH,
-    "query_ask.feature": _ONE_EACH,
     "query_begin_concurrent.feature": _ONE_EACH,
     "query_collect.feature": _ONE_EACH,
     "query_deliver.feature": _ONE_EACH,
