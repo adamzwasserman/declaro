@@ -42,6 +42,7 @@ declaration hands this door the two values.
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from collections.abc import Awaitable, Callable
 
@@ -172,21 +173,34 @@ async def _open_postgresql(target: str, connections: int) -> Connection | Fault:
 
 
 async def _open_turso(target: str, _connections: int) -> Connection | Fault:
-    """A replica needs three things and this door is handed one of them."""
-    return Fault(
-        kind="refused",
-        what_went_wrong=(
-            f"{target} names a Turso primary, and opening a replica of it also "
-            "takes a local file to replicate into and an auth token. This "
-            "function is handed a target, an engine and a number of connections, "
-            "so it has the address and neither of the other two."
-        ),
-        what_to_do_instead=(
-            "Open a SQLite or PostgreSQL target here. A replicated Turso database "
-            "needs the local file and the token to arrive with the target, and "
-            "the declaration does not carry them yet."
-        ),
-    )
+    """One pyturso connection to the copy on disk.
+
+    A REPLICA IS OPENED BY PATH, WITH NO URL AND NO TOKEN. Measured 2026-09-22
+    against the staging primary: `turso.aio.sync.connect(path, url, auth_token=)`
+    makes four files, the database and its changes, info and write-ahead log, and
+    once they exist `turso.connect(path)` reopens them by path alone. So filling
+    a replica is a step before this one, the way creating a table is, and this
+    door opens what is on disk exactly as it opens SQLite.
+
+    UNTIL THAT MEASUREMENT THIS REFUSED EVERY TURSO TARGET, on the reasoning that
+    a replica takes three things and this door is handed one. That was true of
+    making a replica and not of opening one, and the scenario that would have
+    caught it was `xfail` for want of the measurement.
+
+    pyturso IS NOT libSQL. It is a Rust rewrite aiming at SQLite compatibility
+    and not there yet, so nothing here assumes a pragma works because SQLite has
+    one.
+    """
+    import turso
+
+    head, separator, rest = target.partition("://")
+    path = _THE_PATH_IN[separator](target, rest)
+    try:
+        connection = await asyncio.to_thread(turso.connect, path)
+    except (turso.Error, OSError) as unreachable:
+        return _could_not_be_reached(target, unreachable)
+
+    return connection
 
 
 # WHICH DRIVER OPENS WHICH ENGINE. The key is the engine this door was handed,

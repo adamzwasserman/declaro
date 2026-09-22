@@ -42,7 +42,6 @@ forbids is this package queueing them.
 from __future__ import annotations
 
 import asyncio
-import inspect
 import pathlib
 import time
 import typing
@@ -89,6 +88,12 @@ A_READ_THAT_TAKES_TIME: dict[str, str] = {
         ") SELECT count(*) FROM counting"
     ),
     "postgresql": "SELECT pg_sleep(0.2)",
+    # TURSO HAS NEITHER A SLEEP NOR A RECURSIVE CTE. Measured 2026-09-22: the
+    # recursive form SQLite uses above comes back "Parse error: Recursive CTEs
+    # are not yet supported", because pyturso is a Rust rewrite aiming at SQLite
+    # compatibility rather than a fork of it. Hexing a large blob is work it does
+    # do, and it takes about 0.12s at this size.
+    "turso": "SELECT length(hex(zeroblob(40000000)))",
 }
 
 # WHAT ONLY THAT ENGINE ANSWERS. A connection that answers `sqlite_version()`
@@ -131,9 +136,26 @@ async def _read_through_asyncpg(handle: Handle, statement: str) -> list:
     return await handle.fetch(statement)
 
 
+async def _read_through_pyturso(handle: Handle, statement: str) -> list:
+    """pyturso's local connection is synchronous, so the read runs on a thread.
+
+    `turso.connect(path)` hands back a synchronous connection, unlike the two
+    asynchronous drivers beside it. Running it on a thread is what lets five
+    reads overlap here, which is the thing this file measures.
+    """
+
+    def _read() -> list:
+        cursor = handle.cursor()
+        cursor.execute(statement)
+        return cursor.fetchall()
+
+    return await asyncio.to_thread(_read)
+
+
 READ: dict[str, Callable[[Handle, str], Awaitable[list]]] = {
     "sqlite": _read_through_aiosqlite,
     "postgresql": _read_through_asyncpg,
+    "turso": _read_through_pyturso,
 }
 
 
@@ -192,8 +214,20 @@ A_WRITE_IN_FLIGHT: dict[str, Callable[[str, dict[str, float]], Awaitable[None]]]
 # =============================================================================
 
 
+# TWO DRIVERS CLOSE ASYNCHRONOUSLY AND ONE DOES NOT. aiosqlite and asyncpg hand
+# back something to await; pyturso's local connection closes and returns nothing.
+# Awaiting that raises `TypeError: 'NoneType' object can't be awaited`, which
+# reads as a pyturso defect and is not one.
+_FINISH_CLOSING: dict[bool, Callable[[object], Awaitable[None]]] = {
+    True: lambda closing: closing,
+    False: lambda _closing: asyncio.sleep(0),
+}
+
+
 async def _close_them_all(opened: list[Handle]) -> None:
-    [await handle.close() for handle in opened]
+    for handle in opened:
+        closing = handle.close()
+        await _FINISH_CLOSING[hasattr(closing, "__await__")](closing)
 
 
 @pytest.fixture
@@ -532,55 +566,51 @@ def _the_five_overlap(scenario: dict[str, object]) -> None:
 
 
 @given("a replicated database")
-def _a_replicated_database() -> None:
-    """What a replica takes, read off the installed driver rather than claimed.
+def _a_replicated_database(scenario: dict[str, object], a_real_turso_replica: str) -> None:
+    """A live replica of the staging primary, already on disk.
 
-    The two lists are printed side by side so the gap is the reason and not an
-    assertion somebody made once and left behind.
+    THE FIXTURE MAKES IT AND THE DOOR OPENS IT. `turso.aio.sync.connect` wants a
+    local file, a primary and a token, and this door is handed a target, an
+    engine and a number. Measured 2026-09-22: once those four files exist,
+    `turso.connect(path)` reopens them by path alone with no url and no token.
+    So making the replica is setup, the way creating a table is setup, and the
+    door opens what is on disk exactly as it opens SQLite. This scenario was
+    `xfail` for one day for want of that measurement.
     """
-    import turso.aio.sync
+    scenario["targets"] = {"turso": a_real_turso_replica}
 
-    replica = inspect.signature(turso.aio.sync.connect)
-    needed = [
-        name
-        for name, parameter in replica.parameters.items()
-        if parameter.default is inspect.Parameter.empty
-    ]
-    taken = list(inspect.signature(session_open_connection).parameters)
-    pytest.xfail(
-        f"session_open_connection takes {taken}, and opening a Turso replica "
-        f"takes {needed} plus an auth token. Measured 2026-09-22 against the "
-        "staging primary in .env: with the token a replica opens in 1.85s and "
-        "answers, without it the primary answers 401. The driver and the "
-        "credentials are there; the local file and the token are not in this "
-        "door's arguments, so it cannot open a replicated database at all."
+
+@when("many callers read and write at once")
+def _many_callers_read_and_write_at_once(
+    scenario: dict[str, object], loop: asyncio.AbstractEventLoop
+) -> None:
+    """One writer holding the connection, and five readers behind it."""
+    target = scenario["targets"]["turso"]
+    handle = _opened_by_the_door(loop, scenario, target, "turso", FIVE_CALLERS)
+    assert not isinstance(handle, dict), f"the replica did not open: {handle}"
+    scenario["at_once"] = loop.run_until_complete(_five_at_once("turso", handle))
+    scenario["one_after_another"] = loop.run_until_complete(
+        _five_one_after_another("turso", handle)
     )
 
 
-# EVERY STEP IS DEFINED, INCLUDING THE TWO AFTER THE XFAIL. They never run
-# today, and they raise rather than assert, so removing the xfail above turns
-# the scenario red and names what is missing instead of passing on an empty
-# body. Registered from a table because two functions with one body are one
-# function.
+@then("the reads did not queue behind it")
+def _the_reads_did_not_queue(scenario: dict[str, object]) -> None:
+    """Five reads on the replica overlapped, and five run in turn did not.
 
-AFTER_THE_XFAIL: tuple[tuple[str, str], ...] = (
-    ("when", "many callers read and write at once"),
-    ("then", "the reads did not queue behind it"),
-)
-
-REGISTER = {"given": given, "when": when, "then": then}
-
-
-def _unreachable_until_a_replica_can_be_opened(sentence: str) -> Callable[[], None]:
-    def step() -> None:
-        raise NotImplementedError(
-            f"CODE NOT WRITTEN: {sentence!r} needs a replicated database, and "
-            "session_open_connection(target, engine, connections) is handed neither "
-            "local file a replica lives in nor the token the primary wants."
-        )
-
-    return step
-
-
-for _step_type, _sentence in AFTER_THE_XFAIL:
-    REGISTER[_step_type](_sentence)(_unreachable_until_a_replica_can_be_opened(_sentence))
+    THE CONTROL IS THE HALF THAT MATTERS. Overlap is read from the spans, and a
+    reading that calls five sequential reads overlapping cannot tell the two
+    apart. The sibling scenario measures it the same way for the same reason.
+    """
+    spans = scenario["at_once"]
+    assert len(spans) == FIVE_CALLERS, f"only {len(spans)} of five read the replica"
+    assert _every_one_started_before_any_finished(spans), (
+        "the five reads on the replica did not overlap: their spans are "
+        f"{[(round(s - spans[0][0], 3), round(e - spans[0][0], 3)) for s, e in spans]}, "
+        "and one starting after another finished is a read that queued"
+    )
+    control = scenario["one_after_another"]
+    assert not _every_one_started_before_any_finished(control), (
+        "five reads run one after another on the replica also read as "
+        "overlapping, so the reading above cannot tell the two apart"
+    )

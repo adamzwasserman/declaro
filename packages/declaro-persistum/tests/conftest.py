@@ -384,3 +384,50 @@ async def postgresql_schema(request: pytest.FixtureRequest):
         await admin.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
     finally:
         await admin.close()
+
+
+# A REPLICA IS MADE BY THE FIXTURE, NOT BY THE DOOR. Added 2026-09-22 after
+# `session_open_connection` could not be asked about a replicated database at
+# all: the driver's `turso.aio.sync.connect(path, remote_url, auth_token=)` wants
+# a local file, a primary and a token, and the door is handed a target, an engine
+# and a number.
+#
+# MEASURED THE SAME DAY, WHICH IS WHAT MAKES THIS POSSIBLE. A replica is four
+# files: the database, its changes, its info and its write-ahead log. Once they
+# exist, `turso.connect(path)` reopens them by path alone, with no url and no
+# token. So building the replica is setup, the way creating a table is setup,
+# and the door opens what is already on disk exactly as it opens SQLite.
+#
+# THE FOUR FILES ARE ONE ATOMIC UNIT. Deleting a subset breaks the next open, so
+# the whole folder goes at the end or none of it does.
+@pytest.fixture
+def a_real_turso_replica(tmp_path):
+    """A live replica of the staging primary, on disk, ready to be opened.
+
+    Skips with the name of what was missing rather than passing quietly: 186
+    passing tests once went silent as skips with a server down.
+    """
+    import asyncio
+
+    import turso.aio.sync
+
+    url = os.environ.get("TEST_TURSO_URL", "")
+    token = os.environ.get("TEST_TURSO_AUTH_TOKEN", "")
+    missing = [
+        name
+        for name, value in (("TEST_TURSO_URL", url), ("TEST_TURSO_AUTH_TOKEN", token))
+        if not value
+    ]
+    if missing:
+        # APPROVED-IF 2026-09-22 20:10 — credentials are absent or present, and
+        # absence is a reason to stop rather than a row in a table of answers.
+        pytest.skip(f"no Turso replica: {', '.join(missing)} is not set in .env")
+
+    path = tmp_path / "replica.db"
+
+    async def _fill() -> None:
+        made = await asyncio.wait_for(turso.aio.sync.connect(str(path), url, auth_token=token), 30)
+        await made.close()
+
+    asyncio.run(_fill())
+    return str(path)
