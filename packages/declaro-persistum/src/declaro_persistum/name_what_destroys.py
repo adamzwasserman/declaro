@@ -112,13 +112,17 @@ def _marked(operation: Operation) -> Operation:
 
     A new dict rather than a mutated one, so the list a caller handed in still
     says what it said.
+
+    IT NAMED FOUR FIELDS AND AN `Operation` HAS NINE, until 2026-09-22. The four
+    it wrote out were the four this function reads, so the five it did not name
+    were dropped: a `create_table` came in carrying its columns and went out
+    without them, and `fn spell_operation` then refused it for want of the
+    columns it had been handed. Nothing here could see it, because this function
+    is asked only about `destroys` and the loss was one step further on, in
+    `orchestrator fn session_connect`, which is the first caller to spell what
+    this marks.
     """
-    return {
-        "kind": operation["kind"],
-        "table": operation["table"],
-        "detail": operation["detail"],
-        "destroys": LOSES_DATA[operation["kind"]],
-    }
+    return {**operation, "destroys": LOSES_DATA[operation["kind"]]}
 
 
 def name_what_destroys(operations: list[Operation]) -> Plan:
