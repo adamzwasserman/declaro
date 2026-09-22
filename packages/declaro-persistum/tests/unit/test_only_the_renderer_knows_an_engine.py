@@ -9,11 +9,13 @@ looks like ordinary code there, and the first thing to notice is an engine
 refusing a statement nobody can find the source of.
 
 THE DECLARATION IS THE PERMISSION, AND NOTHING HERE IS HAND-WRITTEN. A function
-that takes an `engine: Engine` has been handed the decision on purpose. Every
-other function has not, so naming an engine inside one is a decision made
-somewhere the map says it is not yet made. `docs/design/persistum.hd` is read for
-that list, which means adding a function to the exempt set is done by changing
-the declaration, in the open, rather than by adding a name to a list in a test.
+that takes an `engine: Engine` has been handed the decision on purpose, and so
+has an outward function handed a `Database`, which carries the engine the open
+decided. Every other function has neither, so naming an engine inside one is a
+decision made somewhere the map says it is not yet made.
+`docs/design/persistum.hd` is read for that list, which means adding a function
+to the exempt set is done by changing the declaration, in the open, rather than
+by adding a name to a list in a test.
 
 WHY THIS IS A GATE AND NOT A SCENARIO. It was written as a scenario in
 `compile_statement.feature` on 2026-09-21 and could not be satisfied: no value
@@ -56,12 +58,27 @@ ENGINE_NAMES = frozenset({"postgresql", "sqlite", "turso"})
 # `fn name : (…, engine: Engine …` — the signature is what grants the permission.
 _TAKES_AN_ENGINE = re.compile(r"\bfn\s+([a-z_]+)\s*:\s*\([^)]*\bengine\s*:\s*Engine\b")
 
+# A CARD HANDED A `Database` HAS BEEN HANDED THE ENGINE, and this gate could not
+# see it until 2026-09-22, when three boundaries landed in one afternoon and all
+# three were reported: `query_run_statement`, `schema_inspect` and the writer
+# that opens a drainer's connection. A `Database` carries `engine: Engine`,
+# decided once at open, which is the declaration's own sentence about it, so a
+# function handed one is downstream of the decision rather than making it early.
+#
+# ONLY AN OUTWARD CARD, so the widening stays where the drivers are. `fn
+# replicates` and `fn progress_line` are also handed a database and are pure, and
+# a pure function that pasted a SELECT is still the failure this gate exists for.
+_REACHES_A_DRIVER = re.compile(
+    r"\b(?:boundary_out|reader)\s+fn\s+([a-z_]+)\s*:\s*\([^)]*\bdb\s*:\s*Database\b"
+)
+
 
 @pytest.fixture(scope="module")
 def package() -> tuple[dict[pathlib.Path, str], frozenset[str]]:
     """Every module as path to text, and the module names the declaration exempts."""
     modules = {p: p.read_text(encoding="utf-8") for p in sorted(_SRC.rglob("*.py"))}
-    declared = _TAKES_AN_ENGINE.findall(_DECLARATION.read_text(encoding="utf-8"))
+    declaration = _DECLARATION.read_text(encoding="utf-8")
+    declared = _TAKES_AN_ENGINE.findall(declaration) + _REACHES_A_DRIVER.findall(declaration)
     # `engine_of` is the function that works the engine out, so it returns one
     # rather than taking one. Its own name is the permission.
     permitted = frozenset(f"{name}.py" for name in [*declared, "engine_of"])

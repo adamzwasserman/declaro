@@ -636,7 +636,21 @@ module declaro-persistum
 
   # SESSION. Ask the driver for a connection. `architecture.md:96` says the handle
   # carries its engine, decided once, so nothing downstream works it out again.
-  boundary_out fn session_open_connection : (target: str, connections: int) -> Connection | Fault side_effect reads_writes "database" note "asks the driver for a connection"
+  # THE ENGINE IS HANDED OVER, NOT WORKED OUT AGAIN. Added 2026-09-22: both
+  # opening cards took only a target and re-derived the engine from it, although
+  # `orchestrator fn session_connect` calls `fn engine_of` first and is holding
+  # the answer when it calls these. Two agents writing them hit the same wall on
+  # the same afternoon and each said the fix belonged here rather than in their
+  # code.
+  #
+  # WHAT IT COST WHILE IT WAS MISSING. A gate refuses any module naming an engine
+  # unless the declaration handed its card one, and these two named all three. It
+  # grew a special case shaped like these two functions, which is a rule invented
+  # to fit the code. The special case goes with this change.
+  #
+  # AND IT WAS ALREADY WRONG. A local Turso database is a bare path, and a bare
+  # path reads as sqlite, so a target alone could not name one at all.
+  boundary_out fn session_open_connection : (target: str, engine: Engine, connections: int) -> Connection | Fault side_effect reads_writes "database" note "asks the driver for a connection"
 
   # QUERY. Run a statement on that connection. The driver does not know whether it
   # was a select or a create table, so this is one door rather than four.
@@ -668,7 +682,7 @@ module declaro-persistum
   # not the connection `session_open_connection` hands back. Opening them here
   # is what makes reuse possible; a connection per write is the cost the crew
   # exists to avoid.
-  boundary_out fn session_open_writer : (target: str) -> Connection | Fault side_effect reads_writes "database" note "opens one drainer's connection, held for its life"
+  boundary_out fn session_open_writer : (target: str, engine: Engine) -> Connection | Fault side_effect reads_writes "database" note "opens one drainer's connection, held for its life"
 
   # WITHOUT THIS THE CREW IS ORDINARY LOCKING. `architecture.md:220`: BEGIN
   # CONCURRENT is mandatory on a deposited write, and it is what lets several

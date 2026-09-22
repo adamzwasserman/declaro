@@ -37,8 +37,7 @@ Feature: schema_inspect -- Asking a database what it currently holds
   Scenario: a column comes back carrying where its key points
     Given a database holding a table whose column points at another table
     When it is inspected
-    Then the column comes back naming that table, that column, and what a delete
-      does to the child
+    Then the column comes back naming that table, that column, and what a delete does to the child
 
   Scenario: a rule declared on a table comes back as a condition
     Given a database holding a table with a declared rule on one column
