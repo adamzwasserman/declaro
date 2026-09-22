@@ -65,6 +65,7 @@ from collections.abc import Callable, Coroutine
 from typing import Any
 
 from declaro_persistum.types import (
+    NOTHING,
     Column,
     Comparison,
     Condition,
@@ -334,9 +335,18 @@ def _the_key_found(pointing: dict[Any, Reference], where: Any) -> Reference | No
 
 
 def _points_at_nothing(_pointing: dict[Any, Reference], _where: Any) -> Reference | None:
-    """The column points at nothing, which most columns do. That is a rule about
-    them rather than a gap in the keys a table declares, so it is a row."""
-    return None
+    """The column points at nothing, which most columns do.
+
+    `NOTHING` RATHER THAN A BARE `None`, because this package names absence. The
+    two are the same object and the name is the whole of the difference: a
+    reader of this line sees an answer, where `return None` reads like a
+    function somebody has not finished.
+
+    That most columns point nowhere is a rule about columns rather than a gap in
+    the keys a table declares, so it is a row of the pair below and not a
+    fallback on the read.
+    """
+    return NOTHING
 
 
 _POINTING: dict[bool, Callable[[dict[Any, Reference], Any], Reference | None]] = {
