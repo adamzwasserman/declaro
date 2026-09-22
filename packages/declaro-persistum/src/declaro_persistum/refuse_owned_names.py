@@ -46,6 +46,13 @@ OWNED_NAMES: dict[str, str] = {
     "_declaro_tmp_": "the library",
     "sqlite_": "the engine",
     "turso_": "the engine",
+    # MEASURED ON A LIVE REPLICA, 2026-09-22. Filling one leaves six tables
+    # behind and this prefix is the one the others miss:
+    # `__turso_internal_seq___turso_internal_autoincrement_turso_cdc`. Without
+    # it the migration reads the engine's own bookkeeping as tables a model
+    # forgot, plans to drop them, and `fn refuse_undeclared_loss` stops every
+    # Turso open.
+    "__turso": "the engine",
 }
 
 

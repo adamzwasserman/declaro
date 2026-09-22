@@ -134,14 +134,25 @@ async def _on_postgresql(connection: Connection, statement: Statement) -> Rows |
 
     `get_attributes` is empty for everything that returns no columns, which is
     every change and every schema statement. Preparing does not run it.
+
+    A POOL HANDS OUT CONNECTIONS AND IS NOT ONE. What
+    `boundary_out fn session_open_connection` opens for PostgreSQL is asyncpg's
+    own pool, bounded by the number this database may hold, which is what lets
+    five callers read at once: two reads on one asyncpg connection raise
+    "another operation is in progress". A pool has no `prepare`, so every
+    PostgreSQL statement raised `AttributeError` until 2026-09-22. The pool
+    arrived with a measured reason and this runner was never told, which is the
+    seam this package keeps paying for: both halves written, neither run into
+    the other.
     """
     import asyncpg  # type: ignore[import-untyped]
 
     try:
-        prepared = await connection.prepare(statement["text"])
-        return await _WHAT_POSTGRESQL_PREPARED[prepared.get_attributes() != ()](
-            connection, prepared, statement
-        )
+        async with connection.acquire() as held:
+            prepared = await held.prepare(statement["text"])
+            return await _WHAT_POSTGRESQL_PREPARED[prepared.get_attributes() != ()](
+                held, prepared, statement
+            )
     except asyncpg.PostgresError as engine_said:
         return _refused(engine_said)
 

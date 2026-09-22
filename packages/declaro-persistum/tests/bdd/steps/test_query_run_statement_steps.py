@@ -74,9 +74,17 @@ async def _run_on_sqlite(connection, text: str) -> None:
 
 
 async def _open_postgresql(_folder: pathlib.Path):
+    """A pool, because that is what the door hands over.
+
+    `boundary_out fn session_open_connection` opens asyncpg's own pool for
+    PostgreSQL, bounded by the connections this database may hold, which is what
+    lets five callers read at once. This opened a bare connection until
+    2026-09-22, so every scenario here passed against a type production never
+    sees, and the pool having no `prepare` went unnoticed.
+    """
     import asyncpg
 
-    return await asyncpg.connect(POSTGRESQL_PROBE_URL)
+    return await asyncpg.create_pool(POSTGRESQL_PROBE_URL, min_size=1, max_size=2)
 
 
 async def _close_postgresql(connection) -> None:

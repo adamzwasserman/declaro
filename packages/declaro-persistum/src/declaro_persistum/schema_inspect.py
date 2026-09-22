@@ -64,6 +64,7 @@ import re
 from collections.abc import Callable, Coroutine
 from typing import Any
 
+from declaro_persistum.refuse_owned_names import OWNED_NAMES
 from declaro_persistum.types import (
     NOTHING,
     Column,
@@ -286,9 +287,22 @@ def _rules_read(table: str, declared: list[tuple[str, str]]) -> tuple[list[Const
 
 # --- SQLite and Turso: pragmas, and the text the engine kept ----------------
 
-_THE_TABLES = (
-    "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-)
+# ONE LIST OF WHAT THE LIBRARY AND THE ENGINES OWN, AND IT LIVES NEXT DOOR.
+# `fn refuse_owned_names` refuses a model claiming one of these names, and this
+# reader has to skip the same set, because a table the library or the engine made
+# is not a table a model forgot. Reading a second list here was one fact in two
+# places: this filtered `sqlite_` alone, so a Turso replica's own bookkeeping
+# read as six tables nobody declared, the migration planned to drop them, and
+# `fn refuse_undeclared_loss` stopped every Turso open.
+_THE_TABLES = "SELECT name, sql FROM sqlite_master WHERE type = 'table'"
+
+
+def _ours_or_the_engines(name: str) -> bool:
+    """Whether this table belongs to the library or to the engine rather than
+    to a model. Folded so a name's capitalisation cannot decide it."""
+    folded = name.casefold()
+    return any(folded.startswith(prefix) for prefix in OWNED_NAMES)
+
 
 # `foreign_key_list` spells what a delete does in the engine's own words.
 _PRAGMA_ON_DELETE: dict[str, OnDelete] = {
@@ -414,7 +428,11 @@ async def _pragma_indexes(connection: Connection, name: str) -> list[Index]:
 
 async def _read_pragmas(connection: Connection) -> Reading:
     """SQLite and Turso, which describe themselves the same way."""
-    kept = {row[0]: row[1] or "" for row in await _rows(connection, _THE_TABLES)}
+    kept = {
+        row[0]: row[1] or ""
+        for row in await _rows(connection, _THE_TABLES)
+        if not _ours_or_the_engines(row[0])
+    }
     read = {name: _rules_read(name, _checks_in(ddl)) for name, ddl in kept.items()}
     return (
         [
