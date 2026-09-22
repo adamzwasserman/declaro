@@ -358,9 +358,23 @@ class Receipt(TypedDict):
     failure: Fault | None
 
 
+# THE TICKET IS THE KEY, BECAUSE IT IS THE ONLY THING BOTH HALVES HOLD. Until
+# 2026-09-22 a room held two lists side by side, the statements in arrival order
+# and the tickets given out, and nothing joined one to the other. A drainer could
+# tell which ticket belonged to the write it had taken only because both lists
+# were appended in step, and that stops being true the moment a ticket leaves the
+# middle, which is what `room_release_ticket` does.
+#
+# AND A RECEIPT HAD NOWHERE TO GO. `room_post_receipt` takes a ticket and a
+# receipt, and a room had no field to put one in, so the function that tells a
+# caller what happened to its write could not have worked.
 class Room(TypedDict):
-    arrivals: list[Statement]
-    waiting: list[Ticket]
+    # The order writes arrived in, by ticket.
+    arrivals: list[Ticket]
+    # What each ticket is a write of.
+    writes: dict[Ticket, Statement]
+    # What happened to it, once a drainer has run it.
+    receipts: dict[Ticket, Receipt]
 
 
 # --- the handle a caller keeps ---------------------------------------------

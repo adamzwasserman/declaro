@@ -43,6 +43,7 @@ from pytest_bdd import given, parsers, scenarios, then, when
 
 from declaro_persistum.crew_size import crew_size
 from declaro_persistum.permitted_connections import permitted_connections
+from declaro_persistum.room_make import room_make
 from declaro_persistum.session_open_writer import session_open_writer
 from declaro_persistum.types import NOTHING
 from tests.conftest import POSTGRESQL_PROBE_URL
@@ -213,7 +214,7 @@ async def _a_handle(
         "engine": engine,
         "connection": NOTHING,
         "writers": writers,
-        "room": {"arrivals": [], "waiting": []},
+        "room": room_make(),
         "shutdown": "exit_immediately",
         "primary": primary,
     }

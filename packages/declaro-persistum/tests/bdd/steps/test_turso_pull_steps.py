@@ -48,6 +48,8 @@ from typing import Any
 import pytest
 from pytest_bdd import given, parsers, scenarios, then, when
 
+from declaro_persistum.room_make import room_make
+
 turso = pytest.importorskip(
     "turso", reason="pyturso is not installed, so there is no primary to pull from"
 )
@@ -224,7 +226,7 @@ def _a_database_over(connection: Any, primary: str) -> dict:
         "engine": "turso",
         "connection": connection,
         "writers": [],
-        "room": {"arrivals": [], "waiting": []},
+        "room": room_make(),
         "shutdown": "replicate_then_exit",
         "primary": primary,
     }

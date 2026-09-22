@@ -85,6 +85,7 @@ from declaro_persistum.lifecycle_install_handler import (
     WHAT_WAS_THERE,
 )
 from declaro_persistum.lifecycle_register import REGISTERED
+from declaro_persistum.room_make import room_make
 from declaro_persistum.session_connect import session_connect
 from tests.conftest import POSTGRESQL_PROBE_URL
 
@@ -869,7 +870,7 @@ def _the_handle_comes_back(bench: dict[str, Any], _values: list[str]) -> None:
 def _the_room_came_with_the_handle(bench: dict[str, Any], _values: list[str]) -> None:
     answered = bench["scenario"]["answered"]
     assert not _is_a_fault(answered), f"the open had to work and it said {answered}"
-    assert answered["database"]["room"] == {"arrivals": [], "waiting": []}, (
+    assert answered["database"]["room"] == room_make(), (
         f"the handle carries {answered['database']['room']}, which is not an empty waiting room"
     )
 
@@ -960,7 +961,7 @@ def _the_handle_carries_the_four(bench: dict[str, Any], _values: list[str]) -> N
         f"the handle carries {len(handle['writers'])} writers and the crew is "
         f"{answered['crew']}, so a drainer would have no connection of its own"
     )
-    assert handle["room"] == {"arrivals": [], "waiting": []}, "the handle carries no room"
+    assert handle["room"] == room_make(), "the handle carries no room"
     answers = _ran(bench, ["SELECT 1"])
     assert answers[0], "the connection the handle carries answered nothing"
 

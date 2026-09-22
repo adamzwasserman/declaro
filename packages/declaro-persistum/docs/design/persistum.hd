@@ -29,7 +29,7 @@ module declaro-persistum
   # EVERY SIDE OF THE WORLD THIS MODULE TOUCHES, LISTED ONCE. A boundary naming
   # a side that is not here is a fault, and a side here that nothing touches is
   # one too, so the two lists and the cards cannot drift apart.
-  inputs = { "caller" : "a library call from the host program", "models" : "the Pydantic models the host declares", "database" : "what a database says it holds", "turso" : "the sync channel, inbound", "clock" : "the wall clock", "signal" : "the platform's shutdown", "scheduler" : "a spare turn from the runtime", "shutdown list" : "the databases that asked to replicate at exit", "room" : "the waiting room; on both lists because releasing a ticket reads it and writes it" }
+  inputs = { "caller" : "a library call from the host program", "models" : "the Pydantic models the host declares", "database" : "what a database says it holds", "turso" : "the sync channel, inbound", "clock" : "the wall clock", "signal" : "the platform's shutdown", "scheduler" : "a spare turn from the runtime", "shutdown list" : "the databases that asked to replicate at exit", "room" : "the waiting room; on both lists because releasing a ticket reads it and writes it", "random" : "where a ticket comes from; two writes in one process must never share one" }
   outputs = { "database" : "statements, and the connection they run on", "turso" : "the sync channel, outbound", "room" : "writes deposited and outcomes posted", "signal" : "the process's one handler", "shutdown list" : "the databases shutdown works through", "log" : "what an operator reads afterwards" }
 
   # `Database` IS BACK, AND EVERY FIELD NOW HAS A LINE BEHIND IT. It was cut for
@@ -464,8 +464,24 @@ module declaro-persistum
                    ok: bool
                    attempts: int
                    failure: Fault | NOTHING } note "what a write did; ok false means the engine stayed busy, nothing else"
-  type Room = { arrivals: list<Statement>
-                waiting: list<Ticket> } note "the waiting room between callers and drainers; empty when nobody is mid-flight"
+  # THE TICKET IS THE KEY, BECAUSE IT IS THE ONLY THING BOTH HALVES HOLD. Until
+  # 2026-09-22 a room held two lists side by side, the statements in arrival
+  # order and the tickets given out, and nothing joined one to the other. A
+  # drainer could tell which ticket belonged to the write it had taken only
+  # because both lists were appended in step, and that stops being true the
+  # moment a ticket leaves the middle, which is what `room_release_ticket` does.
+  #
+  # AND A RECEIPT HAD NOWHERE TO GO. `boundary_out fn room_post_receipt` takes a
+  # ticket and a receipt, and a room had no field to put one in, so the function
+  # that tells a caller what happened to its write could not have worked.
+  #
+  # `arrivals` IS THE ORDER, `writes` IS WHAT EACH ONE IS, `receipts` IS WHAT
+  # HAPPENED. All three keyed by the ticket the caller is holding, so a write
+  # taken out of the middle costs nothing and a caller's ticket finds its own
+  # outcome and nobody else's.
+  type Room = { arrivals: list<Ticket>
+                writes: dict<Ticket, Statement>
+                receipts: dict<Ticket, Receipt> } note "the waiting room between callers and drainers; empty when nobody is mid-flight"
 
   # `session_connect`'S OWN RECORD. The caller's three arguments on top, then what each
   # step returned, in the order the chain runs them.
@@ -720,7 +736,7 @@ module declaro-persistum
   # and the first stays landed when the second fails, because it is already in
   # the log. Holding the connection for the group is the only thing here that
   # rolls back, so this is the one write that does not take a ticket.
-  boundary_out fn query_run_together : (db: Database, statements: list<Statement>) -> int | Fault side_effect writes "database" note "runs several writes as one transaction, the only rollback there is"
+  boundary_out fn query_run_together : (db: Database, statements: list<Statement>) -> int | Fault awaited side_effect writes "database" note "runs several writes as one transaction, the only rollback there is"
 
   # THE BEGIN AND THE WRITE SHARE ONE HANDLE, WHICH IS WHY BOTH TAKE IT. A
   # drainer holds one connection and writes on it only. `query_run_statement`
@@ -734,7 +750,11 @@ module declaro-persistum
   # empties the queue afterwards. The room is not the outside world, but a value
   # put into it leaves this caller's hands and is picked up by another, which is
   # why this is a door rather than a step.
-  boundary_out fn room_deposit : (room: Room, statement: Statement) -> Ticket | Fault side_effect writes "room" note "puts a write in the room and takes a ticket for it"
+  # A TICKET IS DRAWN FROM A RANDOM SOURCE AND THE CARD NOW SAYS SO. Two writes
+  # deposited in one process must never share one, and a counter would live
+  # either in the module, hidden from every caller, or in the room, where it
+  # repeats itself the moment the crew drains.
+  boundary_out fn room_deposit : (room: Room, statement: Statement) -> Ticket | Fault side_effect writes "room" side_effect reads "random" note "puts a write in the room and takes a ticket for it"
 
   # ONE HANDLER FOR THE PROCESS, PUT IN BY THE FIRST OPEN THAT NEEDS ONE, AND
   # INSTALLING IT TWICE CHANGES NOTHING. No caller asks for this: a door that
@@ -923,7 +943,11 @@ module declaro-persistum
   fn writer_waiting : (room: Room) -> bool note "answers whether a writer is waiting for the connection"
 
   # The room drains one write at a time, in arrival order.
-  fn next_in_order : (room: Room) -> Statement | NOTHING note "answers which write is next, in arrival order; taking it out is the boundary's work"
+  # IT ANSWERS WITH THE TICKET, NOT THE WRITE. Changed 2026-09-22 with the room
+  # itself: a drainer looks the statement up by the ticket and posts the receipt
+  # against that same ticket, so handing back the statement alone left it with no
+  # way to say whose write it had just run.
+  fn next_in_order : (room: Room) -> Ticket | NOTHING note "answers whose write is next, in arrival order; taking it out is the boundary's work"
 
   # Asked of the fault's kind, never its message.
   fn worth_retrying : (fault: Fault) -> bool note "answers whether a failure is worth another attempt, asked of its kind"

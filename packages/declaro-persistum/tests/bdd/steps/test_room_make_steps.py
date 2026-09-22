@@ -36,7 +36,7 @@ from declaro_persistum.room_make import room_make
 scenarios("../features/room/room_make.feature")
 
 
-AN_EMPTY_ROOM = {"arrivals": [], "waiting": []}
+AN_EMPTY_ROOM = {"arrivals": [], "writes": {}, "receipts": {}}
 """What the declaration says a Room holds, with nobody mid-flight."""
 
 A_DEPOSITED_WRITE = {"text": "INSERT INTO tasks (title) VALUES (:title)", "parameters": {}}
@@ -58,7 +58,7 @@ def _it_holds_nothing(scenario: dict[str, object]) -> None:
     first, second = scenario["rooms"]
 
     assert first == AN_EMPTY_ROOM, f"a new room already holds something: {first}"
-    assert set(first) == {"arrivals", "waiting"}, (
+    assert set(first) == {"arrivals", "writes", "receipts"}, (
         f"a Room carries an arrival order and the callers waiting: {sorted(first)}"
     )
 
@@ -73,13 +73,14 @@ def _it_holds_nothing(scenario: dict[str, object]) -> None:
     # down: the arrival orders would still be one queue.
     assert first is not second, "both calls handed back the same room"
     assert first["arrivals"] is not second["arrivals"], "both rooms share one arrival order"
-    assert first["waiting"] is not second["waiting"], "both rooms share one list of callers"
+    assert first["writes"] is not second["writes"], "both rooms share one set of writes"
+    assert first["receipts"] is not second["receipts"], "both rooms share one set of receipts"
 
     # And the proof that identity is the property that matters: deposit into one
     # room and the other is still empty. A function returning a shared default
     # passes every line above that reads only the first room.
     first["arrivals"].append(A_DEPOSITED_WRITE)
-    first["waiting"].append("w-0001")
+    first["writes"]["w-0001"] = {"text": "INSERT INTO cards (id) VALUES (?)", "parameters": {}}
     assert second == AN_EMPTY_ROOM, f"a write deposited in one room reached another: {second}"
 
     # A room made after that one is still empty, which is the same question

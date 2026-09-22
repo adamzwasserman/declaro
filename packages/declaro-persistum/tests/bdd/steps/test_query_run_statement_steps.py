@@ -45,6 +45,7 @@ from pytest_bdd import parsers, scenarios, then, when
 
 from declaro_persistum.compile_statement import compile_statement
 from declaro_persistum.query_run_statement import query_run_statement
+from declaro_persistum.room_make import room_make
 from declaro_persistum.spell_operation import spell_operation
 from tests.conftest import POSTGRESQL_PROBE_URL
 
@@ -209,7 +210,7 @@ async def _against_every_engine(work: Callable[[dict, str], Awaitable[dict]]) ->
                 "engine": engine,
                 "connection": connection,
                 "writers": [drainer],
-                "room": {"arrivals": [], "waiting": []},
+                "room": room_make(),
                 "shutdown": "exit_immediately",
                 "primary": None,
             }

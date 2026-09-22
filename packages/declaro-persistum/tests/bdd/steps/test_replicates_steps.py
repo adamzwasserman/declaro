@@ -22,6 +22,8 @@ import pytest
 from pytest_bdd import given, parsers, scenarios, then
 
 from declaro_persistum import types as declared_types
+from declaro_persistum.room_deposit import room_deposit
+from declaro_persistum.room_make import room_make
 
 scenarios("../features/core/replicates.feature")
 
@@ -47,6 +49,13 @@ THE_VERDICT = {"replicates": True, "does not replicate": False}
 def answer() -> dict:
     """Where a Given leaves the database and a Then reads the answer."""
     return {}
+
+
+def _a_room_with_a_write_in_it():
+    """A room that is not empty, made the way a room is made."""
+    room = room_make()
+    room_deposit(room, {"text": "INSERT INTO people (id) VALUES (?)", "parameters": {"p1": 1}})
+    return room
 
 
 @given(parsers.re(r"a database opened (?P<opening>against a primary|with no primary)"))
@@ -82,7 +91,7 @@ def _no_field_says_it(a_database: dict) -> None:
         "engine": ["sqlite", "postgresql", "turso"],
         "connection": [object(), None],
         "writers": [[], [object()]],
-        "room": [{"arrivals": [], "waiting": []}, {"arrivals": [object()], "waiting": ["t1"]}],
+        "room": [room_make(), _a_room_with_a_write_in_it()],
         "shutdown": ["exit_immediately", "replicate_then_exit"],
     }
     unmoved = [

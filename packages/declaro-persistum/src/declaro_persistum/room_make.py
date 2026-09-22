@@ -30,4 +30,4 @@ from declaro_persistum.types import Room
 
 def room_make() -> Room:
     """Build an empty waiting room."""
-    return {"arrivals": [], "waiting": []}
+    return {"arrivals": [], "writes": {}, "receipts": {}}

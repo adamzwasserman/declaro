@@ -15,3 +15,11 @@ Feature: room_deposit -- Leaving a write behind and taking a ticket
   Scenario: a deposited write reaches the engine exactly once
     When a caller deposits one write and the crew drains once
     Then the engine was asked to run it once
+
+  # Added 2026-09-22. One deposit cannot show either of these, and both lose a
+  # caller's write: two callers holding one ticket collect each other's outcome,
+  # and two writes drained out of order land in the database back to front.
+  Scenario: two writes keep their order and each caller keeps its own ticket
+    When two callers each deposit a write
+    Then each caller is given a ticket of its own
+    And the crew is handed the two writes in the order they arrived

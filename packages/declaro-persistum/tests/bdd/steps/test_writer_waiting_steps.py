@@ -29,7 +29,10 @@ from typing import cast
 
 from pytest_bdd import given, parsers, scenarios, then
 
+from declaro_persistum.room_deposit import room_deposit
+from declaro_persistum.room_make import room_make
 from declaro_persistum.types import Room, Statement
+from declaro_persistum.writer_waiting import writer_waiting
 
 scenarios("../features/core/writer_waiting.feature")
 
@@ -42,12 +45,25 @@ A_DEPOSITED_WRITE: Statement = {
     "parameters": {"id": 1, "total": 42},
 }
 
+
+def _a_room_holding(statement: Statement) -> Room:
+    """A room with one write in it, deposited the way a caller deposits one.
+
+    BUILT BY DEPOSITING, NOT BY WRITING THE FIELDS OUT. A room joins a ticket to
+    its write and its receipt, and hand-building one is how the shape changed
+    under eight test files on 2026-09-22 without one of them noticing.
+    """
+    room = room_make()
+    room_deposit(room, statement)
+    return room
+
+
 # WHAT EACH OPENING MEANS, as the room it builds. "nothing in the room" is both
 # lists empty, which `docs/architecture.md:140` calls the room whenever nobody
 # is mid-flight.
 A_ROOM: dict[str, Room] = {
-    "one write": {"arrivals": [A_DEPOSITED_WRITE], "waiting": []},
-    "nothing": {"arrivals": [], "waiting": []},
+    "one write": _a_room_holding(A_DEPOSITED_WRITE),
+    "nothing": room_make(),
 }
 
 # WHAT EACH READING ASSERTS. A writer waiting drops the pass, so the verdict a
@@ -62,8 +78,6 @@ def _the_room_holds(scenario: dict[str, object], how_full: str) -> None:
 
 @then(parsers.re(r"a sync pass (?P<verdict>would be dropped|may run)"))
 def _a_sync_pass(scenario: dict[str, object], verdict: str) -> None:
-    from declaro_persistum.writer_waiting import writer_waiting
-
     room = cast(Room, scenario["room"])
     answered = writer_waiting(room)
     assert answered is THE_VERDICT[verdict], (

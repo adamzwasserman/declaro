@@ -33,6 +33,7 @@ import pytest
 from pytest_bdd import scenarios, then, when
 
 from declaro_persistum.lifecycle_register import REGISTERED, lifecycle_register
+from declaro_persistum.room_make import room_make
 from declaro_persistum.types import Database, Shutdown
 
 scenarios("../features/lifecycle/lifecycle_register.feature")
@@ -71,7 +72,7 @@ def opening_a_database(asked_for: Shutdown):
             "engine": "sqlite",
             "connection": object(),
             "writers": [],
-            "room": {"arrivals": [], "waiting": []},
+            "room": room_make(),
             "shutdown": asked_for,
             "primary": "libsql://notes.example.invalid",
         }

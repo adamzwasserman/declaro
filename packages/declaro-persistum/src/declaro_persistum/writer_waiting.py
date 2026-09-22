@@ -37,4 +37,10 @@ from declaro_persistum.types import Room
 
 def writer_waiting(room: Room) -> bool:
     """True when the room holds anybody at all, so the sync pass is dropped."""
-    return bool(room["arrivals"] or room["waiting"])
+    # A WRITE WITH NO RECEIPT IS ONE A DRAINER IS STILL ON. Until 2026-09-22
+    # a room held a list of tickets given out and this read that; the room now
+    # joins a ticket to its write and its receipt, so the same question is
+    # whether any ticket has no receipt yet.
+    return bool(room["arrivals"]) or any(
+        ticket not in room["receipts"] for ticket in room["writes"]
+    )

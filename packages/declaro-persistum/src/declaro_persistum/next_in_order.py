@@ -30,4 +30,7 @@ from declaro_persistum.types import NOTHING, Room, Statement
 
 def next_in_order(room: Room) -> Statement | None:
     """Answer with the write that arrived first, or `NOTHING` if none did."""
+    # THE TICKET, NOT THE WRITE. A drainer looks the statement up by the ticket
+    # and posts the receipt against that same ticket, so handing back the
+    # statement alone left it with no way to say whose write it had just run.
     return next(iter(room["arrivals"]), NOTHING)

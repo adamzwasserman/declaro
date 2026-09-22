@@ -151,7 +151,7 @@ def _the_fault_came_back_to_its_caller(scenario: dict, caplog: pytest.LogCapture
 
 @given("a write whose caller abandoned its ticket")
 def _a_write_whose_caller_has_gone(scenario: dict, a_room: dict) -> None:
-    assert ABANDONED_TICKET not in a_room["waiting"], (
+    assert ABANDONED_TICKET not in a_room["arrivals"], (
         f"the room is waiting on {ABANDONED_TICKET!r}, so its caller has not "
         "abandoned it and this scenario is about a different write"
     )

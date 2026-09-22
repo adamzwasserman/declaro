@@ -13,6 +13,8 @@ import os
 import pytest
 from dotenv import load_dotenv
 
+from declaro_persistum.room_make import room_make
+
 # Load .env file for test credentials. THE IMPORT BELOW IS AFTER IT ON
 # PURPOSE: anything imported from here on may read the environment at
 # import time, and this is the line that puts the credentials in it.
@@ -272,7 +274,7 @@ def declared(a_person_model, an_order_model) -> dict:
 def a_room() -> dict:
     """An empty waiting room. Both lists are empty whenever nobody is
     mid-flight, which is most of the time."""
-    return {"arrivals": [], "waiting": []}
+    return room_make()
 
 
 @pytest.fixture

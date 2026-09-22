@@ -28,6 +28,8 @@ import inspect
 from pytest_bdd import given, scenarios, then
 
 from declaro_persistum.next_in_order import next_in_order
+from declaro_persistum.room_deposit import room_deposit
+from declaro_persistum.room_make import room_make
 from declaro_persistum.types import NOTHING, Room, Statement
 
 scenarios("../features/core/next_in_order.feature")
@@ -53,8 +55,16 @@ THREE_WRITES: tuple[Statement, ...] = (
 
 
 def _a_room(arrivals: tuple[Statement, ...]) -> Room:
-    """A room holding these arrivals and nobody waiting on a ticket."""
-    return {"arrivals": list(arrivals), "waiting": []}
+    """A room holding these writes, deposited in this order.
+
+    BUILT BY DEPOSITING, NOT BY WRITING THE FIELDS OUT. A room joins a ticket to
+    its write and its receipt, and hand-building one is how its shape changed
+    under six test files on 2026-09-22 without one of them noticing.
+    """
+    room = room_make()
+    for statement in arrivals:
+        room_deposit(room, statement)
+    return room
 
 
 @given("three writes deposited in a known order")
@@ -88,9 +98,12 @@ def _they_come_out_in_that_order(scenario: dict[str, object]) -> None:
         answer = next_in_order(room)
         again = next_in_order(room)
 
-        assert answer == expected, (
-            f"write {position} out of the room is {answer}, and the write "
-            f"deposited {position} is {expected}"
+        # IT ANSWERS WITH THE TICKET AND THE WRITE IS LOOKED UP BY IT. A drainer
+        # posts the receipt against that same ticket, so the statement alone
+        # would leave it with no way to say whose write it had just run.
+        assert room["writes"][answer] == expected, (
+            f"write {position} out of the room is {room['writes'].get(answer)}, "
+            f"and the write deposited {position} is {expected}"
         )
         assert again == answer, (
             f"two drainers asked the same room and were told {answer} and {again}"
@@ -114,4 +127,4 @@ def _nothing_comes_back(scenario: dict[str, object]) -> None:
     answer = next_in_order(room)
 
     assert answer is NOTHING, f"an empty room answered with {answer!r}"
-    assert room == {"arrivals": [], "waiting": []}, f"the empty room was changed: {room}"
+    assert room == room_make(), f"the empty room was changed: {room}"
