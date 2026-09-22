@@ -131,7 +131,6 @@ KNOWN_UNBOUND: dict[str, str] = {
     "room_release_ticket.feature": _ONE_EACH,
     "room_run_write.feature": _ONE_EACH,
     "session_close_connection.feature": _ONE_EACH,
-    "session_open.feature": _ONE_EACH,
     "smallest.feature": _ONE_EACH,
     "sum.feature": _ONE_EACH,
     "the_middle_is_pure.feature": _ONE_EACH,
