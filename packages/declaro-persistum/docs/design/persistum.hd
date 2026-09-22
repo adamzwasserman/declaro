@@ -190,10 +190,23 @@ module declaro-persistum
   # appeared is either a rename or a drop and an add, and the difference is your
   # data. Nobody is there to be asked at a deploy, so the new model says which
   # it is: the column that replaced the old one names what it replaced.
+  # WHAT HAPPENS TO A CHILD ROW WHEN ITS PARENT GOES IS A DECLARATION LIKE ANY
+  # OTHER. Added 2026-09-21: `references` was the string `"people.id"`, which said
+  # where the key points and could not say what the engine should do when the
+  # parent row is deleted. A scenario asking for ON DELETE CASCADE had nowhere to
+  # put it. Three functions were also splitting that string back apart to get the
+  # table out, which is a shape being parsed where it could have been carried.
+  set deletion_rules = { "refuse", "cascade", "set_null" } note "what happens to a child row when its parent is deleted"
+  vocabulary OnDelete = { deletion_rules } note "refuse the delete, delete the child too, or empty the column"
+
+  type Reference = { table: str
+                     column: str
+                     on_delete: OnDelete } note "where a foreign key points and what a delete does to the child"
+
   type Column = { name: str
                   declared_type: str
                   renamed_from: str | NOTHING
-                  references: str | NOTHING
+                  references: Reference | NOTHING
                   facets: dict<str, Value> } note "one column and what field() declared about it"
 
   type Index = { name: str
@@ -205,9 +218,20 @@ module declaro-persistum
   # `field(check="total >= 0")` the same way it catches a WHERE clause given as
   # text: that string is neither a declared name nor a bound value, so the only
   # thing left to do with it is paste it in.
+  # WHICH KIND OF RULE IT IS, WHICH NOTHING COULD SAY BEFORE. Added 2026-09-21:
+  # every constraint carried a `Condition`, so every one was read as a CHECK, and
+  # a primary key spanning two columns had no way to be spelled. The columns were
+  # already here; what was missing was the word for what to do with them. A check
+  # reads its rule. A primary key and a unique read their columns, and carry the
+  # condition that narrows by nothing, which is a real value in this package
+  # rather than a hole.
+  set constraint_kinds = { "check", "primary_key", "unique" } note "what a declared rule about a table asks for"
+  vocabulary ConstraintKind = { constraint_kinds } note "which kind of rule this is"
+
   type Constraint = { name: str
+                      kind: ConstraintKind
                       columns: list<str>
-                      rule: Condition } note "a declared rule about a column, as data rather than a string"
+                      rule: Condition } note "a declared rule about a table, as data rather than a string"
 
   type Table = { name: str
                  columns: list<Column>
@@ -237,7 +261,10 @@ module declaro-persistum
   # operation says whether carrying it out destroys something, because
   # `losing_data_is_said_out_loud.feature` asks the library to say which of them
   # do, derived from the models rather than asked for.
-  set operation_kinds = { "create_table", "drop_table", "add_column", "drop_column", "alter_column", "rename_column", "rename_table", "create_index", "drop_index", "create_view", "drop_view", "insert_enum_values" } note "every schema change the differ can emit"
+  # `remove_enum_values` ADDED 2026-09-21. A value could be put into an enum's
+  # lookup table and there was no word for taking one out, so a model that
+  # dropped a choice migrated to a database that still accepted it.
+  set operation_kinds = { "create_table", "drop_table", "add_column", "drop_column", "alter_column", "rename_column", "rename_table", "create_index", "drop_index", "create_view", "drop_view", "insert_enum_values", "remove_enum_values" } note "every schema change the differ can emit"
   vocabulary OperationKind = { operation_kinds } note "which schema change this is"
 
   # A MIGRATION COULD NOT CREATE A TABLE, AND THAT IS WHAT THESE FIVE FIELDS ARE

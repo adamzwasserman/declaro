@@ -60,12 +60,23 @@ NOT_A_REFERENCE = None
 
 
 def _a_column(name: str, references: str | None) -> dict:
-    """One column, with every field a `Column` names present."""
+    """One column, with every field a `Column` names present.
+
+    `references` is written `table.column` here because that is how a person
+    reads a foreign key, and it becomes the `Reference` record the declaration
+    describes before it reaches the function. `refuse` is the deletion rule a
+    declaration means when it says nothing: a parent with children stays.
+    """
+    table, _, column = (references or "").partition(".")
     return {
         "name": name,
         "declared_type": "text",
         "renamed_from": None,
-        "references": references,
+        "references": (
+            {"table": table, "column": column, "on_delete": "refuse"}
+            if references is not None
+            else None
+        ),
         "facets": {},
     }
 

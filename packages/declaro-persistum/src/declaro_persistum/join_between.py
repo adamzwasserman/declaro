@@ -43,21 +43,26 @@ from declaro_persistum.types import Condition, Fault, Join, Model
 def _keys_declared_by(pointing: Model, pointed_at: Model) -> list[tuple[str, str]]:
     """Every key `pointing` declares into `pointed_at`.
 
-    Each pair is (the column that points, the column it points at). A
-    `references` reads `table.column`, which is how `spell_operation.feature`
-    writes one, so the far model's columns are spelled the same way and the two
-    sets are compared.
+    Each pair is (the column that points, the column it points at). A column's
+    `Reference` names the table and the column separately, so nothing here has
+    to take a name apart to find out where it points.
+
+    REWRITTEN 2026-09-21, WHEN A REFERENCE STOPPED BEING A STRING. It used to
+    read `table.column` and split it, and it used the whole reference as a
+    dictionary key. A record cannot be a key, so the old form raised
+    `TypeError` on every model the declaration now describes. Nothing caught
+    it, because this function's own scenarios still built references the old
+    way: a test written against a type production never sees proves only that
+    the test and the function agree with each other.
     """
-    declared: dict[str | None, str] = {
-        column["references"]: column["name"] for column in pointing["columns"]
-    }
-    reachable: set[str] = {
-        f"{pointed_at['table']}.{column['name']}" for column in pointed_at["columns"]
-    }
-    return [
-        (declared[reference], reference.split(".", 1)[1])
-        for reference in sorted(reachable & set(declared))
-    ]
+    over_there = {column["name"] for column in pointed_at["columns"]}
+    return sorted(
+        (column["name"], column["references"]["column"])
+        for column in pointing["columns"]
+        if column["references"] is not None
+        and column["references"]["table"] == pointed_at["table"]
+        and column["references"]["column"] in over_there
+    )
 
 
 def _keys_between(near: Model, far: Model) -> list[tuple[str, str]]:

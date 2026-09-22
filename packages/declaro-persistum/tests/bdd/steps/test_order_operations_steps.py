@@ -37,7 +37,7 @@ from typing import get_args
 from pytest_bdd import given, parsers, scenarios, then
 
 from declaro_persistum.order_operations import MUST_ALREADY_EXIST, order_operations
-from declaro_persistum.types import Fault, Operation, OperationKind
+from declaro_persistum.types import Column, Fault, Operation, OperationKind
 
 scenarios("../features/core/order_operations.feature")
 
@@ -45,19 +45,42 @@ scenarios("../features/core/order_operations.feature")
 # --- the operations the scenarios talk about --------------------------------
 
 
+def _a_column(name: str, points_at: str | None) -> Column:
+    """One column, pointing at another table or at nothing.
+
+    `points_at` is written `table.column` here because that is how a person
+    reads a foreign key, and it becomes a `Reference` immediately, which is the
+    shape everything downstream is handed. `refuse` is the deletion rule a
+    declaration means when it says nothing: a parent with children stays.
+    """
+    table, _, column = (points_at or "").partition(".")
+    references = {"table": table, "column": column, "on_delete": "refuse"}
+    return {
+        "name": name,
+        "declared_type": "integer",
+        "renamed_from": None,
+        "references": references if points_at is not None else None,
+        "facets": {},
+    }
+
+
 def _an_operation(kind: OperationKind, table: str, points_at: str | None) -> Operation:
     """One operation, with every field the declaration gives an Operation.
 
-    `points_at` is a table and column, the way a Column writes a foreign key.
-    An operation that points at nothing carries no `references` at all, so
-    absence is a key that is not there rather than a value to interpret.
+    A table it points at rides on a column's own `Reference`, which is where a
+    foreign key is declared. Until 2026-09-21 it rode in the operation's loose
+    `detail` bag as the string `table.column`, and had to be split apart again
+    by everything that read it.
     """
-    detail: dict[str, object] = {"named": f"{kind} on {table}"}
-    detail.update({key: points_at for key in ["references"] if points_at is not None})
     return {
         "kind": kind,
         "table": table,
-        "detail": detail,  # type: ignore[typeddict-item]
+        "detail": {"named": f"{kind} on {table}"},
+        "columns": [_a_column("id", None), _a_column("points_at", points_at)],
+        "indexes": [],
+        "constraints": [],
+        "copying": [],
+        "values": [],
         "destroys": kind.startswith("drop"),
     }
 
@@ -221,7 +244,9 @@ def _a_fault_naming_both(scenario: dict[str, object]) -> None:
     # IT IS THE CIRCLE THAT IS REFUSED, NOT THE PAIR. Take one of the two
     # references away and the same two operations come back in an order.
     broken = [dict(operation) for operation in written]
-    broken[1]["detail"] = {"named": broken[1]["detail"]["named"]}
+    broken[1]["columns"] = [
+        column for column in broken[1]["columns"] if column["references"] is None
+    ]
     answer = order_operations(broken)  # type: ignore[arg-type]
     assert isinstance(answer, list), f"one reference is not a circle: {answer}"
     assert [operation["table"] for operation in answer] == [both[1], both[0]], (

@@ -47,6 +47,9 @@ Operator = Literal[
     "is_null",
     "is_not_null",
 ]
+# `remove_enum_values` added 2026-09-21. A value could be put into an enum's
+# lookup table and there was no word for taking one out, so a model that
+# dropped a choice migrated to a database that still accepted it.
 OperationKind = Literal[
     "create_table",
     "drop_table",
@@ -60,6 +63,7 @@ OperationKind = Literal[
     "create_view",
     "drop_view",
     "insert_enum_values",
+    "remove_enum_values",
 ]
 
 # The asking vocabulary, in the two halves that travel differently: a reading
@@ -200,11 +204,25 @@ Answer = Rows | int | bool | Ticket | None
 # --- what the code declares ------------------------------------------------
 
 
+# WHAT HAPPENS TO A CHILD ROW WHEN ITS PARENT GOES IS A DECLARATION LIKE ANY
+# OTHER. Added 2026-09-21: a reference was the string "people.id", which said
+# where the key points and could not say what a delete should do to the child.
+# Three functions were also splitting that string apart again to get the table
+# out, which is a shape being parsed where it could have been carried.
+OnDelete = Literal["refuse", "cascade", "set_null"]
+
+
+class Reference(TypedDict):
+    table: str
+    column: str
+    on_delete: OnDelete
+
+
 class Column(TypedDict):
     name: str
     declared_type: str
     renamed_from: str | None
-    references: str | None
+    references: Reference | None
     facets: dict[str, Value]
 
 
@@ -214,8 +232,18 @@ class Index(TypedDict):
     unique: bool
 
 
+# WHICH KIND OF RULE IT IS, WHICH NOTHING COULD SAY BEFORE. Added 2026-09-21:
+# every constraint carried a Condition, so every one was read as a CHECK, and a
+# primary key spanning two columns could not be spelled. The columns were
+# already here; the missing part was the word for what to do with them. A check
+# reads its rule. A primary key and a unique read their columns and carry the
+# condition that narrows by nothing, which is a real value here, not a hole.
+ConstraintKind = Literal["check", "primary_key", "unique"]
+
+
 class Constraint(TypedDict):
     name: str
+    kind: ConstraintKind
     columns: list[str]
     rule: Condition
 

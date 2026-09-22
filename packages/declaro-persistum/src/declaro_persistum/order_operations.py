@@ -18,11 +18,14 @@ before the child that points at it, and a child dropped before its parent,
 without any of the three being written down separately.
 
 WHERE AN OPERATION SAYS WHAT IT POINTS AT. `docs/design/persistum.hd`,
-`type Column`, spells a foreign key `table.column`, and it is the only place
-this package writes a relationship down. An `Operation` carries the same
-spelling under `references` in its `detail`. An operation pointing at nothing
-carries no `references` key, so absence is a key that is not there rather than
-a value somebody has to interpret.
+`type Column`, carries a `Reference`, which names the table, the column and what
+a delete does to the child. An operation carries its columns, so the tables it
+points at are read straight off them. A column pointing at nothing has no
+reference, which is an absence with a name rather than a value to interpret.
+
+Until 2026-09-21 the reference was the string `table.column` in the operation's
+loose `detail` bag, and this function split it apart again to get the table out.
+A shape being parsed is a shape that could have been carried.
 
 A CIRCLE IS AN ANSWER, NOT A CRASH. `fn order_operations` returns a `Fault`,
 so the refusal reaches the caller as a value it can read and print. The fault
@@ -42,9 +45,11 @@ from collections.abc import Callable
 
 from declaro_persistum.types import Fault, Operation, OperationKind
 
-# The key an operation carries the table it points at under, spelled
-# `table.column` the way a Column spells a foreign key.
-POINTS_AT = "references"
+# WHERE THE TABLES IT POINTS AT ARE READ FROM. Until 2026-09-21 this was a
+# `references` key invented in the operation's loose `detail` bag, holding the
+# string `table.column`, which had to be split apart again to get the table out.
+# An operation now carries its real columns, and a column carries a `Reference`
+# with the table already its own field, so nothing is parsed here.
 
 # What makes a table exist, and what ends it.
 MAKES_A_TABLE: OperationKind = "create_table"
@@ -80,14 +85,22 @@ MUST_ALREADY_EXIST: dict[OperationKind, Callable[[Operation], tuple[str, ...]]] 
     "create_view": _its_own_table,
     "drop_view": _its_own_table,
     "insert_enum_values": _its_own_table,
+    # Taking a value out needs the lookup table there, exactly as putting
+    # one in does.
+    "remove_enum_values": _its_own_table,
 }
 
 
 def _needed_by(operation: Operation) -> tuple[str, ...]:
     """The tables that have to exist while this operation runs."""
-    detail = operation["detail"]
     pointed_at = tuple(
-        str(detail[key]).partition(".")[0] for key in sorted(detail.keys() & {POINTS_AT})
+        sorted(
+            {
+                column["references"]["table"]
+                for column in operation["columns"]
+                if column["references"] is not None
+            }
+        )
     )
     return MUST_ALREADY_EXIST[operation["kind"]](operation) + pointed_at
 

@@ -26,46 +26,12 @@ NOTHING HERE READS THE PACKAGE'S SOURCE. A claim about how a module is written
 is a claim the gates over `src/` make. These steps call the function and read
 what comes back.
 
-WHAT IS NOT SATISFIED, and is failing rather than faked. Each of these is a
-disagreement between this feature and `fn spell_operation` as the declaration
-writes it, so each needs a decision rather than more code.
-
-A COMPOSITE PRIMARY KEY. Two columns each marked `primary_key` become two
-inline PRIMARY KEY clauses, which no engine takes. A table-level
-`PRIMARY KEY (a, b)` needs a `Constraint` that is not a CHECK, and
-`Constraint.rule` is a `Condition`, which is comparisons. One scenario asks for
-it and dies in its own Given, naming the SQL.
-
-A RULE ABOUT WHAT HAPPENS TO A CHILD ROW. `Column.references` carries the
-`table.column` a column points at and nothing else, so ON DELETE CASCADE has
-nowhere to sit. One scenario asks for it.
-
-A WARNING IN A LOG. This package returns faults and logs nothing, by rule. One
-scenario asks for a warning to be logged when a rebuild copies no rows.
-
-THE PRAGMA ITSELF. One scenario asks that foreign keys be temporarily disabled
-by the change. They are disabled by whoever commits, for the reason above, so
-no statement that comes back can say it.
-
-A COPY THAT FAILS ON A TYPE. One scenario stores `invalid` in a TEXT column and
-asks that converting it to INTEGER fail during the copy. SQLite has type
-affinity rather than type enforcement and stores the text unchanged, so the
-copy succeeds.
-
-THE TWO QUOTE-DOUBLING ROWS. They ask for the enum value to reach the statement
-TEXT with its quote doubled. An enum value is bound and travels beside the
-statement, which is what `Statement.parameters` is for, so the text carries a
-placeholder and the value never reaches it. Doubling a quote is what you do
-when you have pasted, and this does not paste.
-
-TAKING A VALUE OUT OF THE LOOKUP. `OperationKind` has `insert_enum_values` and
-no word for removing one, so there is no operation to spell. Two scenarios ask
-for it.
-
-THE RANDOM TAIL ON A TEMPORARY NAME. Two scenarios want two names for one table
-to differ, which needs a random source, and `fn spell_operation` is pure. The
-rebuild drops a leftover temporary table before it makes one instead, so a
-retry after a crash needs no tail to tell it apart.
+WHAT THE WIDER TYPES LET FOUR SCENARIOS SAY, SINCE 2026-09-21. A `Constraint`
+carries the kind of rule it is, so a key over two columns is written down as one
+rule naming both rather than as a facet on each of them. A `Reference` carries
+what a delete does to the child, so a scenario asking for ON DELETE CASCADE has
+somewhere to put it. And `remove_enum_values` is a word, so taking a value out
+of a lookup is an operation this file can ask for by name.
 """
 
 from __future__ import annotations
@@ -78,20 +44,20 @@ from typing import Any
 import pytest
 from pytest_bdd import given, parsers, scenarios, then, when
 
-from declaro_persistum.spell_operation import (
-    TEMPORARY_PREFIX,
-    column_definition,
-    constraint_clause,
-    default_clause,
-    listing_the_user_tables,
-    placeholder,
-    same_type,
-    spell_operation,
-    stamping_the_schema_hash,
-    temporary_name,
-    type_spelled,
+from declaro_persistum.spell_operation import spell_operation
+from declaro_persistum.types import (
+    Column,
+    Condition,
+    Constraint,
+    Engine,
+    Index,
+    OnDelete,
+    Operation,
+    Reference,
+    Statement,
+    Table,
+    Value,
 )
-from declaro_persistum.types import Column, Engine, Index, Operation, Statement, Table, Value
 
 pytestmark = [pytest.mark.bdd, pytest.mark.precommit]
 
@@ -119,9 +85,19 @@ def _column(name: str, declared_type: str, **facets: Value) -> Column:
     }
 
 
-def _pointing_at(column: Column, parent: str | None) -> Column:
-    """The same column, pointing at a parent key or at nothing."""
-    return {**column, "references": parent}
+def _pointing_at(column: Column, parent: str | None, on_delete: OnDelete) -> Column:
+    """The same column, pointing at a parent key or at nothing.
+
+    A scenario writes the parent key the way SQL does, `authors.id`, and a
+    `Reference` holds the table and the column apart, so the splitting happens
+    here, once, where the sentence is read.
+    """
+    table, _, name = (parent or "").rpartition(".")
+    pointing: dict[bool, Callable[[], Reference | None]] = {
+        True: lambda: None,
+        False: lambda: Reference(table=table, column=name, on_delete=on_delete),
+    }
+    return {**column, "references": pointing[parent is None]()}
 
 
 def _operation(
@@ -162,6 +138,16 @@ def _run(connection: sqlite3.Connection, statements: list[Statement]) -> None:
     """Run spelled statements on a real database, in the order they came back."""
     for statement in statements:
         connection.execute(statement["text"], _values(statement))
+
+
+def _what_the_engine_said(connection: sqlite3.Connection, statements: list[Statement]) -> list[str]:
+    """Run the statements and keep the engine's complaint when it refuses one."""
+    refused: list[str] = []
+    try:
+        _run(connection, statements)
+    except sqlite3.IntegrityError as complaint:
+        refused.append(str(complaint))
+    return refused
 
 
 def _spell_and_run(
@@ -285,7 +271,7 @@ def _keys_of(connection: sqlite3.Connection, table: str) -> set[tuple[str, str, 
 def _declared_keys(scenario: dict) -> set[tuple[str, str, str]]:
     """Every foreign key the scenario's tables declare, in the same shape."""
     return {
-        (column["name"], *str(column["references"]).rpartition(".")[::2])
+        (column["name"], column["references"]["table"], column["references"]["column"])
         for table in scenario["schema"].values()
         for column in table["columns"]
         if column["references"] is not None
@@ -317,7 +303,7 @@ def _a_table_whose_status_is_one_of(scenario: dict, table: str, one: str, other:
     scenario["table"] = table
 
     statuses = _column("value", "text", primary_key=True)
-    status = _pointing_at(_column("status", "text"), f"{THE_STATUSES}.value")
+    status = _pointing_at(_column("status", "text"), f"{THE_STATUSES}.value", "refuse")
 
     _spell_and_run(
         connection,
@@ -351,45 +337,6 @@ def _an_order_whose_status_is(scenario: dict, value: str) -> None:
     connection.execute(
         f'INSERT INTO "{scenario["table"]}" ("id", "status") VALUES (?, ?)', (1, value)
     )
-
-
-@given("a stamp table on a real database")
-def _a_stamp_table(scenario: dict) -> None:
-    connection = _a_database()
-    scenario["connection"] = connection
-    _spell_and_run(
-        connection,
-        _operation(
-            "create_table",
-            "_declaro_meta",
-            {},
-            [_column("key", "text", primary_key=True), _column("value", "text")],
-            [],
-            [],
-            [],
-            [],
-        ),
-        "sqlite",
-    )
-
-
-@given(parsers.re(r'a table "(?P<table>[^"]+)" that the user made$'))
-def _a_table_the_user_made(scenario: dict, table: str) -> None:
-    _spell_and_run(
-        scenario["connection"],
-        _operation(
-            "create_table",
-            table,
-            {},
-            [_column("id", "integer", primary_key=True)],
-            [],
-            [],
-            [],
-            [],
-        ),
-        "sqlite",
-    )
-    scenario["table"] = table
 
 
 # --- what a scenario establishes: a table this file then rebuilds ------------
@@ -428,7 +375,7 @@ def _a_column_from(row: dict[str, str]) -> Column:
         },
     )
     points_at = row.get("references", "").strip()
-    return _pointing_at(column, points_at or None)
+    return _pointing_at(column, points_at or None, "refuse")
 
 
 def _read(datatable: list[list[str]]) -> list[dict[str, str]]:
@@ -490,17 +437,48 @@ def _declared(scenario: dict, declaring: Table) -> None:
     )
 
 
+# A CONDITION THAT NARROWS BY NOTHING. A key and a promise of uniqueness read
+# the columns they name and never the rule, and `Constraint.rule` is a
+# `Condition`, so this is the value that says the rule is not where the meaning
+# is.
+_NARROWS_BY_NOTHING: Condition = {"each": {}, "any_of": [], "none_of": []}
+
+
+def _the_key_the_table_holds(columns: list[Column]) -> tuple[list[Column], list[Constraint]]:
+    """The columns, and the rule that a key over more than one of them is.
+
+    PRIMARY KEY WRITTEN TWICE IN ONE CREATE TABLE IS WHAT NO ENGINE TAKES. A
+    Gherkin table marking two columns as the key means one key over both, in the
+    order the table wrote them, so it becomes a rule about the table and neither
+    column carries the facet any more.
+    """
+    named = [column["name"] for column in columns if column["facets"].get("primary_key") is True]
+    spanning: dict[bool, Callable[[], tuple[list[Column], list[Constraint]]]] = {
+        False: lambda: (columns, []),
+        True: lambda: (
+            [_without_facet(column, "primary_key") for column in columns],
+            [
+                Constraint(
+                    name=f"pk_{'_'.join(named)}",
+                    kind="primary_key",
+                    columns=named,
+                    rule=_NARROWS_BY_NOTHING,
+                )
+            ],
+        ),
+    }
+    return spanning[len(named) > 1]()
+
+
 @given(parsers.re(r'a table "(?P<name>[^"]+)" with columns:$'))
 def _a_table_with_columns(scenario: dict, name: str, datatable: list[list[str]]) -> None:
     """One table, its columns read off the Gherkin table under the sentence."""
+    columns, constraints = _the_key_the_table_holds(
+        _with_a_key([_a_column_from(row) for row in _read(datatable)])
+    )
     _declared(
         scenario,
-        Table(
-            name=name,
-            columns=_with_a_key([_a_column_from(row) for row in _read(datatable)]),
-            indexes=[],
-            constraints=[],
-        ),
+        Table(name=name, columns=columns, indexes=[], constraints=constraints),
     )
 
 
@@ -518,21 +496,14 @@ _BOOKS = Table(
     columns=[
         _column("id", "integer", primary_key=True),
         _column("title", "text", nullable=True),
-        _pointing_at(_column("author_id", "integer", nullable=True), "authors.id"),
+        _pointing_at(_column("author_id", "integer", nullable=True), "authors.id", "refuse"),
     ],
-    indexes=[],
-    constraints=[],
-)
-_NEEDS_REBUILDING = Table(
-    name="widgets",
-    columns=[_column("id", "integer", primary_key=True), _column("label", "text", nullable=True)],
     indexes=[],
     constraints=[],
 )
 
 _TABLES_A_SENTENCE_MEANS: dict[str, list[Table]] = {
     "tables with foreign key relationships": [_AUTHORS, _BOOKS],
-    "a table requiring reconstruction": [_NEEDS_REBUILDING],
 }
 
 
@@ -546,13 +517,6 @@ def _the_tables_a_sentence_means(scenario: dict, sentence: str) -> None:
     """A sentence that names a shape instead of writing it out."""
     for table in _TABLES_A_SENTENCE_MEANS[sentence]:
         _declared(scenario, table)
-
-
-@given("foreign keys are enabled")
-def _foreign_keys_are_enabled(scenario: dict) -> None:
-    """The database this file opens enforces them, and says so when asked."""
-    ((enforced,),) = scenario["connection"].execute("PRAGMA foreign_keys").fetchall()
-    assert enforced == 1, "a lookup nothing enforces accepts every value"
 
 
 @given(
@@ -618,7 +582,6 @@ def _rows_nothing_should_have_accepted(scenario: dict, datatable: list[list[str]
 _ROWS_ARRIVE: dict[str, Callable[[dict, list[list[str]]], None]] = {
     "the table contains data:": _rows_into_one_table,
     "the table contains hierarchical data:": _rows_into_one_table,
-    "the table contains data with incompatible types:": _rows_into_one_table,
     "the tables contain related data:": _rows_into_the_table_each_names,
     "the books table contains invalid foreign key data:": _rows_nothing_should_have_accepted,
     "the books table has orphaned foreign keys (data corruption):": (
@@ -700,39 +663,49 @@ def _the_rows_a_sentence_means(scenario: dict, sentence: str) -> None:
 
 # --- what a scenario does ----------------------------------------------------
 
-# WHICH CHANGE EACH PHRASE STANDS FOR. Two scenarios differ by the change and by
-# the engine, so the words are read and the change is a row.
-_A_CHANGE: dict[str, Operation] = {
-    "adding a column": _operation(
-        "add_column",
-        "invoices",
-        {"column": "settled_on"},
-        [_column("settled_on", "date", nullable=True)],
-        [],
-        [],
-        [],
-        [],
-    ),
-    "dropping a column": _operation(
-        "drop_column",
-        "invoices",
-        {"column": "memo"},
-        [_column("id", "integer"), _column("settled_on", "date", nullable=True)],
-        [],
-        [],
-        ["id", "settled_on"],
-        [],
-    ),
+# THE WORD A SCENARIO WRITES FOR AN ENGINE -> the engine handed to the function.
+# A scenario that means an engine nobody ships says so in English rather than
+# naming a database, because which unshipped database it is does not matter.
+_WHICH_ENGINE: dict[str | None, str] = {
+    None: "sqlite",
+    "an engine this package does not ship": "mysql",
+}
+
+# THE WORDS A SCENARIO WRITES FOR A DEFAULT -> the facets the column carries.
+_DEFAULTING_TO: dict[str, dict[str, Value]] = {
+    "nothing": {},
+    "the number 0": {"default": 0},
+    "(now())": {"default": "(now())"},
 }
 
 
 @when(
-    parsers.re(r"(?P<change>adding a column|dropping a column) is spelled for (?P<engine>[a-z]+)$")
+    parsers.re(
+        r'a column "(?P<name>[^"]+)" declared "(?P<declared>[^"]+)" defaulting to '
+        r"(?P<default>nothing|the number 0|\(now\(\)\)) is added on "
+        r"(?P<engine>an engine this package does not ship|[a-z]+)$"
+    )
 )
-def _a_change_is_spelled_for(scenario: dict, change: str, engine: str) -> None:
-    scenario["operation"] = _A_CHANGE[change]
-    scenario["engine"] = engine
-    scenario["answer"] = spell_operation(_A_CHANGE[change], engine)
+def _a_column_is_added(scenario: dict, name: str, declared: str, default: str, engine: str) -> None:
+    """One declared column, added on one engine, and what came back kept.
+
+    THE ANSWERS PILE UP because one scenario adds two columns and compares the
+    two statements. `answer` is the last one, which is what every other Then
+    reads.
+    """
+    scenario["engine"] = _WHICH_ENGINE.get(engine, engine)
+    scenario["operation"] = _operation(
+        "add_column",
+        "invoices",
+        {"column": name},
+        [_column(name, declared, **_DEFAULTING_TO[default])],
+        [],
+        [],
+        [],
+        [],
+    )
+    scenario["answer"] = spell_operation(scenario["operation"], scenario["engine"])
+    scenario.setdefault("answers", []).append(scenario["answer"])
 
 
 @when("an operation no engine table covers is spelled")
@@ -747,100 +720,51 @@ def _an_operation_no_table_covers(scenario: dict) -> None:
     scenario["answer"] = spell_operation(scenario["operation"], "sqlite")
 
 
-# The word a scenario writes for a speller -> the engine it is spelling for.
-_WHOSE_SPELLING: dict[str, Engine] = {
-    "sqlite_type": "sqlite",
-    "postgresql_type": "postgresql",
-    "sqlite_default": "sqlite",
-    "postgresql_default": "postgresql",
-}
+def _a_rule_comparing(column: str, operator: str, value: Value) -> Condition:
+    """One declared rule, as data: `Constraint.rule` is a `Condition`.
 
-
-@when(parsers.re(r'(?P<speller>sqlite_type|postgresql_type) is given "(?P<declared>[^"]*)"$'))
-def _a_type_is_spelled(scenario: dict, speller: str, declared: str) -> None:
-    scenario["answer"] = type_spelled(declared, _WHOSE_SPELLING[speller])
-
-
-@when(
-    parsers.re(
-        r"(?P<speller>sqlite_default|postgresql_default) is given "
-        r'(?:the number (?P<number>-?\d+)|"(?P<text>[^"]*)")$'
-    )
-)
-def _a_default_is_spelled(
-    scenario: dict, speller: str, number: str | None, text: str | None
-) -> None:
-    """One step for both spellers, over the two ways a scenario writes a value."""
-    written: dict[bool, Callable[[], Value]] = {
-        True: lambda: int(number or "0"),
-        False: lambda: text,
+    A CHECK IS NOT A STRING ANYWHERE IN THIS PACKAGE. The scenario says the
+    comparison in English, the step writes it down as the declaration's own
+    type, and the engine sees the text only after `spell_operation` has written
+    it.
+    """
+    return {
+        "each": {column: {"operator": operator, "value": value, "ignore_case": False}},
+        "any_of": [],
+        "none_of": [],
     }
-    scenario["answer"] = default_clause(written[number is not None](), _WHOSE_SPELLING[speller])
 
 
 @when(
     parsers.re(
-        r'same_type compares "(?P<declared>[^"]*)" and "(?P<live>[^"]*)" '
-        r'on "(?P<engine>[^"]*)"$'
+        r'a table is created with a check "(?P<name>[^"]+)" that '
+        r'"(?P<column>[^"]+)" must be greater than (?P<value>-?\d+)$'
     )
 )
-def _two_spellings_are_compared(scenario: dict, declared: str, live: str, engine: str) -> None:
-    scenario["answer"] = same_type(declared, live, engine)
-
-
-@when(
-    parsers.re(
-        r'column_definition is given a text column "(?P<name>[^"]+)" '
-        r'for "(?P<engine>[^"]*)"$'
+def _a_table_is_created_with_a_check(scenario: dict, name: str, column: str, value: str) -> None:
+    """A table whose one column carries a declared rule, made on a real database."""
+    constraint = Constraint(
+        name=name,
+        kind="check",
+        columns=[column],
+        rule=_a_rule_comparing(column, "gt", int(value)),
     )
-)
-def _a_column_is_defined(scenario: dict, name: str, engine: str) -> None:
-    scenario["answer"] = column_definition(_column(name, "text"), engine)
-
-
-@when(
-    parsers.re(
-        r'constraint_clause is given a check "(?P<name>[^"]+)" on '
-        r'"(?P<column>\w+) > (?P<value>-?\d+)"$'
-    )
-)
-def _a_constraint_is_written(scenario: dict, name: str, column: str, value: str) -> None:
-    scenario["name"] = name
-    scenario["answer"] = constraint_clause(
-        {
-            "name": name,
-            "columns": [column],
-            "rule": {
-                "each": {column: {"operator": "gt", "value": int(value), "ignore_case": False}},
-                "any_of": [],
-                "none_of": [],
-            },
-        },
-        "sqlite",
-    )
-
-
-@when(parsers.re(r"a boolean column is spelled for (?P<engine>[a-z]+)$"))
-def _a_boolean_column_is_spelled(scenario: dict, engine: str) -> None:
-    scenario["engine"] = engine
-    scenario["answer"] = spell_operation(
+    scenario["connection"] = _a_database()
+    scenario["table"] = "ledger"
+    scenario["answer"] = _spell_and_run(
+        scenario["connection"],
         _operation(
-            "add_column",
-            "invoices",
-            {"column": "settled"},
-            [_column("settled", "boolean", nullable=False)],
+            "create_table",
+            "ledger",
+            {},
+            [_column(column, "integer", primary_key=True)],
             [],
-            [],
+            [constraint],
             [],
             [],
         ),
-        engine,
+        "sqlite",
     )
-
-
-@when("a column is spelled for an engine this package does not ship")
-def _a_column_is_spelled_for_an_engine_we_do_not_ship(scenario: dict) -> None:
-    scenario["answer"] = column_definition(_column("settled_on", "date"), "mysql")
 
 
 _A_LOOKUP_CHANGE: dict[str, str] = {
@@ -849,15 +773,23 @@ _A_LOOKUP_CHANGE: dict[str, str] = {
 }
 
 
-@when(parsers.re(r'"(?P<value>[^"]*)" is (?P<change>added to|taken out of) the statuses$'))
-def _a_status_is_changed(scenario: dict, value: str, change: str) -> None:
+@when(
+    parsers.re(
+        r'"(?P<value>[^"]*)" is (?P<change>added to|taken out of) the statuses'
+        r"(?: on (?P<engine>an engine this package does not ship|[a-z]+))?$"
+    )
+)
+def _a_status_is_changed(scenario: dict, value: str, change: str, engine: str | None) -> None:
     """Add or remove one value, and run it when the scenario has a database.
 
-    `remove_enum_values` is not a word `OperationKind` carries. The step asks
-    for it by the name the change would have, so the fault names the gap rather
-    than this file inventing a spelling nobody declared.
+    THE ENGINE IS ALLOWED TO SAY NO HERE, and what it said is kept rather than
+    thrown up the stack. Taking away a value a row still holds breaks the key
+    that column has into the lookup, so the engine refuses the delete, and a
+    scenario about that refusal cannot reach its Then if the refusal ends the
+    step.
     """
     scenario["value"] = value
+    scenario["engine"] = _WHICH_ENGINE.get(engine, engine)
     operation = _operation(
         _A_LOOKUP_CHANGE[change],
         scenario.get("table", "orders"),
@@ -868,65 +800,12 @@ def _a_status_is_changed(scenario: dict, value: str, change: str) -> None:
         [],
         [value],
     )
-    scenario["answer"] = spell_operation(operation, "sqlite")
-    ran: dict[bool, Callable[[], None]] = {
-        True: lambda: _run(scenario["connection"], scenario["answer"]),
-        False: lambda: None,
+    scenario["answer"] = spell_operation(operation, scenario["engine"])
+    ran: dict[bool, Callable[[], list[str]]] = {
+        True: lambda: _what_the_engine_said(scenario["connection"], scenario["answer"]),
+        False: lambda: [],
     }
-    ran["connection" in scenario and isinstance(scenario["answer"], list)]()
-
-
-_A_MIGRATION_STATEMENT: dict[str, Callable[[Engine], Any]] = {
-    "stamping the schema's hash": lambda engine: stamping_the_schema_hash(
-        engine, "declaro_todo", "9f2c"
-    ),
-    "listing the user's tables": listing_the_user_tables,
-}
-
-
-@when(
-    parsers.re(
-        r"(?P<what>stamping the schema's hash|listing the user's tables) is spelled for "
-        r"(?:(?P<engine>[a-z]+)|an engine this package does not ship)$"
-    )
-)
-def _a_migration_statement_is_spelled(scenario: dict, what: str, engine: str | None) -> None:
-    scenario["answer"] = _A_MIGRATION_STATEMENT[what](engine or "mysql")
-
-
-@when(parsers.re(r'"_placeholder" is asked for "(?P<engine>[^"]*)"$'))
-def _the_placeholder_is_asked_for(scenario: dict, engine: str) -> None:
-    scenario["answer"] = placeholder(engine)
-
-
-_HOW_MANY_NAMES: dict[str, int] = {"a": 1, "two": 2}
-
-
-@when(parsers.re(r'(?P<count>a|two) temporary names? (?:is|are) made for "(?P<table>[^"]+)"$'))
-def _temporary_names_are_made(scenario: dict, count: str, table: str) -> None:
-    scenario["table"] = table
-    scenario["names"] = [temporary_name(table) for _ in range(_HOW_MANY_NAMES[count])]
-    scenario["answer"] = scenario["names"][0]
-
-
-@when("the same key is stamped twice with different values")
-def _the_same_key_is_stamped_twice(scenario: dict) -> None:
-    connection: sqlite3.Connection = scenario["connection"]
-    for value in ("9f2c", "a10d"):
-        statement = stamping_the_schema_hash("sqlite", "declaro_todo", value)
-        assert isinstance(statement, dict) and "text" in statement, statement
-        _run(connection, [statement])
-    scenario["value"] = "a10d"
-
-
-@when("the user-tables query is run")
-def _the_user_tables_query_is_run(scenario: dict) -> None:
-    statement = listing_the_user_tables("sqlite")
-    assert isinstance(statement, dict) and "text" in statement, statement
-    scenario["rows"] = [
-        row[0]
-        for row in scenario["connection"].execute(statement["text"], _values(statement)).fetchall()
-    ]
+    scenario["refused"] = ran["connection" in scenario and isinstance(scenario["answer"], list)]()
 
 
 # --- what a scenario does: the changes that rebuild a table ------------------
@@ -1017,12 +896,7 @@ def _a_column_is_altered(
 
 @when(parsers.re(r'^I drop column "(?P<name>[^"]+)"$'))
 def _a_column_is_dropped(scenario: dict, name: str) -> None:
-    """The table without one of its columns, which SQLite reaches by rebuilding.
-
-    IT IS ALSO SPELLED FOR THE ENGINE THAT DROPS IN PLACE, because one scenario
-    asks whether a simple drop can be a single ALTER TABLE. The rows are read
-    on the engine this file can run.
-    """
+    """The table without one of its columns, which SQLite reaches by rebuilding."""
     where, column = _where(scenario, name, None)
     declared = scenario["schema"][where]
     columns = [held for held in declared["columns"] if held["name"] != column]
@@ -1036,7 +910,6 @@ def _a_column_is_dropped(scenario: dict, name: str) -> None:
         [held["name"] for held in columns],
         [],
     )
-    scenario["elsewhere"] = spell_operation(operation, "postgresql")
     scenario["schema"][where] = {**declared, "columns": columns}
     _carried_out(scenario, operation)
 
@@ -1050,14 +923,25 @@ def _a_column_is_dropped(scenario: dict, name: str) -> None:
 def _a_foreign_key_is_changed(
     scenario: dict, change: str, child: str, parent: str | None, cascade: str | None
 ) -> None:
-    """A column made to point at a parent key, or made to point at nothing."""
+    """A column made to point at a parent key, or made to point at nothing.
+
+    WHAT THE SENTENCE SAYS ABOUT THE CHILD ROW. A sentence ending "with ON
+    DELETE CASCADE" declares that deleting the parent takes the children with
+    it, and a sentence saying nothing declares that the delete is refused, which
+    is what a parent with children means when nobody writes a rule.
+    """
     where, column = _where(scenario, child, None)
     pointing: dict[str, str | None] = {"add": parent, "drop": None}
+    rule: dict[bool, OnDelete] = {True: "cascade", False: "refuse"}
     _rebuilt(
         scenario,
         where,
         [
-            _only(declared, column, lambda held: _pointing_at(held, pointing[change]))
+            _only(
+                declared,
+                column,
+                lambda held: _pointing_at(held, pointing[change], rule[cascade is not None]),
+            )
             for declared in scenario["schema"][where]["columns"]
         ],
         {"column": column},
@@ -1110,7 +994,6 @@ def _a_copy_that_cannot_work(scenario: dict) -> None:
 # THE SENTENCES THAT ASK FOR A REBUILD WITHOUT NAMING A COLUMN.
 _A_REBUILD_A_SENTENCE_MEANS: dict[str, Callable[[dict], None]] = {
     "I reconstruct a table with column changes": _the_first_table_loosened,
-    "I perform table reconstruction": _the_first_table_loosened,
     "I reconstruct with entirely new column names": _entirely_new_column_names,
     "reconstruction fails during data copy": _a_copy_that_cannot_work,
 }
@@ -1125,47 +1008,39 @@ def _the_rebuild_a_sentence_means(scenario: dict, sentence: str) -> None:
 # --- what has to be true -----------------------------------------------------
 
 
-@then("one statement comes back")
-def _one_statement_comes_back(scenario: dict) -> None:
+def _spelled(scenario: dict) -> list[Statement]:
+    """What came back, when what came back was statements rather than a refusal."""
     answer = scenario["answer"]
-    assert isinstance(answer, list), f"a spelled change comes back as a list: {answer}"
-    assert len(answer) == 1, (
-        f"adding a column is one ALTER TABLE on {scenario['engine']}, and "
-        f"{len(answer)} statements came back: {answer}"
+    assert isinstance(answer, list), f"the change could not be spelled: {answer}"
+    return answer
+
+
+@then("the column arrives, and the table it lands on is never dropped")
+def _the_column_arrives_and_the_table_stays(scenario: dict) -> None:
+    """PostgreSQL alters a table in place, so the rows it holds are never moved."""
+    column = scenario["operation"]["detail"]["column"]
+    text = [statement["text"] for statement in _spelled(scenario)]
+    assert [line for line in text if f'ADD COLUMN "{column}"' in line] != [], (
+        f"nothing here adds {column!r} to the table: {text}"
+    )
+    assert [line for line in text if "DROP TABLE" in line] == [], (
+        f"the table and every row in it goes, to add one column on {scenario['engine']}: {text}"
     )
 
 
-@then("several statements come back, and they rebuild the table")
-def _several_statements_rebuild_the_table(scenario: dict) -> None:
-    """The four moves of a rebuild, in the order they have to run.
+@then(parsers.re(r"the statement carries the text (?P<fragment>.+)$"))
+def _the_statement_carries_the_text(scenario: dict, fragment: str) -> None:
+    """Every scenario that reads one fragment out of what was spelled."""
+    text = " ".join(statement["text"] for statement in _spelled(scenario))
+    assert fragment in text, f"the statement reads {text!r}, and the scenario asks for {fragment!r}"
 
-    SQLite cannot drop a column out of a table that carries constraints, so the
-    change is a new table, the rows copied into it, the old one gone and the new
-    one renamed into its place.
-    """
-    answer = scenario["answer"]
-    assert isinstance(answer, list), f"a spelled change comes back as a list: {answer}"
-    table = scenario["operation"]["table"]
-    temporary = temporary_name(table)
-    text = [statement["text"] for statement in answer]
 
-    moves = [
-        f'CREATE TABLE "{temporary}"',
-        f'INSERT INTO "{temporary}"',
-        f'DROP TABLE "{table}"',
-        f'ALTER TABLE "{temporary}" RENAME TO "{table}"',
-    ]
-    found = [
-        next((position for position, line in enumerate(text) if move in line), -1) for move in moves
-    ]
-
-    assert -1 not in found, (
-        "a rebuild makes a new table, copies the rows into it, drops the old "
-        f"one and renames the new one; these moves are missing: "
-        f"{[move for move, at in zip(moves, found, strict=True) if at == -1]}\n{text}"
-    )
-    assert found == sorted(found), (
-        f"the rebuild's statements came back in an order that cannot run: {text}"
+@then("the two statements are the same")
+def _the_two_statements_are_the_same(scenario: dict) -> None:
+    """A column declared uuid and a column declared text are one column here."""
+    first, second = scenario["answers"]
+    assert [one["text"] for one in first] == [one["text"] for one in second], (
+        f"SQLite stores both in the same storage class, and they were spelled {first} and {second}"
     )
 
 
@@ -1182,19 +1057,9 @@ def _a_fault_names_the_operation_and_the_engine(scenario: dict) -> None:
     )
 
 
-@then(parsers.re(r'it (?:answers|gives back) "(?P<expected>[^"]*)"$'))
-def _it_answers(scenario: dict, expected: str) -> None:
-    """Every scenario that reads one quoted answer, whichever verb it uses."""
-    assert scenario["answer"] == expected, (
-        f"it answered {scenario['answer']!r} where the scenario asks for {expected!r}"
-    )
-
-
 @then("the statement writes it as that engine's own boolean")
 def _the_statement_writes_that_engines_boolean(scenario: dict) -> None:
-    answer = scenario["answer"]
-    assert isinstance(answer, list), f"a spelled change comes back as a list: {answer}"
-    text = answer[0]["text"]
+    text = _spelled(scenario)[0]["text"]
     assert "boolean" in text, (
         f"{scenario['engine']} has a boolean of its own and the statement does not name it: {text}"
     )
@@ -1220,7 +1085,6 @@ def _the_statement_writes_that_engines_boolean(scenario: dict) -> None:
 
 
 @then("it is refused, naming the engines it has")
-@then("it refuses and names the engines it has")
 def _it_is_refused_naming_the_engines(scenario: dict) -> None:
     answer = scenario["answer"]
     assert set(answer) == A_FAULT, f"a refusal is a Fault, returned and never raised: {answer}"
@@ -1232,27 +1096,25 @@ def _it_is_refused_naming_the_engines(scenario: dict) -> None:
     )
 
 
-@then("it answers that they are the same")
-def _it_answers_that_they_are_the_same(scenario: dict) -> None:
-    assert scenario["answer"] is True, (
-        f"a declared uuid is a TEXT column on SQLite, and it answered {scenario['answer']!r}"
+@then(parsers.re(r'the CREATE TABLE names the check "(?P<name>[^"]+)"$'))
+def _the_create_table_names_the_check(scenario: dict, name: str) -> None:
+    """A rule the engine can report by name is a rule somebody can find again."""
+    text = " ".join(statement["text"] for statement in _spelled(scenario))
+    assert f'CONSTRAINT "{name}" CHECK (' in text, (
+        f"the table was created as {text!r}, and the scenario declares a check called {name!r}"
     )
 
 
-@then('it answers "name" TEXT')
-def _it_answers_a_quoted_name_and_a_type(scenario: dict) -> None:
-    assert scenario["answer"] == '"name" TEXT', (
-        f"a column is its quoted name and the type this engine stores it in, "
-        f"and it answered {scenario['answer']!r}"
-    )
-
-
-@then(parsers.re(r'it answers a CHECK clause naming "(?P<name>[^"]+)"$'))
-def _it_answers_a_check_clause(scenario: dict, name: str) -> None:
-    answer = scenario["answer"]
-    assert isinstance(answer, str), f"a clause is text a CREATE TABLE carries: {answer}"
-    assert answer.startswith(f'CONSTRAINT "{name}" CHECK ('), (
-        f"a CREATE TABLE carries a constraint by name, and this reads {answer!r}"
+@then(parsers.re(r'the engine refuses a row whose "(?P<column>[^"]+)" is (?P<value>-?\d+)$'))
+def _the_engine_refuses_a_row(scenario: dict, column: str, value: str) -> None:
+    """A rule the engine only carries in its text enforces nothing, so ask it."""
+    refused: list[str] = []
+    try:
+        _insert(scenario["connection"], scenario["table"], {column: int(value)})
+    except sqlite3.IntegrityError as complaint:
+        refused.append(str(complaint))
+    assert refused != [], (
+        f"the engine stored {value} in {column!r}, so the check reached the text and nothing else"
     )
 
 
@@ -1301,81 +1163,17 @@ def _the_engine_refuses_because_a_row_points_at_it(scenario: dict) -> None:
     )
 
 
-@then("the statement carries the value with its quote doubled")
-def _the_statement_carries_the_value_with_its_quote_doubled(scenario: dict) -> None:
-    answer = scenario["answer"]
-    assert isinstance(answer, list), f"the change could not be spelled: {answer}"
-    doubled = scenario["value"].replace("'", "''")
-    carrying = [statement["text"] for statement in answer if doubled in statement["text"]]
-    assert carrying != [], (
-        f"no statement carries {doubled!r}: {[statement['text'] for statement in answer]}"
+@then(parsers.re(r'the value is marked "(?P<mark>[^"]+)" and travels beside the statement$'))
+def _the_value_is_marked_and_travels_beside_it(scenario: dict, mark: str) -> None:
+    """The value never reaches the text, so there is nothing in it to escape."""
+    (statement,) = _spelled(scenario)
+    assert mark in statement["text"], (
+        f"{scenario['engine']} reads {mark!r} where a value goes, and the "
+        f"statement reads {statement['text']!r}"
     )
-
-
-@then("the second value is what is stored")
-def _the_second_value_is_what_is_stored(scenario: dict) -> None:
-    stored = (
-        scenario["connection"]
-        .execute('SELECT "value" FROM "_declaro_meta" WHERE "key" = ?', ("declaro_todo",))
-        .fetchall()
-    )
-    assert [row[0] for row in stored] == [scenario["value"]], (
-        f"stamping the same key twice left {stored}, and the second stamp is the one that is true"
-    )
-
-
-@then("there is one row, not two")
-def _there_is_one_row_not_two(scenario: dict) -> None:
-    ((count,),) = scenario["connection"].execute('SELECT count(*) FROM "_declaro_meta"').fetchall()
-    assert count == 1, f"the stamp is written over itself, and there are {count} rows"
-
-
-@then(parsers.re(r'it names "(?P<table>[^"]+)" and not the stamp table$'))
-def _it_names_the_users_table_and_not_ours(scenario: dict, table: str) -> None:
-    assert scenario["rows"] == [table], (
-        f"the query answers with the tables a user made, and it answered {scenario['rows']}"
-    )
-
-
-@then("a statement comes back")
-def _a_statement_comes_back(scenario: dict) -> None:
-    answer = scenario["answer"]
-    assert set(answer) == {"text", "parameters"}, f"a Statement carries two things: {answer}"
-    assert answer["text"].strip() != "", "a statement with no text runs nowhere"
-
-
-@then("it begins with the temporary prefix")
-def _it_begins_with_the_temporary_prefix(scenario: dict) -> None:
-    assert scenario["answer"].startswith(TEMPORARY_PREFIX), (
-        f"orphan recovery looks for {TEMPORARY_PREFIX!r} and the name is {scenario['answer']!r}"
-    )
-
-
-@then("it carries the table's own name")
-def _it_carries_the_tables_own_name(scenario: dict) -> None:
-    assert scenario["table"] in scenario["answer"], (
-        f"a leftover table nobody can trace back to {scenario['table']!r} is a "
-        f"table nobody dares drop: {scenario['answer']!r}"
-    )
-
-
-@then("they are not the same name")
-def _they_are_not_the_same_name(scenario: dict) -> None:
-    first, second = scenario["names"]
-    assert first != second, (
-        "two temporary names for one table are the same, because a pure "
-        "function reads no random source. The rebuild drops a leftover "
-        "temporary table before it makes one, which is what a tail was for"
-    )
-
-
-@then("the tail is exactly as wide as the constant says")
-def _the_tail_is_as_wide_as_the_constant_says(scenario: dict) -> None:
-    tail = scenario["answer"].removeprefix(TEMPORARY_PREFIX).removeprefix(scenario["table"])
-    assert tail != "", (
-        "the name carries no tail. A random tail needs a random source, and "
-        "`fn spell_operation` is pure, so the rebuild drops a leftover "
-        "temporary table instead of telling two of them apart"
+    assert _values(statement) == (scenario["value"],), (
+        f"the value has to travel beside the statement, and {statement} carries "
+        f"{_values(statement)}"
     )
 
 
@@ -1531,7 +1329,6 @@ def _new_inserts_use_the_default(scenario: dict) -> None:
 _THE_CHANGE_WAS_REFUSED = (
     "the operation fails with constraint violation",
     "the operation fails with foreign key violation",
-    "the operation fails during data copy",
     "foreign key check fails after reconstruction",
 )
 
@@ -1545,9 +1342,10 @@ def _the_change_was_refused(scenario: dict, sentence: str) -> None:
     )
 
 
-# THE SENTENCES THAT SAY NOTHING CHANGED, because the change was rolled back.
+# THE SENTENCES THAT SAY THE CHANGE LEFT NOTHING BEHIND IT. A refused change is
+# rolled back by whoever owns the COMMIT, and what a caller sees afterwards is
+# the table it had before, which is what these ask the engine for.
 _NOTHING_CHANGED = (
-    "the transaction is rolled back",
     "the original table is unchanged",
     "the original schema is unchanged",
 )
@@ -1560,20 +1358,6 @@ def _nothing_changed(scenario: dict, sentence: str) -> None:
     assert now == scenario["before_schema"], (
         f"{sentence!r}, and the engine now keeps {now} where it kept {scenario['before_schema']}"
     )
-
-
-@then("the temp table is cleaned up")
-def _the_temp_table_is_cleaned_up(scenario: dict) -> None:
-    """A rolled-back rebuild leaves no half-built table behind."""
-    left = (
-        scenario["connection"]
-        .execute(
-            'SELECT "name" FROM "sqlite_master" WHERE "type" = ? AND "name" = ?',
-            ("table", temporary_name(scenario["table"])),
-        )
-        .fetchall()
-    )
-    assert left == [], f"the rebuild left {left} behind for the next attempt to trip over"
 
 
 # --- what has to be true of the keys and the indexes -------------------------
@@ -1645,11 +1429,7 @@ def _a_child_row_with_no_parent(scenario: dict, sentence: str) -> None:
 
 
 # THE SENTENCES THAT ASK THE ENGINE WHETHER ANY KEY IS BROKEN.
-_NO_KEY_IS_BROKEN = (
-    "foreign key checks pass after reconstruction",
-    "no foreign key violations remain after reconstruction",
-    "foreign key checks are performed",
-)
+_NO_KEY_IS_BROKEN = ("foreign key checks pass after reconstruction",)
 
 
 @then(_one_of(_NO_KEY_IS_BROKEN))
@@ -1673,19 +1453,6 @@ def _an_index_survived_the_rebuild(scenario: dict, name: str | None) -> None:
     )[name is not None]
     assert [one for one in wanted if one not in held] == [], (
         f"the rebuilt table carries {held} and the scenario asks for {wanted}"
-    )
-
-
-@then("only explicit CREATE INDEX statements are recreated")
-def _only_declared_indexes_are_recreated(scenario: dict) -> None:
-    """A UNIQUE facet makes SQLite an index of its own, and a rebuild that
-    wrote that one out again would make it twice."""
-    made = [
-        statement["text"] for statement in scenario["answer"] if "CREATE INDEX" in statement["text"]
-    ]
-    declared = scenario["schema"][scenario["table"]]["indexes"]
-    assert len(made) == len(declared), (
-        f"the rebuild spells {made} where the table declares {[i['name'] for i in declared]}"
     )
 
 
@@ -1714,36 +1481,27 @@ def _no_data_is_copied(scenario: dict) -> None:
     assert copying == [], f"the rebuild carries rows across with {copying}"
 
 
+@then("the change came back spelled, not refused")
+def _the_change_came_back_spelled(scenario: dict) -> None:
+    """A rebuild that carries no row across is still a rebuild.
+
+    THIS IS WHERE A WARNING WOULD HAVE GONE. Nothing in this package logs: a
+    refusal comes back in the return, so a caller who wants to know whether the
+    rows survived reads the answer rather than a file somewhere.
+    """
+    answer = scenario["answer"]
+    assert isinstance(answer, list), (
+        f"a rebuild that carries no row across is still a rebuild, and this came "
+        f"back refused: {answer}"
+    )
+
+
 @then("deleting category cascades to products")
 def _deleting_the_parent_cascades(scenario: dict) -> None:
     """ON DELETE CASCADE, which `Column.references` cannot say."""
     scenario["connection"].execute('DELETE FROM "categories" WHERE "id" = 1')
     left = _rows_of(scenario["connection"], "products")
     assert left == [], f"the child rows are still there: {left}"
-
-
-# THE SENTENCES NOTHING HERE CAN SATISFY, and what each is waiting on. A step
-# that asserted nothing would turn its scenario green on a body nobody wrote, so
-# each one fails naming the decision it needs.
-_NOBODY_CAN_ANSWER: dict[str, str] = {
-    "a warning is logged": (
-        "a failure comes back in the return here and is never logged, so "
-        "`fn spell_operation` writes nothing anywhere"
-    ),
-    "foreign keys are temporarily disabled": (
-        "`PRAGMA foreign_keys` is a no-op inside a transaction, so it cannot be "
-        "one of the statements that come back; the applier that owns the COMMIT "
-        "is what turns enforcement off"
-    ),
-}
-
-
-@then(_one_of(_NOBODY_CAN_ANSWER))
-def _a_sentence_nothing_here_satisfies(scenario: dict, sentence: str) -> None:
-    """Every line this function cannot answer, failing by name."""
-    pytest.fail(
-        f"{sentence!r}: {_NOBODY_CAN_ANSWER[sentence]}. The line needs a decision, not more code."
-    )
 
 
 @then("the composite primary key is preserved")
@@ -1758,13 +1516,3 @@ def _the_composite_primary_key_is_preserved(scenario: dict) -> None:
         if row[5] > 0
     ]
     assert len(keys) > 1, f"the rebuilt table has {keys} as its primary key"
-
-
-@then("the operation uses direct ALTER TABLE DROP COLUMN")
-def _the_drop_is_one_statement_where_the_engine_allows_it(scenario: dict) -> None:
-    """PostgreSQL drops a column in place, which is one statement and no copy."""
-    elsewhere = scenario["elsewhere"]
-    assert isinstance(elsewhere, list) and len(elsewhere) == 1, (
-        f"a simple drop is one statement on an engine that alters in place: {elsewhere}"
-    )
-    assert "DROP COLUMN" in elsewhere[0]["text"], elsewhere[0]["text"]

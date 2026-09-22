@@ -159,6 +159,9 @@ def test_every_kind_of_operation_gets_an_answer() -> None:
         "drop_table",
         "drop_column",
         "alter_column",
+        # A choice taken out of an enum is data lost: every row still holding
+        # that value stops being one the column accepts.
+        "remove_enum_values",
     }
 
 

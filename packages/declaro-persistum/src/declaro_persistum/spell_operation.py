@@ -13,14 +13,16 @@ the old table gone and the new one renamed into its place. That is one operation
 and five statements, and they come back in the order they have to run.
 
 WHY IT REFUSES RATHER THAN GUESSES. A refusal is returned, never raised and
-never logged. Four of them: an engine nobody declared, a kind of change nobody
-declared, a change missing something its spelling needs, and a declared type
-this package has no storage class for. Each one names what arrived and what to
+never logged. Five of them: an engine nobody declared, a kind of change nobody
+declared, a change missing something its spelling needs, a declared type this
+package has no storage class for, and a word out of one of the small
+vocabularies this engine has no row for. Each one names what arrived and what to
 write instead.
 
-WHY THERE ARE NO BRANCHES. Three engines and twelve kinds of change are a
+WHY THERE ARE NO BRANCHES. Three engines and thirteen kinds of change are a
 table, and every row is present. A key with no row is a fault naming the key,
-never a fallback answering for an input nobody wrote a rule for.
+never a fallback answering for an input nobody wrote a rule for. The three
+constraint kinds and the three deletion rules are tables for the same reason.
 
 A VALUE IS BOUND AND AN IDENTIFIER IS QUOTED. A table or a column name is
 written into the statement text, quoted for the engine, because no driver binds
@@ -38,22 +40,32 @@ spelled from two strings the caller supplied, `definition` and `keeping`, which
 this function invented because the type was short. Both are gone: a structure
 squeezed into a string is a structure nothing can check.
 
+WHAT THE WIDER TYPES BOUGHT, SINCE 2026-09-21. Three things this function could
+not say are now rows in tables here.
+
+A TABLE-LEVEL PRIMARY KEY. `Constraint` carries a `kind`, so a rule that names
+columns is spelled as `PRIMARY KEY (a, b)` on the table and a rule that reads
+comparisons is spelled as a CHECK. Which kind it is arrives with the
+constraint rather than being guessed from its shape.
+
+A RULE ABOUT WHAT HAPPENS TO A CHILD ROW. `Column.references` is a `Reference`,
+which names the table, the column and what a delete does, so ON DELETE CASCADE
+is written from what the declaration said rather than from a string this
+function took apart.
+
+TAKING A VALUE OUT OF A LOOKUP. `remove_enum_values` is a word `OperationKind`
+carries, and it is the same function that puts one in with a different
+statement. A value a row still holds is refused by the foreign key on the
+column, in the engine, where the rows are.
+
 WHAT STILL CANNOT BE SPELLED, named here because a silent gap is worse than a
 loud one.
 
-A TABLE-LEVEL PRIMARY KEY. `Constraint` carries a `rule: Condition`, and a
-condition is comparisons, so `constraint_clause` writes a CHECK and nothing
-else. A composite primary key is `PRIMARY KEY (a, b)` on the table, and there is
-no field it fits in. Two columns each marked `primary_key` come out as two
-inline PRIMARY KEY clauses, which no engine accepts.
-
-A RULE ABOUT WHAT HAPPENS TO A CHILD ROW. `Column.references` is the
-`table.column` a column points at and nothing more, so ON DELETE CASCADE, ON
-UPDATE and the rest have nowhere to sit.
-
-THERE IS NO WORD FOR TAKING A VALUE OUT OF A LOOKUP. `OperationKind` carries
-`insert_enum_values` and nothing that removes one, so a declared value that goes
-away cannot be spelled at all.
+A KEY ON MORE THAN ONE COLUMN, DECLARED AS A FACET. `primary_key` is also a
+facet of a `Column`, so two columns can each claim to be the key, and
+`column_definition` writes an inline PRIMARY KEY for each of them. The table
+level constraint is the shape that works, and nothing here refuses the other
+one.
 
 THE PRAGMA THAT MAKES A REBUILD POSSIBLE BELONGS TO WHOEVER COMMITS. Dropping a
 table another table points at is refused while foreign keys are enforced, so the
@@ -71,11 +83,14 @@ from declaro_persistum.types import (
     NOTHING,
     Column,
     Constraint,
+    ConstraintKind,
     Engine,
     Fault,
     Index,
+    OnDelete,
     Operation,
     OperationKind,
+    Reference,
     Statement,
     Value,
 )
@@ -91,8 +106,6 @@ TEMPORARY_PREFIX = "_declaro_tmp_"
 
 # The library's own tables all start with an underscore, and the engines' own
 # start with their name. The user's tables are what is left.
-THE_LIBRARY_PREFIX = "_"
-THE_STAMP_TABLE = "_declaro_meta"
 
 
 # --- refusals ----------------------------------------------------------------
@@ -241,23 +254,6 @@ def type_spelled(declared: str, engine: str) -> str | Fault:
     return cast("str | Fault", _for_engine(engine, looked_up))
 
 
-def same_type(declared: str, live: str, engine: str) -> bool | Fault:
-    """Whether a declared type and a live column's type are one type here.
-
-    A column declared `uuid` is a `TEXT` column on SQLite, so the two spellings
-    have to compare equal or every open would migrate a database that already
-    matches its models.
-    """
-
-    def compared() -> bool | Fault:
-        spelled = type_spelled(declared, engine)
-        return _the_first_fault_or(
-            [spelled], lambda: cast(str, spelled).casefold() == live.casefold()
-        )
-
-    return cast("bool | Fault", _for_engine(engine, compared))
-
-
 # --- naming a value a statement cannot bind ----------------------------------
 #
 # A DEFAULT AND A CHECK ARE THE TWO PLACES A LITERAL HAS TO REACH THE TEXT. No
@@ -335,11 +331,47 @@ FACET_CLAUSE: dict[str, Callable[[Value, Engine], str | Fault]] = {
 FACET_ORDER = ("primary_key", "nullable", "unique", "default")
 
 
-def _reference_clause(reference: Value, engine: Engine) -> str:
-    """`REFERENCES "authors"("id")`, from the `table.column` a column declares."""
-    table, _, column = cast(str, reference).rpartition(".")
+# WHAT EACH ENGINE WRITES FOR A DECLARED DELETION RULE. `refuse` is what a
+# declaration means when it says nothing about the parent: the delete stops and
+# the child rows stay, which SQL spells NO ACTION.
+#
+# ALL THREE WRITE THE STANDARD WORDS TODAY AND EACH KEEPS A ROW, so the next
+# engine that spells one of them differently is an edit to one row rather than
+# to the shape of this table.
+STANDARD_ON_DELETE: dict[OnDelete, str] = {
+    "refuse": "ON DELETE NO ACTION",
+    "cascade": "ON DELETE CASCADE",
+    "set_null": "ON DELETE SET NULL",
+}
+
+ON_DELETE: dict[Engine, dict[OnDelete, str]] = {
+    "sqlite": STANDARD_ON_DELETE,
+    "postgresql": STANDARD_ON_DELETE,
+    "turso": STANDARD_ON_DELETE,
+}
+
+
+def _reference_clause(reference: Reference, engine: Engine) -> str | Fault:
+    """`REFERENCES "authors"("id") ON DELETE CASCADE`, from what a column points at.
+
+    THE RULE ABOUT THE CHILD ROW IS CARRIED, NOT PARSED. A `Reference` names the
+    table, the column and what a delete does, so nothing here splits a string
+    apart to find out where the key points.
+    """
     quote = QUOTE[engine]
-    return f"REFERENCES {quote(table)}({quote(column)})"
+    rules = ON_DELETE[engine]
+    declared = reference["on_delete"]
+    written: dict[bool, Callable[[], str | Fault]] = {
+        True: lambda: _refused(
+            f"A column points at {reference['table']}.{reference['column']} and "
+            f"declares {declared!r}, which this package cannot write into a "
+            f"{engine} definition.",
+            f"Declare the deletion rule as one of {', '.join(rules)}.",
+        ),
+        False: lambda: f"REFERENCES {quote(reference['table'])}"
+        f"({quote(reference['column'])}) {rules[declared]}",
+    }
+    return written[declared not in rules]()
 
 
 def column_definition(column: Column, engine: str) -> str | Fault:
@@ -402,26 +434,7 @@ def _comparison(column: str, operator: str, value: Value, engine: Engine) -> str
     }[operator not in COMPARISON_TEXT]()
 
 
-def constraint_clause(constraint: Constraint, engine: str) -> str | Fault:
-    """One declared constraint as a CREATE TABLE carries it."""
-
-    def spelled() -> str | Fault:
-        known = cast(Engine, engine)
-        rule = constraint["rule"]
-        nested = rule["any_of"] + rule["none_of"]
-        return {
-            True: lambda: _refused(
-                f"The constraint {constraint['name']!r} groups its comparisons "
-                f"with any_of or none_of, and this package writes a flat CHECK.",
-                "Write the rule as one comparison per column.",
-            ),
-            False: lambda: _check(constraint, known),
-        }[nested != []]()
-
-    return cast("str | Fault", _for_engine(engine, spelled))
-
-
-def _check(constraint: Constraint, engine: Engine) -> str | Fault:
+def _flat_check(constraint: Constraint, engine: Engine) -> str | Fault:
     comparisons: list[Any] = [
         _comparison(column, comparison["operator"], cast(Value, comparison["value"]), engine)
         for column, comparison in constraint["rule"]["each"].items()
@@ -433,6 +446,78 @@ def _check(constraint: Constraint, engine: Engine) -> str | Fault:
     )
 
 
+def _check(constraint: Constraint, engine: Engine) -> str | Fault:
+    """A rule that reads its comparisons, which is the only kind that reads them."""
+    rule = constraint["rule"]
+    nested = rule["any_of"] + rule["none_of"]
+    return {
+        True: lambda: _refused(
+            f"The constraint {constraint['name']!r} groups its comparisons "
+            f"with any_of or none_of, and this package writes a flat CHECK.",
+            "Write the rule as one comparison per column.",
+        ),
+        False: lambda: _flat_check(constraint, engine),
+    }[nested != []]()
+
+
+def _over_its_columns(word: str) -> Callable[[Constraint, Engine], str | Fault]:
+    """A rule that reads the columns it names: a key, or a promise of uniqueness.
+
+    ONE FUNCTION AND TWO ROWS. `PRIMARY KEY ("a", "b")` and `UNIQUE ("a", "b")`
+    differ by the word in front of the columns, so the word is the argument and
+    the rest is written once. Neither reads the rule, which is the condition
+    that narrows by nothing.
+    """
+
+    def spelled(constraint: Constraint, engine: Engine) -> str | Fault:
+        quote = QUOTE[engine]
+        named = [quote(column) for column in constraint["columns"]]
+        written: dict[bool, Callable[[], str | Fault]] = {
+            True: lambda: _refused(
+                f"The constraint {constraint['name']!r} is a {constraint['kind']} "
+                f"and names no column, and {word} () is a statement no engine takes.",
+                f"Send the constraint again naming the columns the {word} is over.",
+            ),
+            False: lambda: f"CONSTRAINT {quote(constraint['name'])} {word} ({', '.join(named)})",
+        }
+        return written[named == []]()
+
+    return spelled
+
+
+# WHICH KIND OF RULE IT IS SAYS HOW IT IS SPELLED. Before `Constraint` carried a
+# kind, every constraint was read as a CHECK, so a key spanning two columns was
+# two inline PRIMARY KEY clauses that no engine accepts.
+CONSTRAINT_CLAUSE: dict[ConstraintKind, Callable[[Constraint, Engine], str | Fault]] = {
+    "check": _check,
+    "primary_key": _over_its_columns("PRIMARY KEY"),
+    "unique": _over_its_columns("UNIQUE"),
+}
+
+
+def _no_such_constraint_kind(constraint: Constraint, engine: str) -> Fault:
+    return _refused(
+        f"The constraint {constraint['name']!r} says it is a "
+        f"{constraint['kind']!r}, and this package writes "
+        f"{', '.join(CONSTRAINT_CLAUSE)} into a {engine} definition.",
+        f"Declare the constraint as one of {', '.join(CONSTRAINT_CLAUSE)}.",
+    )
+
+
+def constraint_clause(constraint: Constraint, engine: str) -> str | Fault:
+    """One declared constraint as a CREATE TABLE carries it."""
+
+    def spelled() -> str | Fault:
+        known = cast(Engine, engine)
+        kind = constraint["kind"]
+        return {
+            True: lambda: CONSTRAINT_CLAUSE[kind](constraint, known),
+            False: lambda: _no_such_constraint_kind(constraint, engine),
+        }[kind in CONSTRAINT_CLAUSE]()
+
+    return cast("str | Fault", _for_engine(engine, spelled))
+
+
 # --- the mark a driver reads -------------------------------------------------
 
 PLACEHOLDER: dict[Engine, Callable[[int], str]] = {
@@ -442,14 +527,6 @@ PLACEHOLDER: dict[Engine, Callable[[int], str]] = {
     "sqlite": lambda _position: "?",
     "turso": lambda _position: "?",
 }
-
-
-def placeholder(engine: str) -> str | Fault:
-    """The mark this engine reads where the first value goes."""
-    return cast(
-        "str | Fault",
-        _for_engine(engine, lambda: PLACEHOLDER[cast(Engine, engine)](1)),
-    )
 
 
 def _marks(engine: Engine, count: int) -> list[str]:
@@ -465,74 +542,6 @@ def _statement(text: str, values: list[Value]) -> Statement:
 
 
 # --- the two statements a migration asks of every engine ---------------------
-
-
-def _sqlite_stamp(engine: Engine, key: str, schema_hash: str) -> Statement:
-    quote = QUOTE[engine]
-    first, second = _marks(engine, 2)
-    return _statement(
-        f"INSERT INTO {quote(THE_STAMP_TABLE)} ({quote('key')}, {quote('value')}) "
-        f"VALUES ({first}, {second}) "
-        f"ON CONFLICT ({quote('key')}) DO UPDATE SET "
-        f"{quote('value')} = excluded.{quote('value')}",
-        [key, schema_hash],
-    )
-
-
-STAMPING: dict[Engine, Callable[[Engine, str, str], Statement]] = {
-    "sqlite": _sqlite_stamp,
-    "turso": _sqlite_stamp,
-    "postgresql": _sqlite_stamp,
-}
-
-
-def stamping_the_schema_hash(engine: str, key: str, schema_hash: str) -> Statement | Fault:
-    """Write the schema's hash down, over whatever was written there before."""
-    return cast(
-        "Statement | Fault",
-        _for_engine(
-            engine,
-            lambda: STAMPING[cast(Engine, engine)](cast(Engine, engine), key, schema_hash),
-        ),
-    )
-
-
-def _sqlite_user_tables(engine: Engine) -> Statement:
-    quote = QUOTE[engine]
-    kind, ours, theirs = _marks(engine, 3)
-    return _statement(
-        f"SELECT {quote('name')} FROM {quote('sqlite_master')} "
-        f"WHERE {quote('type')} = {kind} "
-        f"AND substr({quote('name')}, 1, 1) <> {ours} "
-        f"AND {quote('name')} NOT LIKE {theirs}",
-        ["table", THE_LIBRARY_PREFIX, "sqlite%"],
-    )
-
-
-def _postgresql_user_tables(engine: Engine) -> Statement:
-    quote = QUOTE[engine]
-    schema, ours = _marks(engine, 2)
-    return _statement(
-        f"SELECT {quote('tablename')} FROM {quote('pg_tables')} "
-        f"WHERE {quote('schemaname')} = {schema} "
-        f"AND substr({quote('tablename')}, 1, 1) <> {ours}",
-        ["public", THE_LIBRARY_PREFIX],
-    )
-
-
-LISTING: dict[Engine, Callable[[Engine], Statement]] = {
-    "sqlite": _sqlite_user_tables,
-    "turso": _sqlite_user_tables,
-    "postgresql": _postgresql_user_tables,
-}
-
-
-def listing_the_user_tables(engine: str) -> Statement | Fault:
-    """Name the tables a user made, and none of the ones this library keeps."""
-    return cast(
-        "Statement | Fault",
-        _for_engine(engine, lambda: LISTING[cast(Engine, engine)](cast(Engine, engine))),
-    )
 
 
 def temporary_name(table: str) -> str:
@@ -616,14 +625,51 @@ def _named_column(operation: Operation, engine: Engine) -> Column | Fault:
     return answer[found != []]()
 
 
-def _table_body(operation: Operation, engine: Engine) -> str | Fault:
-    """What goes between the parentheses of a CREATE TABLE: every column, then
-    every constraint, in the order the operation carries them."""
+# A KEY ON ONE COLUMN IS THE COLUMN'S OWN BUSINESS; A KEY ON SEVERAL IS THE
+# TABLE'S. SQL lets a single column say PRIMARY KEY beside its own type, and
+# requires PRIMARY KEY (a, b) at the table level for more than one. Two columns
+# each claiming the facet spells two inline clauses, which no engine parses.
+#
+# REFUSED RATHER THAN SPELLED, added 2026-09-21. Before this it came back as SQL
+# and the engine rejected it, which tells a reader about a statement they did
+# not write. The refusal names the columns and says where the key goes instead.
+def _keyed_inline(columns: list[Column]) -> list[str]:
+    return [column["name"] for column in columns if column["facets"].get("primary_key") is True]
+
+
+def _too_many_keys(named: list[str], table: str) -> Fault:
+    return {
+        "kind": "refused",
+        "what_went_wrong": (
+            f"{table} declares {', '.join(named)} as the primary key, and a key "
+            f"on more than one column cannot be written beside each of them."
+        ),
+        "what_to_do_instead": (
+            f"Take primary_key off those columns and declare one constraint of "
+            f"kind primary_key naming {', '.join(named)} together."
+        ),
+    }
+
+
+def _spelled_body(operation: Operation, engine: Engine) -> str | Fault:
     pieces: list[Any] = [
         *[column_definition(column, engine) for column in operation["columns"]],
         *[constraint_clause(constraint, engine) for constraint in operation["constraints"]],
     ]
     return cast("str | Fault", _the_first_fault_or(pieces, lambda: ", ".join(pieces)))
+
+
+_A_BODY_OR_A_REFUSAL: dict[bool, Callable[[Operation, Engine, list[str]], str | Fault]] = {
+    False: lambda operation, engine, _named: _spelled_body(operation, engine),
+    True: lambda operation, _engine, named: _too_many_keys(named, operation["table"]),
+}
+
+
+def _table_body(operation: Operation, engine: Engine) -> str | Fault:
+    """What goes between the parentheses of a CREATE TABLE: every column, then
+    every constraint, in the order the operation carries them."""
+    named = _keyed_inline(operation["columns"])
+    return _A_BODY_OR_A_REFUSAL[len(named) > 1](operation, engine, named)
 
 
 def _create_table(operation: Operation, engine: Engine) -> list[Statement] | Fault:
@@ -892,36 +938,56 @@ def _lookup_table(table: str, column: str) -> str:
     return f"_dp_enum_{table}_{column}"
 
 
-def _insert_enum_values(operation: Operation, engine: Engine) -> list[Statement] | Fault:
-    """Put the declared values in the lookup the column's foreign key points at.
+def _one_value_at_a_time(
+    spelling: Callable[[str, str, str], str],
+) -> Callable[[Operation, Engine], list[Statement] | Fault]:
+    """A change to the lookup the column's foreign key points at, value by value.
+
+    PUTTING A VALUE IN AND TAKING ONE OUT ARE ONE FUNCTION. Both read the same
+    column, name the same lookup and bind the same value, and they differ by the
+    statement, so the statement is the argument.
 
     Each value is bound. It is a declared value rather than a caller's, and it
     could still carry a quote, so it travels beside the statement like every
     other value this package sends.
+
+    A VALUE A ROW STILL HOLDS IS REFUSED BY THE ENGINE AND NOT BY THIS FUNCTION.
+    The column points at the lookup, so taking away a value somebody is using
+    breaks that key, and the engine says so where it can see the rows.
     """
-    quote = QUOTE[engine]
 
-    def spelled() -> list[Statement] | Fault:
-        lookup = _lookup_table(operation["table"], _word(operation, "column"))
-        (mark,) = _marks(engine, 1)
-        return [
-            _statement(
-                f"INSERT INTO {quote(lookup)} ({quote('value')}) VALUES ({mark})",
-                [value],
-            )
-            for value in operation["values"]
-        ]
+    def spelled(operation: Operation, engine: Engine) -> list[Statement] | Fault:
+        quote = QUOTE[engine]
 
-    return _needing(
-        operation, engine, ("column",), lambda: _carrying(operation, engine, "values", spelled)
-    )
+        def written() -> list[Statement] | Fault:
+            lookup = quote(_lookup_table(operation["table"], _word(operation, "column")))
+            (mark,) = _marks(engine, 1)
+            return [
+                _statement(spelling(lookup, quote("value"), mark), [value])
+                for value in operation["values"]
+            ]
+
+        return _needing(
+            operation, engine, ("column",), lambda: _carrying(operation, engine, "values", written)
+        )
+
+    return spelled
+
+
+_insert_enum_values = _one_value_at_a_time(
+    lambda lookup, column, mark: f"INSERT INTO {lookup} ({column}) VALUES ({mark})"
+)
+
+_remove_enum_values = _one_value_at_a_time(
+    lambda lookup, column, mark: f"DELETE FROM {lookup} WHERE {column} = {mark}"
+)
 
 
 Speller = Callable[[Operation, Engine], "list[Statement] | Fault"]
 
-# THE NINE CHANGES EVERY ENGINE SPELLS THE SAME WAY. Each still asks its engine
-# for the quoting, the type and the placeholder, so "the same way" is the shape
-# and not the text.
+# THE ELEVEN CHANGES EVERY ENGINE SPELLS THE SAME WAY. Each still asks its
+# engine for the quoting, the type and the placeholder, so "the same way" is the
+# shape and not the text.
 SHARED: dict[OperationKind, Speller] = {
     "create_table": _create_table,
     "drop_table": _drop_table,
@@ -933,6 +999,7 @@ SHARED: dict[OperationKind, Speller] = {
     "create_view": _create_view,
     "drop_view": _drop_view,
     "insert_enum_values": _insert_enum_values,
+    "remove_enum_values": _remove_enum_values,
 }
 
 # AND THE TWO THEY DO NOT. PostgreSQL alters and drops a column in place; SQLite

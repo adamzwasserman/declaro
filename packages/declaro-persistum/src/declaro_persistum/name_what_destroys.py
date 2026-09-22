@@ -68,6 +68,9 @@ LOSES_DATA: dict[OperationKind, bool] = {
     "create_view": False,
     "drop_view": False,
     "insert_enum_values": False,
+    # A CHOICE TAKEN AWAY IS DATA LOST. Every row still holding that value
+    # stops being one the column accepts, so this is a loss a model asks for.
+    "remove_enum_values": True,
 }
 
 
@@ -100,6 +103,7 @@ NAMES: dict[OperationKind, Callable[[Operation], str]] = {
     "create_view": _the_table,
     "drop_view": _the_table,
     "insert_enum_values": _the_table,
+    "remove_enum_values": _the_table,
 }
 
 

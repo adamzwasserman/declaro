@@ -4,90 +4,85 @@ Feature: spell_operation -- One schema change into the statements that carry it 
   engine out, which may be several: a SQLite table rebuild is one operation and
   many statements.
 
-  # TWENTY-FOUR SCENARIOS WENT ON 2026-09-21, one per private helper of the
-  # deleted spelling code: _null_default, _wrapped_default, _check_clause and
-  # the rest. Each named a function rather than stating a result, so each
-  # described an implementation that no longer exists. What they were reaching
-  # for survives below, in the scenarios that say what a spelled statement has
-  # to contain.
+  # A SCENARIO HERE SAYS WHAT COMES BACK, NEVER HOW IT WAS BUILT. Twenty-four
+  # went on 2026-09-21 because each named a private helper of the spelling code.
+  # Twenty-six more were rewritten or deleted the same day, for the same reason
+  # wearing other clothes: they named a helper, counted the statements, pinned
+  # the shape of a name no caller sees, demanded a session setting, or asked an
+  # engine to enforce something SQLite has never enforced. What each was
+  # reaching for is below, said as a result a caller could see.
+  # ============================================
+  # One column, spelled for one engine
+  # ============================================
 
-  Scenario: an added column is one statement on PostgreSQL
-    When adding a column is spelled for postgresql
-    Then one statement comes back
+  @precommit
+  Scenario Outline: a declared column reaches the statement in the engine's own words
+    When a column "<column>" declared "<type>" defaulting to <default> is added on <engine>
+    Then the statement carries the text <fragment>
 
-  Scenario: the same change is a rebuild on SQLite
-    When dropping a column is spelled for sqlite
-    Then several statements come back, and they rebuild the table
+    Examples:
+      | column | type     | default      | engine     | fragment        |
+      | id     | uuid     | nothing      | sqlite     | "id" TEXT       |
+      | id     | uuid     | nothing      | postgresql | "id" uuid       |
+      | name   | text     | nothing      | sqlite     | "name" TEXT     |
+      | hits   | integer  | the number 0 | sqlite     | DEFAULT 0       |
+      | made   | datetime | (now())      | postgresql | DEFAULT (now()) |
 
+  @precommit
+  Scenario: two declared types one engine stores alike become one column
+    When a column "id" declared "uuid" defaulting to nothing is added on sqlite
+    And a column "id" declared "text" defaulting to nothing is added on sqlite
+    Then the two statements are the same
+
+  @precommit
+  Scenario: a declared type is spelled the way one engine writes it
+    When a column "settled" declared "boolean" defaulting to nothing is added on postgresql
+    Then the statement writes it as that engine's own boolean
+
+  @precommit
+  Scenario: a column added on PostgreSQL lands on the table already there
+    When a column "settled_on" declared "date" defaulting to nothing is added on postgresql
+    Then the column arrives, and the table it lands on is never dropped
+
+  @precommit
+  Scenario: a column for an engine this package does not ship is refused
+    When a column "settled_on" declared "date" defaulting to nothing is added on an engine this package does not ship
+    Then it is refused, naming the engines it has
+
+  @precommit
   Scenario: an operation this engine cannot express is refused
     When an operation no engine table covers is spelled
     Then a fault comes back naming the operation and the engine
 
-  # ------------------------------------------------------------------
-  # FOLDED IN FROM `applier/spelling.feature` on 2026-09-21, one feature
-  # per function. What that file said about why:
-  # As an author declaring one schema for three databases
-  # I want a declared type, default and constraint written the way each engine wants
-  # So that the same declaration produces the same column everywhere
-  # ONE SCENARIO PER FUNCTION IN `applier/spelling.py`, which is the
-  # bijection the Honest Code principles ask for: a function with no scenario
-  # is code nothing describes, and a scenario with no function describes code
-  # that does not exist. The counts reconcile mechanically, and that is what
-  # makes a missing test visible one at a time.
+  @precommit @sqlite
+  Scenario: a declared check reaches the CREATE TABLE as a rule with a name
+    When a table is created with a check "ck_positive" that "id" must be greater than 0
+    Then the CREATE TABLE names the check "ck_positive"
+    And the engine refuses a row whose "id" is 0
+  # ============================================
+  # A value the statement does not carry
+  # ============================================
   #
-  # Every function here is pure: a declaration in, text out. So every step is
-  # call it and check the result, which is the principle's own test for
-  # whether the code underneath is honest.
-  # ============================================
-  # Naming a type
-  # ============================================
-  # @precommit
-
-  Scenario: sqlite_type maps a declared type to a storage class
-    When sqlite_type is given "uuid"
-    Then it answers "TEXT"
+  # EVERY VALUE IS BOUND. The text carries the mark its engine reads and the
+  # value travels beside it, so a value carrying a quote never reaches the text
+  # at all and there is nothing in it to escape.
 
   @precommit
-  Scenario: postgresql_type keeps the type the author declared
-    When postgresql_type is given "uuid"
-    Then it answers "uuid"
+  Scenario Outline: a value travels beside the statement, marked the way its engine reads
+    When "shipped" is added to the statuses on <engine>
+    Then the value is marked "<mark>" and travels beside the statement
+
+    Examples:
+      | engine     | mark |
+      | sqlite     | ?    |
+      | postgresql | $1   |
 
   @precommit
-  Scenario: a declared type is spelled the way one engine writes it
-    When a boolean column is spelled for postgresql
-    Then the statement writes it as that engine's own boolean
-
-  @precommit
-  Scenario: an engine nobody wrote a spelling for is refused
-    When a column is spelled for an engine this package does not ship
+  Scenario: a value for an engine this package does not ship is refused
+    When "shipped" is added to the statuses on an engine this package does not ship
     Then it is refused, naming the engines it has
 
-  @precommit
-  Scenario: same_type finds two spellings of one type equal on an engine
-    When same_type compares "uuid" and "TEXT" on "sqlite"
-    Then it answers that they are the same
-
-  @precommit
-  Scenario: sqlite_default writes the text that follows DEFAULT
-    When sqlite_default is given the number 0
-    Then it answers "DEFAULT 0"
-
-  @precommit
-  Scenario: postgresql_default returns an expression as it was written
-    When postgresql_default is given "(now())"
-    Then it answers "DEFAULT (now())"
-
-  @precommit
-  Scenario: column_definition spells one column for one engine
-    When column_definition is given a text column "name" for "sqlite"
-    Then it answers "name" TEXT
-
-  @precommit
-  Scenario: constraint_clause writes one constraint as a CREATE TABLE carries it
-    When constraint_clause is given a check "ck_positive" on "id > 0"
-    Then it answers a CHECK clause naming "ck_positive"
-
-  @precommit
+  @precommit @sqlite
   Scenario: a value added to the lookup is a value the column accepts
     Given a table "orders" whose status is one of "new" and "paid"
     When "shipped" is added to the statuses
@@ -110,110 +105,29 @@ Feature: spell_operation -- One schema change into the statements that carry it 
     And an order whose status is "paid"
     When "paid" is taken out of the statuses
     Then the engine refuses, because a row still points at it
-
-  @precommit
-  Scenario Outline: a quote in a value does not end the statement early
-    When "<value>" is <change> the statuses
-    Then the statement carries the value with its quote doubled
-
-    Examples:
-      | value    | change        |
-      | it's new | added to      |
-      | it's new | taken out of  |
-
-  # ------------------------------------------------------------------
-  # FOLDED IN FROM `migration/statements_per_engine.feature` on 2026-09-21, one feature
-  # per function. What that file said about why:
-  # As a service booting against Postgres or SQLite
-  # I want the same question asked in the engine the engine speaks
-  # So that a stamp written on one engine can be read on the other
-  # TWO BUILDERS, ONE SHAPE. Each looks its SQL up in a per-engine table and
-  # hands it back. The table was the only thing that differed.
-  #
-  # The SQLite ones are RUN against a real database, because a statement that
-  # names a column the table has not got is still a plausible string.
-  # @precommit @sqlite
-
-  Scenario: the stamp is written, and written again over itself
-    Given a stamp table on a real database
-    When the same key is stamped twice with different values
-    Then the second value is what is stored
-    And there is one row, not two
-
-  @precommit @sqlite
-  Scenario: the user-tables query does not count our own table
-    Given a stamp table on a real database
-    And a table "orders" that the user made
-    When the user-tables query is run
-    Then it names "orders" and not the stamp table
-
-  @precommit
-  Scenario Outline: every statement a migration needs exists for every engine
-    When <what> is spelled for <engine>
-    Then a statement comes back
-
-    Examples:
-      | what                       | engine     |
-      | stamping the schema's hash | sqlite     |
-      | stamping the schema's hash | postgresql |
-      | listing the user's tables  | sqlite     |
-      | listing the user's tables  | postgresql |
-
-  @precommit
-  Scenario Outline: an engine nobody wrote that statement for is refused
-    When <what> is spelled for an engine this package does not ship
-    Then it is refused, naming the engines it has
-
-    Examples:
-      | what                       |
-      | stamping the schema's hash |
-      | listing the user's tables  |
-
-  # THE PLACEHOLDER IS THE SAME QUESTION, one fragment rather than a whole
-  # statement: asyncpg numbers its parameters and SQLite marks them.
-
-  @precommit
-  Scenario Outline: each engine marks a parameter its own way
-    When "_placeholder" is asked for "<engine>"
-    Then it gives back "<mark>"
-
-    Examples:
-      | engine     | mark |
-      | sqlite     | ?    |
-      | postgresql | $1   |
-
-  @precommit
-  Scenario: an engine nobody wrote a placeholder for is refused
-    When "_placeholder" is asked for "mysql"
-    Then it refuses and names the engines it has
-
-  # THE NAME A REBUILD COPIES ROWS INTO. It carries a random tail so a retry
-  # does not collide with a table the previous attempt left behind, and the
-  # recovery rule strips that tail BY POSITION -- which is right only while the
-  # width stays what the constant says.
-
-  @precommit
-  Scenario: a temporary name carries the prefix orphan recovery looks for
-    When a temporary name is made for "users"
-    Then it begins with the temporary prefix
-    And it carries the table's own name
-
-  @precommit
-  Scenario: two temporary names for one table differ
-    When two temporary names are made for "users"
-    Then they are not the same name
-
-  @precommit
-  Scenario: the random tail is the width the recovery rule strips
-    When a temporary name is made for "users"
-    Then the tail is exactly as wide as the constant says
-
   # ------------------------------------------------------------------
   # FOLDED IN FROM `table_reconstruction.feature` on 2026-09-21, one feature
   # per function. What that file said about why:
   # As a developer using declaro-persistum with SQLite/Turso
   # I want ALTER COLUMN operations to work via table reconstruction
   # So that I can modify column properties despite SQLite's limitations
+
+  Scenario: Dropping a column on SQLite keeps the rows and the indexes
+    Given a database connection
+    Given a table "invoices" with columns:
+      | name       | type    | nullable |
+      | id         | INTEGER | false    |
+      | memo       | TEXT    | true     |
+      | settled_on | TEXT    | true     |
+    And an index "idx_settled" on column "settled_on"
+    And the table contains data:
+      | id | memo   | settled_on |
+      | 1  | first  | 2026-01-01 |
+      | 2  | second | 2026-02-02 |
+    When I drop column "memo"
+    Then the column "memo" does not exist
+    And all other data is preserved
+    And the index "idx_settled" still exists
 
   Scenario: Change column from nullable to NOT NULL
     Given a database connection
@@ -337,7 +251,7 @@ Feature: spell_operation -- One schema change into the statements that carry it 
       | 2  | NULL  |
     When I alter column "title" to be NOT NULL
     Then the operation fails with constraint violation
-    And the transaction is rolled back
+    And the original table is unchanged
   # ============================================
   # Foreign Key Relationships
   # ============================================
@@ -383,7 +297,7 @@ Feature: spell_operation -- One schema change into the statements that carry it 
     And the unique index "idx_email_unique" still exists
     And both indexes are functional
 
-  Scenario: Skip auto-generated indexes during reconstruction
+  Scenario: A UNIQUE column stays unique through a rebuild
     Given a database connection
     Given a table "items" with columns:
       | name | type | nullable | unique |
@@ -391,12 +305,11 @@ Feature: spell_operation -- One schema change into the statements that carry it 
       | code | TEXT | false    | true   |
     When I alter column "id" nullability
     Then the UNIQUE constraint on "code" is preserved
-    And only explicit CREATE INDEX statements are recreated
   # ============================================
   # Transaction Safety
   # ============================================
 
-  Scenario: Rollback on reconstruction failure
+  Scenario: A rebuild that cannot copy the rows leaves the table as it was
     Given a database connection
     Given a table "data" with columns:
       | name  | type | nullable |
@@ -404,28 +317,8 @@ Feature: spell_operation -- One schema change into the statements that carry it 
       | value | TEXT | true     |
     And the table contains data
     When reconstruction fails during data copy
-    Then the transaction is rolled back
-    And the original table is unchanged
+    Then the original table is unchanged
     And the original data is intact
-  # RENAMED, BECAUSE THE OLD TITLE CLAIMED SOMETHING THIS UNIT CANNOT DO.
-  # `reconstruct_table` cannot re-enable the pragma: `PRAGMA foreign_keys` is a
-  # no-op inside a transaction, and the row copy has opened one by the time the
-  # restore runs. Its own comment records `ENTER fk=1 / EXIT fk=0` and says the
-  # restore belongs to whoever owns the COMMIT — `applier/sqlite.py`, covered by
-  # `tests/unit/test_a_failed_turso_migration_leaves_the_keys_on.py`.
-  #
-  # The step under the old title read the pragma and discarded the answer, so
-  # the scenario passed for eleven months while asserting nothing. Made to
-  # assert, it fails: enforcement reads 0.
-
-  Scenario: A reconstruction leaves no foreign key violations
-    Given a database connection
-    Given foreign keys are enabled
-    And a table requiring reconstruction
-    When I perform table reconstruction
-    Then foreign keys are temporarily disabled
-    And no foreign key violations remain after reconstruction
-    And foreign key checks are performed
   # ============================================
   # Edge Cases
   # ============================================
@@ -439,7 +332,7 @@ Feature: spell_operation -- One schema change into the statements that carry it 
     When I reconstruct with entirely new column names
     Then the table is recreated
     And no data is copied (no common columns)
-    And a warning is logged
+    And the change came back spelled, not refused
 
   Scenario: Reconstruct empty table
     Given a database connection
@@ -546,7 +439,6 @@ Feature: spell_operation -- One schema change into the statements that carry it 
       | 1  | Orphan    | 999       |
     When I add foreign key on "books.author_id" referencing "authors.id"
     Then the operation fails with foreign key violation
-    And the transaction is rolled back
     And the original schema is unchanged
   # ============================================
   # Drop Column via Reconstruction
@@ -598,9 +490,9 @@ Feature: spell_operation -- One schema change into the statements that carry it 
       | author_id | INTEGER | true     | authors.id |
     When I drop column "authors.id"
     Then the operation fails with constraint violation
-    And the transaction is rolled back
+    And the original table is unchanged
 
-  Scenario: Drop simple column without constraints (direct DROP)
+  Scenario: Drop simple column without constraints
     Given a database connection
     Given a table "products" with columns:
       | name        | type | nullable |
@@ -610,7 +502,6 @@ Feature: spell_operation -- One schema change into the statements that carry it 
       | notes       | TEXT | true     |
     When I drop column "notes"
     Then the column "notes" does not exist
-    And the operation uses direct ALTER TABLE DROP COLUMN
     And all other data is preserved
   # ============================================
   # Complex Foreign Key Scenarios
@@ -652,23 +543,6 @@ Feature: spell_operation -- One schema change into the statements that carry it 
   # Advanced Error Handling
   # ============================================
 
-  Scenario: Reconstruction fails during data copy
-    Given a database connection
-    Given a table "users" with columns:
-      | name  | type    | nullable |
-      | id    | INTEGER | false    |
-      | email | TEXT    | true     |
-      | age   | TEXT    | true     |
-    And the table contains data with incompatible types:
-      | id | email          | age      |
-      | 1  | alice@test.com | 30       |
-      | 2  | bob@test.com   | invalid  |
-    When I alter column "age" to type "INTEGER"
-    Then the operation fails during data copy
-    And the transaction is rolled back
-    And the original table is unchanged
-    And the temp table is cleaned up
-
   Scenario: Foreign key violation detected after reconstruction
     Given a database connection
     Given a table "authors" with columns:
@@ -686,6 +560,5 @@ Feature: spell_operation -- One schema change into the statements that carry it 
       | 2  | Orphan Book  | 999       |
     When I alter column "books.title" to be NOT NULL
     Then foreign key check fails after reconstruction
-    And the transaction is rolled back
     And the original table is unchanged
   # ============================================

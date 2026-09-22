@@ -39,12 +39,27 @@ scenarios("../features/core/join_between.feature")
 
 
 def _a_column(name: str, declared_type: str, references: str | None) -> dict:
-    """One column, with every field the declaration gives a Column."""
+    """One column, with every field the declaration gives a Column.
+
+    `references` is written `table.column` here because that is how a person
+    reads a foreign key, and it becomes the `Reference` record the declaration
+    describes before it reaches the function. Until 2026-09-21 the string went
+    straight through, and these scenarios were green while `join_between` could
+    not take a column as the declaration writes one.
+
+    `refuse` is the deletion rule a declaration means when it says nothing: a
+    parent with children stays. `join_between` never reads it.
+    """
+    table, _, column = (references or "").partition(".")
     return {
         "name": name,
         "declared_type": declared_type,
         "renamed_from": None,
-        "references": references,
+        "references": (
+            {"table": table, "column": column, "on_delete": "refuse"}
+            if references is not None
+            else None
+        ),
         "facets": {},
     }
 
