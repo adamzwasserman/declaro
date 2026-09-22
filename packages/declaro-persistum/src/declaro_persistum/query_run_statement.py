@@ -94,8 +94,8 @@ def _refused(engine_said: BaseException) -> Fault:
 # --- one row per engine ------------------------------------------------------
 #
 # EACH ROW IS THE DRIVER'S OWN MANUAL AND NOTHING ELSE. They look alike from a
-# distance and they are not one function: aiosqlite is awaited, pyturso is not,
-# and asyncpg answers a read and a change through two different calls. Folding
+# distance and they are not one function: all three are awaited, and asyncpg
+# answers a read and a change through two different calls. Folding
 # them together would make the next difference between two drivers an edit to
 # the shape of this table rather than an edit to one row.
 
@@ -165,33 +165,37 @@ _WHAT_POSTGRESQL_PREPARED: dict[bool, Callable[..., Awaitable[Rows | int]]] = {
 
 
 async def _on_turso(connection: Connection, statement: Statement) -> Rows | int | Fault:
-    """pyturso, on a local database. Its cursor answers now rather than later.
+    """pyturso, awaited throughout.
 
-    THE REPLICATED SHAPE IS NOT THIS SHAPE. `turso.aio.sync` hands back a
-    connection whose `execute` and `fetchall` are awaitable, and this row does
-    not await them. `boundary_out fn session_open_connection` is handed a target
-    and a count and no primary, so the connection it can open is the local one.
+    NOTHING IN pyturso IS NATIVELY SYNCHRONOUS. `turso.aio` is the driver and
+    `turso.connect` is a shim over it. Measured 2026-09-22: `execute`,
+    `fetchall` and `close` are all coroutines, and only `cursor()` is not,
+    because it makes an object and touches no database. This row called them
+    without awaiting until then, which raised nothing and did nothing: a
+    coroutine is truthy, so the answer came back built from a cursor that had
+    never run, and the only sign was a warning on a later line.
     """
     import turso
 
     try:
-        cursor = connection.execute(statement["text"], _values(statement))
-        answer = _WHAT_A_CURSOR_HOLDS[cursor.description is not None](cursor)
-        connection.commit()
+        cursor = connection.cursor()
+        await cursor.execute(statement["text"], _values(statement))
+        answer = await _WHAT_A_CURSOR_HOLDS[cursor.description is not None](cursor)
+        await connection.commit()
         return answer
     except turso.Error as engine_said:
         return _refused(engine_said)
 
 
-def _turso_rows(cursor: Any) -> Rows:
-    return _rows_from(cursor.description, cursor.fetchall())
+async def _turso_rows(cursor: Any) -> Rows:
+    return _rows_from(cursor.description, await cursor.fetchall())
 
 
-def _turso_count(cursor: Any) -> int:
+async def _turso_count(cursor: Any) -> int:
     return max(int(cursor.rowcount), 0)
 
 
-_WHAT_A_CURSOR_HOLDS: dict[bool, Callable[..., Rows | int]] = {
+_WHAT_A_CURSOR_HOLDS: dict[bool, Callable[..., Awaitable[Rows | int]]] = {
     True: _turso_rows,
     False: _turso_count,
 }

@@ -88,17 +88,19 @@ async def _run_on_postgresql(connection, text: str) -> None:
 
 
 async def _open_turso(folder: pathlib.Path):
-    import turso
+    """NOTHING IN pyturso IS NATIVELY SYNCHRONOUS. `turso.aio` is the driver and
+    `turso.connect` is a shim over it, so everything here is awaited."""
+    import turso.aio
 
-    return turso.connect(str(folder / "turso.db"))
+    return await turso.aio.connect(str(folder / "turso.db"))
 
 
 async def _close_turso(connection) -> None:
-    connection.close()
+    await connection.close()
 
 
 async def _run_on_turso(connection, text: str) -> None:
-    connection.execute(text)
+    await connection.execute(text)
 
 
 THE_THREE_ENGINES = {

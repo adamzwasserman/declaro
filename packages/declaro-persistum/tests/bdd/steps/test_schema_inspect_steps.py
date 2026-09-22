@@ -44,7 +44,6 @@ from __future__ import annotations
 
 import asyncio
 import pathlib
-import sqlite3
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -151,35 +150,66 @@ _THREE_COLUMNS = (
 
 
 def _sqlite(
-    scenario: dict, _loop: asyncio.AbstractEventLoop, made: pathlib.Path
+    scenario: dict, loop: asyncio.AbstractEventLoop, made: pathlib.Path
 ) -> tuple[Any, Callable[[tuple[str, ...]], None]]:
-    """A SQLite database in a file this scenario owns."""
-    connection = sqlite3.connect(made / "inspected.db")
-    scenario.setdefault("closing", []).append(connection.close)
+    """A SQLite database in a file this scenario owns, through aiosqlite.
+
+    THE DRIVER THE PACKAGE USES, NOT THE ONE THE STANDARD LIBRARY HAS. This
+    opened `sqlite3` until 2026-09-22, which is synchronous, so every read in
+    `schema_inspect` could be written synchronously and pass. Against the
+    connection `boundary_out fn session_open_connection` hands over, which is
+    aiosqlite's, the same code builds its answer from a coroutine.
+    """
+    import aiosqlite
+
+    connection = loop.run_until_complete(aiosqlite.connect(made / "inspected.db"))
+    scenario.setdefault("closing", []).append(lambda: loop.run_until_complete(connection.close()))
 
     def run(statements: tuple[str, ...]) -> None:
         for statement in statements:
-            connection.execute(statement)
-        connection.commit()
+            loop.run_until_complete(connection.execute(statement))
+        loop.run_until_complete(connection.commit())
 
     return connection, run
 
 
 def _turso(
-    scenario: dict, _loop: asyncio.AbstractEventLoop, made: pathlib.Path
+    scenario: dict, loop: asyncio.AbstractEventLoop, made: pathlib.Path
 ) -> tuple[Any, Callable[[tuple[str, ...]], None]]:
-    """A Turso database with no primary, through pyturso."""
+    """A Turso database with no primary, through pyturso's own async driver.
+
+    NOTHING IN pyturso IS NATIVELY SYNCHRONOUS. `turso.aio` is the driver and
+    `turso.connect` is a shim over it. This opened the shim until 2026-09-22,
+    which is what let `schema_inspect` be written synchronously and pass.
+    """
     try:
         import turso
     except ImportError as missing:
         pytest.fail(f"Turso is a supported backend and pyturso is not installed: {missing}")
 
-    connection = turso.connect(str(made / "inspected.db"))
-    scenario.setdefault("closing", []).append(connection.close)
+    import turso.aio
+
+    # EVERY CALL IS MADE INSIDE A COROUTINE, NOT HANDED TO ONE. `turso.aio.connect`
+    # asks for the running loop while it builds the connection, so calling it to
+    # make an argument for `run_until_complete` raises "There is no current event
+    # loop in thread 'MainThread'". aiosqlite and asyncpg do not care. This reads
+    # as a pyturso defect and is not one.
+    async def _opened() -> Any:
+        return await turso.aio.connect(str(made / "inspected.db"))
+
+    connection = loop.run_until_complete(_opened())
+
+    async def _closed() -> None:
+        await connection.close()
+
+    scenario.setdefault("closing", []).append(lambda: loop.run_until_complete(_closed()))
 
     def run(statements: tuple[str, ...]) -> None:
-        for statement in statements:
-            connection.execute(statement)
+        async def _ran() -> None:
+            for statement in statements:
+                await connection.execute(statement)
+
+        loop.run_until_complete(_ran())
 
     return connection, run
 

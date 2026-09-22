@@ -137,19 +137,14 @@ async def _read_through_asyncpg(handle: Handle, statement: str) -> list:
 
 
 async def _read_through_pyturso(handle: Handle, statement: str) -> list:
-    """pyturso's local connection is synchronous, so the read runs on a thread.
+    """One read on the replica, awaited like the other two.
 
-    `turso.connect(path)` hands back a synchronous connection, unlike the two
-    asynchronous drivers beside it. Running it on a thread is what lets five
-    reads overlap here, which is the thing this file measures.
+    `cursor()` is the one call here that is not awaited, and it touches no
+    database: it makes the object whose `execute` and `fetchall` are coroutines.
     """
-
-    def _read() -> list:
-        cursor = handle.cursor()
-        cursor.execute(statement)
-        return cursor.fetchall()
-
-    return await asyncio.to_thread(_read)
+    cursor = handle.cursor()
+    await cursor.execute(statement)
+    return await cursor.fetchall()
 
 
 READ: dict[str, Callable[[Handle, str], Awaitable[list]]] = {
@@ -214,20 +209,8 @@ A_WRITE_IN_FLIGHT: dict[str, Callable[[str, dict[str, float]], Awaitable[None]]]
 # =============================================================================
 
 
-# TWO DRIVERS CLOSE ASYNCHRONOUSLY AND ONE DOES NOT. aiosqlite and asyncpg hand
-# back something to await; pyturso's local connection closes and returns nothing.
-# Awaiting that raises `TypeError: 'NoneType' object can't be awaited`, which
-# reads as a pyturso defect and is not one.
-_FINISH_CLOSING: dict[bool, Callable[[object], Awaitable[None]]] = {
-    True: lambda closing: closing,
-    False: lambda _closing: asyncio.sleep(0),
-}
-
-
 async def _close_them_all(opened: list[Handle]) -> None:
-    for handle in opened:
-        closing = handle.close()
-        await _FINISH_CLOSING[hasattr(closing, "__await__")](closing)
+    [await handle.close() for handle in opened]
 
 
 @pytest.fixture
@@ -572,7 +555,7 @@ def _a_replicated_database(scenario: dict[str, object], a_real_turso_replica: st
     THE FIXTURE MAKES IT AND THE DOOR OPENS IT. `turso.aio.sync.connect` wants a
     local file, a primary and a token, and this door is handed a target, an
     engine and a number. Measured 2026-09-22: once those four files exist,
-    `turso.connect(path)` reopens them by path alone with no url and no token.
+    `turso.aio.connect(path)` reopens them by path alone with no url and no token.
     So making the replica is setup, the way creating a table is setup, and the
     door opens what is on disk exactly as it opens SQLite. This scenario was
     `xfail` for one day for want of that measurement.

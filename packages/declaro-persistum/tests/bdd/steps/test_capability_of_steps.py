@@ -337,16 +337,54 @@ def _against_sqlite(path: pathlib.Path) -> dict[tuple[str, str], str]:
 
 
 def _against_turso(path: pathlib.Path) -> dict[tuple[str, str], str]:
-    import turso
+    """Every exercise run against pyturso's own driver.
 
-    conn = turso.connect(str(path / "turso.db"))
+    NOTHING IN pyturso IS NATIVELY SYNCHRONOUS. `turso.aio` is the driver and
+    `turso.connect` is a shim over it, so a capability measured through the shim
+    is measured against something this package never uses.
+
+    THE EXERCISES STAY SYNCHRONOUS because SQLite's share them, so this hands
+    them an adapter that runs each statement on a loop of its own. The loop is
+    never running when the adapter is called, which is what makes that legal.
+    `turso.aio.connect` also asks for the running loop while it builds, so it is
+    called inside a coroutine rather than handed to one.
+    """
+    import asyncio
+
+    import turso.aio
+
+    loop = asyncio.new_event_loop()
+
+    async def _opened() -> Any:
+        return await turso.aio.connect(str(path / "turso.db"))
+
+    connection = loop.run_until_complete(_opened())
+
+    def ran(statement: str) -> Any:
+        """The rows, not the cursor.
+
+        pyturso's cursor is not iterable, where the standard library's is, and
+        the exercises are written against the standard library's because SQLite
+        shares them. So the rows are fetched here and the exercise gets a list.
+        """
+
+        async def _go() -> Any:
+            cursor = await connection.execute(statement)
+            return list(await cursor.fetchall())
+
+        return loop.run_until_complete(_go())
+
+    async def _closed() -> None:
+        await connection.close()
+
     try:
         return {
-            ("turso", feature): exercise(conn.execute)
+            ("turso", feature): exercise(ran)
             for feature, exercise in THE_SQLITE_SHAPED_EXERCISES.items()
         }
     finally:
-        conn.close()
+        loop.run_until_complete(_closed())
+        loop.close()
 
 
 @given("every answer saying an engine has a feature natively")

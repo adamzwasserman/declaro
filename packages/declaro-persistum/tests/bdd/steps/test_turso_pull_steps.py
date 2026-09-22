@@ -424,11 +424,21 @@ def _the_handle_came_back(scenario: dict) -> None:
         f"open must not wait on the primary at all"
     )
 
-    local = turso.connect(scenario["path"])
-    try:
-        still_there = local.execute(f"SELECT v FROM {scenario['table']}").fetchall()
-    finally:
-        local.close()
+    # NOTHING IN pyturso IS NATIVELY SYNCHRONOUS. `turso.aio` is the driver and
+    # `turso.connect` is a shim over it, so the read here is awaited like every
+    # other. `turso.aio.connect` also asks for the running loop while it builds,
+    # so it is called inside the coroutine rather than handed to one.
+    import turso.aio
+
+    async def _read_the_copy() -> list:
+        local = await turso.aio.connect(scenario["path"])
+        try:
+            cursor = await local.execute(f"SELECT v FROM {scenario['table']}")
+            return list(await cursor.fetchall())
+        finally:
+            await local.close()
+
+    still_there = asyncio.new_event_loop().run_until_complete(_read_the_copy())
     assert still_there == [("one",)], (
         f"the local copy answers {still_there} after the failed pull, so the "
         f"database did not stay usable from it"

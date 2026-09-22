@@ -42,7 +42,6 @@ declaration hands this door the two values.
 
 from __future__ import annotations
 
-import asyncio
 import sqlite3
 from collections.abc import Awaitable, Callable
 
@@ -178,7 +177,7 @@ async def _open_turso(target: str, _connections: int) -> Connection | Fault:
     A REPLICA IS OPENED BY PATH, WITH NO URL AND NO TOKEN. Measured 2026-09-22
     against the staging primary: `turso.aio.sync.connect(path, url, auth_token=)`
     makes four files, the database and its changes, info and write-ahead log, and
-    once they exist `turso.connect(path)` reopens them by path alone. So filling
+    once they exist `turso.aio.connect(path)` reopens them by path alone. So filling
     a replica is a step before this one, the way creating a table is, and this
     door opens what is on disk exactly as it opens SQLite.
 
@@ -187,16 +186,22 @@ async def _open_turso(target: str, _connections: int) -> Connection | Fault:
     making a replica and not of opening one, and the scenario that would have
     caught it was `xfail` for want of the measurement.
 
+    NOTHING IN pyturso IS NATIVELY SYNCHRONOUS, and `turso.aio` is the way in.
+    `turso.connect` is a shim over it. Measured 2026-09-22: `turso.aio.connect`
+    is awaited, and `close`, `execute` and `fetchall` are all coroutines. Only
+    `cursor()` is not, because it makes an object and touches no database.
+
     pyturso IS NOT libSQL. It is a Rust rewrite aiming at SQLite compatibility
     and not there yet, so nothing here assumes a pragma works because SQLite has
-    one.
+    one, and it has no recursive CTE at all.
     """
     import turso
+    import turso.aio
 
     head, separator, rest = target.partition("://")
     path = _THE_PATH_IN[separator](target, rest)
     try:
-        connection = await asyncio.to_thread(turso.connect, path)
+        connection = await turso.aio.connect(path)
     except (turso.Error, OSError) as unreachable:
         return _could_not_be_reached(target, unreachable)
 

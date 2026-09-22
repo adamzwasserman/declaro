@@ -394,7 +394,7 @@ async def postgresql_schema(request: pytest.FixtureRequest):
 #
 # MEASURED THE SAME DAY, WHICH IS WHAT MAKES THIS POSSIBLE. A replica is four
 # files: the database, its changes, its info and its write-ahead log. Once they
-# exist, `turso.connect(path)` reopens them by path alone, with no url and no
+# exist, `turso.aio.connect(path)` reopens them by path alone, with no url and no
 # token. So building the replica is setup, the way creating a table is setup,
 # and the door opens what is already on disk exactly as it opens SQLite.
 #

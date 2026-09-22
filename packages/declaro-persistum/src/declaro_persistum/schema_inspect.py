@@ -345,21 +345,29 @@ _POINTING: dict[bool, Callable[[dict[Any, Reference], Any], Reference | None]] =
 }
 
 
-def _rows(connection: Connection, statement: str) -> list[Any]:
-    """Whatever the driver hands back for one statement, as a list."""
-    return list(connection.execute(statement).fetchall())
+async def _rows(connection: Connection, statement: str) -> list[Any]:
+    """Whatever the driver hands back for one statement, as a list.
+
+    NOTHING IN pyturso IS NATIVELY SYNCHRONOUS, and neither is aiosqlite. This
+    was written synchronously and passed, because its test opened Turso through
+    `turso.connect`, the shim, rather than through `turso.aio`, which is the
+    driver. Against the connection `boundary_out fn session_open_connection`
+    hands over it would have built its answer from a coroutine.
+    """
+    cursor = await connection.execute(statement)
+    return list(await cursor.fetchall())
 
 
-def _pragma_columns(connection: Connection, name: str) -> list[Column]:
+async def _pragma_columns(connection: Connection, name: str) -> list[Column]:
     """Every column a table holds, as the pragma describes it."""
-    described = _rows(connection, f"PRAGMA table_info({_quoted(name)})")
+    described = await _rows(connection, f"PRAGMA table_info({_quoted(name)})")
     pointing = {
         row[3]: Reference(
             table=row[2],
             column=row[4],
             on_delete=_PRAGMA_ON_DELETE[str(row[6]).upper()],
         )
-        for row in _rows(connection, f"PRAGMA foreign_key_list({_quoted(name)})")
+        for row in await _rows(connection, f"PRAGMA foreign_key_list({_quoted(name)})")
     }
     return [
         Column(
@@ -373,17 +381,19 @@ def _pragma_columns(connection: Connection, name: str) -> list[Column]:
     ]
 
 
-def _pragma_indexes(connection: Connection, name: str) -> list[Index]:
+async def _pragma_indexes(connection: Connection, name: str) -> list[Index]:
     """Every index on a table, less the one the engine made to hold its key."""
     listed = [
-        row for row in _rows(connection, f"PRAGMA index_list({_quoted(name)})") if row[3] != "pk"
+        row
+        for row in await _rows(connection, f"PRAGMA index_list({_quoted(name)})")
+        if row[3] != "pk"
     ]
     return [
         Index(
             name=row[1],
             columns=[
                 part[2]
-                for part in sorted(_rows(connection, f"PRAGMA index_info({_quoted(row[1])})"))
+                for part in sorted(await _rows(connection, f"PRAGMA index_info({_quoted(row[1])})"))
                 if part[2] is not None
             ],
             unique=row[2] == 1,
@@ -394,14 +404,14 @@ def _pragma_indexes(connection: Connection, name: str) -> list[Index]:
 
 async def _read_pragmas(connection: Connection) -> Reading:
     """SQLite and Turso, which describe themselves the same way."""
-    kept = {row[0]: row[1] or "" for row in _rows(connection, _THE_TABLES)}
+    kept = {row[0]: row[1] or "" for row in await _rows(connection, _THE_TABLES)}
     read = {name: _rules_read(name, _checks_in(ddl)) for name, ddl in kept.items()}
     return (
         [
             Table(
                 name=name,
-                columns=_pragma_columns(connection, name),
-                indexes=_pragma_indexes(connection, name),
+                columns=await _pragma_columns(connection, name),
+                indexes=await _pragma_indexes(connection, name),
                 constraints=read[name][0],
             )
             for name in kept
