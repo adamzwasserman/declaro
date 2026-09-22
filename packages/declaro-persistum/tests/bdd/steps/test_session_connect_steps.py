@@ -316,11 +316,18 @@ def _what_a_caller_says(bench: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _nothing_was_there_first(_bench: dict[str, Any]) -> None:
-    """Most scenarios open a database that starts as the Given left it."""
+def _nothing_was_there_first(_bench: dict[str, Any]) -> bool:
+    """Most scenarios open a database that starts as the Given left it.
+
+    ANSWERS FALSE RATHER THAN RETURNING NOTHING. Both halves of this pair hand
+    back whether a first open ran, so the caller reads an answer instead of
+    trusting that a side effect happened. An empty body would leave a reader
+    unable to tell "nothing to do" from "not written yet".
+    """
+    return False
 
 
-def _what_was_there_first(bench: dict[str, Any]) -> None:
+def _what_was_there_first(bench: dict[str, Any]) -> bool:
     """Build the starting schema, then declare the models that moved from it.
 
     WHY THIS RUNS HERE AND NOT IN THE GIVEN. An outline names its engine in the
@@ -345,9 +352,10 @@ def _what_was_there_first(bench: dict[str, Any]) -> None:
     del before
     gc.collect()
     scenario.pop("moved_to")(bench)
+    return True
 
 
-WHETHER_A_STARTING_SCHEMA_IS_WANTED: dict[bool, Callable[[dict[str, Any]], None]] = {
+WHETHER_A_STARTING_SCHEMA_IS_WANTED: dict[bool, Callable[[dict[str, Any]], bool]] = {
     True: _what_was_there_first,
     False: _nothing_was_there_first,
 }
@@ -355,7 +363,9 @@ WHETHER_A_STARTING_SCHEMA_IS_WANTED: dict[bool, Callable[[dict[str, Any]], None]
 
 def _open_it(bench: dict[str, Any]) -> Any:
     """Ask the orchestrator. The `loop` fixture already records what it opened."""
-    WHETHER_A_STARTING_SCHEMA_IS_WANTED["starting_schema" in bench["scenario"]](bench)
+    bench["scenario"]["opened_once_already"] = WHETHER_A_STARTING_SCHEMA_IS_WANTED[
+        "starting_schema" in bench["scenario"]
+    ](bench)
     asked = _what_a_caller_says(bench)
     bench["scenario"]["asked"] = asked
     answered = bench["loop"].run_until_complete(session_connect(asked))
