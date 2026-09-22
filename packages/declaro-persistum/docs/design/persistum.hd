@@ -550,7 +550,7 @@ module declaro-persistum
   # it, so nobody names one. `shutdown` and the bound on connections are stated
   # here because this is the only place it can be, and `shutdown` has no
   # default because there is no safe answer to whether your data survives.
-  boundary_in fn session_open : (target: str, shutdown: Shutdown) -> Database | Fault side_effect reads "caller" side_effect reads "env:DECLARO_CREW_SIZE" side_effect reads "env:DECLARO_CONNECTIONS" invokes session_connect note "opens a database for a caller; the target says which engine, so nobody names one"
+  boundary_in fn session_open : (target: str, shutdown: Shutdown) -> Database | Fault awaited side_effect reads "caller" side_effect reads "env:DECLARO_CREW_SIZE" side_effect reads "env:DECLARO_CONNECTIONS" invokes session_connect note "opens a database for a caller; the target says which engine, so nobody names one"
 
   # QUERY. A caller asks a question, or declares a write. `HOW-IT-SHOULD-WORK.md`
   # names four ways to spell it and one meaning: pseudo-SQL, Django, Prisma and
@@ -560,7 +560,7 @@ module declaro-persistum
   # the caller entered four different buildings. One door carrying which entry
   # point was used says the four are spellings of one question, and `by_grammar`
   # is where that key is spent.
-  boundary_in fn query_ask : (db: Database, model: Model, grammar: Grammar, asked: Asked) -> Answer | Fault side_effect reads "caller" invokes query_answer note "takes a question or a declared write, in any of the four grammars"
+  boundary_in fn query_ask : (db: Database, model: Model, grammar: Grammar, asked: Asked) -> Answer | Fault awaited side_effect reads "caller" invokes query_answer note "takes a question or a declared write, in any of the four grammars"
 
   # LIFECYCLE. The platform says stop, and nothing in the program asked for it. The
   # other two doors open because a caller called; this one opens whether or not
@@ -601,7 +601,7 @@ module declaro-persistum
   # awaits `flush`; that scenario contradicts the architecture and is the one to
   # change.
 
-  boundary_in fn lifecycle_turn : (db: Database) -> NOTHING | Fault side_effect reads "scheduler" invokes lifecycle_catch_up note "receives a spare moment from the runtime"
+  boundary_in fn lifecycle_turn : (db: Database) -> NOTHING | Fault awaited side_effect reads "scheduler" invokes lifecycle_catch_up note "receives a spare moment from the runtime"
 
   # --- column 2: one orchestrator per door --------------------------------
   #
@@ -617,11 +617,11 @@ module declaro-persistum
   #
   # Works out which engine the target names, connects, copies the whole database
   # if this copy is cold, and hands back the handle everything downstream reads.
-  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, crew_size, session_open_writer, room_make, replicates, lifecycle_install_handler, lifecycle_register, turso_pull, schema_read_declared, refuse_owned_names, schema_from_declared, schema_inspect, migration_needed, difference, name_what_is_ambiguous, order_operations, name_what_destroys, refuse_undeclared_loss, capability_of, mechanism_for, spell_view, spell_operation, migration_report, query_run_statement, log_write note "works out the engine, connects, and builds the handle everything downstream reads"
+  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault awaited invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, crew_size, session_open_writer, room_make, replicates, lifecycle_install_handler, lifecycle_register, turso_pull, schema_read_declared, refuse_owned_names, schema_from_declared, schema_inspect, migration_needed, difference, name_what_is_ambiguous, order_operations, name_what_destroys, refuse_undeclared_loss, capability_of, mechanism_for, spell_view, spell_operation, migration_report, query_run_statement, log_write note "works out the engine, connects, and builds the handle everything downstream reads"
 
   # Checks the columns against the model, builds the declaration, renders it for
   # this engine, runs it, and shapes what comes back.
-  orchestrator fn query_answer : (asking: Answering) -> Answering | Fault invokes by_grammar, refuse_undeclared_columns, join_between, compile_statement, travels_together, query_run_statement, query_run_together, room_deposit, answer_from_rows, answer_from_ticket, log_write note "turns a caller's question into rows, a number, or a ticket"
+  orchestrator fn query_answer : (asking: Answering) -> Answering | Fault awaited invokes by_grammar, refuse_undeclared_columns, join_between, compile_statement, travels_together, query_run_statement, query_run_together, room_deposit, answer_from_rows, answer_from_ticket, log_write note "turns a caller's question into rows, a number, or a ticket"
 
   # Pushes until Turso has everything, retrying rather than giving up,
   # then closes. The one place blocking is correct.
@@ -638,7 +638,7 @@ module declaro-persistum
   # the same question: is a writer waiting. `architecture.md:308` has
   # `replicate_if_idle` ask it, and the drainer is what knows the query_answer. Split
   # across two orchestrators, it gets asked twice and answered twice.
-  orchestrator fn lifecycle_catch_up : (catching_up: CatchingUp) -> CatchingUp | Fault invokes writer_waiting, next_in_order, query_begin_concurrent, room_run_write, worth_retrying, budget_spent, clock_read, next_wait, receipt_for, room_post_receipt, replicates, turso_push, turso_pull, log_write note "spends a free turn draining the room, then syncing if nobody is writing"
+  orchestrator fn lifecycle_catch_up : (catching_up: CatchingUp) -> CatchingUp | Fault awaited invokes writer_waiting, next_in_order, query_begin_concurrent, room_run_write, worth_retrying, budget_spent, clock_read, next_wait, receipt_for, room_post_receipt, replicates, turso_push, turso_pull, log_write note "spends a free turn draining the room, then syncing if nobody is writing"
 
 
   # --- column 3: output I/O, and there are four ways out ------------------
@@ -663,18 +663,18 @@ module declaro-persistum
   #
   # AND IT WAS ALREADY WRONG. A local Turso database is a bare path, and a bare
   # path reads as sqlite, so a target alone could not name one at all.
-  boundary_out fn session_open_connection : (target: str, engine: Engine, connections: int) -> Connection | Fault side_effect reads_writes "database" note "asks the driver for a connection"
+  boundary_out fn session_open_connection : (target: str, engine: Engine, connections: int) -> Connection | Fault awaited side_effect reads_writes "database" note "asks the driver for a connection"
 
   # QUERY. Run a statement on that connection. The driver does not know whether it
   # was a select or a create table, so this is one door rather than four.
-  boundary_out fn query_run_statement : (db: Database, statement: Statement) -> Rows | int | Fault side_effect reads_writes "database" note "runs one statement on the connection; the driver knows read from write"
+  boundary_out fn query_run_statement : (db: Database, statement: Statement) -> Rows | int | Fault awaited side_effect reads_writes "database" note "runs one statement on the connection; the driver knows read from write"
 
   # THREE and FOUR. The sync channel, in its two directions. `architecture.md`
   # names exactly two moments where sync is on the critical path, one per
   # direction: a cold open copies the whole database before returning, and
   # shutdown pushes until Turso has everything. Two callers, two
   # directions, one connection. A card is a function, not a connection.
-  reader fn turso_pull : (db: Database) -> NOTHING | Fault side_effect reads "turso" note "brings down what Turso has and this copy does not"
+  reader fn turso_pull : (db: Database) -> NOTHING | Fault awaited side_effect reads "turso" note "brings down what Turso has and this copy does not"
   boundary_out fn turso_push : (db: Database) -> NOTHING | Fault side_effect writes "turso" note "sends local commits to Turso"
 
   # THE ODD ONE, AND IT RETURNS NOTHING. Every other outward call hands back a
@@ -695,7 +695,7 @@ module declaro-persistum
   # not the connection `session_open_connection` hands back. Opening them here
   # is what makes reuse possible; a connection per write is the cost the crew
   # exists to avoid.
-  boundary_out fn session_open_writer : (target: str, engine: Engine) -> Connection | Fault side_effect reads_writes "database" note "opens one drainer's connection, held for its life"
+  boundary_out fn session_open_writer : (target: str, engine: Engine) -> Connection | Fault awaited side_effect reads_writes "database" note "opens one drainer's connection, held for its life"
 
   # WITHOUT THIS THE CREW IS ORDINARY LOCKING. `architecture.md:220`: BEGIN
   # CONCURRENT is mandatory on a deposited write, and it is what lets several
@@ -757,7 +757,7 @@ module declaro-persistum
   # different set to each door and nothing would notice.
   reader fn schema_read_declared : () -> Declared | Fault side_effect reads "models" note "asks the code which models and views it declares"
 
-  reader fn schema_inspect : (db: Database) -> Schema | Fault side_effect reads "database" note "asks a database what it currently holds, so the two can be compared"
+  reader fn schema_inspect : (db: Database) -> Schema | Fault awaited side_effect reads "database" note "asks a database what it currently holds, so the two can be compared"
 
   boundary_out fn log_write : (event: dict<str, Value>) -> NOTHING side_effect writes "log" note "writes a line an operator reads afterwards; a failure never travels here"
 
