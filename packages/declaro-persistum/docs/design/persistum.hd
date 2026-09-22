@@ -170,7 +170,19 @@ module declaro-persistum
                     dropping_tables: list<str>
                     dropping_views: list<str> } note "the models and views the code declares"
 
-  type Model = { table: str
+  # A MODEL HAD A TABLE AND NO NAME OF ITS OWN, AND THREE THINGS BROKE ON IT.
+  # Added 2026-09-22. You write `Person` and the table is `people`, so a refusal
+  # could only say `people`, which is not the word you typed. Nothing could check
+  # the model a question names against the model it was handed, and a question
+  # that reaches a second table had no way to find it by name.
+  #
+  # MEASURED, NOT REASONED ABOUT. Asking for a model called
+  # `people WHERE 1=1; DROP TABLE people; --` reached the engine and came back in
+  # the engine's words. Nothing ran, because `fn compile_statement` quotes the
+  # name, but this library's rule is that a name no model declares is refused in
+  # the caller's own process, and that rule reached the columns and not the table.
+  type Model = { name: str
+                 table: str
                  columns: list<Column>
                  dropping: list<str>
                  indexes: list<Index>

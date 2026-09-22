@@ -42,6 +42,7 @@ NOTHING_ASKED: Condition = {"each": {}, "any_of": [], "none_of": []}
 def _a_model(table: str, columns: list[str]) -> Model:
     """One model, with every field the declaration names present."""
     return {
+        "name": table,
         "table": table,
         "columns": [
             {

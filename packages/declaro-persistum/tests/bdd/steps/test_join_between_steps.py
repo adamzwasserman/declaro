@@ -67,6 +67,7 @@ def _a_column(name: str, declared_type: str, references: str | None) -> dict:
 def _a_model(table: str, columns: list[dict]) -> dict:
     """One model, with every field the declaration gives a Model."""
     return {
+        "name": table,
         "table": table,
         "columns": columns,
         "dropping": [],

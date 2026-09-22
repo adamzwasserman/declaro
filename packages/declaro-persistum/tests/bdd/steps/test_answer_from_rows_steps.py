@@ -84,6 +84,7 @@ def _a_column(name: str, references: str | None) -> dict:
 def _a_model(table: str, columns: list[tuple[str, str | None]]) -> dict:
     """One model, with every field a `Model` names present."""
     return {
+        "name": table,
         "table": table,
         "columns": [_a_column(name, references) for name, references in columns],
         "dropping": [],

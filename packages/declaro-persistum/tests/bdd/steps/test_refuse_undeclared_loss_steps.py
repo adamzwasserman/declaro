@@ -56,6 +56,7 @@ def _a_column(name: str) -> Column:
 def _a_model(table: str, dropping: list[str]) -> Model:
     """One model of `THE_TABLE`'s columns, naming what it means to lose."""
     return {
+        "name": table,
         "table": table,
         "columns": [_a_column(name) for name in ITS_COLUMNS],
         "dropping": dropping,

@@ -60,6 +60,7 @@ def _a_column(name: str, replaced: str | None) -> Column:
 def _a_model(table: str, columns: list[Column], dropping: list[str]) -> Model:
     """One model, with every field the declaration names present."""
     return {
+        "name": table,
         "table": table,
         "columns": columns,
         "dropping": dropping,

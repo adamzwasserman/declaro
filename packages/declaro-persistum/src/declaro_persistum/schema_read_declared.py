@@ -259,6 +259,10 @@ def _the_model(cls: type, named: Any) -> Model | Fault:
     return _the_first_fault_or(
         columns,
         lambda: Model(
+            # WHAT YOU WROTE, WHICH IS THE CLASS'S OWN NAME. You write `Person`
+            # and the table is `people`, so a refusal that could only say
+            # `people` was not saying the word you typed.
+            name=cls.__name__,
             table=named,
             columns=columns,  # type: ignore[arg-type]
             dropping=_declared_on(cls, "__dropping__", []),

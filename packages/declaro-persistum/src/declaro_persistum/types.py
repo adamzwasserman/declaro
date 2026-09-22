@@ -271,7 +271,16 @@ class Constraint(TypedDict):
     rule: Condition
 
 
+# A MODEL HAD A TABLE AND NO NAME OF ITS OWN, AND THREE THINGS BROKE ON IT. You
+# write `Person` and the table is `people`, so a refusal could only say `people`,
+# nothing could check the model a question names against the model it was handed,
+# and a question reaching a second table had no way to find it. Added 2026-09-22
+# after asking for a model called `people WHERE 1=1; DROP TABLE people; --` and
+# getting the engine's own words back.
 class Model(TypedDict):
+    # What you wrote: the class's own name.
+    name: str
+    # Where its rows live.
     table: str
     columns: list[Column]
     dropping: list[str]

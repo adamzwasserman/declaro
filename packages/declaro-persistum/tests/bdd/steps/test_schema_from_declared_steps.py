@@ -64,6 +64,7 @@ def _an_index(name: str, columns: list[str], unique: bool) -> Index:
 def _a_model(table: str, columns: list[str], indexes: list[Index]) -> Model:
     """One model, with every field a `Model` names present."""
     return {
+        "name": table,
         "table": table,
         "columns": [_a_column(name) for name in columns],
         "dropping": [],

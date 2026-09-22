@@ -81,6 +81,14 @@ scenarios("../features/query/query_answer.feature")
 
 THE_TABLE_THE_FEATURE_NAMES = "people"
 
+# THE CLASS'S OWN NAME, AND IT IS NOT THE TABLE'S. A host writes `class Person`
+# and `__tablename__ = "people"`, so a caller has `Person` to ask with and the
+# engine has `people` to answer to. Until 2026-09-22 this file called the class
+# `people` as well, which made the two words one word, and no scenario here
+# could tell whether anything traded one for the other. Nothing did: every
+# question a caller wrote by class name reached the engine as `FROM Person`.
+THE_NAME_THE_CLASS_HAS = "Person"
+
 # The rows a scenario puts in the table before it asks anything, and the three
 # it declares together. `id` is the key, so the group scenario has a row the
 # engine will refuse when it needs one.
@@ -149,6 +157,7 @@ def _a_person_model() -> type:
 # a Pydantic class.
 
 THE_MODEL: dict[str, Any] = {
+    "name": THE_NAME_THE_CLASS_HAS,
     "table": THE_TABLE_THE_FEATURE_NAMES,
     "columns": [
         {
@@ -465,6 +474,24 @@ async def _every_person(db: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+async def _every_person_by_the_class_name(db: dict[str, Any]) -> dict[str, Any]:
+    """The same read, written the way a host's caller writes one.
+
+    The question says `Person`, which is the class's own name and the only name
+    a caller has. The rows live in `people`. If nothing trades one word for the
+    other, the engine is sent `SELECT ... FROM Person` and answers that there is
+    no such table.
+    """
+    answered = await query_answer(
+        _an_answering(db, {"model": THE_NAME_THE_CLASS_HAS, "wanted": "all"}, THE_GRAMMAR)
+    )
+    return {
+        "answered": answered,
+        "room": _room_of(db),
+        "in_the_table": await _what_the_table_holds(db),
+    }
+
+
 async def _one_new_person(db: dict[str, Any]) -> dict[str, Any]:
     """A write of one row. It is deposited and answered by a ticket."""
     answered = await query_answer(
@@ -537,6 +564,7 @@ async def _in_a_grammar_nothing_can_build(db: dict[str, Any]) -> dict[str, Any]:
 
 WHAT_EACH_CALLER_ASKS: dict[str, Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = {
     "a caller asks for every person": _every_person,
+    "a caller asks for every person by the name of the class": _every_person_by_the_class_name,
     "a caller declares one new person": _one_new_person,
     "a caller declares three people together": _three_people_together,
     'a caller asks for people named ""': _people_named_bob,

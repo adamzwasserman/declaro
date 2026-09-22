@@ -73,6 +73,7 @@ import os
 import pathlib
 import re
 import signal
+import typing
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -81,6 +82,7 @@ import pytest
 from pydantic import BaseModel
 from pytest_bdd import given, parsers, scenarios, then, when
 
+from declaro_persistum import types as declared_types
 from declaro_persistum.lifecycle_install_handler import (
     WHAT_THE_PLATFORM_SENDS,
     WHAT_WAS_THERE,
@@ -139,6 +141,7 @@ def _a_person_model() -> type:
 # Person and the record calls it `people`, which is what every refusal below
 # names.
 THE_MODEL: Model = {
+    "name": THE_TABLE_THE_FEATURE_NAMES,
     "table": THE_TABLE_THE_FEATURE_NAMES,
     "columns": [
         {
@@ -333,16 +336,24 @@ async def _closed(db: dict[str, Any]) -> None:
         await handle.close()
 
 
-async def _kept(_target: str) -> None:
-    """A file in the folder pytest made dies with the folder."""
+async def _kept(_target: str) -> bool:
+    """A file in the folder pytest made dies with the folder.
+
+    ANSWERS WHETHER ANYTHING HAD TO BE TAKEN AWAY, which here is nothing. Both
+    halves of this pair hand that back, so the caller reads an answer rather
+    than trusting a side effect, and an empty body cannot be mistaken for a
+    function nobody finished.
+    """
+    return False
 
 
-async def _dropped(target: str) -> None:
+async def _dropped(target: str) -> bool:
     """A PostgreSQL database this file made, taken away again."""
     await _administer([f'DROP DATABASE IF EXISTS "{target.rpartition("/")[2]}" WITH (FORCE)'])
+    return True
 
 
-WHAT_BECOMES_OF_EACH_DATABASE: dict[str, Callable[[str], Awaitable[None]]] = {
+WHAT_BECOMES_OF_EACH_DATABASE: dict[str, Callable[[str], Awaitable[bool]]] = {
     "sqlite": _kept,
     "postgresql": _dropped,
     "turso": _kept,
@@ -357,6 +368,11 @@ async def _against_every_engine(
 ) -> dict[str, dict[str, Any]]:
     """Open each engine, run `work` against the feature's table, close it all."""
     answers: dict[str, dict[str, Any]] = {}
+    # ONE ANSWER PER ENGINE ABOUT WHETHER ITS DATABASE HAD TO BE TAKEN AWAY. A
+    # file dies with the folder pytest made; a PostgreSQL database does not and
+    # is dropped. Read below, so neither half of that pair is a bare side
+    # effect.
+    taken_away: list[bool] = []
     for engine in WHERE_EACH_ENGINES_DATABASE_GOES:
         mine = folder / (engine + "_" + uuid.uuid4().hex[:8])
         mine.mkdir()
@@ -372,7 +388,12 @@ async def _against_every_engine(
                 await _closed(db)
         finally:
             os.chdir(was)
-            await WHAT_BECOMES_OF_EACH_DATABASE[engine](target)
+            taken_away.append(await WHAT_BECOMES_OF_EACH_DATABASE[engine](target))
+
+    assert len(taken_away) == len(WHERE_EACH_ENGINES_DATABASE_GOES), (
+        f"{len(taken_away)} of {len(WHERE_EACH_ENGINES_DATABASE_GOES)} databases "
+        "were dealt with, so one was left behind"
+    )
     return answers
 
 
@@ -1229,7 +1250,10 @@ def _there_is_no_object_to_open_or_close(engine: str, outcome: dict[str, Any]) -
 
 
 def _the_model_carries_no_object_that_owns_queries(engine: str, outcome: dict[str, Any]) -> None:
-    assert sorted(THE_MODEL) == ["columns", "constraints", "dropping", "indexes", "table"], (
+    # READ OFF THE TYPE, NOT WRITTEN OUT. This named the five fields a `Model`
+    # had, and went stale the day it gained a sixth on 2026-09-22. A list of
+    # fields written beside the type is a second copy of the type.
+    assert sorted(THE_MODEL) == sorted(typing.get_type_hints(declared_types.Model)), (
         f"on {engine} the model record carries {sorted(THE_MODEL)}, and a field "
         "beyond what `type Model` declares is where a manager would live"
     )

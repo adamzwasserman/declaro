@@ -224,6 +224,32 @@ async def _no_column_the_model_does_not_declare(carried: Answering) -> Any:
     )
 
 
+async def _under_the_name_its_rows_live_under(carried: Answering) -> Any:
+    """The caller said `Person`. The rows live in `people`. Swap one for the other.
+
+    A caller writes the class's own name, because that is the only name it has.
+    The renderer writes a table name into the text, because that is the only
+    name an engine answers to. Both are right and they are different words, so
+    somebody has to trade one for the other, and this is the only place that
+    holds the model and the question at once.
+
+    The check above has already run, so the word here is this model's own, and
+    the trade cannot land the question on somebody else's table. Until
+    2026-09-22 nothing traded at all: every question a caller wrote by class
+    name reached the engine as `SELECT ... FROM Person` and came back `no such
+    table: Person`.
+
+    A JOIN still carries the far model's name untraded, because a `Join` names
+    a model this function was not handed. `docs/design/persistum.hd` says the
+    declared models belong on the handle; until they are there, a question
+    across models keeps the caller's word for the far side.
+    """
+    return {
+        **carried,
+        "declaration": {**carried["declaration"], "model": carried["model"]["table"]},
+    }
+
+
 async def _the_statement(carried: Answering) -> Any:
     """The one place this question becomes an engine's own characters.
 
@@ -345,6 +371,7 @@ async def _said_out_loud(carried: Answering) -> Any:
 THE_CHAIN: tuple[Step, ...] = (
     _the_declaration,
     _no_column_the_model_does_not_declare,
+    _under_the_name_its_rows_live_under,
     _the_statement,
     _answered,
     _said_out_loud,

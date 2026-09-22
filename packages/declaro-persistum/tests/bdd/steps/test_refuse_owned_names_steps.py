@@ -78,6 +78,7 @@ def _declaring(table: str) -> Declared:
     return {
         "models": [
             {
+                "name": table,
                 "table": table,
                 "columns": [
                     {

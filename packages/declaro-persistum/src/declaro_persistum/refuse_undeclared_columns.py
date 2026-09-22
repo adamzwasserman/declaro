@@ -67,15 +67,58 @@ def _refuse(model: Model, declared: list[str], undeclared: list[str]) -> Fault |
     return Fault(
         kind="refused",
         what_went_wrong=(
-            f"You asked {model['table']} for {asked}, and {model['table']} declares no such column."
+            f"You asked {model['name']} for {asked}, and {model['name']} declares no such column."
         ),
-        what_to_do_instead=(f"{model['table']} declares {has}. Ask it for one of those."),
+        what_to_do_instead=(f"{model['name']} declares {has}. Ask it for one of those."),
     )
 
 
 _ANSWER: dict[bool, Callable[[Model, list[str], list[str]], Fault | None]] = {
     False: _fine,
     True: _refuse,
+}
+
+
+def _the_model_it_names(model: Model, declaration: Declaration) -> Fault | None:
+    """Refuse a question naming a model other than the one it was handed.
+
+    A caller writes `Person` and the model's table is `people`, so the two are
+    compared by the model's own name. Either spelling is accepted, because the
+    four grammars differ in which one they carry.
+    """
+    return _WHETHER_IT_IS_THIS_MODEL[declaration["model"] in (model["name"], model["table"])](
+        model, declaration
+    )
+
+
+def _it_is_this_model(_model: Model, _declaration: Declaration) -> Fault | None:
+    return NOTHING
+
+
+def _it_is_another_model(model: Model, declaration: Declaration) -> Fault | None:
+    return Fault(
+        kind="refused",
+        what_went_wrong=(
+            f"The question names {declaration['model']!r} and it was asked of "
+            f"{model['name']}, which is a different model."
+        ),
+        what_to_do_instead=(
+            f"Ask {model['name']} for what {model['name']} holds, or hand the "
+            f"call the model {declaration['model']!r} names."
+        ),
+    )
+
+
+_WHETHER_IT_IS_THIS_MODEL: dict[bool, Callable[[Model, Declaration], Fault | None]] = {
+    True: _it_is_this_model,
+    False: _it_is_another_model,
+}
+
+# A REFUSAL ANYWHERE IS THE ANSWER, and the model's name is checked first because
+# a question about another model's columns says nothing a caller can act on.
+_THE_FIRST_REFUSAL: dict[bool, Callable[[Fault | None, Fault | None], Fault | None]] = {
+    True: lambda _named, columns: columns,
+    False: lambda named, _columns: named,
 }
 
 
@@ -86,9 +129,19 @@ def refuse_undeclared_columns(model: Model, declaration: Declaration) -> Fault |
     connection, builds no statement and asks nothing of the clock, so a caller
     gets this answer before anything has been sent anywhere.
     """
+    named = _the_model_it_names(model, declaration)
+
+    # THE TABLE IS A NAME TOO, AND NOTHING CHECKED IT UNTIL 2026-09-22. Measured:
+    # asking for a model called `people WHERE 1=1; DROP TABLE people; --` reached
+    # the engine and came back in the engine's words. Nothing ran, because
+    # `fn compile_statement` quotes the name, but this library's rule is that a
+    # name no model declares is refused in the caller's own process, and that
+    # rule covered the columns and not the table.
     declared = [column["name"] for column in model["columns"]]
     asked = dict.fromkeys(
         name for read in WHERE_COLUMNS_ARE_NAMED.values() for name in read(declaration)
     )
     undeclared = [name for name in asked if name not in declared]
-    return _ANSWER[bool(undeclared)](model, declared, undeclared)
+    return _THE_FIRST_REFUSAL[named is NOTHING](
+        named, _ANSWER[bool(undeclared)](model, declared, undeclared)
+    )
