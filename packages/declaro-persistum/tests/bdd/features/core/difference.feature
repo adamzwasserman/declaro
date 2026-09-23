@@ -17,6 +17,31 @@ Feature: difference -- What turns the live schema into the target
     Given a column declared as text and held as an integer
     Then there is an alter for that column
 
+  # A COLUMN IS ITS TYPE AND EVERY RULE ABOUT IT. Until 2026-09-23 this function
+  # compared declared types and nothing else, so declaring a column NOT NULL or
+  # giving it a default emitted no operation at all and the migration reported
+  # success with the database unchanged. Neither rule could have been compared
+  # before: both lived in a bag of facets on the column, and a bag keyed by
+  # strings has no two values you can put side by side.
+
+  Scenario Outline: a rule declared on a column the live database does not hold is altered
+    Given a column held with no rules and declared <rule>
+    Then there is an alter for that column
+
+    Examples:
+      | rule                     |
+      | that it must hold something |
+      | that it starts at "new"     |
+      | that it may hold 8 characters |
+
+  Scenario: a rule the live database holds and the target drops is altered
+    Given a column held as NOT NULL and declared with no rules
+    Then there is an alter for that column
+
+  Scenario: a column whose type and rules both match is left alone
+    Given a column held and declared exactly alike, rules and all
+    Then there is no alter for that column
+
   Scenario: no difference is an answer
     Given two schemas that match
     Then nothing comes back, and that is distinguishable from a failure

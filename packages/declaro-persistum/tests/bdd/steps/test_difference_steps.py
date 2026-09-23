@@ -49,13 +49,14 @@ is a gate over `src/`; a scenario states what comes back.
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pytest_bdd import given, parsers, scenarios, then, when
 
 from declaro_persistum.difference import difference
-from declaro_persistum.types import Column, Declaration, Schema, Table, View
+from declaro_persistum.types import Column, Constraint, Declaration, Schema, Table, Value, View
+from tests.conftest import NARROWS_BY_NOTHING, a_column, a_constraint
 
 pytestmark = [pytest.mark.bdd, pytest.mark.precommit]
 
@@ -68,12 +69,23 @@ scenarios("../features/core/difference.feature")
 
 
 def _column(name: str, declared_type: str) -> Column:
-    return Column(
-        name=name,
-        declared_type=declared_type,
-        renamed_from=None,
-        references=None,
-        facets={},
+    return cast(
+        Column,
+        a_column(name=name, declared_type=declared_type, renamed_from=None, references=None),
+    )
+
+
+def _rule(kind: str, column: str, value: Value) -> Constraint:
+    """One rule about one column, for the scenarios that compare rules."""
+    return cast(
+        Constraint,
+        a_constraint(
+            name=f"{kind}_{column}",
+            kind=kind,
+            columns=[column],
+            rule=NARROWS_BY_NOTHING,
+            value=value,
+        ),
     )
 
 
@@ -83,6 +95,16 @@ def _table(name: str, columns: list[tuple[str, str]]) -> Table:
         columns=[_column(column, declared_type) for column, declared_type in columns],
         indexes=[],
         constraints=[],
+    )
+
+
+def _ruled(name: str, rules: list[Constraint]) -> Table:
+    """A table of one text column called `name`, under the rules given."""
+    return Table(
+        name="users",
+        columns=[_column("id", "integer"), _column(name, "text")],
+        indexes=[],
+        constraints=rules,
     )
 
 
@@ -144,6 +166,38 @@ WHAT_IS_DECLARED: dict[str, dict[str, Any]] = {
     "a column declared as text and held as an integer": {
         "live": _schema([_table("users", [("id", "integer"), ("name", "integer")])], []),
         "target": _schema([_table("users", [("id", "integer"), ("name", "text")])], []),
+        "column": "name",
+    },
+    # --- a rule declared, dropped, or matching on both sides ------------------
+    #
+    # ONE COLUMN, ONE RULE, AND THE SAME TYPE ON BOTH SIDES. The type is what
+    # this function used to compare, so a pair differing in type as well would
+    # pass every one of these on the old comparison.
+    "a column held with no rules and declared that it must hold something": {
+        "live": _schema([_ruled("name", [])], []),
+        "target": _schema([_ruled("name", [_rule("not_null", "name", None)])], []),
+        "column": "name",
+    },
+    'a column held with no rules and declared that it starts at "new"': {
+        "live": _schema([_ruled("name", [])], []),
+        "target": _schema([_ruled("name", [_rule("default", "name", "new")])], []),
+        "column": "name",
+    },
+    "a column held with no rules and declared that it may hold 8 characters": {
+        "live": _schema([_ruled("name", [])], []),
+        "target": _schema([_ruled("name", [_rule("length", "name", 8)])], []),
+        "column": "name",
+    },
+    "a column held as NOT NULL and declared with no rules": {
+        "live": _schema([_ruled("name", [_rule("not_null", "name", None)])], []),
+        "target": _schema([_ruled("name", [])], []),
+        "column": "name",
+    },
+    # THE CONTROL. Without it every scenario above passes on a function that
+    # alters every column of every table it is handed.
+    "a column held and declared exactly alike, rules and all": {
+        "live": _schema([_ruled("name", [_rule("not_null", "name", None)])], []),
+        "target": _schema([_ruled("name", [_rule("not_null", "name", None)])], []),
         "column": "name",
     },
     # --- nothing to do -------------------------------------------------------
@@ -380,6 +434,27 @@ def _an_operation_is_produced_for_the_changed_view(scenario: dict) -> None:
     acted_on = [operation["table"] for operation in _answer(scenario)]
 
     assert "recent" in acted_on, f"the operations name {acted_on}, and none of them is the view"
+
+
+@then("there is no alter for that column")
+def _there_is_no_alter_for_that_column(scenario: dict) -> None:
+    """The control on every scenario above.
+
+    WITHOUT IT, EVERY ONE OF THEM PASSES ON A FUNCTION THAT ALTERS EVERYTHING.
+    "there is an alter for that column" is satisfied by a differ that emits an
+    alter for every column of every table it is handed, which is a migration
+    that rebuilds the whole database on every deploy.
+    """
+    altered = [
+        operation["column"]
+        for operation in _answer(scenario)
+        if operation["kind"] == "alter_column"
+    ]
+
+    assert altered == [], (
+        f"the two schemas declare {scenario['column']!r} alike, rules and all, "
+        f"and alter_column names {altered}"
+    )
 
 
 @then("each operation carries the view it names, with its declaration")

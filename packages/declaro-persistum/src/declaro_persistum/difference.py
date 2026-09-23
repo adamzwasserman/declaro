@@ -65,6 +65,8 @@ drop and an add come back, and that pair is exactly what that card is given.
 
 from __future__ import annotations
 
+from typing import Any
+
 from declaro_persistum.types import (
     Column,
     Constraint,
@@ -211,9 +213,49 @@ def _columns_of(live: Table, target: Table) -> list[Operation]:
             None,
         )
         for column in wanted
-        if column in held and held[column]["declared_type"] != wanted[column]["declared_type"]
+        if column in held and _differs(column, live, target, held, wanted)
     ]
     return added + dropped + altered
+
+
+def _rules_on(column: str, table: Table) -> list[tuple[str, Any]]:
+    """Every rule this table declares about this column, as kind and value.
+
+    SORTED, BECAUSE THE ORDER TWO SCHEMAS LIST THEIR RULES IN IS NOT A
+    DIFFERENCE. The live side is whatever an engine reported and the target is
+    whatever a model declared, and comparing the lists as written would alter
+    every column whose rules arrived in another order.
+
+    THE NAME IS LEFT OUT ON PURPOSE. A live constraint carries whatever the
+    engine called it, which for an unnamed rule is something the engine made up,
+    so comparing names would alter a column every time nothing about it changed.
+    """
+    return sorted(
+        (rule["kind"], repr(rule["value"]))
+        for rule in table["constraints"]
+        if column in rule["columns"]
+    )
+
+
+def _differs(
+    column: str,
+    live: Table,
+    target: Table,
+    held: dict[str, Column],
+    wanted: dict[str, Column],
+) -> bool:
+    """Whether the live column and the declared one are the same column.
+
+    A COLUMN IS ITS TYPE AND EVERY RULE ABOUT IT. Until 2026-09-23 this compared
+    declared types alone, so declaring a column NOT NULL or giving it a default
+    emitted no operation and the migration reported success with the database
+    unchanged. Neither could have been compared before: both lived in a bag of
+    facets on the column, and a bag keyed by strings has no two values to put
+    side by side.
+    """
+    return held[column]["declared_type"] != wanted[column]["declared_type"] or _rules_on(
+        column, live
+    ) != _rules_on(column, target)
 
 
 def _views_of(live: Schema, target: Schema) -> list[Operation]:
