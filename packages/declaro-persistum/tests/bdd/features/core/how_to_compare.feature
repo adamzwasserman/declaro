@@ -4,7 +4,7 @@ Feature: how_to_compare -- How one engine writes one comparison
   renderer reads an answer rather than knowing fifteen operators itself.
 
   Scenario: an ordinary comparison is a symbol and one value
-    Given the equals operator on any engine
+    Given the eq operator on any engine
     Then the answer gives a symbol and says one value goes beside it
 
   Scenario: matching part of the text wraps the value

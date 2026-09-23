@@ -34,31 +34,6 @@ import re
 
 import pytest
 
-# NOTHING THIS FILE GUARDS IS BUILT, SO IT MAY NOT REPORT GREEN. Marked
-# 2026-09-23. Every module the declaration hands an `Engine` was deleted that
-# morning: the renderer, both spellers, the inspector. The two gates below would
-# walk a package with no engine-aware module in it and pass over nothing, which
-# reads exactly like a package they had checked.
-#
-# ONLY THE SELF-CHECK CARRIES IT, and that is deliberate. The two gates below do
-# pass right now, over a package with nothing in it to fail on, and that vacuous
-# green is the whole danger. The self-check is the one that knows, so it is the
-# one that says so.
-#
-# `strict=True` IS THE POINT. The day a module the declaration hands an engine is
-# written back, the self-check passes, pytest reports XPASS and fails, and
-# whoever built it takes this marker off. A marker that outlives its reason is a
-# second silence.
-_NOTHING_TO_GUARD = pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "every module the declaration hands an Engine is unbuilt as of "
-        "2026-09-23, so these gates have nothing to examine; they come back on "
-        "with the renderer"
-    ),
-)
-
-
 pytestmark = pytest.mark.precommit
 
 _ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -174,7 +149,6 @@ def test_no_module_the_declaration_kept_engine_free_names_an_engine(package):
     )
 
 
-@_NOTHING_TO_GUARD
 def test_this_gate_can_actually_see_the_package(package):
     """A discovery bug would make both tests above pass on an empty set.
 

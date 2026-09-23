@@ -117,9 +117,6 @@ _NEXT_UP = (
 )
 
 KNOWN_UNBOUND: dict[str, str] = {
-    "how_to_compare.feature": _NEXT_UP,
-    "how_to_inspect.feature": _NEXT_UP,
-    "how_to_spell.feature": _NEXT_UP,
     "compile_statement.feature": _READS_A_RECORD_THAT_MOVED,
     "declaration_from_django.feature": _READS_A_RECORD_THAT_MOVED,
     "declaration_from_phrasing.feature": _READS_A_RECORD_THAT_MOVED,
