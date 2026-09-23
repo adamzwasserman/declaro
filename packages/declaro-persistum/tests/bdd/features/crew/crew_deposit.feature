@@ -23,3 +23,14 @@ Feature: crew_deposit -- Handing a write to the crew and taking a ticket
     When two callers each deposit a write
     Then each caller is given a ticket of its own
     And the crew is handed the two writes in the order they arrived
+
+  # THE BELL IS THE DIFFERENCE BETWEEN A WORKER SLEEPING AND A WORKER LOOKING.
+  # write_queue.py recorded what looking cost before the rewrite deleted it: a
+  # busy loop starves the worker while a caller waits on a promise with no time
+  # limit, which is a hang rather than a slowdown, and it hung about one run in
+  # six. A deposit that does not ring leaves every worker asleep until its idle
+  # limit runs out.
+  Scenario: a deposit wakes a sleeping worker
+    Given a worker asleep on a crew holding nothing
+    When a caller deposits a write
+    Then the worker wakes
