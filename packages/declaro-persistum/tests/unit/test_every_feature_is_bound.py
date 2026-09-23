@@ -117,7 +117,6 @@ _NEXT_UP = (
 )
 
 KNOWN_UNBOUND: dict[str, str] = {
-    "compile_statement.feature": _READS_A_RECORD_THAT_MOVED,
     "lifecycle_register.feature": _NEEDS_A_DELETED_FUNCTION,
     "replicates.feature": _NEEDS_A_DELETED_FUNCTION,
     "schema_read_declared.feature": _NEEDS_A_DELETED_FUNCTION,
@@ -133,8 +132,6 @@ KNOWN_UNBOUND: dict[str, str] = {
     "schema_inspect.feature": _DELETED_2026_09_23,
     "session_connect.feature": _DELETED_2026_09_23,
     "session_open.feature": _DELETED_2026_09_23,
-    "spell_operation.feature": _DELETED_2026_09_23,
-    "spell_view.feature": _DELETED_2026_09_23,
     "turso_pull.feature": _DELETED_2026_09_23,
     "a_condition_is_data.feature": _ONE_EACH,
     "a_failure_is_a_value.feature": _ONE_EACH,

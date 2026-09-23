@@ -433,7 +433,7 @@ module declaro-persistum
 
   fn how_to_compare : (operator: Operator, engine: Engine) -> Comparing | Fault note "reads the operators table and hands back how this engine writes this comparison"
 
-  fn spell_operation : (operation: Operation, spelling: Spelling) -> list<Statement> | Fault invokes how_to_spell note "turns one schema change into the statements that carry it out, reading how off the record it is handed"
+  fn spell_operation : (operation: Operation, engine: Engine) -> list<Statement> | Fault invokes how_to_spell note "turns one schema change into the statements that carry it out"
 
   # --- what a question across models reaches -------------------------------
 
@@ -441,6 +441,6 @@ module declaro-persistum
 
   # --- what a declared view reaches ---------------------------------------
 
-  fn spell_view : (view: View, spelling: Spelling) -> Statement | Fault invokes how_to_spell note "writes the SELECT a declared view stands for, reading how off the record it is handed"
+  fn spell_view : (view: View, engine: Engine) -> Statement | Fault invokes compile_statement note "writes the SELECT a declared view stands for"
 
   fn mechanism_for : (freshness: Freshness, engine: Engine, capability: Capability) -> list<Operation> | Fault note "picks the mechanism that gives a materialized view the freshness asked for"

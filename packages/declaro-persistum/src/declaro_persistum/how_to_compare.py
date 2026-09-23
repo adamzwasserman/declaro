@@ -92,12 +92,38 @@ def _no_row_for_that(operator: Operator, engine: Engine) -> Comparing | Fault:
 # Whether the operators table holds a row for this comparison. Both answers are
 # written out, so a sixteenth operator is refused by a row rather than rendered
 # as whatever the lookup happened to fall through to.
-_WHETHER_IT_IS_WRITTEN_DOWN: dict[bool, Callable[[Operator, Engine], Comparing | Fault]] = {
-    True: _the_row,
-    False: _no_row_for_that,
+def _no_such_engine(_operator: Operator, engine: Engine) -> Comparing | Fault:
+    """An engine this package does not ship, named rather than subscripted.
+
+    The engine reaches here as a value, and a value can be anything a caller
+    typed. Reading the table by subscript would raise where the question was
+    not asked, so the row is read after this and not before.
+    """
+    return Fault(
+        kind="refused",
+        what_went_wrong=(
+            f"You asked about {engine!r}, and this package ships "
+            f"{', '.join(sorted(_WHAT_THIS_ENGINE_SAYS_INSTEAD))}."
+        ),
+        what_to_do_instead=(
+            f"Ask about one of {sorted(_WHAT_THIS_ENGINE_SAYS_INSTEAD)}, or add a row for "
+            f"{engine!r} to every one of the tables an engine has a row in."
+        ),
+    )
+
+
+_WHETHER_IT_IS_WRITTEN_DOWN: dict[
+    tuple[bool, bool], Callable[[Operator, Engine], Comparing | Fault]
+] = {
+    (True, True): _the_row,
+    (True, False): _no_such_engine,
+    (False, True): _no_row_for_that,
+    (False, False): _no_such_engine,
 }
 
 
 def how_to_compare(operator: Operator, engine: Engine) -> Comparing | Fault:
     """Say how this engine writes this comparison."""
-    return _WHETHER_IT_IS_WRITTEN_DOWN[operator in _THE_SAME_EVERYWHERE](operator, engine)
+    return _WHETHER_IT_IS_WRITTEN_DOWN[
+        (operator in _THE_SAME_EVERYWHERE, engine in _WHAT_THIS_ENGINE_SAYS_INSTEAD)
+    ](operator, engine)

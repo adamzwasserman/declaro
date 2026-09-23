@@ -47,6 +47,12 @@ _STEP_DECORATORS = frozenset({"given", "when", "then"})
 # by another card, and they go when those scenarios move to the feature of the
 # function that can answer them.
 KNOWN_DUPLICATE_SHAPES: dict[str, int] = {
+    # `_what_the_scenario_declared` records what a scenario set up and
+    # `_something_this_function_is_not_handed` marks a scenario as asking for
+    # something outside this function. Both read a table by a word the sentence
+    # carried, so they are one shape, and they are not one function: one keeps
+    # state and the other stops the test.
+    "test_spell_view_steps.py": 1,
     "common_steps.py": 1,
     "test_budget_spent_steps.py": 1,
     "test_worth_retrying_steps.py": 2,

@@ -103,12 +103,38 @@ def _no_row_for_that(kind: OperationKind, engine: Engine) -> Spelling | Fault:
 # Whether the generators table holds a row for this change. Both answers are
 # written out, so a fourteenth kind is refused by a row rather than spelled as
 # whatever the lookup happened to fall through to.
-_WHETHER_IT_IS_WRITTEN_DOWN: dict[bool, Callable[[OperationKind, Engine], Spelling | Fault]] = {
-    True: _the_row,
-    False: _no_row_for_that,
+def _no_such_engine(_kind: OperationKind, engine: Engine) -> Spelling | Fault:
+    """An engine this package does not ship, named rather than subscripted.
+
+    The engine reaches here as a value, and a value can be anything a caller
+    typed. Reading the table by subscript would raise where the question was
+    not asked, so the row is read after this and not before.
+    """
+    return Fault(
+        kind="refused",
+        what_went_wrong=(
+            f"You asked about {engine!r}, and this package ships "
+            f"{', '.join(sorted(_WHAT_THIS_ENGINE_WRITES_INSTEAD))}."
+        ),
+        what_to_do_instead=(
+            f"Ask about one of {sorted(_WHAT_THIS_ENGINE_WRITES_INSTEAD)}, or add a row for "
+            f"{engine!r} to every one of the tables an engine has a row in."
+        ),
+    )
+
+
+_WHETHER_IT_IS_WRITTEN_DOWN: dict[
+    tuple[bool, bool], Callable[[OperationKind, Engine], Spelling | Fault]
+] = {
+    (True, True): _the_row,
+    (True, False): _no_such_engine,
+    (False, True): _no_row_for_that,
+    (False, False): _no_such_engine,
 }
 
 
 def how_to_spell(kind: OperationKind, engine: Engine) -> Spelling | Fault:
     """Say how this engine writes this schema change."""
-    return _WHETHER_IT_IS_WRITTEN_DOWN[kind in _THE_SAME_EVERYWHERE](kind, engine)
+    return _WHETHER_IT_IS_WRITTEN_DOWN[
+        (kind in _THE_SAME_EVERYWHERE, engine in _WHAT_THIS_ENGINE_WRITES_INSTEAD)
+    ](kind, engine)
