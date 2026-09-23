@@ -31,6 +31,15 @@ Freshness = Literal["always current", "current when read", "refreshed when asked
 FaultKind = Literal["conflict", "refused", "budget_spent", "cut_short"]
 Feature = Literal["materialized_view", "check_constraint", "partial_index", "enum", "range_type"]
 
+# How far back a failed migration rolls on this engine.
+MigrationMode = Literal["all_or_nothing", "per_operation"]
+# How a driver wants the values handed to it.
+ParameterStyle = Literal["named", "positional"]
+# How many values a comparison puts beside its symbol.
+ValueShape = Literal["one", "list", "range", "pattern", "none"]
+# What shape a caller wants its rows back in.
+Shaping = Literal["dictionaries", "objects"]
+
 # ELEVEN WORDS, NONE OF THEM ANY ENGINE'S. A declared type says what a column
 # holds, and `spell_operation` is the one place it becomes an engine's own word.
 # Added 2026-09-22 after the reader and the renderer were found disagreeing on
@@ -118,6 +127,16 @@ Value = str | int | float | bool | None
 Row = dict[str, Value]
 Rows = list[Row]
 Connection = Any
+# The one line to the primary. Held and pushed and pulled along, never read.
+Channel = Any
+# Where one caller's outcome is put. Awaited once, never read.
+Waiter = Any
+# How a sleeping drainer is told there is work, or told to stop.
+Doorbell = Any
+# One running worker, held so a crew can be stopped.
+Drainer = Any
+# One of your own model objects, built from a row and handed straight back.
+Instance = Any
 Ticket = str
 
 # --- what a caller says ----------------------------------------------------
@@ -208,6 +227,7 @@ class Declaration(TypedDict):
     having: Condition
     paging: dict[str, int] | None
     rows: Rows | None
+    shaping: Shaping
     across: list[Join] | None
 
 
@@ -222,7 +242,7 @@ class Fault(TypedDict):
     what_to_do_instead: str
 
 
-Answer = Rows | int | bool | Ticket | None
+Answer = Rows | list[Instance] | int | bool | None
 
 # --- what the code declares ------------------------------------------------
 
@@ -246,7 +266,6 @@ class Column(TypedDict):
     declared_type: DeclaredType
     renamed_from: str | None
     references: Reference | None
-    facets: dict[str, Value]
 
 
 class Index(TypedDict):
@@ -261,7 +280,7 @@ class Index(TypedDict):
 # already here; the missing part was the word for what to do with them. A check
 # reads its rule. A primary key and a unique read their columns and carry the
 # condition that narrows by nothing, which is a real value here, not a hole.
-ConstraintKind = Literal["check", "primary_key", "unique"]
+ConstraintKind = Literal["check", "primary_key", "unique", "length"]
 
 
 class Constraint(TypedDict):
@@ -327,7 +346,6 @@ class Schema(TypedDict):
 class Operation(TypedDict):
     kind: OperationKind
     table: str
-    detail: dict[str, Value]
     # A new table's columns, and a changed table's whole shape afterwards.
     columns: list[Column]
     # What a SQLite rebuild puts back: that engine alters a column by making a
@@ -339,6 +357,10 @@ class Operation(TypedDict):
     copying: list[str]
     # What `insert_enum_values` inserts.
     values: list[Value]
+    # What a renamed table is called afterwards.
+    renamed_to: str | None
+    # The view a `create_view` creates.
+    view: View | None
     destroys: bool
 
 
@@ -352,6 +374,70 @@ class Report(TypedDict):
     applied: int
 
 
+# --- what each table hands back --------------------------------------------
+#
+# `docs/architecture.md` lines 56 to 68 name seven tables, one row per engine,
+# and say adding an engine means adding a row to each. These are the records
+# those rows hold. A pure function reads the table and hands one of these back;
+# whatever runs the work reads the record and never learns an engine's name.
+
+
+class Transacting(TypedDict):
+    """What one engine needs around a write."""
+
+    # The statement that opens a transaction. Turso says BEGIN CONCURRENT,
+    # SQLite says BEGIN IMMEDIATE, and PostgreSQL says nothing because its
+    # driver owns the transaction.
+    begin: str
+    parameters: ParameterStyle
+    commits: bool
+
+
+class Inspecting(TypedDict):
+    """The five questions one engine answers about itself."""
+
+    tables: Statement
+    columns: Statement
+    indexes: Statement
+    constraints: Statement
+    views: Statement
+
+
+class Spelling(TypedDict):
+    """How one engine writes one schema change."""
+
+    statements: list[str]
+    # SQLite alters a column by building a new table and copying into it.
+    rebuilds: bool
+
+
+class Comparing(TypedDict):
+    """How one engine writes one of the fifteen comparisons."""
+
+    symbol: str
+    shape: ValueShape
+    # What a value is wrapped in, for the three that match on part of the text.
+    wraps: str
+    # What this engine says instead when case does not matter.
+    ignoring_case: str
+
+
+class Carrying(TypedDict):
+    """Which fields one kind of schema change fills.
+
+    Adding a kind of change is one more row in this table, rather than one more
+    field on `Operation` or one more function.
+    """
+
+    columns: bool
+    indexes: bool
+    constraints: bool
+    copying: bool
+    values: bool
+    renamed_to: bool
+    view: bool
+
+
 class Capability(TypedDict):
     native: bool
     built_from: str
@@ -363,27 +449,37 @@ class Capability(TypedDict):
 class Receipt(TypedDict):
     id: str
     ok: bool
+    touched: int
     attempts: int
     failure: Fault | None
 
 
-# THE TICKET IS THE KEY, BECAUSE IT IS THE ONLY THING BOTH HALVES HOLD. Until
-# 2026-09-22 a room held two lists side by side, the statements in arrival order
-# and the tickets given out, and nothing joined one to the other. A drainer could
-# tell which ticket belonged to the write it had taken only because both lists
-# were appended in step, and that stops being true the moment a ticket leaves the
-# middle, which is what `room_release_ticket` does.
+# THE TICKET IS THE KEY, BECAUSE IT IS THE ONLY THING BOTH HALVES HOLD. A
+# drainer looks a write up by the ticket and hands the outcome back under that
+# same ticket, so nothing has to guess whose write it just ran.
 #
-# AND A RECEIPT HAD NOWHERE TO GO. `room_post_receipt` takes a ticket and a
-# receipt, and a room had no field to put one in, so the function that tells a
-# caller what happened to its write could not have worked.
-class Room(TypedDict):
+# THE WAITING IS A WAITER PER TICKET, NOT A DICT ANYBODY CHECKS. A deposit leaves
+# one, the caller awaits it, and the drainer hands the outcome to it, which wakes
+# that one caller at that instant.
+#
+# `arrived` IS THE DOORBELL AND `stop` ENDS THE CREW. Without the first, a drainer
+# has to keep looking instead of sleeping, and `write_queue.py` recorded what that
+# cost before the rewrite deleted it: a busy loop starves the drainer while a
+# caller waits with no time limit, which hung about one run in six.
+class Crew(TypedDict):
     # The order writes arrived in, by ticket.
     arrivals: list[Ticket]
     # What each ticket is a write of.
     writes: dict[Ticket, Statement]
-    # What happened to it, once a drainer has run it.
-    receipts: dict[Ticket, Receipt]
+    # Where each caller is parked, waiting for its own outcome.
+    waiting: dict[Ticket, Waiter]
+    # Rung by a deposit, slept on by a drainer.
+    arrived: Doorbell
+    # Rung once, to end every drainer.
+    stop: Doorbell
+    # The running workers, held so they can be stopped.
+    drainers: list[Drainer]
+    size: int
 
 
 # --- the handle a caller keeps ---------------------------------------------
@@ -391,11 +487,11 @@ class Room(TypedDict):
 
 class Database(TypedDict):
     engine: Engine
-    connection: Connection
+    connections: list[Connection]
     writers: list[Connection]
-    room: Room
+    channel: Channel | None
+    crew: Crew
     shutdown: Shutdown
-    primary: str | None
 
 
 # --- what each orchestrator carries while it works -------------------------
@@ -404,7 +500,10 @@ class Database(TypedDict):
 class Connecting(TypedDict):
     target: str
     shutdown: Shutdown
-    connections: int | None
+    # The caller hands both in. A database with no primary passes NOTHING.
+    primary: str | None
+    token: str | None
+    connections_asked: int | None
     # WHAT THE DEPLOYMENT ASKED FOR, beside what was settled. Added 2026-09-22:
     # `session_open` declares that it reads DECLARO_CREW_SIZE and
     # DECLARO_CONNECTIONS, and this record held one number for both, so the
@@ -414,9 +513,10 @@ class Connecting(TypedDict):
     engine: Engine
     settings: dict[str, Value]
     permitted: int
-    crew: int
+    crew_size: int
     writers: list[Connection]
-    connection: Connection
+    connections: list[Connection]
+    channel: Channel | None
     declared: Declared
     live: Schema
     wanted_schema: Schema
@@ -432,14 +532,22 @@ class Answering(TypedDict):
     asked: Asked
     declaration: Declaration
     statement: Statement
+    # A write travels the whole way inside one call: deposited, waited on, and
+    # answered with a count. Neither of these ever reaches a caller.
+    ticket: Ticket
+    receipt: Receipt
     rows: Rows
     answer: Answer
 
 
-class Collecting(TypedDict):
+class Draining(TypedDict):
+    """What one drainer holds for its whole life."""
+
     db: Database
-    ticket: Ticket
-    receipt: Receipt
+    # The one connection this drainer writes on, and never reads on.
+    writer: Connection
+    stop: Doorbell
+    idle: float
 
 
 class CatchingUp(TypedDict):

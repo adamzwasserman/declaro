@@ -49,9 +49,6 @@ _STEP_DECORATORS = frozenset({"given", "when", "then"})
 KNOWN_DUPLICATE_SHAPES: dict[str, int] = {
     "common_steps.py": 1,
     "test_budget_spent_steps.py": 1,
-    "test_crew_size_steps.py": 1,
-    "test_declaration_from_phrasing_steps.py": 1,
-    "test_spell_view_steps.py": 1,
     "test_worth_retrying_steps.py": 2,
 }
 
@@ -180,17 +177,20 @@ def _duplicate_shapes(text: str) -> dict[str, list[str]]:
     return {shape: names for shape, names in by_shape.items() if len(names) > 1}
 
 
-@pytest.fixture(scope="module")
-def step_files() -> dict[pathlib.Path, str]:
-    """Every step module, as path to text."""
-    return {p: p.read_text(encoding="utf-8") for p in sorted(_STEPS.rglob("*.py"))}
+# EVERY STEP MODULE, READ ONCE, WHEN THIS FILE LOADS. The reading is up here
+# rather than inside a fixture because pytest collecting this file is the edge,
+# and a function that reads a disk, called by the tests below, buries the I/O
+# where neither test can see it. Nothing under this line touches a disk.
+STEP_FILES: dict[pathlib.Path, str] = {
+    p: p.read_text(encoding="utf-8") for p in sorted(_STEPS.rglob("*.py"))
+}
 
 
-def test_no_two_step_functions_share_a_shape(step_files):
+def test_no_two_step_functions_share_a_shape():
     """Erase the words and two of them are the same function."""
     found = {
         path.name: sorted(names for names in _duplicate_shapes(text).values())
-        for path, text in step_files.items()
+        for path, text in STEP_FILES.items()
         if _duplicate_shapes(text)
     }
     # A file not on the ratchet is allowed none, which is a rule and not an
@@ -211,9 +211,9 @@ def test_no_two_step_functions_share_a_shape(step_files):
     )
 
 
-def test_the_ratchet_holds_no_name_that_is_already_clean(step_files):
+def test_the_ratchet_holds_no_name_that_is_already_clean():
     """An entry for a file with nothing wrong hides the next regression."""
-    live = {path.name: len(_duplicate_shapes(text)) for path, text in step_files.items()}
+    live = {path.name: len(_duplicate_shapes(text)) for path, text in STEP_FILES.items()}
     measured = dict.fromkeys(KNOWN_DUPLICATE_SHAPES, 0) | live
     stale = sorted(
         name for name, allowed in KNOWN_DUPLICATE_SHAPES.items() if measured[name] < allowed
@@ -225,15 +225,15 @@ def test_the_ratchet_holds_no_name_that_is_already_clean(step_files):
     )
 
 
-def test_this_gate_can_actually_see_the_steps(step_files):
+def test_this_gate_can_actually_see_the_steps():
     """A discovery bug would make the gate above pass on an empty set."""
-    assert len(step_files) >= 20, (
-        f"only {len(step_files)} step modules found under {_STEPS}; the gate "
+    assert len(STEP_FILES) >= 20, (
+        f"only {len(STEP_FILES)} step modules found under {_STEPS}; the gate "
         "above would pass by examining almost nothing"
     )
     steps = sum(
         1
-        for text in step_files.values()
+        for text in STEP_FILES.values()
         for node in ast.walk(ast.parse(text))
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and _is_a_step(node)
     )
@@ -243,7 +243,7 @@ def test_this_gate_can_actually_see_the_steps(step_files):
     )
     judged = sum(
         1
-        for text in step_files.values()
+        for text in STEP_FILES.values()
         for node in ast.walk(ast.parse(text))
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
         and _is_a_step(node)

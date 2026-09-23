@@ -27,12 +27,12 @@ import logging
 import pytest
 from pytest_bdd import given, parsers, scenarios, then, when
 
-from declaro_persistum.crew_size import crew_size
+from declaro_persistum.budget_spent import budget_spent
 from declaro_persistum.engine_of import engine_of
 from declaro_persistum.log_write import LOGGER_NAME, NAMED_LEVELS, log_write
-from declaro_persistum.progress_line import progress_line
-from declaro_persistum.replicates import replicates
+from declaro_persistum.next_wait import next_wait
 from declaro_persistum.types import Value
+from declaro_persistum.worth_retrying import worth_retrying
 
 scenarios("../features/observability/log_write.feature")
 
@@ -149,12 +149,13 @@ def _the_fault_came_back_to_its_caller(scenario: dict, caplog: pytest.LogCapture
     )
 
 
+# NO CREW IS NEEDED HERE AND ONE USED TO BE ASKED FOR. Changed 2026-09-23: this
+# step took an empty crew and asserted the ticket was not in it, which is true of
+# every empty crew by construction. What the scenario is about is `log_write`
+# being handed a failure with nobody left to return it to, and that is a fact
+# about the event, not about where the write came from.
 @given("a write whose caller abandoned its ticket")
-def _a_write_whose_caller_has_gone(scenario: dict, a_room: dict) -> None:
-    assert ABANDONED_TICKET not in a_room["arrivals"], (
-        f"the room is waiting on {ABANDONED_TICKET!r}, so its caller has not "
-        "abandoned it and this scenario is about a different write"
-    )
+def _a_write_whose_caller_has_gone(scenario: dict) -> None:
     scenario["abandoned"] = {"ticket": ABANDONED_TICKET, **A_FAILURE}
 
 
@@ -177,14 +178,19 @@ def _the_abandoned_failure_reached_the_log(
     )
 
 
+# FIVE PURE FUNCTIONS THAT NEED NOTHING BUT VALUES. Changed 2026-09-23: three of
+# the five took a `Database`, and the only honest way to get one is to open a
+# database, which is the one thing this scenario must not do. These five answer
+# from their arguments alone, so a log line from any of them is I/O nothing in
+# the signature admits to.
 @when("the pure core runs")
-def _the_pure_core_runs(scenario: dict, a_replicated_database: dict) -> None:
+def _the_pure_core_runs(scenario: dict) -> None:
     scenario["answers"] = [
         engine_of("sqlite:///orders.db"),
         engine_of(A_TARGET_NO_ENGINE_READS),
-        crew_size(32, False),
-        replicates(a_replicated_database),
-        progress_line(a_replicated_database, 4.0, False),
+        worth_retrying({"kind": "conflict", "what_went_wrong": "x", "what_to_do_instead": "y"}),
+        budget_spent(4, 3),
+        next_wait(2, 1_700_000_000.0, "a-ticket"),
     ]
 
 

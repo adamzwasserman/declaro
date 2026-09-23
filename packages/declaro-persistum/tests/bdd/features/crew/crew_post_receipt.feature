@@ -1,6 +1,6 @@
 @bdd @specification
-Feature: room_post_receipt -- Leaving the outcome where its caller will find it
-  The drainer never speaks to the caller. It puts what happened in the room, and
+Feature: crew_post_receipt -- Handing the outcome to the caller waiting on it
+  The drainer never speaks to the caller. It hands what happened to the crew, and
   the caller collecting takes it from there.
 
   Scenario: a receipt reaches the caller waiting for it

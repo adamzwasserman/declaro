@@ -1,186 +1,51 @@
-# declaro-persistum, declared one function at a time.
-#
-# SOURCES, IN ORDER, AND NOTHING ELSE. `HOW-IT-SHOULD-WORK.md`, then
-# `docs/architecture.md`, then `tests/bdd/features/`. No source file is opened
-# to write this: a declaration written from the code describes what exists, and
-# then the two are one thing wearing two names and neither can check the other.
-#
-# BUILT ONE CARD AT A TIME, EACH READ ON THE MAP BEFORE THE NEXT. Nothing is here
-# that was not argued for. The last attempt was a whole board written at once and
-# defended for eleven rounds; this one gets read before it grows.
 
 module declaro-persistum
 
   layer data
 
-  # HOW MANY DRAINERS THE CREW RUNS, AND WHERE THAT NUMBER COMES FROM. Not a
-  # caller's argument: it is a fact about the box this process runs on, and the
-  # deployment sets it. `Absent` says an unset variable is a case somebody has to
-  # handle rather than a silent default.
   env DECLARO_CREW_SIZE : int | Absent
 
-  # HOW MANY CONNECTIONS THIS DEPLOYMENT MAY HOLD, FROM THE SAME PLACE. It was a
-  # door argument until 2026-09-20, which asked a caller for a number about the
-  # box rather than about the data. Taking it here also closes a hole: what
-  # PostgreSQL permits is written in none of the sources, and with the number
-  # declared by the deployment there is no per-engine table to invent.
   env DECLARO_CONNECTIONS : int | Absent
 
-  # EVERY SIDE OF THE WORLD THIS MODULE TOUCHES, LISTED ONCE. A boundary naming
-  # a side that is not here is a fault, and a side here that nothing touches is
-  # one too, so the two lists and the cards cannot drift apart.
-  inputs = { "caller" : "a library call from the host program", "models" : "the Pydantic models the host declares", "database" : "what a database says it holds", "turso" : "the sync channel, inbound", "clock" : "the wall clock", "signal" : "the platform's shutdown", "scheduler" : "a spare turn from the runtime", "shutdown list" : "the databases that asked to replicate at exit", "room" : "the waiting room; on both lists because releasing a ticket reads it and writes it", "random" : "where a ticket comes from; two writes in one process must never share one" }
-  outputs = { "database" : "statements, and the connection they run on", "turso" : "the sync channel, outbound", "room" : "writes deposited and outcomes posted", "signal" : "the process's one handler", "shutdown list" : "the databases shutdown works through", "log" : "what an operator reads afterwards" }
+  inputs = { "caller" : "a library call from the host program", "models" : "the Pydantic models the host declares", "database" : "what a database says it holds", "primary" : "the channel from the primary, inbound", "clock" : "the wall clock", "signal" : "the platform's shutdown", "crew" : "a drainer waking, and the writes that have arrived; on both lists because releasing a ticket reads it and writes it", "shutdown list" : "the databases that asked to replicate at exit", "random" : "where a ticket comes from; two writes in one process must never share one" }
+  outputs = { "database" : "statements, and the connection they run on", "primary" : "the channel to the primary, outbound", "signal" : "the process's one handler", "crew" : "the drainers, and the writes deposited and outcomes posted to them", "shutdown list" : "the databases shutdown works through", "log" : "what an operator reads afterwards" }
 
-  # `Database` IS BACK, AND EVERY FIELD NOW HAS A LINE BEHIND IT. It was cut for
-  # being assembled out of signatures I had just written. It returns because
-  # `session_connect` is the function whose whole job is to produce it.
-  #
-  # A PURE FUNCTION USED TO BUILD IT AND CANNOT. `assemble` took the driver's
-  # connection as an argument, and naming a handle in a signature is reading it.
-  # Holding one inside a record is not, so `session_connect` puts the six fields
-  # together itself. That is what an orchestrator is: the thing that keeps what
-  # each step returned.
-  #
-  #   engine      `tests/bdd/features/opening/open_database.feature`: the
-  #               database carries the engine, and that is the only place it is
-  #               written down.
-  #   writers     one connection per drainer, opened once and held for life.
-  #               `architecture.md:142` and `:148`: a crew is N drainers over one
-  #               room, each holding one persistent connection, because every
-  #               connection is an OS thread and opening one per write pays for
-  #               that thread every time. Reuse alone is a 6x difference.
-  #   room        the waiting room writes are deposited into. `HOW-IT-SHOULD-
-  #               WORK.md:184`: the library chooses the connection, opens it and
-  #               closes it, and the room is the same kind of machinery. A caller
-  #               that had to make one could make two and split its own writes.
-  #   connection  a replicated database connects at open and holds it for life.
-  #               `query_run_statement` has nothing to run on without it.
-  #   shutdown    `architecture.md:314`: required at open, and `lifecycle_shut_down` is
-  #               the function that reads it.
-  #   primary     `tests/bdd/features/database/opening.feature:14`: whether a
-  #               database replicates is DERIVED from the primary rather than
-  #               stored beside it, because a second flag could disagree.
-  # A FAULT SAYS WHAT TO DO DIFFERENTLY, AND THAT IS WHY IT HAS TWO FIELDS.
-  # Naming what went wrong is half a fault. The other half is the edit the
-  # programmer should make instead, which is the difference between "no such
-  # column" from an engine and "Person declares id and name, and you asked for
-  # nmae". A fault with one field would let the second half be forgotten.
-  #
-  # IT TRAVELS BY RETURN AND BY NOTHING ELSE. Every function below that can fail
-  # says so in its return type, and so does every caller of one, out to the door
-  # the caller knocked on. No log line, no exception thrown past the signatures.
   type Fault = { kind: FaultKind
                  what_went_wrong: str
                  what_to_do_instead: str } note "a failure on its way back to a caller; it says what to do, not only what broke"
 
-  # WHETHER TO TRY AGAIN IS ASKED OF THE KIND, NEVER OF THE MESSAGE.
-  # `tests/bdd/features/running/retrying_is_the_librarys_job.feature`: a conflict
-  # is retried and a refusal is not, and a spent budget must be told apart from a
-  # refusal. `cut_short` is the platform killing a shutdown before it finished.
   set fault_kinds = { "conflict" : "two writers wrote one row; try again", "refused" : "the request itself is wrong; change it", "budget_spent" : "retried as many times as allowed", "cut_short" : "the process was killed before the work finished" } note "the kinds of failure, because the kind decides whether to try again"
   vocabulary FaultKind = { fault_kinds } note "which kind of failure this is"
 
-  # A VALUE, AND THE SMALLEST ONE. `HOW-IT-SHOULD-WORK.md` says every string you
-  # pass is either checked against your declaration or bound as a parameter.
-  # This is the bound half, and it is the only place a caller's own data lives.
   type Value = str | int | float | bool | NOTHING note "a value a caller passed, bound by the driver and never pasted into text"
   type Row = dict<str, Value> note "one row, as column names to values"
   type Rows = list<Row> note "the rows a driver handed back"
 
-  # THE ONE VALUE WE DID NOT MAKE. A driver's
-  # connection has a shape, and it belongs to the driver. `architecture.md:98`
-  # refuses to work an engine out from one, and reading its interior is how that
-  # starts. `handle` is the format's word for it as of today: held, passed to a
-  # boundary, never read. A pure function that names one is now a fault.
-  #
-  # `Callables` WAS HERE AND IS GONE. `compile_statement` is the only card that
-  # knows the engine, so a second bag of engine-specific functions on the handle
-  # had nothing left to do.
-  # `Asked` is the call as the caller phrased it. Its keys are column names and
-  # the vocabulary's own words; its values are the six things below and nothing
-  # else, so a call of bare integers is not one of them.
-  type Connection = handle note "the driver's connection, held and passed onward but never read"
-  # A NARROWING IS WIDER THAN A CONDITION, AND THAT IS THE WHOLE POINT OF THE
-  # BUILDERS. A `Condition` is what this library holds: every comparison spelled
-  # out, `any_of` and `none_of` present whether or not anybody used them. A
-  # `Narrowing` is what a caller wrote, which is a bare value where they meant
-  # eq, `or` and `not` where they meant `any_of` and `none_of`, and a named
-  # operator where they wanted one. `condition_from_narrowing` is the one place
-  # the second becomes the first.
-  #
-  # ADDED 2026-09-21, BECAUSE FOUR BUILDERS WERE HANDED SOMETHING THEIR ARGUMENT
-  # TYPE DID NOT ADMIT. `{"age": {"gt": 18}}` and `{"or": [...]}` are neither a
-  # `Row` nor a `Condition`, so every builder was taking data the declaration
-  # said could not arrive. Found by building against the types rather than by
-  # reading them.
+  type Connection = handle note "what statements run on: reads and writes to the local file, held and never read"
+
+  type Channel = handle note "the one line to the primary, pushed and pulled along, held and never read"
+
+  type Waiter = handle note "where one caller's outcome is put; awaited once, never read"
+  type Doorbell = handle note "how a sleeping drainer is told there is work, or told to stop"
+  type Drainer = handle note "one running worker, held so a crew can be stopped"
   type Narrowing = dict<str, AskedValue> note "a caller's narrowing as they wrote it: a bare value, a named operator, or `or` and `not` holding more of the same"
   type AskedValue = Value | Row | Rows | Condition | Narrowing | list<Narrowing> | list<str> | list<Value> | dict<str, Direction> note "what may stand beside a key in a caller's question"
   type Asked = dict<str, AskedValue> note "a caller's question, as they phrased it"
 
-  # A GRAMMAR IS A SET OF WORDS AND NOTHING ELSE. Django says `filter`, Prisma
-  # and the library's own phrasing say `where`, SQLAlchemy says `filter_by`, and
-  # all four mean `condition`. That difference is a table, so each builder is its
-  # own table and `declaration_from_phrasing` is the reader they share.
-  #
-  # WHERE A GRAMMAR HAS NO WORD, THE LIBRARY SUPPLIES ONE. SQLAlchemy's own API
-  # has no phrasing this surface imitates for `having` or `page`. Refusing those
-  # four words for that grammar would make the four grammars unequal, and a
-  # caller who picked a spelling would have picked a smaller library. So a word
-  # a grammar does not bring is the library's own word, and every grammar reaches
-  # all ten fields.
   type Phrasing = dict<str, str> note "a grammar's word for each field of a declaration, and nothing else"
 
   type Database = { engine: Engine
-                    connection: Connection
+                    connections: list<Connection>
                     writers: list<Connection>
-                    room: Room
-                    shutdown: Shutdown
-                    primary: str | NOTHING } note "what opening gives you, and what every later call reads"
+                    channel: Channel | NOTHING
+                    crew: Crew
+                    shutdown: Shutdown } note "what opening gives you, and what every later call reads"
 
-  # WHAT A MODEL SAYS, WHICH IS THE ONLY DESCRIPTION OF THE DATABASE. A column
-  # carries its facets, which is what `field` declares: a key, a floor, a
-  # length. One of those facets is a foreign key, and that is the whole of what
-  # a join needs. `HOW-IT-SHOULD-WORK.md`: you declared the relationship once,
-  # in the model, and naming it again in every query is the duplication this
-  # library exists to remove.
-  # A MODEL DECLARES EVERYTHING ABOUT ITS TABLE, NOT ONLY ITS COLUMNS. An index
-  # is a promise about speed and a constraint is a rule about a column, and both
-  # are declared the way a column is. Without them here, the desired state could
-  # not hold what `Table` already knows how to carry.
-  #
-  # A FOREIGN KEY IS DECLARED ONCE, ON THE COLUMN THAT POINTS. It sat here as a
-  # mapping on the model and again in the prose as a facet of a column, which is
-  # two places for one fact and the duplication this library exists to remove.
-  # `join_between` reads the column.
-  #
-  # `dropping` IS HOW LOSING DATA IS ASKED FOR. Decided 2026-09-20: a column
-  # absent from a model is not permission to drop it, because a typo is also a
-  # column absent from a model. Naming it here is the permission, and it is a
-  # declaration like every other, so nobody has to be at a deploy to give it.
-  # EVERYTHING THE CODE DECLARES, IN ONE ANSWER. A view is declared against the
-  # models, so the two arrive together or the target schema is half built.
-  #
-  # A WHOLE TABLE'S LOSS HAS NO MODEL LEFT TO ASK. `Model.dropping` names a
-  # column a surviving model means to lose. A table that is gone has no model,
-  # and deleting a file is the easiest way to lose one by accident, so the two
-  # lists here are where dropping a whole table or view is asked for.
   type Declared = { models: list<Model>
                     views: list<View>
                     dropping_tables: list<str>
                     dropping_views: list<str> } note "the models and views the code declares"
 
-  # A MODEL HAD A TABLE AND NO NAME OF ITS OWN, AND THREE THINGS BROKE ON IT.
-  # Added 2026-09-22. You write `Person` and the table is `people`, so a refusal
-  # could only say `people`, which is not the word you typed. Nothing could check
-  # the model a question names against the model it was handed, and a question
-  # that reaches a second table had no way to find it by name.
-  #
-  # MEASURED, NOT REASONED ABOUT. Asking for a model called
-  # `people WHERE 1=1; DROP TABLE people; --` reached the engine and came back in
-  # the engine's words. Nothing ran, because `fn compile_statement` quotes the
-  # name, but this library's rule is that a name no model declares is refused in
-  # the caller's own process, and that rule reached the columns and not the table.
   type Model = { name: str
                  table: str
                  columns: list<Column>
@@ -189,25 +54,10 @@ module declaro-persistum
                  constraints: list<Constraint> } note "your description of one table, which is the only description there is"
 
   # --- the schema, which is the models and nothing else --------------------
-  #
-  # `HOW-IT-SHOULD-WORK.md`: you change a model, the library reads the live
-  # database, compares it to your models, works out the difference and applies
-  # it. The models are the desired state and everything else is derived.
 
-  # A column's facets are what `field` declares: a key, a floor, a length. The
-  # set of types a model may write is in
-  # `schema-declared/every_column_type_is_declarable.feature`, which exists
-  # because a type the loader cannot read is a model nobody can declare.
-  # A RENAME IS A DECLARATION LIKE EVERY OTHER. A column gone and another
-  # appeared is either a rename or a drop and an add, and the difference is your
-  # data. Nobody is there to be asked at a deploy, so the new model says which
-  # it is: the column that replaced the old one names what it replaced.
-  # WHAT HAPPENS TO A CHILD ROW WHEN ITS PARENT GOES IS A DECLARATION LIKE ANY
-  # OTHER. Added 2026-09-21: `references` was the string `"people.id"`, which said
-  # where the key points and could not say what the engine should do when the
-  # parent row is deleted. A scenario asking for ON DELETE CASCADE had nowhere to
-  # put it. Three functions were also splitting that string back apart to get the
-  # table out, which is a shape being parsed where it could have been carried.
+  # A column's facets are what `field` declares: a key, a floor, a length. Every
+  # type a model may write is declarable, because a type the loader cannot read
+  # is a model nobody can declare.
   set deletion_rules = { "refuse", "cascade", "set_null" } note "what happens to a child row when its parent is deleted"
   vocabulary OnDelete = { deletion_rules } note "refuse the delete, delete the child too, or empty the column"
 
@@ -215,154 +65,96 @@ module declaro-persistum
                      column: str
                      on_delete: OnDelete } note "where a foreign key points and what a delete does to the child"
 
-  # ELEVEN WORDS, NONE OF THEM ANY ENGINE'S. A declared type says what a column
-  # holds, and `fn spell_operation` is the one place it becomes an engine's own
-  # word. Approved 2026-09-22 after the reader and the renderer were found
-  # disagreeing on five of eleven: the reader was saying `real`, `blob`,
-  # `numeric`, `timestamp` and `jsonb`, which are SQLite's and PostgreSQL's
-  # words, in a place that is supposed to have none.
-  #
-  # IT WAS A BARE `str` UNTIL TODAY, so nothing could catch the disagreement, and
-  # a `"str"` that is not a member of anything had been sitting in the tree
-  # unnoticed. Each word is a Python type a person already writes in a model.
   set declared_types = { "text", "integer", "float", "decimal", "boolean", "bytes", "date", "time", "datetime", "uuid", "json" } note "what a column may hold, in words no engine uses"
   vocabulary DeclaredType = { declared_types } note "what one column holds"
 
   type Column = { name: str
                   declared_type: DeclaredType
                   renamed_from: str | NOTHING
-                  references: Reference | NOTHING
-                  facets: dict<str, Value> } note "one column and what field() declared about it"
+                  references: Reference | NOTHING } note "one column: what it is called, what it holds, what it was called before, and where it points"
 
   type Index = { name: str
                  columns: list<str>
                  unique: bool } note "a declared promise about speed"
 
-  # A CONSTRAINT IS A RULE ABOUT A COLUMN, AND IT IS DATA HERE FOR THE REASON
-  # EVERY OTHER RULE IS. `HOW-IT-SHOULD-WORK.md`'s test catches
-  # `field(check="total >= 0")` the same way it catches a WHERE clause given as
-  # text: that string is neither a declared name nor a bound value, so the only
-  # thing left to do with it is paste it in.
-  # WHICH KIND OF RULE IT IS, WHICH NOTHING COULD SAY BEFORE. Added 2026-09-21:
-  # every constraint carried a `Condition`, so every one was read as a CHECK, and
-  # a primary key spanning two columns had no way to be spelled. The columns were
-  # already here; what was missing was the word for what to do with them. A check
-  # reads its rule. A primary key and a unique read their columns, and carry the
-  # condition that narrows by nothing, which is a real value in this package
-  # rather than a hole.
-  set constraint_kinds = { "check", "primary_key", "unique" } note "what a declared rule about a table asks for"
+  set constraint_kinds = { "check" : "a rule the value must satisfy", "primary_key" : "the column that names the row", "unique" : "no two rows share it", "length" : "how long the value may be" } note "every rule you can declare about a column or a table; a new one is one more line here"
   vocabulary ConstraintKind = { constraint_kinds } note "which kind of rule this is"
 
   type Constraint = { name: str
                       kind: ConstraintKind
                       columns: list<str>
-                      rule: Condition } note "a declared rule about a table, as data rather than a string"
+                      rule: Condition } note "one declared rule, over a column or a whole table, as data rather than a string"
 
   type Table = { name: str
                  columns: list<Column>
                  indexes: list<Index>
                  constraints: list<Constraint> } note "one table's columns, indexes and rules"
 
-  # A VIEW IS A DECLARATION WITH A NAME, NOT A STRING. `a_view_is_a_named_
-  # declaration.feature`: you declare it against your models and the library
-  # writes the SELECT, which only means something if what is stored is the same
-  # `Declaration` a caller asks with. A plain view has no freshness to state.
   type View = { name: str
                 declaration: Declaration
                 freshness: Freshness | NOTHING } note "a declared query with a name; it holds a declaration, never a SELECT"
 
-  # HOW STALE YOU CAN STAND IT, IN THE LIBRARY'S WORDS. The three come from
-  # `freshness_is_declared_in_plain_words.feature`, which refuses to let a
-  # caller say `on_commit` or `trigger`: those are mechanisms, and picking one
-  # is the library's job. A caller who has to know which engine they are on has
-  # been handed that job back.
   set freshnesses = { "always current", "current when read", "refreshed when asked" } note "how fresh a materialized view must be, in requirements rather than mechanisms"
   vocabulary Freshness = { freshnesses } note "how stale a materialized view may be"
 
   type Schema = { tables: list<Table>
                   views: list<View> } note "every table and view, live or declared"
 
-  # WHAT THE DIFFER EMITS. The words are `schema/diff.feature`'s own. Each
-  # operation says whether carrying it out destroys something, because
-  # `losing_data_is_said_out_loud.feature` asks the library to say which of them
-  # do, derived from the models rather than asked for.
-  # `remove_enum_values` ADDED 2026-09-21. A value could be put into an enum's
-  # lookup table and there was no word for taking one out, so a model that
-  # dropped a choice migrated to a database that still accepted it.
+  type Inspecting = { tables: Statement
+                      columns: Statement
+                      indexes: Statement
+                      constraints: Statement
+                      views: Statement } note "the five questions one engine answers about itself, so reading a schema back names no engine"
+
+  # WHAT THE DIFFER EMITS. Each operation says whether carrying it out destroys
+  # something, so the library says which of them do, derived from the models
+  # rather than asked for.
   set operation_kinds = { "create_table", "drop_table", "add_column", "drop_column", "alter_column", "rename_column", "rename_table", "create_index", "drop_index", "create_view", "drop_view", "insert_enum_values", "remove_enum_values" } note "every schema change the differ can emit"
   vocabulary OperationKind = { operation_kinds } note "which schema change this is"
 
-  # A MIGRATION COULD NOT CREATE A TABLE, AND THAT IS WHAT THESE FIVE FIELDS ARE
-  # FOR. `detail` holds single values, so a new table's columns had nowhere to
-  # sit: `difference` could say "create `people`" and `spell_operation` was handed
-  # a name with no way to learn that `people` has an `id` and a `name`. Thirty-six
-  # scenarios failed on it, all of them the first statement any migration runs.
-  #
-  # NAMED BY THE FUNCTION THAT READS THEM, on 2026-09-21, rather than guessed.
-  # `columns` carries a new table's columns and a changed one's whole after-shape.
-  # `indexes` and `constraints` are what a SQLite rebuild has to put back, because
-  # that engine alters a column by making a new table and copying into it.
-  # `copying` is which columns that rebuild carries across, and only `difference`
-  # can know it, because only `difference` holds both the live schema and the
-  # target. `values` is what `insert_enum_values` inserts.
-  #
-  # EACH ONE IS EMPTY ON EVERY KIND THAT NAMES NONE, which is a value rather than
-  # an absence, so nothing has to be looked up and found missing.
+  type Carrying = { columns: bool
+                    indexes: bool
+                    constraints: bool
+                    copying: bool
+                    values: bool
+                    renamed_to: bool
+                    view: bool } note "which fields one kind of change fills; adding a kind of change is one more line in this table"
+
   type Operation = { kind: OperationKind
                      table: str
-                     detail: dict<str, Value>
                      columns: list<Column>
                      indexes: list<Index>
                      constraints: list<Constraint>
                      copying: list<str>
                      values: list<Value>
-                     destroys: bool } note "one schema change, everything it needs spelled out, and whether it destroys anything"
+                     renamed_to: str | NOTHING
+                     view: View | NOTHING
+                     destroys: bool } note "one schema change, every field it may fill named, and whether it destroys anything"
 
-  # The operations in the order they would run.
-  #
-  # `asking_what_would_change.feature` ASKS FOR A DOOR THAT IS NOT HERE. It says
-  # nobody deploys a schema change without reading it first, which needs somebody
-  # reading at a deploy, and nobody is. The safety it was reaching for is here
-  # instead: a destructive operation runs only where a model asked for it. That
-  # scenario is the third to change, after the awaited flush and the remembered
-  # rename.
   type Plan = { operations: list<Operation>
                 destroys: list<str> } note "the operations a migration would run, in order"
+
+  set migration_modes = { "all_or_nothing" : "every operation lands or none does", "per_operation" : "each one lands on its own" } note "how far back a failed migration rolls on this engine"
+  vocabulary MigrationMode = { migration_modes } note "how far back a failed migration rolls"
 
   type Report = { plan: Plan
                   applied: int } note "what a migration actually did"
 
-  # ENGINES DO NOT OFFER THE SAME THINGS, AND ONE TABLE SAYS SO.
-  # `one_table_of_capabilities.feature`: PostgreSQL has a materialized view and
-  # SQLite does not, so one is built from a table, its triggers and a registry
-  # row. Split this across a function per operation and "native or built" ends
-  # up encoded in function names, where nobody can read it.
+  type Spelling = { statements: list<str>
+                    rebuilds: bool } note "how one engine writes one schema change: the statements it takes, and whether it gets there by rebuilding the table"
+
   set features = { "materialized_view", "check_constraint", "partial_index", "enum", "range_type" } note "the things the three engines disagree about"
   vocabulary Feature = { features } note "which engine capability is in question"
 
   type Capability = { native: bool
                       built_from: str } note "what an engine offers natively, and what builds it where it does not"
 
-  # The three engines, and what in a target names each. Straight from the table
-  # in `tests/bdd/features/opening/engine_of.feature`.
   set engines = { "sqlite" : "a bare path, or a sqlite scheme", "postgresql" : "a postgresql or postgres scheme", "turso" : "a libsql scheme, or a path with a primary" } note "the three engines, and what in a target names each"
   vocabulary Engine = { engines } note "which engine a database is on, decided once at open"
 
-  # SPELLINGS MINE, MEANINGS NOT. The features say a shutdown policy must be
-  # stated and that a local database promising to replicate is refused. Neither
-  # writes down the two words, so rename these freely.
   set shutdowns = { "exit_immediately" : "stop, and anything only local is gone", "replicate_then_exit" : "push until the cloud has it, then stop" } note "what happens to your data at exit; no default, because none is safe"
   vocabulary Shutdown = { shutdowns } note "which shutdown policy a caller chose"
 
-  # WHAT THE FOUR GRAMMARS PRODUCE, AND THE ONLY THING `compile_statement` READS.
-  # `tests/bdd/features/rendering/render.feature` says why it exists: four
-  # grammars into three engines is twelve conversions that have to agree, four
-  # into one and one into three is seven. Every field below is a row in the
-  # vocabulary tables of `HOW-IT-SHOULD-WORK.md`, nothing more.
-  #
-  # THE WRITE SIDE IS `wanted` AND `rows`. "Writing has the same shape", so
-  # `add` and `change` are askings like `all` and `count`, and the rows they
-  # carry sit in the last field. A read leaves it `NOTHING`.
   type Declaration = { model: str
                        wanted: Wanted
                        columns: list<str>
@@ -372,52 +164,21 @@ module declaro-persistum
                        having: Condition
                        paging: dict<str, int> | NOTHING
                        rows: Rows | NOTHING
+                       shaping: Shaping
                        across: list<Join> | NOTHING } note "one question or write, engine-free; what four grammars produce"
 
-  # THE LIBRARY WORKS THE JOIN OUT, AND THIS IS WHAT IT WORKED OUT. Three ways
-  # to reach the other side, all of them reading the same foreign key: the rows
-  # that belong to a row, a condition on the far side, and a question used as a
-  # value inside another question.
   type Join = { model: str
                 by_column: str
                 to_column: str
                 condition: Condition } note "a path to another model, worked out from its foreign key"
 
-  # THE WHOLE VOCABULARY, IN TWO LISTS, BECAUSE THE TWO HALVES TRAVEL
-  # DIFFERENTLY. A read runs now and answers now. A write is deposited and
-  # answered by a ticket, and the rows reach the engine later, on a spare
-  # moment. Splitting the set is what lets the table below say so word by word.
   set readings = { "all", "one", "first", "page", "distinct", "exists", "count", "sum", "average", "smallest", "largest", "count_distinct" } note "the twelve askings that run now and answer now; this is the read half of the fork"
   set writings = { "add", "change", "change_all", "remove", "remove_all", "replace" } note "the six askings that are deposited and drained later; the write half of the fork"
   vocabulary Wanted = { readings, writings } note "what a question asks for, reading or writing"
 
-  # Fifteen operators, named as keys because a condition is data.
   set operators = { "eq", "ne", "lt", "lte", "gt", "gte", "in", "not_in", "between", "like", "contains", "startswith", "endswith", "is_null", "is_not_null" } note "the fifteen ways to narrow, named as keys"
   vocabulary Operator = { operators } note "which comparison a condition makes"
 
-  # THE CALLER STILL WRITES `or` AND `not`. Those are the words in
-  # `HOW-IT-SHOULD-WORK.md` and they do not change. `any_of` and `none_of` are
-  # what the four builders turn them into, so a declaration holds no word that
-  # would have to be read again later.
-  #
-  # `and` IS WHAT TWO KEYS ALREADY MEAN, so `each` needs no word of its own.
-  # `or` and `not` are keys holding a condition rather than a column, so they
-  # hold conditions here. A bare value meaning `eq` never reaches this type: the
-  # four builders expand it, which is what they are for, and by the time a
-  # declaration exists every comparison names its operator.
-  # IGNORE_CASE MEANS NOTHING TO `is_null` OR TO A NUMBER, and it is on every
-  # comparison anyway, because a field that is there only sometimes is a field
-  # every reader has to check for. False is the answer where case cannot apply.
-  #
-  # IGNORE_CASE IS A COMPANION ON EVERY TEXT OPERATOR, AND THAT IS NOT A DETAIL.
-  # `HOW-IT-SHOULD-WORK.md`: the same `like` matched a name on one engine and
-  # nothing on another, silently, and it is the library's job to make the
-  # engines agree rather than the caller's job to learn which is which.
-  # `between` TAKES TWO VALUES AND `in` TAKES A LIST, SO ONE VALUE IS NOT ENOUGH.
-  # Widened 2026-09-21: `{"age": {"between": [18, 30]}}` built a comparison the
-  # type did not describe, and the builder carried it through untouched rather
-  # than say so. A list here is still bound by the driver, one parameter per
-  # member, and still never pasted into the text.
   type Comparison = { operator: Operator
                       value: Value | list<Value>
                       ignore_case: bool } note "one comparison: an operator, the value or values bound to it, and whether case matters"
@@ -425,98 +186,70 @@ module declaro-persistum
                      any_of: list<Condition>
                      none_of: list<Condition> } note "how a question narrows, as data in every grammar"
 
+  set value_shapes = { "one" : "one value beside the symbol", "list" : "a list of them", "range" : "two, a floor and a ceiling", "pattern" : "one value wrapped in a pattern", "none" : "no value at all" } note "how many values a comparison puts beside its symbol"
+  vocabulary ValueShape = { value_shapes } note "how many values this comparison takes"
+
+  type Comparing = { symbol: str
+                     shape: ValueShape
+                     wraps: str
+                     ignoring_case: str } note "how one engine writes one comparison: the symbol, how many values go beside it, the pattern a value is wrapped in, and what it says instead when case does not matter"
+
   set directions = { "ascending", "descending" } note "which way an order sorts"
   vocabulary Direction = { directions } note "ascending or descending"
 
-  # THE KEY CAME WITH THE CALL, IT WAS NOT WORKED OUT.
-  # `tests/bdd/features/grammars/the_grammar_is_recognized.feature` says the
-  # shape IS the entry point, so which grammar spelled a question is known
-  # before anything runs. It travels as a value and the table below reads it.
   set grammars = { "pseudo_sql", "django", "prisma", "sqlalchemy" } note "the four ways to phrase one question"
   vocabulary Grammar = { grammars } note "which grammar spelled this question"
 
-  # THE TEXT AND THE VALUES KEPT OUT OF IT. `render.feature`: the statement is
-  # rendered and the values are not. They come back beside it, untouched, and
-  # the driver binds them. A value that reached the text would be a value nobody
-  # bound, and no earlier check would have seen it happen.
   type Statement = { text: str
                      parameters: dict<str, Value> } note "a statement for one engine, and the values kept beside it"
 
-  # Rows, or a number when you asked how many, or true or false when you asked
-  # only whether any exist, or the ticket a write leaves with, or a named
-  # absence. `exists` is the one that reads no rows at all.
-  # `architecture.md:120`: absence is `NOTHING`, not `None` and not an empty
-  # result, because `None` is also what a nullable column holds.
-  type Answer = Rows | int | bool | Ticket | NOTHING note "what a caller gets back: rows, a number, true or false, a ticket, or NOTHING"
+  set parameter_styles = { "named", "positional" } note "how a driver wants the values handed to it"
+  vocabulary ParameterStyle = { parameter_styles } note "named or positional"
 
-  # THE WAITING ROOM, AND IT IS NOT A STORE. `architecture.md:140`: a room holds
-  # the arrival order and the callers waiting on tickets, both empty whenever
-  # nobody is mid-flight. A write waiting is a statement and its values, which is
-  # the same pair `compile_statement` produces. The receipt a caller collects is
-  # written out at `architecture.md:244` and is declared below, reached through
-  # `query_collect`.
+  type Transacting = { begin: str
+                   parameters: ParameterStyle
+                   commits: bool } note "what one engine needs around a write: the statement that opens it, how values go in, and whether there is a commit"
+
+  type Answer = Rows | list<Instance> | int | bool | NOTHING note "what a caller gets back: rows, your own objects, a number, true or false, or NOTHING"
+
+  type Instance = handle note "one of your own model objects, built from a row and handed straight back; nothing in here ever reads one"
+
+  set shapings = { "dictionaries" : "column name to value, which is what a partial row can be", "objects" : "your model, built from a whole row" } note "what shape a caller wants its rows back in"
+  vocabulary Shaping = { shapings } note "which shape the caller asked its rows back in"
+
   type Ticket = str note "one caller's claim on one deposited write"
 
-  # WHAT A CALLER READS WHEN IT COMES BACK FOR ITS WRITE. `architecture.md:244`
-  # writes the three fields out. `ok` false means one thing only: the engine
-  # stayed busy for the whole retry budget. Anything refused outright never
-  # becomes a receipt, it is raised, and telling those two apart is the caller's
-  # whole reason to read this.
-  #
-  # HOW MANY TIMES IT TRIED IS IN THE ANSWER. `retrying_is_the_librarys_job`
-  # asks for it in those words, and until 2026-09-21 no declared type could
-  # carry it: a caller told its write landed could not tell a first attempt from
-  # a fourth. Found by giving that scenario one home and watching the only
-  # function that could own it fail.
-  #
-  # THE FAILURE IS A FAULT, NOT A SENTENCE. It carried a bare string until
-  # 2026-09-20, which made a receipt the one place in this module that said what
-  # went wrong without saying what to do about it.
   type Receipt = { id: str
                    ok: bool
+                   touched: int
                    attempts: int
-                   failure: Fault | NOTHING } note "what a write did; ok false means the engine stayed busy, nothing else"
-  # THE TICKET IS THE KEY, BECAUSE IT IS THE ONLY THING BOTH HALVES HOLD. Until
-  # 2026-09-22 a room held two lists side by side, the statements in arrival
-  # order and the tickets given out, and nothing joined one to the other. A
-  # drainer could tell which ticket belonged to the write it had taken only
-  # because both lists were appended in step, and that stops being true the
-  # moment a ticket leaves the middle, which is what `room_release_ticket` does.
-  #
-  # AND A RECEIPT HAD NOWHERE TO GO. `boundary_out fn room_post_receipt` takes a
-  # ticket and a receipt, and a room had no field to put one in, so the function
-  # that tells a caller what happened to its write could not have worked.
-  #
-  # `arrivals` IS THE ORDER, `writes` IS WHAT EACH ONE IS, `receipts` IS WHAT
-  # HAPPENED. All three keyed by the ticket the caller is holding, so a write
-  # taken out of the middle costs nothing and a caller's ticket finds its own
-  # outcome and nobody else's.
-  type Room = { arrivals: list<Ticket>
+                   failure: Fault | NOTHING } note "what a write did, and how many rows it touched"
+  type Crew = { arrivals: list<Ticket>
                 writes: dict<Ticket, Statement>
-                receipts: dict<Ticket, Receipt> } note "the waiting room between callers and drainers; empty when nobody is mid-flight"
+                waiting: dict<Ticket, Waiter>
+                arrived: Doorbell
+                stop: Doorbell
+                drainers: list<Drainer>
+                size: int } note "N drainers, each holding one connection for its life, over the writes that have arrived"
 
-  # `session_connect`'S OWN RECORD. The caller's three arguments on top, then what each
-  # step returned, in the order the chain runs them.
-  # TWO VARIABLES ARRIVE AND THERE WAS ONE FIELD FOR THEM. `boundary_in fn
-  # session_open` declares that it reads `DECLARO_CREW_SIZE` and
-  # `DECLARO_CONNECTIONS`, and this record carried only `connections`, so the
-  # orchestrator handed that one number to `fn permitted_connections` and to
-  # `fn crew_size` alike. Measured 2026-09-22 by opening a database with the
-  # crew set to 2 and the connections to 4: four writers opened, and the crew
-  # size a deployment had asked for was gone without a word.
-  #
-  # `crew_asked` IS WHAT THE DEPLOYMENT SAID AND `crew` IS WHAT WAS SETTLED, the
-  # same way `connections` and `permitted` already sit beside each other.
+  type Draining = { db: Database
+                    writer: Connection
+                    stop: Doorbell
+                    idle: float } note "what one drainer holds for its whole life: the database, the one connection it writes on, its stop and how long it sleeps"
+
   type Connecting = { target: str
                       shutdown: Shutdown
-                      connections: int | NOTHING
+                      primary: str | NOTHING
+                      token: str | NOTHING
+                      connections_asked: int | NOTHING
                       crew_asked: int | NOTHING
                       engine: Engine
                       settings: dict<str, Value>
                       permitted: int
-                      crew: int
+                      crew_size: int
                       writers: list<Connection>
-                      connection: Connection
+                      connections: list<Connection>
+                      channel: Channel | NOTHING
                       declared: Declared
                       live: Schema
                       wanted_schema: Schema
@@ -524,409 +257,120 @@ module declaro-persistum
                       migration: Report
                       database: Database } note "what session_connect carries while it opens a database"
 
-  # `lifecycle_shut_down`'S OWN RECORD. When it started and how many pushes it has made,
-  # because every log line names the database and the time elapsed.
   type ShuttingDown = { databases: list<Database>
                         started_at: float
                         attempts: int } note "what shutdown carries: when it began and how many pushes it has made"
 
-  # `lifecycle_catch_up`'S OWN RECORD. One drainer's turn, so it names the
-  # connection that drainer holds. Without it the record would say a turn writes
-  # without saying what it writes on, and the two outs that take a connection
-  # would be handed one from nowhere. Whether a writer was waiting decides whether the
-  # sync pass runs at all, so the answer is kept rather than asked twice.
   type CatchingUp = { db: Database
                       writer: Connection
                       statement: Statement | NOTHING
                       writer_waiting: bool
                       attempts: int } note "what a free turn carries, including whether a writer was waiting"
 
-  # `query_deliver`'S OWN RECORD.
-  type Collecting = { db: Database
-                      ticket: Ticket
-                      receipt: Receipt } note "what collecting a write carries: the ticket and what came back"
-
-  # `query_answer`'S OWN RECORD, AND NOTHING ELSE NAMES IT. The four things the caller
-  # said are the top half. The bottom half is what each step in the chain
-  # produced, in the order the chain runs them, so the last field is what leaves
-  # on the right.
-  #
-  # PRIVACY IS BY THE SIGNATURES, NOT BY A KEYWORD. Nothing in the format scopes
-  # a type to a function. This one is private because `query_answer` is the only card
-  # that names it, which is a thing you can check by reading, and the map shows
-  # it: click any other function and this record does not appear.
-  # NO FAULT FIELD HERE, DELIBERATELY. Each field holds what a step produced
-  # when it worked. A step that fails returns its fault to `query_answer`, and `query_answer`
-  # returns it onward, so a fault is never something you have to remember to
-  # look at afterwards.
   type Answering = { db: Database
                      model: Model
                      grammar: Grammar
                      asked: Asked
                      declaration: Declaration
                      statement: Statement
+                     ticket: Ticket
+                     receipt: Receipt
                      rows: Rows
                      answer: Answer } note "what answering a question carries, step by step in order"
 
-  # NO STORE, AND THE REASON IS A MISSING NUMBER. `running/a_statement_is_built_
-  # once.feature` asks that the same question not be compiled twice, and a
-  # `store compiled = compile_statement` said so here until 2026-09-20. It came
-  # off because nothing has ever timed one compile. A store's reason string is
-  # meant to carry a measurement, and ours carried a feature reference, which
-  # made it the one card on the board resting on a claim nobody had checked.
-  #
-  # It comes back when somebody times a compile against a round trip to the
-  # engine and the number says it is worth keeping.
-
   # --- column 1: input I/O, and there are five ways in --------------------
-  #
-  # A LIBRARY'S WORLD IS ITS CALLER. It has no file waiting to be read, so the
-  # world arrives when somebody calls it, and the doors they call are the input
-  # boundaries. That is what makes the four grammars boundaries rather than pure
-  # functions, which is where I had them.
 
-  # SESSION. A caller asks for a database. The target says which engine is behind
-  # it, so nobody names one. `shutdown` and the bound on connections are stated
-  # here because this is the only place it can be, and `shutdown` has no
-  # default because there is no safe answer to whether your data survives.
-  boundary_in fn session_open : (target: str, shutdown: Shutdown) -> Database | Fault awaited side_effect reads "caller" side_effect reads "env:DECLARO_CREW_SIZE" side_effect reads "env:DECLARO_CONNECTIONS" invokes session_connect note "opens a database for a caller; the target says which engine, so nobody names one"
+  boundary_in fn session_open : (target: str, shutdown: Shutdown, primary: str | NOTHING, token: str | NOTHING) -> Database | Fault awaited side_effect reads "caller" side_effect reads "env:DECLARO_CREW_SIZE" side_effect reads "env:DECLARO_CONNECTIONS" invokes session_connect note "opens a database for a caller; the target says which engine, so nobody names one"
 
-  # QUERY. A caller asks a question, or declares a write. `HOW-IT-SHOULD-WORK.md`
-  # names four ways to spell it and one meaning: pseudo-SQL, Django, Prisma and
-  # SQLAlchemy, each a thin skin over the same declaration.
-  #
-  # ONE CARD HERE AND FOUR SPELLINGS, SETTLED BY THE TABLE. Four doors would say
-  # the caller entered four different buildings. One door carrying which entry
-  # point was used says the four are spellings of one question, and `by_grammar`
-  # is where that key is spent.
   boundary_in fn query_ask : (db: Database, model: Model, grammar: Grammar, asked: Asked) -> Answer | Fault awaited side_effect reads "caller" invokes query_answer note "takes a question or a declared write, in any of the four grammars"
 
-  # LIFECYCLE. The platform says stop, and nothing in the program asked for it. The
-  # other two doors open because a caller called; this one opens whether or not
-  # anything was ready.
-  #
-  # IT IS THE ONE WITH THE HIGHEST COST OF BEING WRONG. The usual deployment has
-  # disk that does not survive the process, so anything unreplicated at exit is
-  # gone, and the window between the signal and the kill is all there is.
-  boundary_in fn lifecycle_stop : () -> NOTHING | Fault side_effect reads "signal" invokes lifecycle_shut_down note "receives the platform's shutdown signal"
+  boundary_in fn lifecycle_stop : () -> NOTHING | Fault awaited side_effect reads "signal" invokes lifecycle_shut_down note "receives the platform's shutdown signal"
 
-  # LIFECYCLE. The runtime hands us a turn, and nothing outside asked for that
-  # either. `architecture.md:227` is a loop that runs until stop is set and
-  # calls `drain` on every pass, so a caller's write does not travel on the door
-  # the caller knocked on. `room_deposit` hands back a ticket and returns; the write
-  # leaves the process later, here.
-  # THE CLOCK IS THE WORLD, AND READING IT IS INPUT. `engine_of.feature` says a
-  # pure function reads no clock. This is the fourth role, added 2026-09-17: the
-  # program asks, rather than the world calling in. It stands with the doors,
-  # calls nothing, and heads no chain, and the three orchestrators that need the
-  # time call it and hand its answer to the pure functions.
-  # LIFECYCLE. THE DATABASES THAT ASKED TO REPLICATE AT EXIT. `lifecycle_register`
-  # writes this list as each one opens, and nothing else reads it. The signal
-  # carries no arguments, so without this reader the door would have to be handed
-  # a list the module wrote itself.
   reader fn lifecycle_read_registered : () -> list<Database> | Fault side_effect reads "shutdown list" note "reads the databases that asked to replicate at exit"
 
   reader fn clock_read : () -> float side_effect reads "clock" note "asks the clock what time it is"
 
-  # QUERY. A caller comes back for the write it deposited. `write_queue.feature`:
-  # a ticket belongs to exactly one caller, so a failure reaches that caller and
-  # nobody else, and a caller draws its own atomicity boundary by choosing when
-  # to collect. Deposit hands out the ticket; this is where it is spent.
-  boundary_in fn query_collect : (db: Database, ticket: Ticket) -> Receipt | Fault awaited side_effect reads "caller" invokes query_deliver note "hands a caller the outcome of a write it deposited earlier"
-
-  # NO FLUSH DOOR. Decided 2026-09-17. `architecture.md:308`: no caller waits for
-  # the primary, with exactly two exceptions, a cold open and shutdown, both at
-  # the edges of the process. `replication.feature` has a scenario where a caller
-  # awaits `flush`; that scenario contradicts the architecture and is the one to
-  # change.
-
-  boundary_in fn lifecycle_turn : (db: Database) -> NOTHING | Fault awaited side_effect reads "scheduler" invokes lifecycle_catch_up note "receives a spare moment from the runtime"
+  boundary_in fn lifecycle_turn : (draining: Draining) -> NOTHING | Fault awaited side_effect reads "crew" invokes lifecycle_catch_up note "one drainer's turn, which arrives because that drainer woke"
 
   # --- column 2: one orchestrator per door --------------------------------
-  #
-  # A DOOR RECEIVES AND AN ORCHESTRATOR SEQUENCES, and each door reaches exactly
-  # one. Five doors, five orchestrators, and the family word is the same on both
-  # sides so a chain never changes vocabulary halfway down. It was nine of each
-  # until the schema and startup doors came off.
 
-  # THE MIGRATION RUNS BEFORE THE HANDLE COMES BACK. The models the code has and
-  # the schema the database has meet here, and a database still behind its models
-  # is brought up before any caller can ask it anything. Handing back a handle
-  # first would let the first question fail on a column the models declare.
-  #
-  # Works out which engine the target names, connects, copies the whole database
-  # if this copy is cold, and hands back the handle everything downstream reads.
-  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault awaited invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, crew_size, session_open_writer, room_make, replicates, lifecycle_install_handler, lifecycle_register, turso_pull, schema_read_declared, refuse_owned_names, schema_from_declared, schema_inspect, migration_needed, difference, name_what_is_ambiguous, order_operations, name_what_destroys, refuse_undeclared_loss, capability_of, mechanism_for, spell_view, spell_operation, migration_report, query_run_statement, log_write note "works out the engine, connects, and builds the handle everything downstream reads"
+  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault awaited invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, crew_size, session_open_writer, session_open_channel, crew_make, crew_start, replicates, lifecycle_install_handler, lifecycle_register, channel_pull, schema_read_declared, refuse_owned_names, schema_from_declared, schema_inspect, migration_needed, difference, name_what_is_ambiguous, order_operations, name_what_destroys, what_an_operation_carries, refuse_undeclared_loss, how_to_migrate, how_to_inspect, how_to_spell, capability_of, mechanism_for, spell_view, spell_operation, query_run_statement, log_write note "works out the engine, connects, and builds the handle everything downstream reads"
 
-  # Checks the columns against the model, builds the declaration, renders it for
-  # this engine, runs it, and shapes what comes back.
-  orchestrator fn query_answer : (asking: Answering) -> Answering | Fault awaited invokes by_grammar, refuse_undeclared_columns, join_between, compile_statement, travels_together, query_run_statement, query_run_together, room_deposit, answer_from_rows, answer_from_ticket, log_write note "turns a caller's question into rows, a number, or a ticket"
+  orchestrator fn query_answer : (asking: Answering) -> Answering | Fault awaited invokes by_grammar, refuse_undeclared_columns, refuse_some_columns_as_an_object, join_between, compile_statement, travels_together, query_run_statement, query_run_together, crew_deposit, crew_release_ticket, refusal_reaches_caller, answer_from_rows, answer_from_receipt, log_write note "turns a caller's question into rows or a number, waiting on the crew when it is a write"
 
-  # Pushes until Turso has everything, retrying rather than giving up,
-  # then closes. The one place blocking is correct.
-  orchestrator fn lifecycle_shut_down : (shutting_down: ShuttingDown) -> ShuttingDown | Fault invokes lifecycle_read_registered, replicates, clock_read, turso_push, next_wait, progress_line, session_close_connection, log_write note "gets every local commit to Turso before the process dies"
+  orchestrator fn lifecycle_shut_down : (shutting_down: ShuttingDown) -> ShuttingDown | Fault awaited invokes lifecycle_read_registered, crew_stop, replicates, clock_read, channel_push, next_wait, progress_line, session_close_connection, log_write note "gets every local commit to the primary before the process dies"
 
-  # Waits for the drainer to finish this caller's write, hands back the receipt
-  # and drops the ticket, so a collected ticket leaves the room empty again.
-  orchestrator fn query_deliver : (query_collect: Collecting) -> Collecting | Fault awaited invokes room_release_ticket, refusal_reaches_caller, log_write note "waits for the drainer and hands back the receipt"
-
-  # Empties the room one write at a time in arrival order, and, if nothing else
-  # wants the connection, pushes and pulls on it.
-  #
-  # TWO PATHS AND ONE ORCHESTRATOR, DELIBERATELY. Draining and syncing turn on
-  # the same question: is a writer waiting. `architecture.md:308` has
-  # `replicate_if_idle` ask it, and the drainer is what knows the query_answer. Split
-  # across two orchestrators, it gets asked twice and answered twice.
-  orchestrator fn lifecycle_catch_up : (catching_up: CatchingUp) -> CatchingUp | Fault awaited invokes writer_waiting, next_in_order, query_begin_concurrent, room_run_write, worth_retrying, budget_spent, clock_read, next_wait, receipt_for, room_post_receipt, replicates, turso_push, turso_pull, log_write note "spends a free turn draining the room, then syncing if nobody is writing"
-
+  orchestrator fn lifecycle_catch_up : (catching_up: CatchingUp) -> CatchingUp | Fault awaited invokes crew_wait_for_work, writer_waiting, next_in_order, how_to_write, crew_run_write, worth_retrying, budget_spent, clock_read, next_wait, receipt_for, crew_post_receipt, replicates, channel_push, channel_pull, log_write note "spends a free turn running what the crew holds, then syncing if nobody is writing"
 
   # --- column 3: output I/O, and there are four ways out ------------------
-  #
-  # AN OUTWARD CALL HANDS SOMETHING BACK, AND THAT RETURN IS NOT A DOOR. Rows
-  # arrive because we asked the driver for them. The world does not push them at
-  # us, so reading is not a fourth entrance.
 
-  # SESSION. Ask the driver for a connection. `architecture.md:96` says the handle
-  # carries its engine, decided once, so nothing downstream works it out again.
-  # THE ENGINE IS HANDED OVER, NOT WORKED OUT AGAIN. Added 2026-09-22: both
-  # opening cards took only a target and re-derived the engine from it, although
-  # `orchestrator fn session_connect` calls `fn engine_of` first and is holding
-  # the answer when it calls these. Two agents writing them hit the same wall on
-  # the same afternoon and each said the fix belonged here rather than in their
-  # code.
-  #
-  # WHAT IT COST WHILE IT WAS MISSING. A gate refuses any module naming an engine
-  # unless the declaration handed its card one, and these two named all three. It
-  # grew a special case shaped like these two functions, which is a rule invented
-  # to fit the code. The special case goes with this change.
-  #
-  # AND IT WAS ALREADY WRONG. A local Turso database is a bare path, and a bare
-  # path reads as sqlite, so a target alone could not name one at all.
   boundary_out fn session_open_connection : (target: str, engine: Engine, connections: int) -> Connection | Fault awaited side_effect reads_writes "database" note "asks the driver for a connection"
 
-  # QUERY. Run a statement on that connection. The driver does not know whether it
-  # was a select or a create table, so this is one door rather than four.
-  boundary_out fn query_run_statement : (db: Database, statement: Statement) -> Rows | int | Fault awaited side_effect reads_writes "database" note "runs one statement on the connection; the driver knows read from write"
+  boundary_out fn query_run_statement : (connection: Connection, statement: Statement) -> Rows | int | Fault awaited side_effect reads_writes "database" note "runs one statement on the connection it is handed, and on no other"
 
-  # THREE and FOUR. The sync channel, in its two directions. `architecture.md`
-  # names exactly two moments where sync is on the critical path, one per
-  # direction: a cold open copies the whole database before returning, and
-  # shutdown pushes until Turso has everything. Two callers, two
-  # directions, one connection. A card is a function, not a connection.
-  reader fn turso_pull : (db: Database) -> NOTHING | Fault awaited side_effect reads "turso" note "brings down what Turso has and this copy does not"
-  boundary_out fn turso_push : (db: Database) -> NOTHING | Fault side_effect writes "turso" note "sends local commits to Turso"
+  reader fn channel_pull : (channel: Channel) -> NOTHING | Fault awaited side_effect reads "primary" note "brings down what the primary has and this copy does not"
+  boundary_out fn channel_push : (channel: Channel) -> NOTHING | Fault awaited side_effect writes "primary" note "sends local commits to the primary"
 
-  # THE ODD ONE, AND IT RETURNS NOTHING. Every other outward call hands back a
-  # value the caller uses. This one does not, which is why it is a door and not
-  # a call. `architecture.md:114` keeps failures out of it: a failure comes back
-  # as a value, never as a log line. `architecture.md:116` is why it can only be
-  # reached from column 2: writing a log line is I/O, so a function in the
-  # middle that logs has reached outside without changing its signature.
-  # WHAT IS OPENED IS CLOSED, AND SHUTDOWN IS WHERE. `architecture.md:314` ends
-  # shutdown with the close, after the push. It was off the board while the only
-  # connection was one the operating system would close anyway; a crew of
-  # drainers each holding one for life is a different claim, and a connection
-  # left open is an OS thread left running.
-  boundary_out fn session_close_connection : (connection: Connection) -> NOTHING | Fault side_effect writes "database" note "closes one connection, after shutdown has pushed"
+  boundary_out fn session_close_connection : (connection: Connection) -> NOTHING | Fault awaited side_effect writes "database" note "closes one connection, after shutdown has pushed"
 
-  # ONE PER DRAINER, OPENED AT OPEN AND HELD FOR LIFE. A drainer writes and
-  # never reads, and `architecture.md:213` opens it in its own mode, so this is
-  # not the connection `session_open_connection` hands back. Opening them here
-  # is what makes reuse possible; a connection per write is the cost the crew
-  # exists to avoid.
   boundary_out fn session_open_writer : (target: str, engine: Engine) -> Connection | Fault awaited side_effect reads_writes "database" note "opens one drainer's connection, held for its life"
 
-  # WITHOUT THIS THE CREW IS ORDINARY LOCKING. `architecture.md:220`: BEGIN
-  # CONCURRENT is mandatory on a deposited write, and it is what lets several
-  # drainers overlap inside the engine instead of queueing behind one writer.
-  # Each drainer says it on its own connection, once per write.
-  boundary_out fn query_begin_concurrent : (writer: Connection) -> NOTHING | Fault side_effect writes "database" note "opens one write so drainers overlap rather than queue"
+  boundary_out fn session_open_channel : (target: str, primary: str, token: str) -> Channel | Fault awaited side_effect reads_writes "primary" note "opens the one line to the primary, held for the life of the database"
 
-  # SEVERAL WRITES THAT LAND TOGETHER, OR NOT AT ALL. `HOW-IT-SHOULD-WORK.md`:
-  # declare several together and they arrive together. That cannot go through
-  # the room: `architecture.md:150` says two deposits are two independent writes
-  # and the first stays landed when the second fails, because it is already in
-  # the log. Holding the connection for the group is the only thing here that
-  # rolls back, so this is the one write that does not take a ticket.
-  boundary_out fn query_run_together : (db: Database, statements: list<Statement>) -> int | Fault awaited side_effect writes "database" note "runs several writes as one transaction, the only rollback there is"
+  boundary_out fn crew_start : (db: Database) -> Crew | Fault awaited side_effect writes "crew" note "hands one drainer per writer to the runtime, and keeps them so they can be stopped"
 
-  # THE BEGIN AND THE WRITE SHARE ONE HANDLE, WHICH IS WHY BOTH TAKE IT. A
-  # drainer holds one connection and writes on it only. `query_run_statement`
-  # takes the database and serves reads and the DDL a migration runs;
-  # `architecture.md:156` keeps DDL off the crew, because a table created on one
-  # MVCC connection is invisible to every other.
-  boundary_out fn room_run_write : (writer: Connection, statement: Statement) -> int | Fault side_effect writes "database" note "runs one deposited write on the drainer's own connection"
+  boundary_out fn crew_stop : (crew: Crew) -> NOTHING | Fault awaited side_effect writes "crew" note "stops every drainer and waits for each to put its connection down"
 
-  # A WRITE LEAVES HERE AND THE CALLER DOES NOT WAIT. `architecture.md:201`: the
-  # caller deposits and gets a ticket back immediately, and a crew of drainers
-  # empties the queue afterwards. The room is not the outside world, but a value
-  # put into it leaves this caller's hands and is picked up by another, which is
-  # why this is a door rather than a step.
-  # A TICKET IS DRAWN FROM A RANDOM SOURCE AND THE CARD NOW SAYS SO. Two writes
-  # deposited in one process must never share one, and a counter would live
-  # either in the module, hidden from every caller, or in the room, where it
-  # repeats itself the moment the crew drains.
-  boundary_out fn room_deposit : (room: Room, statement: Statement) -> Ticket | Fault side_effect writes "room" side_effect reads "random" note "puts a write in the room and takes a ticket for it"
+  boundary_out fn query_run_together : (writer: Connection, statements: list<Statement>, transacting: Transacting) -> int | Fault awaited side_effect writes "database" note "runs several writes as one transaction on one writer, the only rollback there is"
 
-  # ONE HANDLER FOR THE PROCESS, PUT IN BY THE FIRST OPEN THAT NEEDS ONE, AND
-  # INSTALLING IT TWICE CHANGES NOTHING. No caller asks for this: a door that
-  # said "start the library" would be one more thing a program could forget,
-  # and forgetting it costs the data. The first open is startup. `replication.feature`: any handler the host application already set
-  # still runs. It chains; it never replaces.
+  boundary_out fn crew_run_write : (writer: Connection, statement: Statement, transacting: Transacting) -> int | Fault awaited side_effect writes "database" note "runs one write the way the engine needs it, reading how off the record it is handed"
+
+  boundary_out fn crew_deposit : (crew: Crew, statement: Statement) -> Ticket | Fault side_effect writes "crew" side_effect reads "random" note "hands a write to the crew, leaves a waiter, rings the doorbell and takes a ticket"
+
   boundary_out fn lifecycle_install_handler : () -> NOTHING | Fault side_effect writes "signal" note "installs the signal handler, chaining to whatever was already there"
 
-  # A DATABASE THAT ASKED TO REPLICATE AT EXIT PUTS ITSELF ON THE LIST THE ONE
-  # HANDLER WORKS THROUGH. A database that did not ask stays off it, so a caller
-  # who never opted in changes nothing about what happens at exit.
   boundary_out fn lifecycle_register : (db: Database) -> NOTHING | Fault side_effect writes "shutdown list" note "adds a replicating database to the list shutdown works through"
 
-  # WAITS FOR THIS ONE TICKET AND TAKES IT OUT. The caller is parked here until
-  # the drainer posts what happened, which is why a deposit could return at once.
-  #
-  # `awaited` SAID 2026-09-22, BECAUSE THE WAIT IS THE WHOLE FUNCTION. The
-  # drainer that posts the outcome runs on the same event loop as the caller
-  # waiting for it. A wait that did not yield would hold the loop, the drainer
-  # would never get a turn, and the outcome this function is waiting for could
-  # never be posted. So it is a coroutine, and every caller of it out to the
-  # door is awaited too.
-  boundary_out fn room_release_ticket : (room: Room, ticket: Ticket) -> Receipt | Fault awaited side_effect reads_writes "room" note "waits for one ticket's outcome and takes it out of the room"
+  boundary_out fn crew_release_ticket : (crew: Crew, ticket: Ticket) -> Receipt | Fault awaited side_effect reads_writes "crew" note "awaits this caller's own waiter and takes its ticket off the crew"
 
-  # THE DRAINER PUTS THE OUTCOME WHERE THE WAITING CALLER WILL FIND IT. A
-  # failure whose caller has already gone has nowhere to go, so the drainer logs
-  # it, and that is the only place it can still be seen.
-  boundary_out fn room_post_receipt : (room: Room, ticket: Ticket, receipt: Receipt) -> NOTHING | Fault side_effect writes "room" note "leaves a write's outcome where its caller will find it"
+  boundary_out fn crew_post_receipt : (crew: Crew, ticket: Ticket, receipt: Receipt) -> NOTHING | Fault side_effect writes "crew" side_effect writes "log" note "hands a write's outcome to the waiter its caller is parked on"
 
-  # WHAT THE DATABASE ACTUALLY HOLDS. The program asks; nothing arrives on its
-  # own, so this is a reader rather than a door. It is the only place the
-  # library asks a database what is there, and it asks so it can compare, never
-  # so it can decide what belongs.
-  # WHAT THE CODE DECLARES, ASKED FOR RATHER THAN PASSED IN. A caller declares
-  # models and views and the library asks for them, the same way it asks a
-  # database what it holds. Both answers meet in `migration_needed`. No door
-  # takes them, because a caller that had to hand them over could hand a
-  # different set to each door and nothing would notice.
+  boundary_out fn crew_wait_for_work : (draining: Draining) -> NOTHING | Fault awaited side_effect reads_writes "crew" note "sleeps until a write arrives, the crew stops, or the idle limit runs out"
+
   reader fn schema_read_declared : () -> Declared | Fault side_effect reads "models" note "asks the code which models and views it declares"
 
-  reader fn schema_inspect : (db: Database) -> Schema | Fault awaited side_effect reads "database" note "asks a database what it currently holds, so the two can be compared"
+  reader fn schema_inspect : (connection: Connection, inspecting: Inspecting) -> Schema | Fault awaited side_effect reads "database" note "asks a database the five questions and builds what it holds out of the answers"
 
   boundary_out fn log_write : (event: dict<str, Value>) -> NOTHING side_effect writes "log" note "writes a line an operator reads afterwards; a failure never travels here"
 
-  # CLOSING THE CONNECTION IS NOT HERE. The process ending closes it, and I
-  # cannot yet say what we do that the operating system does not. It comes back
-  # when something needs it.
-
   # --- the pure core, so far only what `session_connect` reaches -------------------
 
-  # THE DECISION THE DOOR RESTS ON, AND THE SPECIFICATION ALREADY NAMES IT.
-  # `tests/bdd/features/opening/engine_of.feature` is one feature for this one
-  # function: a string in, one of three words out, or a refusal naming the
-  # three. It opens nothing and reads no connection, which is the same refusal
-  # `architecture.md:98` makes, and it is separate from the door because the
-  # decision is the part worth testing without a database.
   fn engine_of : (target: str) -> Engine | Fault note "reads a target and names one of three engines; it opens nothing"
 
-  # A SETTING THAT MEANS NOTHING TO THE ENGINE IS REFUSED, NOT IGNORED. One door
-  # accepts the union of what three engines need, so `primary` means nothing to
-  # SQLite and a busy timeout means nothing to PostgreSQL. Ignoring one is a
-  # silent default wearing a different hat.
-  #
-  # This is what is left of the shutdown check. Asking a database with no
-  # primary to replicate at exit is one setting the engine cannot use, not a
-  # rule of its own.
   fn refuse_unusable_settings : (engine: Engine, settings: dict<str, Value>) -> dict<str, Value> | Fault note "refuses a setting the detected engine cannot use, rather than ignoring it"
 
-  # A CREW IS FOR A LOCAL DATABASE. `architecture.md:154`: a replicated database
-  # holds one connection by construction, so N drainers there are N coroutines
-  # queued behind one lock. Local runs what the deployment asked for; replicated
-  # runs one, whatever it asked for.
-  fn crew_size : (asked: int | NOTHING, replicated: bool) -> int note "settles how many drainers this database runs"
+  fn crew_size : (asked: int | NOTHING) -> int | Fault note "settles how many drainers run, from what the deployment asked for"
 
-  # THE DEPLOYMENT ASKS AND ONE RULE OVERRIDES IT. A replicated database holds
-  # one sync connection, measured against a real primary
-  # (`architecture.md:179`), whatever the deployment set. Everything else gets
-  # what it asked for, and an unset variable is a case rather than a default.
-  fn permitted_connections : (asked: int | NOTHING, replicated: bool) -> int | Fault note "settles how many connections this engine actually permits"
+  fn permitted_connections : (asked: int | NOTHING) -> int | Fault note "settles how many connections this database opens, from what the deployment asked for"
 
   # --- what `query_answer` reaches ----------------------------------------------
 
-  # THE LAST STEP, AND THE ONLY ONE THAT KNOWS WHICH ENGINE IT IS TALKING TO.
-  # Everything before it is engine-free. Named `render` in
-  # `tests/bdd/features/rendering/render.feature`; renamed here because the job
-  # is compiling one representation into a target dialect, and because compiling
-  # once and running many times with different values is what
-  # `tests/bdd/features/running/a_statement_is_built_once.feature` describes.
-  fn compile_statement : (declaration: Declaration, engine: Engine) -> Statement | Fault note "compiles a declaration into a statement for one engine, values kept out"
+  fn compile_statement : (declaration: Declaration, engine: Engine) -> Statement | Fault invokes how_to_compare note "compiles a declaration into a statement for one engine, values kept out"
 
-  # Every grammar refuses the same undeclared columns, in your own process. It
-  # names your model and lists the columns it does declare, so no caller ever
-  # sees "no such column" from an engine.
-  # IT CHECKS AND IT DOES NOT PRODUCE. Returning the declaration it was handed
-  # makes it look like a second source of declarations beside the four builders,
-  # and the map said so: with two possible producers it refused to draw where a
-  # `Declaration` comes from at all. A check answers whether something is wrong.
   fn refuse_undeclared_columns : (model: Model, declaration: Declaration) -> NOTHING | Fault note "refuses a column no model declares, naming the model and its columns"
 
-  # WHICH WRITES HAVE TO TRAVEL TOGETHER. `add` carrying one row is a deposit
-  # and a ticket; `add` carrying several is a transaction, because the caller
-  # asked for all of them or none. The declaration already says how many rows it
-  # holds, so nothing new has to be declared to know which is which.
+  fn refuse_some_columns_as_an_object : (declaration: Declaration) -> NOTHING | Fault note "refuses a question that asks for some columns and for your own model at once, naming both words"
+
   fn travels_together : (declaration: Declaration) -> bool note "answers whether these writes have to land together"
 
-  # A WRITE'S ANSWER IS ITS TICKET, AND IT NEEDS SHAPING TOO. A read comes back
-  # through `answer_from_rows`; a write comes back from `room_deposit` holding a
-  # ticket. Both end as an `Answer`, which is what makes one door able to serve
-  # both halves of the vocabulary.
-  fn answer_from_ticket : (ticket: Ticket) -> Answer note "turns the ticket a deposit handed back into the caller's answer"
+  fn answer_from_receipt : (receipt: Receipt) -> Answer | Fault note "turns what the drainer did into the count a caller reads"
 
-  # Driver rows in, and out comes what was asked for: instances of the model, a
-  # number, or `NOTHING`.
-  fn answer_from_rows : (model: Model, rows: Rows, declaration: Declaration) -> Answer | Fault note "turns driver rows into instances of the model, a number, true or false, or NOTHING"
+  fn answer_from_rows : (model: Model, rows: Rows, declaration: Declaration) -> Answer | Fault note "shapes driver rows the way the caller asked: your own objects, plain rows, a number, true or false, or NOTHING"
 
-  # FOUR BUILDERS, ONE TABLE, AND NO GUESSING ANYWHERE.
-  # The four cards below are what the four grammars produce, all of it the same
-  # `Declaration`. `by_grammar` picks between them, and it is a lookup rather
-  # than a detection: the key arrived with the call.
-  #
-  # NO TABLE FOR THE READ AND WRITE FORK, BECAUSE THE VOCABULARY ALREADY SPLITS.
-  # A `dispatch by_wanted` stood here with eighteen rows pointing at two sinks,
-  # which read as eighteen decisions and was one: is this a read or a write.
-  # `readings` and `writings` are that column, written once, and the orchestrator
-  # works from it. A two-row table was tried on 2026-09-20 and taken out the same
-  # hour: it changed no decision, and what it would have added is a picture of
-  # which branch runs, which is a runtime fact no edge on this map claims.
-
-  # THIS IS WHAT KEEPS `query_ask` ONE DOOR. Four doors would say the caller entered
-  # four different buildings. One door carrying which entry point was used says
-  # the four are spellings, which is what `HOW-IT-SHOULD-WORK.md` says they are.
   dispatch by_grammar = { "pseudo_sql" -> declaration_from_pseudo_sql, "django" -> declaration_from_django, "prisma" -> declaration_from_prisma, "sqlalchemy" -> declaration_from_sqlalchemy } note "picks the builder for the grammar the call arrived in"
 
-  # FOUR BUILDERS HELD ONE FUNCTION FOUR TIMES, AND THE FOURTH COPY IS WHAT
-  # NAMED IT. Measured 2026-09-21, after all four were written from their own
-  # features by four people who could not see each other's work: 1,330 lines, and
-  # every one of them separately invented the same things. Reading the caller's
-  # operator against the fifteen. The `ignore_case` companion. A bare value
-  # meaning eq. `or` and `not` becoming `any_of` and `none_of`. The refusal when
-  # a comparison names two operators or none. The refusal when no model is named.
-  #
-  # A condition is data, and data composes the same way whatever spelled it. So
-  # the shared work is one function, and a grammar is what it was supposed to be
-  # all along: a table of words. The four cards below each carry one table and
-  # nothing else.
-  #
-  # WHAT THIS DELETES BESIDES THE LINES. Four copies of one rule is four places
-  # for a decision, and the copies had already drifted before anyone finished
-  # writing them: three builders read the model under `model` and one under
-  # `from`, three took the vocabulary's own word and one translated its grammar's
-  # verb. Neither drift was a decision. Both were what happens when one rule has
-  # four homes.
   fn condition_from_narrowing : (narrowing: AskedValue) -> Condition | Fault note "turns what a caller wrote into the condition this library holds: a bare value means eq, `or` and `not` become `any_of` and `none_of`"
 
-  # EVERY GRAMMAR REACHES ALL TEN FIELDS, INCLUDING THE WORDS IT DID NOT BRING.
-  # A caller who picked a spelling must not have picked a smaller library, so a
-  # field a grammar has no native word for is reached by the library's own word.
-  # Refusing four of them for one grammar, which is what `declaration_from_sqlalchemy`
-  # did on 2026-09-21, makes the four unequal and makes the claim in all four
-  # feature files false.
   fn declaration_from_phrasing : (asked: Asked, phrasing: Phrasing) -> Declaration | Fault invokes condition_from_narrowing note "reads a caller's question through one grammar's words and builds the declaration all four produce"
 
   fn declaration_from_pseudo_sql : (asked: Asked) -> Declaration | Fault invokes declaration_from_phrasing note "the library's own words, and nothing else"
@@ -936,141 +380,66 @@ module declaro-persistum
 
   # --- what `lifecycle_shut_down` and `lifecycle_catch_up` reach ------------------------------
 
-  # DERIVED, NEVER STORED. `database/opening.feature:14`: whether a database
-  # replicates comes from its primary, because a second flag could disagree with
-  # the first. It decides whether any sync door is reached at all.
-  fn replicates : (db: Database) -> bool note "answers whether this database replicates, derived from its primary"
+  fn replicates : (db: Database) -> bool note "answers whether this database replicates, derived from whether it holds a channel"
 
-  # THE NEXT WAIT GROWS, AND TWO CALLERS DO NOT WAIT IN STEP. No random source:
-  # the spread comes from the time and the write's ticket, so the same three
-  # inputs always give the same wait and a test checks an exact number. The
-  # ticket is what separates two callers who retry at the same instant, since
-  # they read the same time.
   fn next_wait : (attempt: int, now: float, ticket: Ticket) -> float note "works out how long to wait before the next attempt"
 
-  # EVERY LINE NAMES THE DATABASE AND THE TIME ELAPSED, AND UNTIL THE PUSH ENDS
-  # EACH ONE SAYS THE DATA HAS NOT YET REACHED THE CLOUD. `replication.feature`
-  # asks that a shutdown cut short says so in its last line. Nothing runs after
-  # the kill, so every line has to be fit to be the last one.
   fn progress_line : (db: Database, elapsed: float, done: bool) -> dict<str, Value> note "builds a shutdown log line naming the database and the time elapsed"
 
-  # An empty room: no arrivals, nobody waiting. Both lists are empty whenever
-  # nobody is mid-flight, so this is what the room looks like most of the time.
-  fn room_make : () -> Room note "builds an empty room"
+  boundary_out fn crew_make : () -> Crew side_effect writes "crew" note "builds a crew with nobody in it yet, and the doorbell a drainer sleeps on"
 
-  # `architecture.md:308`: the sync pass is dropped when a writer is waiting.
-  fn writer_waiting : (room: Room) -> bool note "answers whether a writer is waiting for the connection"
+  fn writer_waiting : (crew: Crew) -> bool note "answers whether a writer is waiting for the connection"
 
-  # The room drains one write at a time, in arrival order.
-  # IT ANSWERS WITH THE TICKET, NOT THE WRITE. Changed 2026-09-22 with the room
-  # itself: a drainer looks the statement up by the ticket and posts the receipt
-  # against that same ticket, so handing back the statement alone left it with no
-  # way to say whose write it had just run.
-  fn next_in_order : (room: Room) -> Ticket | NOTHING note "answers whose write is next, in arrival order; taking it out is the boundary's work"
+  fn next_in_order : (crew: Crew) -> Ticket | NOTHING note "answers whose write is next, in arrival order; taking it out is the boundary's work"
 
-  # Asked of the fault's kind, never its message.
   fn worth_retrying : (fault: Fault) -> bool note "answers whether a failure is worth another attempt, asked of its kind"
 
-  # A bounded budget, and spending it is an answer of its own kind.
   fn budget_spent : (attempts: int, budget: int) -> bool note "answers whether the retry budget is gone"
 
-  # --- what `query_deliver` and the drainer reach -------------------------------
-
-  # A REFUSAL IS RAISED, A SPENT BUDGET IS A RECEIPT. `write_queue.feature`: a
-  # caller that cannot tell them apart will retry the one that can never succeed
-  # and give up on the one that would have worked. Asked of the fault's kind.
   fn refusal_reaches_caller : (fault: Fault) -> bool note "decides whether a fault is raised or comes back as a receipt"
 
-  # Builds what the caller will read out of what the engine did.
-  fn receipt_for : (ticket: Ticket, failure: NOTHING | Fault, attempts: int) -> Receipt note "builds the receipt a caller reads for its write"
+  fn receipt_for : (ticket: Ticket, touched: int, failure: NOTHING | Fault, attempts: int) -> Receipt note "builds the receipt a caller reads for its write"
 
   # --- what the schema half reaches ---------------------------------------
 
-  # THE LIBRARY KEEPS ITS OWN TABLES BESIDE YOURS, AND A COLLISION IS SILENT
-  # UNTIL IT IS FATAL. `a_name_the_library_owns_is_refused.feature` lists the
-  # prefixes: `_declaro_meta`, `_dp_`, `_declaro_tmp_`, and `sqlite_` and
-  # `turso_`, which belong to the engines.
   fn refuse_owned_names : (declared: Declared) -> NOTHING | Fault note "refuses a model that claims a name the library or an engine owns"
 
-  # The models are the desired state, so the target schema is derived from them
-  # and from nothing the database says.
   fn schema_from_declared : (declared: Declared) -> Schema | Fault note "builds the target schema from what the code declares, and from nothing else"
 
-  # NOTHING IS DESTROYED THAT NOBODY DECLARED. A migration runs at open with no
-  # one watching, so an operation that loses data and is not named in `dropping`
-  # stops the open, and the fault says which column or table it was and what to
-  # write to allow it. The models stay the only place a decision is made.
   fn refuse_undeclared_loss : (plan: Plan, declared: Declared) -> Plan | Fault note "stops a migration that would destroy something no model asked to lose"
 
-  # A HANDLE HANDED BACK BEFORE THE DATABASE MATCHES THE MODELS IS A HANDLE TO A
-  # DATABASE THAT WILL REFUSE THE FIRST QUESTION ASKED OF IT. So opening
-  # compares the two and says whether anything has to run first.
   fn migration_needed : (live: Schema, target: Schema) -> bool note "answers whether the database still has to be brought up to the models"
 
-  # Set theory over two schemas: what is only in the target is created, what is
-  # only in the live database is dropped, what differs is altered.
   fn difference : (live: Schema, target: Schema) -> list<Operation> note "works out which operations turn the live schema into the target"
 
-  # A COLUMN GONE AND ANOTHER APPEARED IS TWO DIFFERENT CHANGES. It reads the
-  # answer off `renamed_from` on the column that replaced the old one. When no
-  # column says, it stops rather than guessing, and the fault names both columns
-  # and the declaration to write.
-  #
-  # `dropping` SETTLES IT THE OTHER WAY, AND WITHOUT THAT THE REFUSAL IS
-  # INESCAPABLE. Added 2026-09-21 on building it: with `renamed_from` as the only
-  # signal, no model could ever add a column and drop one from the same table, in
-  # any change, because every such pair reads as a possible rename and no line
-  # anybody could write would clear it. `Model.dropping` already says the column's
-  # contents are meant to be lost, which is exactly the statement that this is not
-  # a rename. Two declarations, one for each reading, and a pair carrying neither
-  # is the only one that stops.
-  #
-  # A PAIR IS ONLY A PAIR WITHIN ONE TABLE, because a rename moves a column inside
-  # one. A column gone from `people` and one appeared on `orders` are two changes
-  # and never a question.
-  #
-  # `a_rename_is_asked_and_remembered.feature` DESCRIBES THE OLD ANSWER. It has
-  # a person answering once and the library remembering it, which needs somebody
-  # at a deploy. That scenario is the one to change, like the awaited flush.
   fn name_what_is_ambiguous : (operations: list<Operation>, declared: Declared) -> list<Operation> | Fault note "stops on a change that could be a rename or a drop and an add"
 
-  # Dependencies decide the order: a table before the index on it, a parent
-  # before the child that points at it.
   fn order_operations : (operations: list<Operation>) -> list<Operation> | Fault note "puts the operations in an order their dependencies allow"
 
-  # Dropping a column loses what was in it, dropping a table loses all of it,
-  # and narrowing a type loses what no longer fits. Each one is marked here, and
-  # `refuse_undeclared_loss` is what stops the unmarked ones running.
   fn name_what_destroys : (operations: list<Operation>) -> Plan note "marks which operations lose data"
 
-  # WHAT THE MIGRATION AT OPEN DID, so the log line can say it and the handle
-  # can carry it. Nobody is watching a deploy, so this is where the record of
-  # one lives.
-  fn migration_report : (plan: Plan, applied: int) -> Report note "says what the migration at open did"
-
-  # Native here, built there, and the table says which.
   fn capability_of : (engine: Engine, feature: Feature) -> Capability note "answers whether an engine does this natively, and what builds it if not"
 
-  # One operation into the statements that carry it out on this engine. The
-  # schema half's `compile_statement`.
-  fn spell_operation : (operation: Operation, engine: Engine) -> list<Statement> | Fault note "turns one schema operation into the statements that carry it out"
+  fn how_to_write : (engine: Engine) -> Transacting note "reads the writers table and hands back what one engine needs around a write"
+
+  fn how_to_migrate : (engine: Engine) -> MigrationMode note "reads the facts table and hands back how far back a failed migration rolls"
+
+  fn how_to_inspect : (engine: Engine) -> Inspecting note "reads the inspectors table and hands back the five questions this engine answers about itself"
+
+  fn how_to_spell : (kind: OperationKind, engine: Engine) -> Spelling | Fault note "reads the generators table and hands back how this engine writes this change"
+
+  fn what_an_operation_carries : (kind: OperationKind) -> Carrying note "reads the operations table and hands back which fields this kind of change fills"
+
+  fn how_to_compare : (operator: Operator, engine: Engine) -> Comparing | Fault note "reads the operators table and hands back how this engine writes this comparison"
+
+  fn spell_operation : (operation: Operation, spelling: Spelling) -> list<Statement> | Fault invokes how_to_spell note "turns one schema change into the statements that carry it out, reading how off the record it is handed"
 
   # --- what a question across models reaches -------------------------------
 
-  # THE FOREIGN KEY ALREADY SAID IT. Given the two models and the far-side
-  # condition a caller wrote, this works out the join rather than asking the
-  # caller to write it. A pair of models with no key between them is a fault
-  # naming both, since no join exists to work out.
   fn join_between : (near: Model, far: Model, condition: Condition) -> Join | Fault note "works out the join from the foreign key the model already declared"
 
   # --- what a declared view reaches ---------------------------------------
 
-  # The library writes the SELECT, which is this: the same compiler the data
-  # half uses, over the declaration the view holds.
-  fn spell_view : (view: View, engine: Engine) -> Statement | Fault note "writes the SELECT a declared view stands for"
+  fn spell_view : (view: View, spelling: Spelling) -> Statement | Fault invokes how_to_spell note "writes the SELECT a declared view stands for, reading how off the record it is handed"
 
-  # PICKS THE MECHANISM THE CALLER REFUSED TO NAME. PostgreSQL has a real
-  # materialized view and SQLite does not, so one engine gets a declaration and
-  # the other gets a table, its triggers and a registry row. Which is which is
-  # in the capability table, not in a function name.
   fn mechanism_for : (freshness: Freshness, engine: Engine, capability: Capability) -> list<Operation> | Fault note "picks the mechanism that gives a materialized view the freshness asked for"

@@ -24,7 +24,6 @@
 >
 > So: "a replica permits one connection" is false. "A replicated database serializes writers" is false. Turso's sync engine syncs MVCC databases, so replicated and concurrent are not opposites. If a sentence concludes something about concurrency from a count of connections, it is wrong.
 
-
 One rule shapes all of this: you declare, the library decides. Every layer below moves a declaration one step closer to a statement, and soaks up an engine difference on the way instead of passing it up to you.
 
 ## The one path
@@ -135,8 +134,6 @@ That's also why ten thousand concurrent callers is a reasonable thing to want an
 
 A read is a question with an answer. A write is a request to change the database. Different jobs, different machinery, so writes get their own.
 
-**You deposit and you're free.** `deposit(room, write)` hands back a ticket immediately and runs nothing. Go do whatever you want, then ask for the answer with `collect(room, ticket)`. That's the difference between this and a lock: a lock makes you wait at the moment you write.
-
 **The room is a waiting room, not a store.** A `Room` holds the arrival order and the callers waiting on tickets. Both are empty whenever nobody's mid-flight. No persistence, no pending list to survive a crash, because every write has a caller holding its ticket. The write-ahead log is already the queue; this just buffers callers who show up at the same instant.
 
 **A crew is N drainers over one room.** `drain` appends everything waiting, one write at a time, in arrival order. A crew runs several drainers at once, and each holds one connection for its whole life instead of opening one per write.
@@ -148,8 +145,6 @@ What MVCC buys is the size of the crew. It is what lets several drainers overlap
 **Connection reuse multiplies it.** Every connection is an OS thread. Open one per write and you pay for that thread every time, which is dead cost in exactly the gap the staggering is trying to fill. Reuse alone is a 6x difference, and it compounds with the crew size MVCC allows.
 
 **A deposit is not a transaction.** Two deposits are two independent writes. The second failing doesn't undo the first, because the first is already in the log. If you need several statements to land together, hold the connection: `writing(db)` is the only thing here that gives you rollback.
-
-**A failure belongs to whoever wrote it.** A ticket belongs to exactly one caller, so a constraint violation reaches that caller and nobody else. `collect` raises the engine's own exception for anything refused outright. A receipt saying `ok: False` means only that the engine stayed busy through the whole retry budget. Mix those two up and you'll retry the one that can never succeed.
 
 **The crew is for local databases only.** A replicated database holds one connection by construction, so N drainers there are N coroutines queued behind one lock. The recipe below says why, with the numbers.
 

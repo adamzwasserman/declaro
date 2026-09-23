@@ -54,7 +54,9 @@ You write no migration scripts. You never say "add a column." You declare that t
 
 ## The data is declared too
 
-Reading and writing follow the same rule as the schema. You name a model and the columns you care about, and you get back instances of that model.
+Reading and writing follow the same rule as the schema. You name a model and the columns you care about, and you say which shape you want the rows back in: instances of that model, or plain dictionaries of column name to value.
+
+You choose because neither one is right for every question. An instance is what you want when you asked for a whole row and are about to work with it. A dictionary is what you get when you asked for two columns out of five, because two fields of a five-field model is not that model and calling it one would be a lie.
 
 There are four ways to say it. They are grammars: four ways of phrasing one meaning. A team arriving from Django writes what it already knows, and so does a team arriving from Prisma or SQLAlchemy.
 
@@ -113,6 +115,10 @@ The vocabulary is small and every word means one thing. Each grammar spells thes
 | only some columns | `values("id", "name")` |
 | no duplicates | `distinct` |
 | whether any exist at all | `exists`, which answers true or false and reads no rows |
+| the rows as your own model | `as_objects` |
+| the rows as plain dictionaries | `as_dictionaries` |
+
+Asking for only some columns and asking for your own model at the same time is refused, and it names both words. Two columns out of five is not a Person, and the library will not hand you something that says it is.
 
 `page` is the one worth having over raw limit and offset. Paging is what people actually mean, and doing it by hand is where the off-by-one lives.
 

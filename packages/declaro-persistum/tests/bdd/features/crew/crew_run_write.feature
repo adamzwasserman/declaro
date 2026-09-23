@@ -1,5 +1,5 @@
 @bdd @specification
-Feature: room_run_write -- Running one deposited write on the drainer's connection
+Feature: crew_run_write -- Running one deposited write on the drainer's connection
   A drainer writes and never reads, on the one connection it holds for its life,
   which is why this takes that connection rather than the database.
 

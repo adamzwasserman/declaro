@@ -1,5 +1,5 @@
 @bdd @specification
-Feature: room_deposit -- Leaving a write behind and taking a ticket
+Feature: crew_deposit -- Handing a write to the crew and taking a ticket
   `docs/architecture.md:201`: the caller deposits and gets a ticket back at once,
   and a crew of drainers empties the queue afterwards.
 

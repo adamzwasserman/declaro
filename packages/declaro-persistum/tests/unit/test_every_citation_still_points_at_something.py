@@ -127,8 +127,14 @@ def test_this_gate_can_actually_see_both_sides(sources, declared_cards):
         f"only {len(cited)} distinct cards are cited across every test; the "
         "reader is no longer finding them and the gate above measures nothing"
     )
-    assert "permitted_connections" in cited, (
-        "`fn permitted_connections` is cited in "
-        "tests/bdd/steps/test_permitted_connections_steps.py and the reader did "
-        f"not find it, so the citation gate is blind. It found: {sorted(cited)}"
+    # ONE CARD THAT IS CITED AND EXISTS, whichever it happens to be. Changed
+    # 2026-09-23: this named `permitted_connections` and the step file citing it
+    # was deleted that morning, so the gate's own proof failed on a file rather
+    # than on a citation. What it has to show is that the reader finds cards at
+    # all, and any card a live step file cites shows that.
+    assert len(cited) >= 10, (
+        f"the reader found only {sorted(cited)}, which is too few for the gate "
+        f"above to be checking anything. Either no step file cites a card any "
+        f"more, or the way a card is written in the declaration changed and the "
+        f"reader no longer recognises one."
     )

@@ -13,8 +13,6 @@ import os
 import pytest
 from dotenv import load_dotenv
 
-from declaro_persistum.room_make import room_make
-
 # Load .env file for test credentials. THE IMPORT BELOW IS AFTER IT ON
 # PURPOSE: anything imported from here on may read the environment at
 # import time, and this is the line that puts the credentials in it.
@@ -218,16 +216,33 @@ def require_postgresql() -> None:
 
 @pytest.fixture
 def require_turso() -> None:
-    """Require Turso for stress tests - skip if not configured."""
+    """Require Turso, and FAIL rather than skip when it is missing.
+
+    A SKIP HERE READS AS A PASS, which is the argument `refuse_without_postgresql`
+    already makes twice in this file. This fixture used to skip on a missing
+    driver and again on missing credentials, so a run with no Turso reported the
+    package tested while nothing Turso does was exercised.
+    """
     try:
         import turso  # noqa: F401
     except ImportError:
-        pytest.skip("Turso (pyturso) not installed. Install with: uv sync --extra turso")
+        pytest.fail(
+            "Turso (pyturso) is REQUIRED and is not installed. "
+            "Install with: uv sync --extra turso. This is a failure and not a "
+            "skip because a skipped backend reads as a tested one."
+        )
 
-    # Also check if Turso is configured with a real URL
-    turso_url = os.environ.get("TEST_TURSO_URL", "")
-    if not turso_url:
-        pytest.skip("TEST_TURSO_URL environment variable not set - skipping Turso tests")
+    missing = [
+        name for name in ("TEST_TURSO_URL", "TEST_TURSO_AUTH_TOKEN") if not os.environ.get(name, "")
+    ]
+    if missing:
+        # APPROVED-IF 2026-09-23 09:40 — credentials are absent or present, and
+        # absence is a reason to stop rather than a row in a table of answers.
+        pytest.fail(
+            f"Turso is REQUIRED and {', '.join(missing)} is not set in .env. "
+            f"This is a failure and not a skip because a skipped backend reads "
+            f"as a tested one."
+        )
 
 
 @pytest.fixture
@@ -240,86 +255,6 @@ def require_sqlite() -> None:
 
 
 # Sample schemas for testing
-
-
-# =============================================================================
-# The declaration's own shapes
-# =============================================================================
-#
-# WHAT THESE ARE FOR. `docs/design/persistum.hd` declares what this package is
-# built out of, and until 2026-09-21 no fixture produced any of it. A test
-# reaching for a schema got a finished one, which is the one thing the design
-# says nobody hands you: a schema is derived from what the code declares, by
-# `schema_from_declared`, so a fixture that hands one over skips the function
-# that makes it.
-#
-# These are plain dicts on purpose. They are the records the declaration names,
-# written out in the test suite so a test can say "given these models" without
-# reaching into a package that does not have them yet.
-
-
-@pytest.fixture
-def declared(a_person_model, an_order_model) -> dict:
-    """Everything the code declares, in one answer, the way `schema_read_declared`
-    hands it over: models and views together, and what it means to lose."""
-    return {
-        "models": [a_person_model, an_order_model],
-        "views": [],
-        "dropping_tables": [],
-        "dropping_views": [],
-    }
-
-
-@pytest.fixture
-def a_room() -> dict:
-    """An empty waiting room. Both lists are empty whenever nobody is
-    mid-flight, which is most of the time."""
-    return room_make()
-
-
-@pytest.fixture
-def a_handle():
-    """A real driver connection, held and never read.
-
-    Real rather than a stand-in, because a stand-in that gets the driver
-    contract wrong manufactures bugs: this package has twice chased a defect
-    that lived only in a double. Nothing here reads it, which is what `handle`
-    means in the declaration.
-    """
-    import sqlite3
-
-    connection = sqlite3.connect(":memory:")
-    try:
-        yield connection
-    finally:
-        connection.close()
-
-
-@pytest.fixture
-def a_database(a_handle, a_room) -> dict:
-    """What opening gives a caller, as the declaration describes it: the engine
-    decided once, the connection it reads on, one writer per drainer, the room,
-    the shutdown policy and the primary it derives replication from."""
-    return {
-        "engine": "sqlite",
-        "connection": a_handle,
-        "writers": [a_handle],
-        "room": a_room,
-        "shutdown": "exit_immediately",
-        "primary": None,
-    }
-
-
-@pytest.fixture
-def a_replicated_database(a_database) -> dict:
-    """The same, with a primary, which is the one thing replication is derived
-    from. A second flag saying "replicated" could disagree with this one."""
-    return {
-        **a_database,
-        "primary": "libsql://team-app.turso.io",
-        "shutdown": "replicate_then_exit",
-        "writers": [],
-    }
 
 
 # =============================================================================
@@ -433,3 +368,209 @@ def a_real_turso_replica(tmp_path):
 
     asyncio.run(_fill())
     return str(path)
+
+
+# =============================================================================
+# The four things no function in the library builds
+# =============================================================================
+#
+# EVERY OTHER SHAPE COMES FROM A FUNCTION, SO NO FIXTURE MAY HAND ONE OVER.
+# Worked out on 2026-09-23 by walking every type in `docs/design/persistum.hd`
+# and asking which of them something in the library produces. Twenty-four are
+# produced directly and most of the rest sit nested inside one of those: a
+# `Model` comes out of `schema_read_declared`, a `Doorbell` out of `crew_make`,
+# a `Report` is assembled by the opener. A fixture that writes one of those out
+# by hand is handing the function under test its own answer, and it goes stale
+# the day the shape changes. That happened to the database handle under four
+# files this week and nothing noticed.
+#
+# Four things have no producer anywhere, and they are what belongs here: the
+# classes a host declares, a question as a caller types it, rows as a driver
+# hands them back, and a real database.
+
+
+# --- the classes a host declares -------------------------------------------
+#
+# THE CLASS NAME AND THE TABLE NAME ARE DIFFERENT, ON PURPOSE AND ALWAYS. A
+# caller writes `Person` because that is the only name it has; the rows live in
+# `people`. On 2026-09-22 every model in the suite was named after its own
+# table, so the two words were one word, and the library shipped with nothing
+# trading one for the other: every question a caller wrote by class name reached
+# the engine as `SELECT ... FROM Person`. 541 tests passed.
+#
+# DECLARED INSIDE A CALL AND NEVER AT MODULE LEVEL. `reader fn
+# schema_read_declared` reads every Pydantic class alive in the process, so a
+# class held at import time joins every other test's migration for the whole run.
+
+
+@pytest.fixture
+def a_person_class():
+    """`class Person` over the table `people`, declared the way a host declares one."""
+    from pydantic import BaseModel
+
+    # honest-code-allow: L1.21.5 — a host's model IS a Pydantic class.
+    # `HOW-IT-SHOULD-WORK.md:34`: "You write Pydantic models. That is your
+    # only description of the database." `reader fn schema_read_declared`
+    # reads exactly these, so a fixture that declared anything else would be
+    # testing an input the library never receives.
+    class Person(BaseModel):
+        __tablename__ = "people"
+        id: int
+        name: str
+
+    return Person
+
+
+@pytest.fixture
+def an_order_class():
+    """`class Order` over `orders`, pointing at `people`, so a join has a key to find.
+
+    The foreign key is the whole of what `fn join_between` reads, so a pair of
+    classes with no key between them cannot exercise it either way.
+    """
+    from pydantic import BaseModel
+
+    # honest-code-allow: L1.21.5 — a host's model IS a Pydantic class.
+    # `HOW-IT-SHOULD-WORK.md:34`: "You write Pydantic models. That is your
+    # only description of the database." `reader fn schema_read_declared`
+    # reads exactly these, so a fixture that declared anything else would be
+    # testing an input the library never receives.
+    class Order(BaseModel):
+        __tablename__ = "orders"
+        id: int
+        person_id: int
+        total: int
+
+    return Order
+
+
+# --- a question, as a caller types it ---------------------------------------
+#
+# ONE MEANING IN FOUR GRAMMARS. `HOW-IT-SHOULD-WORK.md:59` says the four are
+# spellings of one question and produce the same rows, so a fixture that offers
+# only one grammar can never show that. The words here are the caller's own; no
+# function in the library builds an `Asked`.
+
+
+@pytest.fixture
+def the_same_question_four_ways() -> dict[str, dict]:
+    """`people.select("id", "name").where({"name": "bob"})`, in all four grammars.
+
+    Keyed by grammar so a scenario can walk them and assert one answer.
+    """
+    return {
+        "pseudo_sql": {
+            "model": "Person",
+            "wanted": "all",
+            "select": ["id", "name"],
+            "where": {"name": "bob"},
+        },
+        "django": {
+            "model": "Person",
+            "wanted": "all",
+            "values": ["id", "name"],
+            "filter": {"name": "bob"},
+        },
+        "prisma": {
+            "model": "Person",
+            "wanted": "all",
+            "select": ["id", "name"],
+            "where": {"name": "bob"},
+        },
+        "sqlalchemy": {
+            "model": "Person",
+            "wanted": "all",
+            "with_only": ["id", "name"],
+            "filter_by": {"name": "bob"},
+        },
+    }
+
+
+# --- rows, as a driver hands them back --------------------------------------
+
+
+@pytest.fixture
+def rows_a_driver_handed_back() -> list[dict]:
+    """Two whole rows of `people`, column name to value, the way every driver
+    answers once the cursor has been drained."""
+    return [{"id": 1, "name": "alice"}, {"id": 2, "name": "bob"}]
+
+
+# --- a real database, on each engine ----------------------------------------
+#
+# SQLITE HAD NO FIXTURE AND FOUR STEP FILES EACH MADE THEIR OWN TEMP FILE.
+# PostgreSQL has `postgresql_schema` and Turso has `a_real_turso_replica`; this
+# is the third, so all three engines are reached the same way.
+
+
+@pytest.fixture
+def a_real_sqlite_database(tmp_path) -> str:
+    """A SQLite file this test owns, gone with the temp folder afterwards.
+
+    A path rather than an open connection, because opening one is
+    `boundary_out fn session_open_connection`'s job and a fixture that opened it
+    would be answering the question under test.
+    """
+    return str(tmp_path / "declaro.db")
+
+
+# =============================================================================
+# The two shapes twelve step files were each building their own way
+# =============================================================================
+#
+# ONE PLACE, SO A CHANGE BREAKS LOUDLY. Twelve step files wrote a `Model` out by
+# hand and ten wrote a `Column`, between them through seven private `_a_model`
+# helpers and six private `_a_column` helpers, each slightly different. On
+# 2026-09-22 `Column` lost `facets` and `Operation` lost `detail`, and not one of
+# the twelve knew. That is the shape that already bit this suite once: eight
+# files hand-built a `Room`, the room changed under them in a day, and the suite
+# stayed green because nothing compares a fixture against the declaration.
+#
+# NOTHING TAKES A DEFAULT, AND THAT IS THE WHOLE POINT. Every field is required
+# at every call site, so a field added to either record fails twelve files at
+# once rather than filling itself in with an empty list nobody chose. It is
+# noisier to call and it is the noise that does the work.
+#
+# A MODEL THAT COMES OUT OF `reader fn schema_read_declared` IS NOT THIS. These
+# are for the pure functions that TAKE a model, so a scenario can say "given a
+# model shaped like this" without a live process full of Pydantic classes.
+
+
+def a_column(*, name: str, declared_type: str, renamed_from: str | None, references: dict | None):
+    """One `Column`, every field said out loud."""
+    return {
+        "name": name,
+        "declared_type": declared_type,
+        "renamed_from": renamed_from,
+        "references": references,
+    }
+
+
+def a_reference(*, table: str, column: str, on_delete: str):
+    """Where a foreign key points, and what a delete does to the child."""
+    return {"table": table, "column": column, "on_delete": on_delete}
+
+
+def a_model(
+    *,
+    name: str,
+    table: str,
+    columns: list,
+    dropping: list,
+    indexes: list,
+    constraints: list,
+):
+    """One `Model`, every field said out loud.
+
+    `name` AND `table` ARE DIFFERENT WORDS AND A CALLER SHOULD KEEP THEM SO. A
+    caller writes the class's name; the rows live under the table's. Naming them
+    alike is what hid a whole family of defect until 2026-09-22.
+    """
+    return {
+        "name": name,
+        "table": table,
+        "columns": columns,
+        "dropping": dropping,
+        "indexes": indexes,
+        "constraints": constraints,
+    }

@@ -78,7 +78,70 @@ _ONE_EACH = (
     "It comes off this list when its function exists."
 )
 
+_DELETED_2026_09_23 = (
+    "Deleted on 2026-09-23, with its code, because the declaration moved under "
+    "it. Eleven functions drifted from their card when the crew, the connection "
+    "and the channel were reworked, and seven lost their card outright. Adam's "
+    "reason for deleting rather than patching: a module left sitting there "
+    "invites the next reader to edit it into agreement instead of writing what "
+    "the card says. It comes off this list when its function is written back."
+)
+
+_NEEDS_A_DELETED_FUNCTION = (
+    "Bound until 2026-09-23 by a step file that composed with a function deleted "
+    "that day, or that asserted a rule the declaration dropped. `replicates` was "
+    "derived from a primary and is now derived from the channel. "
+    "`session_open_writer` asserted that a replicated database gets one connection "
+    "and one drainer, which was the channel's limit applied to connections. "
+    "`schema_read_declared` cross-checks every declared type against "
+    "`fn spell_operation`, and `lifecycle_register` needs a `Database`, which only "
+    "the opener makes. Each comes back when the function it needs does."
+)
+
+_READS_A_RECORD_THAT_MOVED = (
+    "Deleted on 2026-09-23. Its arguments still matched its card, so a check on "
+    "signatures alone called it fine. What moved was inside a record it reads: "
+    "`Declaration` gained the shape a caller asks its rows back in, and "
+    "`Database` lost its primary and gained a channel and a crew. "
+    "`declaration_from_pseudo_sql` survives untouched, three lines that read no "
+    "field of anything, and only its step file went, because the reader it calls "
+    "is gone. Each comes back when its function is written against the record as "
+    "it now stands."
+)
+
 KNOWN_UNBOUND: dict[str, str] = {
+    "compile_statement.feature": _READS_A_RECORD_THAT_MOVED,
+    "declaration_from_django.feature": _READS_A_RECORD_THAT_MOVED,
+    "declaration_from_phrasing.feature": _READS_A_RECORD_THAT_MOVED,
+    "declaration_from_prisma.feature": _READS_A_RECORD_THAT_MOVED,
+    "declaration_from_pseudo_sql.feature": _READS_A_RECORD_THAT_MOVED,
+    "declaration_from_sqlalchemy.feature": _READS_A_RECORD_THAT_MOVED,
+    "progress_line.feature": _READS_A_RECORD_THAT_MOVED,
+    "lifecycle_register.feature": _NEEDS_A_DELETED_FUNCTION,
+    "replicates.feature": _NEEDS_A_DELETED_FUNCTION,
+    "schema_read_declared.feature": _NEEDS_A_DELETED_FUNCTION,
+    "session_open_writer.feature": _NEEDS_A_DELETED_FUNCTION,
+    "crew_deposit.feature": _DELETED_2026_09_23,
+    "crew_make.feature": _DELETED_2026_09_23,
+    "crew_post_receipt.feature": _DELETED_2026_09_23,
+    "crew_release_ticket.feature": _DELETED_2026_09_23,
+    "crew_run_write.feature": _ONE_EACH,
+    "crew_size.feature": _DELETED_2026_09_23,
+    "migration_report.feature": _DELETED_2026_09_23,
+    "next_in_order.feature": _DELETED_2026_09_23,
+    "permitted_connections.feature": _DELETED_2026_09_23,
+    "query_answer.feature": _DELETED_2026_09_23,
+    "query_ask.feature": _DELETED_2026_09_23,
+    "query_run_statement.feature": _DELETED_2026_09_23,
+    "query_run_together.feature": _DELETED_2026_09_23,
+    "receipt_for.feature": _DELETED_2026_09_23,
+    "schema_inspect.feature": _DELETED_2026_09_23,
+    "session_connect.feature": _DELETED_2026_09_23,
+    "session_open.feature": _DELETED_2026_09_23,
+    "spell_operation.feature": _DELETED_2026_09_23,
+    "spell_view.feature": _DELETED_2026_09_23,
+    "turso_pull.feature": _DELETED_2026_09_23,
+    "writer_waiting.feature": _DELETED_2026_09_23,
     "a_condition_is_data.feature": _ONE_EACH,
     "a_failure_is_a_value.feature": _ONE_EACH,
     "a_model_declares_and_does_nothing_else.feature": _ONE_EACH,
@@ -118,12 +181,9 @@ KNOWN_UNBOUND: dict[str, str] = {
     "page.feature": _ONE_EACH,
     "preparing_the_target.feature": _ONE_EACH,
     "query_begin_concurrent.feature": _ONE_EACH,
-    "query_collect.feature": _ONE_EACH,
-    "query_deliver.feature": _ONE_EACH,
     "remove.feature": _ONE_EACH,
     "remove_all.feature": _ONE_EACH,
     "replace.feature": _ONE_EACH,
-    "room_run_write.feature": _ONE_EACH,
     "session_close_connection.feature": _ONE_EACH,
     "smallest.feature": _ONE_EACH,
     "sum.feature": _ONE_EACH,
