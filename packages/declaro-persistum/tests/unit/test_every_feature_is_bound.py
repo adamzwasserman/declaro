@@ -109,7 +109,17 @@ _READS_A_RECORD_THAT_MOVED = (
     "it now stands."
 )
 
+_NEXT_UP = (
+    "Written on 2026-09-23 ahead of its function, which is the order: the "
+    "feature, then the setup, then the code. It comes off the day the function "
+    "lands, and it is here rather than absent so the count of what is specified "
+    "and unbuilt is one somebody can read."
+)
+
 KNOWN_UNBOUND: dict[str, str] = {
+    "how_to_compare.feature": _NEXT_UP,
+    "how_to_inspect.feature": _NEXT_UP,
+    "how_to_spell.feature": _NEXT_UP,
     "compile_statement.feature": _READS_A_RECORD_THAT_MOVED,
     "declaration_from_django.feature": _READS_A_RECORD_THAT_MOVED,
     "declaration_from_phrasing.feature": _READS_A_RECORD_THAT_MOVED,
