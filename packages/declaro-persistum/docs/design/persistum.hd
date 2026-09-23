@@ -307,7 +307,7 @@ module declaro-persistum
 
   boundary_out fn session_open_connection : (target: str, engine: Engine, connections: int) -> Connection | Fault awaited side_effect reads_writes "database" note "asks the driver for a connection"
 
-  boundary_out fn query_run_statement : (connection: Connection, statement: Statement) -> Rows | int | Fault awaited side_effect reads_writes "database" note "runs one statement on the connection it is handed, and on no other"
+  boundary_out fn query_run_statement : (connection: Connection, engine: Engine, statement: Statement) -> Rows | int | Fault awaited side_effect reads_writes "database" note "runs one statement on the connection it is handed, and on no other"
 
   reader fn channel_pull : (channel: Channel) -> NOTHING | Fault awaited side_effect reads "primary" note "brings down what the primary has and this copy does not"
   boundary_out fn channel_push : (channel: Channel) -> NOTHING | Fault awaited side_effect writes "primary" note "sends local commits to the primary"

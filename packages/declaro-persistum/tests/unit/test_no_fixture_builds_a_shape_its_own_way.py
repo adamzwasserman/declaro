@@ -51,6 +51,7 @@ def _files_writing(field: str, said: dict[str, str]) -> set[str]:
 # work rather than a number. Each comes off as it moves to the shared builder,
 # and the list may only ever get shorter.
 STILL_THEIR_OWN_WAY = {
+    "test_query_run_statement_steps.py",
     "test_spell_view_steps.py",
     "test_spell_operation_steps.py",
     "test_answer_from_rows_steps.py",

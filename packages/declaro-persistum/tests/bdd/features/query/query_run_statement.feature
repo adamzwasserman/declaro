@@ -10,7 +10,7 @@ Feature: query_run_statement -- Running one statement on the database's connecti
 
   Scenario: a schema change runs on the database's own connection
     When a migration runs a create table
-    Then it ran on the connection the database holds, not on a drainer's
+    Then it ran on the connection it was handed, and on no other
 
   Scenario: a refusal comes back as a fault
     When a statement the engine refuses is run
