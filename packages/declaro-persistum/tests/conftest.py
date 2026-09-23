@@ -551,6 +551,32 @@ def a_reference(*, table: str, column: str, on_delete: str):
     return {"table": table, "column": column, "on_delete": on_delete}
 
 
+# The narrowing that narrows by nothing, which every rule but a check carries.
+NARROWS_BY_NOTHING = {"each": {}, "any_of": [], "none_of": []}
+
+
+def a_constraint(*, name: str, kind: str, columns: list, rule: dict, value):
+    """One `Constraint`, every field said out loud.
+
+    `kind` SAYS WHICH OF THE OTHER FIELDS MEAN ANYTHING. A check reads `rule`. A
+    primary key, a unique and a not_null read `columns`. A length and a default
+    read `value`. Every field is still written at every call site, because a
+    caller writing `rule=NARROWS_BY_NOTHING` beside a primary key has said that
+    the key rules nothing out, which is true and worth reading.
+
+    A `value` OF `None` IS A VALUE. `DEFAULT NULL` is a real declaration, and
+    nothing here asks whether the field was filled in, because the kind already
+    said whether it is read.
+    """
+    return {
+        "name": name,
+        "kind": kind,
+        "columns": columns,
+        "rule": rule,
+        "value": value,
+    }
+
+
 def a_model(
     *,
     name: str,

@@ -56,9 +56,6 @@ module declaro-persistum
 
   # --- the schema, which is the models and nothing else --------------------
 
-  # A column's facets are what `field` declares: a key, a floor, a length. Every
-  # type a model may write is declarable, because a type the loader cannot read
-  # is a model nobody can declare.
   set deletion_rules = { "refuse", "cascade", "set_null" } note "what happens to a child row when its parent is deleted"
   vocabulary OnDelete = { deletion_rules } note "refuse the delete, delete the child too, or empty the column"
 
@@ -78,13 +75,14 @@ module declaro-persistum
                  columns: list<str>
                  unique: bool } note "a declared promise about speed"
 
-  set constraint_kinds = { "check" : "a rule the value must satisfy", "primary_key" : "the column that names the row", "unique" : "no two rows share it", "length" : "how long the value may be" } note "every rule you can declare about a column or a table; a new one is one more line here"
+  set constraint_kinds = { "check" : "a rule the value must satisfy", "primary_key" : "the column that names the row", "unique" : "no two rows share it", "length" : "how long the value may be", "not_null" : "the column must hold something", "default" : "what goes in when a write names no value" } note "every rule you can declare about a column or a table; a new one is one more line here"
   vocabulary ConstraintKind = { constraint_kinds } note "which kind of rule this is"
 
   type Constraint = { name: str
                       kind: ConstraintKind
                       columns: list<str>
-                      rule: Condition } note "one declared rule, over a column or a whole table, as data rather than a string"
+                      rule: Condition
+                      value: Value } note "one declared rule, over a column or a whole table, as data rather than a string; `rule` is what a check reads and `value` is the number a length allows or the value a default writes"
 
   type Table = { name: str
                  columns: list<Column>
@@ -322,9 +320,9 @@ module declaro-persistum
 
   boundary_out fn crew_stop : (crew: Crew) -> NOTHING | Fault awaited side_effect writes "crew" note "stops every drainer and waits for each to put its connection down"
 
-  boundary_out fn query_run_together : (writer: Connection, statements: list<Statement>, transacting: Transacting) -> int | Fault awaited side_effect writes "database" note "runs several writes as one transaction on one writer, the only rollback there is"
+  boundary_out fn query_run_together : (writer: Connection, engine: Engine, statements: list<Statement>, transacting: Transacting) -> int | Fault awaited side_effect writes "database" note "runs several writes as one transaction on one writer, the only rollback there is"
 
-  boundary_out fn crew_run_write : (writer: Connection, statement: Statement, transacting: Transacting) -> int | Fault awaited side_effect writes "database" note "runs one write the way the engine needs it, reading how off the record it is handed"
+  boundary_out fn crew_run_write : (writer: Connection, engine: Engine, statement: Statement, transacting: Transacting) -> int | Fault awaited side_effect writes "database" note "runs one write the way the engine needs it, reading the words off the record it is handed"
 
   boundary_out fn crew_deposit : (crew: Crew, statement: Statement) -> Ticket | Fault side_effect writes "crew" side_effect reads "random" note "hands a write to the crew, leaves a waiter, rings the doorbell and takes a ticket"
 

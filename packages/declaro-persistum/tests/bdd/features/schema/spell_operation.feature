@@ -60,6 +60,69 @@ Feature: spell_operation -- One schema change into the statements that carry it 
     Then the CREATE TABLE names the check "ck_positive"
     And the engine refuses a row whose "id" is 0
   # ============================================
+  # Every kind of rule a model may declare
+  # ============================================
+  #
+  # A RULE IS A CONSTRAINT AND NOTHING ELSE. Until 2026-09-23 a column carried
+  # a bag of facets keyed by strings, so a key nobody wrote a clause for was
+  # spelled as silence, and `spell_operation` had to check for unknown keys
+  # before writing a definition. The kinds are a declared set now, `Constraint`
+  # carries the one value a kind may need, and a kind with no clause is refused
+  # by name.
+
+  @precommit
+  Scenario Outline: every declared kind reaches the statement in the engine's own words
+    When a table is created with a <kind> rule on "code" allowing <value>
+    Then the statement carries the text <fragment>
+
+    Examples:
+      | kind        | value  | fragment     |
+      | not_null    | -      | NOT NULL     |
+      | unique      | -      | UNIQUE       |
+      | primary_key | -      | PRIMARY KEY  |
+      | length      | 8      | length       |
+
+  @precommit
+  Scenario: a declared rule of a kind this package writes no clause for is refused
+    When a table is created with a rule of a kind no clause covers
+    Then it is refused, naming the kinds it writes
+
+  @precommit @sqlite
+  Scenario: the engine holds a row to the length that was declared
+    Given a table "parts" whose "code" may hold 8 characters
+    Then the engine accepts a row whose "code" is 8 characters
+    And the engine refuses a row whose "code" is 9 characters
+
+  @precommit @sqlite
+  Scenario: the engine holds a row to a column that must hold something
+    Given a table "parts" whose "code" must hold something
+    Then the engine refuses a row that leaves "code" empty
+  # ============================================
+  # What goes in when a write names no value
+  # ============================================
+  #
+  # A DEFAULT IS THE ONE RULE THAT RULES NOTHING OUT. Every value the column's
+  # type permits is still permitted with the default in place. What it does is
+  # supply a value in the one case where the writer supplied none, which is why
+  # it is the kind that needed `Constraint` to carry a value at all.
+
+  @precommit @sqlite
+  Scenario: a row written without the column gets the value that was declared
+    Given a table "parts" whose "status" starts at "new"
+    When a row is written naming only "code"
+    Then the row's "status" reads "new"
+
+  @precommit @sqlite
+  Scenario: a row that names the column keeps what it named
+    Given a table "parts" whose "status" starts at "new"
+    When a row is written naming "code" and a "status" of "shipped"
+    Then the row's "status" reads "shipped"
+
+  @precommit
+  Scenario: a default this package cannot write into a clause is refused
+    When a table is created whose "status" starts at a value no engine can be told
+    Then it is refused, saying what a default may be
+  # ============================================
   # A value the statement does not carry
   # ============================================
   #

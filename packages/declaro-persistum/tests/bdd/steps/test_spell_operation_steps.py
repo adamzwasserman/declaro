@@ -39,7 +39,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from pytest_bdd import given, parsers, scenarios, then, when
@@ -58,6 +58,7 @@ from declaro_persistum.types import (
     Table,
     Value,
 )
+from tests.conftest import NARROWS_BY_NOTHING, a_column, a_constraint
 
 pytestmark = [pytest.mark.bdd, pytest.mark.precommit]
 
@@ -74,15 +75,41 @@ THE_STATUSES = "_dp_enum_orders_status"
 # --- the pieces a scenario hands over ---------------------------------------
 
 
-def _column(name: str, declared_type: str, **facets: Value) -> Column:
+def _column(name: str, declared_type: str) -> Column:
     """One declared column, with every field a `Column` carries."""
-    return {
-        "name": name,
-        "declared_type": declared_type,
-        "renamed_from": None,
-        "references": None,
-        "facets": dict(facets),
-    }
+    return a_column(
+        name=name,
+        declared_type=declared_type,
+        renamed_from=None,
+        references=None,
+    )
+
+
+def _rule(kind: str, column: str, value: Value = None) -> Constraint:
+    """One rule about one column, named after the kind and the column it is on."""
+    return a_constraint(
+        name=f"{kind}_{column}",
+        kind=kind,
+        columns=[column],
+        rule=NARROWS_BY_NOTHING,
+        value=value,
+    )
+
+
+def _without(constraints: list[Constraint], column: str, kind: str) -> list[Constraint]:
+    """The rules, with this column's rule of that kind taken out."""
+    return [
+        constraint
+        for constraint in constraints
+        if not (constraint["kind"] == kind and constraint["columns"] == [column])
+    ]
+
+
+def _ruling(
+    constraints: list[Constraint], column: str, kind: str, value: Value = None
+) -> list[Constraint]:
+    """The rules, with this column's rule of that kind replaced by this one."""
+    return [*_without(constraints, column, kind), _rule(kind, column, value)]
 
 
 def _pointing_at(column: Column, parent: str | None, on_delete: OnDelete) -> Column:
@@ -302,12 +329,21 @@ def _a_table_whose_status_is_one_of(scenario: dict, table: str, one: str, other:
     scenario["connection"] = connection
     scenario["table"] = table
 
-    statuses = _column("value", "text", primary_key=True)
+    statuses = _column("value", "text")
     status = _pointing_at(_column("status", "text"), f"{THE_STATUSES}.value", "refuse")
 
     _spell_and_run(
         connection,
-        _operation("create_table", THE_STATUSES, {}, [statuses], [], [], [], []),
+        _operation(
+            "create_table",
+            THE_STATUSES,
+            {},
+            [statuses],
+            [],
+            [_rule("primary_key", "value")],
+            [],
+            [],
+        ),
         "sqlite",
     )
     _spell_and_run(
@@ -316,9 +352,9 @@ def _a_table_whose_status_is_one_of(scenario: dict, table: str, one: str, other:
             "create_table",
             table,
             {},
-            [_column("id", "integer", primary_key=True), status],
+            [_column("id", "integer"), status],
             [],
-            [],
+            [_rule("primary_key", "id")],
             [],
             [],
         ),
@@ -351,31 +387,37 @@ def _a_database_connection(scenario: dict) -> None:
     scenario["answer"] = []
 
 
-# WHAT A CELL OF A COLUMN TABLE MEANS. The feature writes a column as a row of
-# a Gherkin table, and each heading is one thing a `Column` carries. `type` is
-# the declared type; the rest are facets, except `references`, which is the key
-# the column points at.
-_A_FACET: dict[str, Callable[[str], Value]] = {
-    "nullable": lambda cell: cell.strip().lower() == "true",
-    "primary_key": lambda cell: cell.strip().lower() == "true",
-    "unique": lambda cell: cell.strip().lower() == "true",
-    "default": lambda cell: cell.strip().strip("'"),
+# WHAT A CELL OF A COLUMN TABLE MEANS. The feature writes a column as a row of a
+# Gherkin table. `name` and `type` are the column; `references` is the key it
+# points at; every other heading is a rule about it, and each says whether the
+# rule is there rather than what it holds, except `default`, which holds one.
+#
+# A `nullable` OF true IS NO RULE AT ALL. A column that may be empty is a column
+# nothing rules, which is why the row reads as the absence of a not_null.
+_WHAT_A_HEADING_DECLARES: dict[str, Callable[[str, str], list[Constraint]]] = {
+    "nullable": lambda column, cell: [_rule("not_null", column)][: int(cell.strip() == "false")],
+    "primary_key": lambda column, cell: [_rule("primary_key", column)][
+        : int(cell.strip() == "true")
+    ],
+    "unique": lambda column, cell: [_rule("unique", column)][: int(cell.strip() == "true")],
+    "default": lambda column, cell: [_rule("default", column, cell.strip().strip("'"))],
 }
 
 
 def _a_column_from(row: dict[str, str]) -> Column:
     """One declared column, read off one row of a Gherkin table."""
-    column = _column(
-        row["name"],
-        row["type"],
-        **{
-            heading: _A_FACET[heading](row[heading])
-            for heading in _A_FACET
-            if row.get(heading, "").strip() != ""
-        },
-    )
     points_at = row.get("references", "").strip()
-    return _pointing_at(column, points_at or None, "refuse")
+    return _pointing_at(_column(row["name"], row["type"]), points_at or None, "refuse")
+
+
+def _the_rules_in(row: dict[str, str]) -> list[Constraint]:
+    """Every rule one row of a Gherkin table declares about its column."""
+    return [
+        rule
+        for heading, declares in _WHAT_A_HEADING_DECLARES.items()
+        if row.get(heading, "").strip() != ""
+        for rule in declares(row["name"], row[heading])
+    ]
 
 
 def _read(datatable: list[list[str]]) -> list[dict[str, str]]:
@@ -384,8 +426,8 @@ def _read(datatable: list[list[str]]) -> list[dict[str, str]]:
     return [dict(zip(headings, row, strict=True)) for row in rows]
 
 
-def _with_a_key(columns: list[Column]) -> list[Column]:
-    """The same columns, with the first one made the key if none is.
+def _with_a_key(columns: list[Column], constraints: list[Constraint]) -> list[Constraint]:
+    """The same rules, with the first column made the key if none is.
 
     A FOREIGN KEY NEEDS A KEY TO POINT AT. Half the Gherkin tables in this
     feature write `references | authors.id` and give `authors.id` no primary
@@ -393,13 +435,10 @@ def _with_a_key(columns: list[Column]) -> list[Column]:
     because a parent column with nothing unique about it is not a parent. Every
     one of those tables names its key first, so the first column is it.
     """
-    declared = [column for column in columns if column["facets"].get("primary_key") is True]
+    declared = [rule for rule in constraints if rule["kind"] == "primary_key"]
     return {
-        True: lambda: columns,
-        False: lambda: [
-            {**columns[0], "facets": {**columns[0]["facets"], "primary_key": True}},
-            *columns[1:],
-        ],
+        True: lambda: constraints,
+        False: lambda: [_rule("primary_key", columns[0]["name"]), *constraints],
     }[declared != []]()
 
 
@@ -444,41 +483,46 @@ def _declared(scenario: dict, declaring: Table) -> None:
 _NARROWS_BY_NOTHING: Condition = {"each": {}, "any_of": [], "none_of": []}
 
 
-def _the_key_the_table_holds(columns: list[Column]) -> tuple[list[Column], list[Constraint]]:
-    """The columns, and the rule that a key over more than one of them is.
+def _one_key(constraints: list[Constraint]) -> list[Constraint]:
+    """The rules, with every primary key folded into the one key a table has.
 
     PRIMARY KEY WRITTEN TWICE IN ONE CREATE TABLE IS WHAT NO ENGINE TAKES. A
     Gherkin table marking two columns as the key means one key over both, in the
-    order the table wrote them, so it becomes a rule about the table and neither
-    column carries the facet any more.
+    order the table wrote them.
     """
-    named = [column["name"] for column in columns if column["facets"].get("primary_key") is True]
-    spanning: dict[bool, Callable[[], tuple[list[Column], list[Constraint]]]] = {
-        False: lambda: (columns, []),
-        True: lambda: (
-            [_without_facet(column, "primary_key") for column in columns],
-            [
-                Constraint(
-                    name=f"pk_{'_'.join(named)}",
-                    kind="primary_key",
-                    columns=named,
-                    rule=_NARROWS_BY_NOTHING,
-                )
-            ],
-        ),
+    keys = [rule for rule in constraints if rule["kind"] == "primary_key"]
+    named = [column for rule in keys for column in rule["columns"]]
+    rest = [rule for rule in constraints if rule["kind"] != "primary_key"]
+    folded: dict[bool, Callable[[], list[Constraint]]] = {
+        False: lambda: constraints,
+        True: lambda: [
+            a_constraint(
+                name=f"pk_{'_'.join(named)}",
+                kind="primary_key",
+                columns=named,
+                rule=NARROWS_BY_NOTHING,
+                value=None,
+            ),
+            *rest,
+        ],
     }
-    return spanning[len(named) > 1]()
+    return folded[len(keys) > 1]()
 
 
 @given(parsers.re(r'a table "(?P<name>[^"]+)" with columns:$'))
 def _a_table_with_columns(scenario: dict, name: str, datatable: list[list[str]]) -> None:
-    """One table, its columns read off the Gherkin table under the sentence."""
-    columns, constraints = _the_key_the_table_holds(
-        _with_a_key([_a_column_from(row) for row in _read(datatable)])
-    )
+    """One table, its columns and its rules read off the Gherkin table."""
+    rows = _read(datatable)
+    columns = [_a_column_from(row) for row in rows]
+    declared = [rule for row in rows for rule in _the_rules_in(row)]
     _declared(
         scenario,
-        Table(name=name, columns=columns, indexes=[], constraints=constraints),
+        Table(
+            name=name,
+            columns=columns,
+            indexes=[],
+            constraints=_one_key(_with_a_key(columns, declared)),
+        ),
     )
 
 
@@ -487,19 +531,19 @@ def _a_table_with_columns(scenario: dict, name: str, datatable: list[list[str]])
 # the shape is a row here rather than three step functions.
 _AUTHORS = Table(
     name="authors",
-    columns=[_column("id", "integer", primary_key=True), _column("name", "text", nullable=True)],
+    columns=[_column("id", "integer"), _column("name", "text")],
     indexes=[],
-    constraints=[],
+    constraints=[_rule("primary_key", "id")],
 )
 _BOOKS = Table(
     name="books",
     columns=[
-        _column("id", "integer", primary_key=True),
-        _column("title", "text", nullable=True),
-        _pointing_at(_column("author_id", "integer", nullable=True), "authors.id", "refuse"),
+        _column("id", "integer"),
+        _column("title", "text"),
+        _pointing_at(_column("author_id", "integer"), "authors.id", "refuse"),
     ],
     indexes=[],
-    constraints=[],
+    constraints=[_rule("primary_key", "id")],
 )
 
 _TABLES_A_SENTENCE_MEANS: dict[str, list[Table]] = {
@@ -672,10 +716,10 @@ _WHICH_ENGINE: dict[str | None, str] = {
 }
 
 # THE WORDS A SCENARIO WRITES FOR A DEFAULT -> the facets the column carries.
-_DEFAULTING_TO: dict[str, dict[str, Value]] = {
-    "nothing": {},
-    "the number 0": {"default": 0},
-    "(now())": {"default": "(now())"},
+_DEFAULTING_TO: dict[str, Callable[[str], list[Constraint]]] = {
+    "nothing": lambda _column: [],
+    "the number 0": lambda column: [_rule("default", column, 0)],
+    "(now())": lambda column: [_rule("default", column, "(now())")],
 }
 
 
@@ -698,9 +742,9 @@ def _a_column_is_added(scenario: dict, name: str, declared: str, default: str, e
         "add_column",
         "invoices",
         {"column": name},
-        [_column(name, declared, **_DEFAULTING_TO[default])],
+        [_column(name, declared)],
         [],
-        [],
+        _DEFAULTING_TO[default](name),
         [],
         [],
     )
@@ -743,11 +787,12 @@ def _a_rule_comparing(column: str, operator: str, value: Value) -> Condition:
 )
 def _a_table_is_created_with_a_check(scenario: dict, name: str, column: str, value: str) -> None:
     """A table whose one column carries a declared rule, made on a real database."""
-    constraint = Constraint(
+    constraint = a_constraint(
         name=name,
         kind="check",
         columns=[column],
         rule=_a_rule_comparing(column, "gt", int(value)),
+        value=None,
     )
     scenario["connection"] = _a_database()
     scenario["table"] = "ledger"
@@ -757,9 +802,114 @@ def _a_table_is_created_with_a_check(scenario: dict, name: str, column: str, val
             "create_table",
             "ledger",
             {},
-            [_column(column, "integer", primary_key=True)],
+            [_column(column, "integer")],
             [],
-            [constraint],
+            [constraint, _rule("primary_key", column)],
+            [],
+            [],
+        ),
+        "sqlite",
+    )
+
+
+# --- every kind of rule a model may declare ----------------------------------
+#
+# WHAT A SCENARIO WRITES IN THE `value` COLUMN -> what the rule carries. A kind
+# that carries nothing writes a dash, because an empty cell in a Gherkin table
+# reads as the column being absent.
+_WHAT_THE_RULE_CARRIES: dict[bool, Callable[[str], Value]] = {
+    True: lambda cell: int(cell),
+    False: lambda cell: {"-": None}.get(cell, cell),
+}
+
+
+@when(
+    parsers.re(
+        r'a table is created with a (?P<kind>[a-z_]+) rule on "(?P<column>[^"]+)" '
+        r"allowing (?P<value>\S+)$"
+    )
+)
+def _a_table_with_one_rule(scenario: dict, kind: str, column: str, value: str) -> None:
+    """A table of one column carrying one declared rule, spelled for SQLite."""
+    carried = _WHAT_THE_RULE_CARRIES[value.isdigit()](value)
+    scenario["engine"] = "sqlite"
+    scenario["operation"] = _operation(
+        "create_table",
+        "parts",
+        {},
+        [_column(column, "text")],
+        [],
+        [_rule(kind, column, carried)],
+        [],
+        [],
+    )
+    scenario["answer"] = spell_operation(scenario["operation"], "sqlite")
+
+
+@when("a table is created with a rule of a kind no clause covers")
+def _a_rule_of_no_kind(scenario: dict) -> None:
+    """A kind nothing writes a clause for, which is refused rather than skipped."""
+    scenario["engine"] = "sqlite"
+    scenario["operation"] = _operation(
+        "create_table",
+        "parts",
+        {},
+        [_column("code", "text")],
+        [],
+        [_rule("smells_nice", "code")],
+        [],
+        [],
+    )
+    scenario["answer"] = spell_operation(scenario["operation"], "sqlite")
+
+
+@when('a table is created whose "status" starts at a value no engine can be told')
+def _a_default_no_engine_takes(scenario: dict) -> None:
+    """A default that is not text, a number, a boolean or nothing."""
+    scenario["engine"] = "sqlite"
+    scenario["operation"] = _operation(
+        "create_table",
+        "parts",
+        {},
+        [_column("status", "text")],
+        [],
+        [_rule("default", "status", cast(Value, {"a": "dict"}))],
+        [],
+        [],
+    )
+    scenario["answer"] = spell_operation(scenario["operation"], "sqlite")
+
+
+# WHAT A SENTENCE ABOUT ONE COLUMN'S RULE DECLARES. Each row is the rule the
+# table is made with, so the four Givens below are one function over a table.
+_THE_RULE_A_SENTENCE_DECLARES: dict[str, Callable[[str], Constraint]] = {
+    "may hold 8 characters": lambda column: _rule("length", column, 8),
+    "must hold something": lambda column: _rule("not_null", column),
+    'starts at "new"': lambda column: _rule("default", column, "new"),
+}
+
+
+@given(
+    parsers.re(
+        r'a table "(?P<name>[^"]+)" whose "(?P<column>[^"]+)" '
+        r'(?P<rule>may hold 8 characters|must hold something|starts at "new")$'
+    )
+)
+def _a_table_whose_column_is_ruled(scenario: dict, name: str, column: str, rule: str) -> None:
+    """A real table of two columns, one of them carrying the declared rule."""
+    scenario["connection"] = _a_database()
+    scenario["table"] = name
+    scenario["schema"] = {}
+    scenario["refused"] = []
+    _spell_and_run(
+        scenario["connection"],
+        _operation(
+            "create_table",
+            name,
+            {},
+            [_column("code", "text"), _column("status", "text")],
+            [],
+            [_THE_RULE_A_SENTENCE_DECLARES[rule](column)],
             [],
             [],
         ),
@@ -811,26 +961,44 @@ def _a_status_is_changed(scenario: dict, value: str, change: str, engine: str | 
 # --- what a scenario does: the changes that rebuild a table ------------------
 
 
-def _facet(column: Column, facet: str, value: Value) -> Column:
-    return {**column, "facets": {**column["facets"], facet: value}}
-
-
-def _without_facet(column: Column, facet: str) -> Column:
-    return {**column, "facets": {n: v for n, v in column["facets"].items() if n != facet}}
-
-
-# THE PHRASE A SCENARIO WRITES -> WHAT IT DOES TO THE COLUMN IT NAMES. Every
+# THE PHRASE A SCENARIO WRITES -> WHAT IT DOES TO THE TABLE IT NAMES. Every
 # alter in this feature is one of these seven, and each is one line, so they are
 # rows rather than seven step functions.
-_AN_ALTERATION: dict[str, Callable[[Column, str], Column]] = {
-    "to be NOT NULL": lambda column, _value: _facet(column, "nullable", False),
-    "to be nullable": lambda column, _value: _facet(column, "nullable", True),
-    "nullability": lambda column, _value: _facet(column, "nullable", True),
-    "to type": lambda column, value: {**column, "declared_type": value},
-    "to have default": lambda column, value: _facet(column, "default", value.strip("'")),
-    "to have no default": lambda column, _value: _without_facet(column, "default"),
-    "to be NOT NULL with default": lambda column, value: _facet(
-        _facet(column, "nullable", False), "default", value.strip("'")
+#
+# EACH ROW TAKES THE WHOLE TABLE AND HANDS BACK THE WHOLE TABLE. Until
+# 2026-09-23 a row changed one column's facets, because that is where
+# nullability and defaults lived. They are `Constraint`s now, so changing one
+# changes the table's rules, and only "to type" touches a column at all.
+_AN_ALTERATION: dict[
+    str, Callable[[list[Column], list[Constraint], str, str], tuple[list[Column], list[Constraint]]]
+] = {
+    "to be NOT NULL": lambda columns, rules, column, _value: (
+        columns,
+        _ruling(rules, column, "not_null"),
+    ),
+    "to be nullable": lambda columns, rules, column, _value: (
+        columns,
+        _without(rules, column, "not_null"),
+    ),
+    "nullability": lambda columns, rules, column, _value: (
+        columns,
+        _without(rules, column, "not_null"),
+    ),
+    "to type": lambda columns, rules, column, value: (
+        [_only(held, column, lambda one: {**one, "declared_type": value}) for held in columns],
+        rules,
+    ),
+    "to have default": lambda columns, rules, column, value: (
+        columns,
+        _ruling(rules, column, "default", value.strip("'")),
+    ),
+    "to have no default": lambda columns, rules, column, _value: (
+        columns,
+        _without(rules, column, "default"),
+    ),
+    "to be NOT NULL with default": lambda columns, rules, column, value: (
+        columns,
+        _ruling(_ruling(rules, column, "not_null"), column, "default", value.strip("'")),
     ),
 }
 
@@ -850,7 +1018,13 @@ def _where(scenario: dict, name: str, table: str | None) -> tuple[str, str]:
     return (qualified or table or scenario["table"], bare)
 
 
-def _rebuilt(scenario: dict, table: str, columns: list[Column], detail: dict[str, Value]) -> None:
+def _rebuilt(
+    scenario: dict,
+    table: str,
+    columns: list[Column],
+    constraints: list[Constraint],
+    detail: dict[str, Value],
+) -> None:
     """Carry out the change that turns the live table into this shape."""
     declared = scenario["schema"][table]
     held = [column["name"] for column in declared["columns"]]
@@ -860,11 +1034,11 @@ def _rebuilt(scenario: dict, table: str, columns: list[Column], detail: dict[str
         detail,
         columns,
         declared["indexes"],
-        declared["constraints"],
+        constraints,
         [column["name"] for column in columns if column["name"] in held],
         [],
     )
-    scenario["schema"][table] = {**declared, "columns": columns}
+    scenario["schema"][table] = {**declared, "columns": columns, "constraints": constraints}
     scenario["altered"] = detail["column"]
     _carried_out(scenario, operation)
 
@@ -883,15 +1057,11 @@ def _a_column_is_altered(
     """One column changed, and the whole table rebuilt around the change."""
     where, column = _where(scenario, name, table)
     scenario["default"] = (value or "").strip("'")
-    _rebuilt(
-        scenario,
-        where,
-        [
-            _only(declared, column, lambda held: _AN_ALTERATION[change](held, value or ""))
-            for declared in scenario["schema"][where]["columns"]
-        ],
-        {"column": column},
+    declared = scenario["schema"][where]
+    columns, constraints = _AN_ALTERATION[change](
+        declared["columns"], declared["constraints"], column, value or ""
     )
+    _rebuilt(scenario, where, columns, constraints, {"column": column})
 
 
 @when(parsers.re(r'^I drop column "(?P<name>[^"]+)"$'))
@@ -900,17 +1070,21 @@ def _a_column_is_dropped(scenario: dict, name: str) -> None:
     where, column = _where(scenario, name, None)
     declared = scenario["schema"][where]
     columns = [held for held in declared["columns"] if held["name"] != column]
+    # A RULE GOES WITH THE COLUMN IT NAMES. A unique over a column the new table
+    # has not got is a rebuild SQLite refuses, and the column is still there
+    # afterwards, which reads exactly like a drop that quietly did nothing.
+    rules = [rule for rule in declared["constraints"] if column not in rule["columns"]]
     operation = _operation(
         "drop_column",
         where,
         {"column": column},
         columns,
         declared["indexes"],
-        declared["constraints"],
+        rules,
         [held["name"] for held in columns],
         [],
     )
-    scenario["schema"][where] = {**declared, "columns": columns}
+    scenario["schema"][where] = {**declared, "columns": columns, "constraints": rules}
     _carried_out(scenario, operation)
 
 
@@ -944,6 +1118,7 @@ def _a_foreign_key_is_changed(
             )
             for declared in scenario["schema"][where]["columns"]
         ],
+        scenario["schema"][where]["constraints"],
         {"column": column},
     )
 
@@ -960,7 +1135,8 @@ def _the_first_table_loosened(scenario: dict) -> None:
     _rebuilt(
         scenario,
         name,
-        columns[:-1] + [_facet(columns[-1], "nullable", True)],
+        columns,
+        _without(scenario["schema"][name]["constraints"], columns[-1]["name"], "not_null"),
         {"column": columns[-1]["name"]},
     )
 
@@ -975,6 +1151,13 @@ def _entirely_new_column_names(scenario: dict) -> None:
             {**column, "name": f"fresh_{column['name']}"}
             for column in scenario["schema"][name]["columns"]
         ],
+        # THE RULES FOLLOW THE COLUMNS THEY NAME. A key still naming the old
+        # column is a key over a name the new table has not got, and SQLite
+        # reads a name it does not know as an expression and refuses it.
+        [
+            {**rule, "columns": [f"fresh_{held}" for held in rule["columns"]]}
+            for rule in scenario["schema"][name]["constraints"]
+        ],
         {"column": scenario["schema"][name]["columns"][0]["name"]},
     )
 
@@ -986,7 +1169,8 @@ def _a_copy_that_cannot_work(scenario: dict) -> None:
     _rebuilt(
         scenario,
         name,
-        [columns[0], _facet(columns[1], "nullable", False), *columns[2:]],
+        columns,
+        _ruling(scenario["schema"][name]["constraints"], columns[1]["name"], "not_null"),
         {"column": columns[1]["name"]},
     )
 
@@ -1071,7 +1255,7 @@ def _the_statement_writes_that_engines_boolean(scenario: dict) -> None:
             "add_column",
             "invoices",
             {"column": "settled"},
-            [_column("settled", "boolean", nullable=False)],
+            [_column("settled", "boolean")],
             [],
             [],
             [],
@@ -1081,6 +1265,84 @@ def _the_statement_writes_that_engines_boolean(scenario: dict) -> None:
     )
     assert isinstance(elsewhere, list) and elsewhere[0]["text"] != text, (
         f"sqlite and {scenario['engine']} got the same spelling: {text}"
+    )
+
+
+# --- what a real engine does with a rule it was told -------------------------
+
+# WHAT A SENTENCE ABOUT A ROW MEANS -> the row it writes. A row naming only
+# `code` is what asks whether a default reached the column.
+_THE_ROW_A_SENTENCE_WRITES: dict[str, tuple[str, tuple[Value, ...]]] = {
+    'naming only "code"': ("INSERT INTO parts (code) VALUES (?)", ("c1",)),
+    'naming "code" and a "status" of "shipped"': (
+        "INSERT INTO parts (code, status) VALUES (?, ?)",
+        ("c1", "shipped"),
+    ),
+}
+
+
+@when(parsers.re(r"a row is written (?P<what>naming .+)$"))
+def _a_row_is_written(scenario: dict, what: str) -> None:
+    text, values = _THE_ROW_A_SENTENCE_WRITES[what]
+    scenario["connection"].execute(text, values)
+
+
+@then(parsers.re(r'the row\'s "(?P<column>[^"]+)" reads "(?P<value>[^"]*)"$'))
+def _the_rows_column_reads(scenario: dict, column: str, value: str) -> None:
+    held = scenario["connection"].execute(f'SELECT "{column}" FROM parts').fetchall()
+    assert held == [(value,)], (
+        f'the row\'s "{column}" reads {held!r}, and the scenario asks for {value!r}'
+    )
+
+
+# WHAT A SENTENCE ABOUT ONE ROW MEANS -> the row, and whether the engine takes
+# it. Each is one line, so the six are a table rather than six step functions.
+_A_ROW_A_SENTENCE_MEANS: dict[str, tuple[str, tuple[Value, ...]]] = {
+    'a row whose "code" is 8 characters': (
+        "INSERT INTO parts (code) VALUES (?)",
+        ("12345678",),
+    ),
+    'a row whose "code" is 9 characters': (
+        "INSERT INTO parts (code) VALUES (?)",
+        ("123456789",),
+    ),
+    'a row that leaves "code" empty': ("INSERT INTO parts (status) VALUES (?)", ("x",)),
+}
+
+
+@then(parsers.re(r"the engine (?P<verdict>accepts|refuses) (?P<row>a row .+)$"))
+def _the_engine_answers_a_row(scenario: dict, verdict: str, row: str) -> None:
+    """Write the row and read the engine's own answer, whichever way it went."""
+    text, values = _A_ROW_A_SENTENCE_MEANS[row]
+    refused: list[str] = []
+    try:
+        scenario["connection"].execute(text, values)
+    except sqlite3.IntegrityError as complaint:
+        refused.append(str(complaint))
+    assert (refused == []) == (verdict == "accepts"), (
+        f"the scenario says the engine {verdict} {row}, and the engine said {refused or 'yes'}"
+    )
+
+
+@then("it is refused, naming the kinds it writes")
+def _it_is_refused_naming_the_kinds(scenario: dict) -> None:
+    answer = scenario["answer"]
+    assert set(answer) == A_FAULT, f"a refusal is a Fault, returned and never raised: {answer}"
+    said = answer["what_went_wrong"] + " " + answer["what_to_do_instead"]
+    unnamed = [kind for kind in ("check", "primary_key", "unique", "length") if kind not in said]
+    assert unnamed == [], (
+        f"the refusal does not say which kinds this package writes, so a caller "
+        f"has to go and find out: {unnamed} missing from {said!r}"
+    )
+
+
+@then("it is refused, saying what a default may be")
+def _it_is_refused_saying_what_a_default_may_be(scenario: dict) -> None:
+    answer = scenario["answer"]
+    assert set(answer) == A_FAULT, f"a refusal is a Fault, returned and never raised: {answer}"
+    said = answer["what_to_do_instead"]
+    assert "text" in said and "number" in said, (
+        f"the refusal does not say what a default may be instead: {said!r}"
     )
 
 
@@ -1228,11 +1490,15 @@ def _the_definition_of_a_column(scenario: dict, column: str, claim: str, value: 
 
 @then(parsers.re(r'^the UNIQUE constraint on "(?P<column>[^"]+)" is preserved$'))
 def _the_unique_constraint_is_preserved(scenario: dict, column: str) -> None:
-    """A rebuild that loses a UNIQUE facet loses what the facet enforced, so
-    the engine is asked to store the same value twice."""
-    definition = _definition_of(scenario, scenario["table"], column)
-    assert "UNIQUE" in definition.upper(), (
-        f"the rebuild kept {definition!r}, and the scenario says {column!r} is still unique"
+    """A rebuild that loses the rule loses what the rule enforced.
+
+    IT READS THE WHOLE CREATE TABLE RATHER THAN ONE COLUMN'S CLAUSE. A unique
+    is a `Constraint` over the columns it names, so the engine keeps it beside
+    the columns rather than inside one of their definitions.
+    """
+    kept = _schema_sql(scenario["connection"], scenario["table"])
+    assert "UNIQUE" in kept.upper() and column in kept, (
+        f"the rebuild kept {kept!r}, and the scenario says {column!r} is still unique"
     )
 
 

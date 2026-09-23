@@ -51,12 +51,21 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import date, datetime, time
 from decimal import Decimal
-from typing import Any, Literal, Union, get_args, get_origin
+from typing import Any, Literal, Union, cast, get_args, get_origin
 from uuid import UUID
 
 from pydantic import BaseModel
 
-from declaro_persistum.types import NOTHING, Column, Declared, Fault, Model, View
+from declaro_persistum.types import (
+    NOTHING,
+    Column,
+    Condition,
+    Constraint,
+    Declared,
+    Fault,
+    Model,
+    View,
+)
 
 # What a column holds and whether it may be absent, which is the pair every
 # reader below hands back and the pair a `Column` is built from.
@@ -246,15 +255,41 @@ def _a_column(name: str, annotation: Any) -> Column | Fault:
             declared_type=held[0],
             renamed_from=NOTHING,
             references=NOTHING,
-            facets={"nullable": held[1]},
         ),
     )
 
 
+# WHAT AN ANNOTATION SAYS ABOUT AN EMPTY VALUE, AS THE RULE IT IS. `str` means
+# the column must hold something and `str | None` means it need not, which is
+# the one rule a host writes without writing a constraint. Until 2026-09-23 it
+# rode in a bag of facets on the column; it is a `Constraint` of kind not_null
+# now, like every other rule, so `fn spell_operation` reads it the one way.
+NARROWS_BY_NOTHING = Condition(each={}, any_of=[], none_of=[])
+
+
+def _must_hold_something(name: str, annotation: Any) -> list[Constraint]:
+    """A not_null rule for a column whose annotation does not permit nothing."""
+    held = _read(annotation)
+    written = {
+        True: lambda: [],
+        False: lambda: [
+            Constraint(
+                name=f"nn_{name}",
+                kind="not_null",
+                columns=[name],
+                rule=NARROWS_BY_NOTHING,
+                value=NOTHING,
+            )
+        ],
+    }
+    return cast("list[Constraint]", written[_is_fault(held) or held[1] is True]())
+
+
 def _the_model(cls: type, named: Any) -> Model | Fault:
-    columns = [
-        _a_column(name, field.annotation)
-        for name, field in cls.model_fields.items()  # type: ignore[attr-defined]
+    fields = list(cls.model_fields.items())  # type: ignore[attr-defined]
+    columns = [_a_column(name, field.annotation) for name, field in fields]
+    required = [
+        rule for name, field in fields for rule in _must_hold_something(name, field.annotation)
     ]
     return _the_first_fault_or(
         columns,
@@ -267,7 +302,7 @@ def _the_model(cls: type, named: Any) -> Model | Fault:
             columns=columns,  # type: ignore[arg-type]
             dropping=_declared_on(cls, "__dropping__", []),
             indexes=_declared_on(cls, "__indexes__", []),
-            constraints=_declared_on(cls, "__constraints__", []),
+            constraints=[*required, *_declared_on(cls, "__constraints__", [])],
         ),
     )
 

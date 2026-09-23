@@ -318,16 +318,17 @@ def default_clause(value: Value, engine: str) -> str | Fault:
 
 
 # --- one column, and one constraint ------------------------------------------
+#
+# WHERE EACH KIND GOES IS SQL'S DECISION RATHER THAN THIS PACKAGE'S, and the two
+# clause tables below are where it is written down. A kind with a row in
+# `COLUMN_CLAUSE` is spelled beside its column; every other kind is spelled over
+# the table. A DEFAULT has no table-level form in any engine, so it goes beside
+# the column or nowhere. NOT NULL has a table-level spelling as a CHECK and is
+# still written inline, because inline is the form a schema read back reports as
+# nullability.
 
-FACET_CLAUSE: dict[str, Callable[[Value, Engine], str | Fault]] = {
-    "primary_key": lambda value, _engine: {True: "PRIMARY KEY", False: ""}[value is True],
-    "nullable": lambda value, _engine: {True: "", False: "NOT NULL"}[value is True],
-    "unique": lambda value, _engine: {True: "UNIQUE", False: ""}[value is True],
-    "default": default_clause,
-}
-
-# The order a CREATE TABLE reads them in.
-FACET_ORDER = ("primary_key", "nullable", "unique", "default")
+# The order a column definition reads its own rules in.
+COLUMN_CLAUSE_ORDER: tuple[ConstraintKind, ...] = ("not_null", "default")
 
 
 # WHAT EACH ENGINE WRITES FOR A DECLARED DELETION RULE. `refuse` is what a
@@ -373,32 +374,41 @@ def _reference_clause(reference: Reference, engine: Engine) -> str | Fault:
     return written[declared not in rules]()
 
 
-def column_definition(column: Column, engine: str) -> str | Fault:
-    """One column as a CREATE TABLE carries it: its name, its type, its facets."""
+def column_definition(column: Column, constraints: list[Constraint], engine: str) -> str | Fault:
+    """One column as a CREATE TABLE carries it: its name, its type, its own rules.
+
+    IT TAKES THE WHOLE TABLE'S CONSTRAINTS AND READS THE ONES THAT NAME IT. Until
+    2026-09-23 a column carried a bag of facets, and this function had to hunt
+    for keys nobody wrote a clause for before it could write anything. A rule is
+    a `Constraint` now, `WHERE_A_KIND_GOES` says which kinds are written beside a
+    column, and a kind with no clause never reaches here.
+    """
 
     def spelled() -> str | Fault:
-        known = cast(Engine, engine)
-        unknown = list(filter(lambda facet: facet not in FACET_CLAUSE, column["facets"]))
-        return {
-            True: lambda: _refused(
-                f"The column {column['name']!r} declares {', '.join(unknown)}, "
-                f"which this package cannot write into a {engine} definition.",
-                f"Declare only {', '.join(FACET_ORDER)} on a column.",
-            ),
-            False: lambda: _definition(column, known),
-        }[unknown != []]()
+        return _definition(column, constraints, cast(Engine, engine))
 
     return cast("str | Fault", _for_engine(engine, spelled))
 
 
-def _definition(column: Column, engine: Engine) -> str | Fault:
-    facets = column["facets"]
+def _its_own(
+    column: Column, constraints: list[Constraint], kind: ConstraintKind
+) -> list[Constraint]:
+    """The rules of one kind that name this column."""
+    return [
+        constraint
+        for constraint in constraints
+        if constraint["kind"] == kind and column["name"] in constraint["columns"]
+    ]
+
+
+def _definition(column: Column, constraints: list[Constraint], engine: Engine) -> str | Fault:
     pieces: list[Any] = [
         QUOTE[engine](column["name"]),
         type_spelled(column["declared_type"], engine),
         *[
-            FACET_CLAUSE[facet](facets[facet], engine)
-            for facet in filter(facets.__contains__, FACET_ORDER)
+            COLUMN_CLAUSE[kind](constraint, engine)
+            for kind in COLUMN_CLAUSE_ORDER
+            for constraint in _its_own(column, constraints, kind)
         ],
         *[
             _reference_clause(reference, engine)
@@ -484,22 +494,62 @@ def _over_its_columns(word: str) -> Callable[[Constraint, Engine], str | Fault]:
     return spelled
 
 
+def _length(constraint: Constraint, engine: Engine) -> str | Fault:
+    """`CHECK (length("code") <= 8)`, over every column the rule names.
+
+    A CHECK RATHER THAN A TYPE MODIFIER, because `VARCHAR(8)` is enforced by
+    PostgreSQL and ignored by SQLite, so the same declaration would mean two
+    different things. Measured 2026-09-23: SQLite and pyturso both take this
+    CHECK and both raise IntegrityError on a ninth character.
+
+    THE LENGTH IS A WHOLE NUMBER OR IT IS A REFUSAL. `value` is a `Value`, so
+    `"eight"` is expressible, and an engine handed `length("code") <= 'eight'`
+    compares a number against text and answers something nobody asked for.
+    """
+    allowed = constraint["value"]
+    quote = QUOTE[engine]
+    named = [f"length({quote(column)}) <= {allowed}" for column in constraint["columns"]]
+    written: dict[bool, Callable[[], str | Fault]] = {
+        True: lambda: _refused(
+            f"The constraint {constraint['name']!r} allows a length of "
+            f"{allowed!r}, which is a {type(allowed).__name__} rather than a "
+            "count of characters.",
+            "Declare the length as a whole number of at least one.",
+        ),
+        False: lambda: f"CONSTRAINT {quote(constraint['name'])} CHECK ({' AND '.join(named)})",
+    }
+    return written[not isinstance(allowed, int) or isinstance(allowed, bool) or allowed < 1]()
+
+
 # WHICH KIND OF RULE IT IS SAYS HOW IT IS SPELLED. Before `Constraint` carried a
 # kind, every constraint was read as a CHECK, so a key spanning two columns was
 # two inline PRIMARY KEY clauses that no engine accepts.
+#
+# A KIND IS IN EXACTLY ONE OF THESE TWO TABLES, and `WHERE_A_KIND_GOES` says
+# which. A kind in neither is refused by name rather than spelled as silence,
+# which is what a bag keyed by strings used to do.
 CONSTRAINT_CLAUSE: dict[ConstraintKind, Callable[[Constraint, Engine], str | Fault]] = {
     "check": _check,
     "primary_key": _over_its_columns("PRIMARY KEY"),
     "unique": _over_its_columns("UNIQUE"),
+    "length": _length,
 }
+
+COLUMN_CLAUSE: dict[ConstraintKind, Callable[[Constraint, Engine], str | Fault]] = {
+    "not_null": lambda _constraint, _engine: "NOT NULL",
+    "default": lambda constraint, engine: default_clause(constraint["value"], engine),
+}
+
+
+_EVERY_KIND_WITH_A_CLAUSE = sorted(set(CONSTRAINT_CLAUSE) | set(COLUMN_CLAUSE))
 
 
 def _no_such_constraint_kind(constraint: Constraint, engine: str) -> Fault:
     return _refused(
         f"The constraint {constraint['name']!r} says it is a "
         f"{constraint['kind']!r}, and this package writes "
-        f"{', '.join(CONSTRAINT_CLAUSE)} into a {engine} definition.",
-        f"Declare the constraint as one of {', '.join(CONSTRAINT_CLAUSE)}.",
+        f"{', '.join(_EVERY_KIND_WITH_A_CLAUSE)} into a {engine} definition.",
+        f"Declare the constraint as one of {', '.join(_EVERY_KIND_WITH_A_CLAUSE)}.",
     )
 
 
@@ -624,51 +674,31 @@ def _named_column(operation: Operation, engine: Engine) -> Column | Fault:
     return answer[found != []]()
 
 
-# A KEY ON ONE COLUMN IS THE COLUMN'S OWN BUSINESS; A KEY ON SEVERAL IS THE
-# TABLE'S. SQL lets a single column say PRIMARY KEY beside its own type, and
-# requires PRIMARY KEY (a, b) at the table level for more than one. Two columns
-# each claiming the facet spells two inline clauses, which no engine parses.
-#
-# REFUSED RATHER THAN SPELLED, added 2026-09-21. Before this it came back as SQL
-# and the engine rejected it, which tells a reader about a statement they did
-# not write. The refusal names the columns and says where the key goes instead.
-def _keyed_inline(columns: list[Column]) -> list[str]:
-    return [column["name"] for column in columns if column["facets"].get("primary_key") is True]
-
-
-def _too_many_keys(named: list[str], table: str) -> Fault:
-    return {
-        "kind": "refused",
-        "what_went_wrong": (
-            f"{table} declares {', '.join(named)} as the primary key, and a key "
-            f"on more than one column cannot be written beside each of them."
-        ),
-        "what_to_do_instead": (
-            f"Take primary_key off those columns and declare one constraint of "
-            f"kind primary_key naming {', '.join(named)} together."
-        ),
-    }
-
-
-def _spelled_body(operation: Operation, engine: Engine) -> str | Fault:
-    pieces: list[Any] = [
-        *[column_definition(column, engine) for column in operation["columns"]],
-        *[constraint_clause(constraint, engine) for constraint in operation["constraints"]],
-    ]
-    return cast("str | Fault", _the_first_fault_or(pieces, lambda: ", ".join(pieces)))
-
-
-_A_BODY_OR_A_REFUSAL: dict[bool, Callable[[Operation, Engine, list[str]], str | Fault]] = {
-    False: lambda operation, engine, _named: _spelled_body(operation, engine),
-    True: lambda operation, _engine, named: _too_many_keys(named, operation["table"]),
-}
+# A PRIMARY KEY GOES AT THE TABLE LEVEL WHETHER IT COVERS ONE COLUMN OR THREE,
+# and until 2026-09-23 that was not true. A column carried a `primary_key` facet,
+# so a key over two columns spelled two inline PRIMARY KEY clauses that no engine
+# parses, and this function had to count them and refuse. A key is a `Constraint`
+# naming its columns now, `PRIMARY KEY ("id")` is what one column spells, and
+# there is nothing left to count. Measured 2026-09-23: SQLite, PostgreSQL and
+# pyturso all take the table-level form over a single column.
 
 
 def _table_body(operation: Operation, engine: Engine) -> str | Fault:
-    """What goes between the parentheses of a CREATE TABLE: every column, then
-    every constraint, in the order the operation carries them."""
-    named = _keyed_inline(operation["columns"])
-    return _A_BODY_OR_A_REFUSAL[len(named) > 1](operation, engine, named)
+    """What goes between the parentheses of a CREATE TABLE.
+
+    Every column with the rules written beside it, then every rule written over
+    the table, in the order the operation carries them.
+    """
+    constraints = operation["constraints"]
+    pieces: list[Any] = [
+        *[column_definition(column, constraints, engine) for column in operation["columns"]],
+        *[
+            constraint_clause(constraint, engine)
+            for constraint in constraints
+            if constraint["kind"] not in COLUMN_CLAUSE
+        ],
+    ]
+    return cast("str | Fault", _the_first_fault_or(pieces, lambda: ", ".join(pieces)))
 
 
 def _create_table(operation: Operation, engine: Engine) -> list[Statement] | Fault:
@@ -690,7 +720,8 @@ def _add_column(operation: Operation, engine: Engine) -> list[Statement] | Fault
     def spelled() -> list[Statement] | Fault:
         column = _named_column(operation, engine)
         definition = _the_first_fault_or(
-            [column], lambda: column_definition(cast(Column, column), engine)
+            [column],
+            lambda: column_definition(cast(Column, column), operation["constraints"], engine),
         )
         return _the_first_fault_or(
             [column, definition],
@@ -777,31 +808,51 @@ def _rebuild(operation: Operation, engine: Engine) -> list[Statement] | Fault:
     return _carrying(operation, engine, "columns", spelled)
 
 
-# WHAT ONE ALTERED COLUMN ASKS OF AN ENGINE THAT ALTERS IN PLACE, read off the
-# column rather than off `detail`. The column is the declaration, so the alter
-# makes the live column match it.
-ALTERATION: dict[str, Callable[[Column, Engine], str | Fault]] = {
-    "declared_type": lambda column, engine: _the_first_fault_or(
+def _set_or_drop(word: str) -> Callable[[list[Constraint], Engine], str | Fault]:
+    """SET it when a rule names the column, DROP it when none does.
+
+    ABSENCE IS A DECLARATION HERE, WHICH IS WHAT CHANGED ON 2026-09-23. The
+    operation carries the target table's whole constraint list, so a column with
+    no not_null rule among them is a column the declaration says may be empty,
+    and a column with no default rule is one that starts at nothing. The alter
+    makes the live column match the declaration, so it says both ways round.
+    """
+
+    def clause(_rules: list[Constraint], _engine: Engine) -> str | Fault:
+        return f"DROP {word}"
+
+    def named(rules: list[Constraint], engine: Engine) -> str | Fault:
+        written = _WRITTEN_AFTER_SET[word](rules[0], engine)
+        return _the_first_fault_or([written], lambda: f"SET {written}")
+
+    def either(rules: list[Constraint], engine: Engine) -> str | Fault:
+        return {True: named, False: clause}[rules != []](rules, engine)
+
+    return either
+
+
+_WRITTEN_AFTER_SET: dict[str, Callable[[Constraint, Engine], str | Fault]] = {
+    "NOT NULL": lambda _constraint, _engine: "NOT NULL",
+    "DEFAULT": lambda constraint, engine: default_clause(constraint["value"], engine),
+}
+
+
+# WHAT ONE ALTERED COLUMN ASKS OF AN ENGINE THAT ALTERS IN PLACE. The column and
+# the rules that name it are the declaration, so the alter makes the live column
+# match them. Each row takes the rules of its own kind and nothing else.
+ALTERATION: dict[str, Callable[[Column, list[Constraint], Engine], str | Fault]] = {
+    "declared_type": lambda column, _rules, engine: _the_first_fault_or(
         [type_spelled(column["declared_type"], engine)],
         lambda: f"TYPE {type_spelled(column['declared_type'], engine)}",
     ),
-    "nullable": lambda column, _engine: {True: "DROP NOT NULL", False: "SET NOT NULL"}[
-        column["facets"]["nullable"] is True
-    ],
-    "default": lambda column, engine: _the_first_fault_or(
-        [default_clause(column["facets"]["default"], engine)],
-        lambda: f"SET {default_clause(column['facets']['default'], engine)}",
-    ),
+    "not_null": lambda _column, rules, engine: _set_or_drop("NOT NULL")(rules, engine),
+    "default": lambda _column, rules, engine: _set_or_drop("DEFAULT")(rules, engine),
 }
 
 # The order a migration reads them in, so two changes to one column always run
-# the same way round.
-ALTERATION_ORDER = ("declared_type", "nullable", "default")
-
-# A COLUMN ALWAYS NAMES ITS TYPE AND MAY NAME THE OTHER TWO. `declared_type` is
-# a field of `Column`, so every alter sets the type; `nullable` and `default`
-# are facets, and a column that declares neither is altered without them.
-DECLARED_ON_EVERY_COLUMN = ("declared_type",)
+# the same way round. `declared_type` reads no constraint and the other two read
+# the rules of their own kind, which is why the key is the kind's own word.
+ALTERATION_ORDER: tuple[str, ...] = ("declared_type", "not_null", "default")
 
 
 def _alter_column_directly(operation: Operation, engine: Engine) -> list[Statement] | Fault:
@@ -817,12 +868,12 @@ def _alter_column_directly(operation: Operation, engine: Engine) -> list[Stateme
 
 
 def _in_place(column: Column, operation: Operation, engine: Engine) -> list[Statement] | Fault:
-    changes = [
-        change
+    clauses: list[Any] = [
+        ALTERATION[change](
+            column, _its_own(column, operation["constraints"], cast(ConstraintKind, change)), engine
+        )
         for change in ALTERATION_ORDER
-        if change in DECLARED_ON_EVERY_COLUMN or change in column["facets"]
     ]
-    clauses: list[Any] = [ALTERATION[change](column, engine) for change in changes]
     quote = QUOTE[engine]
     return _the_first_fault_or(
         clauses,

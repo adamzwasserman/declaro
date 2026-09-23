@@ -277,17 +277,33 @@ class Index(TypedDict):
 # WHICH KIND OF RULE IT IS, WHICH NOTHING COULD SAY BEFORE. Added 2026-09-21:
 # every constraint carried a Condition, so every one was read as a CHECK, and a
 # primary key spanning two columns could not be spelled. The columns were
-# already here; the missing part was the word for what to do with them. A check
-# reads its rule. A primary key and a unique read their columns and carry the
-# condition that narrows by nothing, which is a real value here, not a hole.
-ConstraintKind = Literal["check", "primary_key", "unique", "length"]
+# already here; the missing part was the word for what to do with them.
+#
+# `not_null` AND `default` JOINED THEM ON 2026-09-23, when `Column` lost the bag
+# of facets they used to live in. A bag keyed by strings permits a key nobody
+# wrote a clause for, which is why `column_definition` had to hunt for unknown
+# keys before it could write a definition. These are rules about a column, they
+# are what SQLite's own grammar calls column-constraints, and they belong here.
+ConstraintKind = Literal["check", "primary_key", "unique", "length", "not_null", "default"]
 
 
+# WHAT EACH KIND READS. A check reads `rule`. A primary key, a unique and a
+# not_null read `columns`. A length and a default read `value`. Every field is
+# present on every constraint, so nothing is looked up and found missing: a
+# primary key carries the condition that narrows by nothing, which is a real
+# value rather than a hole.
+#
+# `value` ARRIVED BECAUSE A LENGTH AND A DEFAULT CARRY A LITERAL. A `Condition`
+# narrows rows, so the only way to store 255 in one was to write "the column
+# equals 255" or "the column is at most 255", and both say something false about
+# the column. A `Value` of `None` is `DEFAULT NULL`, which is a declaration
+# somebody made rather than a field nobody filled in.
 class Constraint(TypedDict):
     name: str
     kind: ConstraintKind
     columns: list[str]
     rule: Condition
+    value: Value
 
 
 # A MODEL HAD A TABLE AND NO NAME OF ITS OWN, AND THREE THINGS BROKE ON IT. You
