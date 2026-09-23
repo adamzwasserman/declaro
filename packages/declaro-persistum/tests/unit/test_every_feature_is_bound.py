@@ -118,12 +118,6 @@ _NEXT_UP = (
 
 KNOWN_UNBOUND: dict[str, str] = {
     "compile_statement.feature": _READS_A_RECORD_THAT_MOVED,
-    "declaration_from_django.feature": _READS_A_RECORD_THAT_MOVED,
-    "declaration_from_phrasing.feature": _READS_A_RECORD_THAT_MOVED,
-    "declaration_from_prisma.feature": _READS_A_RECORD_THAT_MOVED,
-    "declaration_from_pseudo_sql.feature": _READS_A_RECORD_THAT_MOVED,
-    "declaration_from_sqlalchemy.feature": _READS_A_RECORD_THAT_MOVED,
-    "progress_line.feature": _READS_A_RECORD_THAT_MOVED,
     "lifecycle_register.feature": _NEEDS_A_DELETED_FUNCTION,
     "replicates.feature": _NEEDS_A_DELETED_FUNCTION,
     "schema_read_declared.feature": _NEEDS_A_DELETED_FUNCTION,

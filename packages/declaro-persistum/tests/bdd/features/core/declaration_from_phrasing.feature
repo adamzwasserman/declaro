@@ -10,9 +10,9 @@ Feature: declaration_from_phrasing -- One reader, and a grammar is only its word
   the reader they share.
 
   WHERE A GRAMMAR HAS NO WORD, THE LIBRARY SUPPLIES ONE. A caller who picked a
-  spelling must not have picked a smaller library. So every grammar reaches all
-  ten fields of a declaration, including the fields whose imitated ORM has no
-  phrasing this surface copies.
+  spelling must not have picked a smaller library. So every grammar reaches every
+  field of a declaration, including the fields whose imitated ORM has no phrasing
+  this surface copies.
 
   # ------------------------------------------------- what the caller said travels
 
@@ -28,7 +28,7 @@ Feature: declaration_from_phrasing -- One reader, and a grammar is only its word
 
   Scenario: every field of a declaration is there to be read
     When any question is built
-    Then the declaration carries all ten fields
+    Then the declaration carries every field a declaration has
 
   Scenario: the declaration does not remember which grammar built it
     When four callers ask one question in four grammars
@@ -52,6 +52,7 @@ Feature: declaration_from_phrasing -- One reader, and a grammar is only its word
       | grouping |
       | having   |
       | paging   |
+      | shaping  |
 
   Scenario: a grammar's own word wins over the library's where it has one
     Given a grammar whose word for the condition is "filter_by"
@@ -77,6 +78,15 @@ Feature: declaration_from_phrasing -- One reader, and a grammar is only its word
   Scenario: absence is a refusal only where the type cannot hold it
     When a caller leaves out the paging
     Then the declaration says so without refusing
+
+  # THE SHAPE A CALLER WANTS ITS ROWS BACK IN IS NOT A FIELD THEY MUST FILL, and
+  # it is also not one that can be absent: a declaration carries a word saying
+  # which shape, and there is no member meaning "unsaid". So a caller who says
+  # nothing gets dictionaries, which is the shape that works for every question
+  # including the ones naming some columns.
+  Scenario: a caller who says nothing about shape gets dictionaries
+    When a caller says nothing about the shape they want
+    Then the declaration says dictionaries
 
   Scenario: an asking word nobody declared is refused
     When a caller asks for something that is not one of the eighteen words

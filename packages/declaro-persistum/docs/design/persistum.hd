@@ -34,7 +34,8 @@ module declaro-persistum
 
   type Phrasing = dict<str, str> note "a grammar's word for each field of a declaration, and nothing else"
 
-  type Database = { engine: Engine
+  type Database = { target: str
+                    engine: Engine
                     connections: list<Connection>
                     writers: list<Connection>
                     channel: Channel | NOTHING

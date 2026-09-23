@@ -486,6 +486,13 @@ class Crew(TypedDict):
 
 
 class Database(TypedDict):
+    # WHERE THIS DATABASE IS, AND THE ONLY THING THAT NAMES IT. A caller holding
+    # two open databases has nothing else to tell them apart by: an engine is
+    # shared, a connection may never be read, and a crew belongs to whichever
+    # database made it. A shutdown log line naming anything else would name the
+    # same thing for every database exiting at once, which is the stall those
+    # lines exist to tell apart from progress.
+    target: str
     engine: Engine
     connections: list[Connection]
     writers: list[Connection]

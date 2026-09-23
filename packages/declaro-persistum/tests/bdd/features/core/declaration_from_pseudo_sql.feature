@@ -14,9 +14,9 @@ Feature: declaration_from_pseudo_sql -- The library's own phrasing into a declar
     When a caller writes people.select("id", "name").where({"name": "bob"})
     Then naming another model and other columns moves both
 
-  Scenario: a declaration carries ten fields however few the caller named
+  Scenario: a declaration carries every field however few the caller named
     When a caller writes people.select("id", "name").where({"name": "bob"})
-    Then the declaration carries all ten fields
+    Then the declaration carries every field
 
   Scenario Outline: the same question written twice is one declaration
     When a caller writes <phrasing>
