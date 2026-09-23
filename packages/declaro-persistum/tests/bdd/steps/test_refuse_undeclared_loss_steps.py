@@ -28,10 +28,12 @@ from __future__ import annotations
 
 import inspect
 import re
+from typing import cast
 
 from pytest_bdd import given, parsers, scenarios, then
 
 from declaro_persistum.types import Column, Declared, Model, Operation, Plan
+from tests.conftest import an_operation
 
 scenarios("../features/schema/refuse_undeclared_loss.feature")
 
@@ -75,17 +77,29 @@ def _declared(dropping: list[str], dropping_tables: list[str]) -> Declared:
     }
 
 
+def _one(kind: str, column: str | None, *, destroys: bool) -> Operation:
+    """One operation on the one table this feature is about."""
+    return cast(
+        Operation,
+        an_operation(
+            kind=kind,
+            table=THE_TABLE,
+            column=column,
+            columns=[],
+            indexes=[],
+            constraints=[],
+            copying=[],
+            values=[],
+            renamed_to=None,
+            view=None,
+            destroys=destroys,
+        ),
+    )
+
+
 def _dropping_columns(columns: list[str]) -> Plan:
     """A plan of one drop per column, each already marked as destroying."""
-    operations: list[Operation] = [
-        {
-            "kind": "drop_column",
-            "table": THE_TABLE,
-            "detail": {"column": column},
-            "destroys": True,
-        }
-        for column in columns
-    ]
+    operations: list[Operation] = [_one("drop_column", column, destroys=True) for column in columns]
     return {
         "operations": operations,
         "destroys": [f"{THE_TABLE}.{column}" for column in columns],
@@ -122,7 +136,7 @@ def _a_model_meaning_to_lose(scenario: dict, column: str) -> None:
 @given("a plan that would drop a table no model declares")
 def _a_plan_dropping_a_table(scenario: dict) -> None:
     scenario["plan"] = {
-        "operations": [{"kind": "drop_table", "table": THE_TABLE, "detail": {}, "destroys": True}],
+        "operations": [_one("drop_table", None, destroys=True)],
         "destroys": [THE_TABLE],
     }
     scenario["losing"] = [THE_TABLE]
@@ -150,14 +164,7 @@ def _nothing_declares_the_loss(scenario: dict) -> None:
 @given("a plan that only adds a column")
 def _a_plan_that_only_adds(scenario: dict) -> None:
     scenario["plan"] = {
-        "operations": [
-            {
-                "kind": "add_column",
-                "table": THE_TABLE,
-                "detail": {"column": "nickname"},
-                "destroys": False,
-            }
-        ],
+        "operations": [_one("add_column", "nickname", destroys=False)],
         "destroys": [],
     }
     scenario["declared"] = _declared(dropping=[], dropping_tables=[])

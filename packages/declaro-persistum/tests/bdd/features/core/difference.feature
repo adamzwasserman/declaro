@@ -132,3 +132,14 @@ Feature: difference -- What turns the live schema into the target
     Given a view that is identical in both schemas
     When it is diffed
     Then no operations are produced, because a migration that rewrites things nobody changed is indistinguishable from one that had a reason to
+
+  # ADDED 2026-09-23, AND IT WOULD HAVE CAUGHT A YEAR OF THIS. A view operation
+  # carried its name and nothing else, so whoever spelled it had no query to
+  # spell and every one of them was refused. Both scenarios above pass on an
+  # operation carrying no view at all, because both ask only that an operation
+  # came back.
+  Scenario: a view operation carries the view it is about
+    Given a view "recent" with one query
+    And a target view "recent" with a different query
+    When the views are diffed
+    Then each operation carries the view it names, with its declaration

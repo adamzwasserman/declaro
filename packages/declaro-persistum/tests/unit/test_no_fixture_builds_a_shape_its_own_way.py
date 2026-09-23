@@ -1,4 +1,4 @@
-"""Nobody writes a `Model` or a `Column` out by hand twice.
+"""Nobody writes a `Model`, a `Column` or an `Operation` out by hand twice.
 
 THE FAILURE THIS EXISTS TO STOP. Twelve step files each wrote a `Model` out
 themselves and ten wrote a `Column`, through thirteen private helpers that were
@@ -9,6 +9,13 @@ and stops there.
 
 It had already happened once. Eight files hand-built a `Room`, the room grew two
 fields and lost one inside a day, and the suite stayed green throughout.
+
+AND IT HAPPENED AGAIN THE NEXT DAY, TO A RECORD THIS GATE WAS NOT WATCHING. Six
+step files hand-built an `Operation`, and between them they wrote four fields the
+type does not have and left five off that it does. This gate watched two records
+and saw none of it. A gate that names the shapes it watches goes stale the moment
+a third one matters, so `Operation` is here now, and the next record added to the
+declaration belongs here on the day it lands.
 
 SO THE RULE IS ONE BUILDER EACH, IN `tests/conftest.py`, with every field
 required. A record that gains a field then fails every call site at once, which
@@ -25,12 +32,14 @@ pytestmark = pytest.mark.precommit
 
 _STEPS = pathlib.Path(__file__).resolve().parents[1] / "bdd" / "steps"
 
-# The field names that say a dict is being built as one of the two shapes. Read
-# off the declaration's own records rather than guessed: a `Column` is the only
-# thing with `declared_type`, and a `Model` the only thing with `table` beside
-# `columns`.
+# The field names that say a dict is being built as one of the three shapes.
+# Read off the declaration's own records rather than guessed: a `Column` is the
+# only thing with `declared_type`, a `Model` the only thing with `dropping`, and
+# an `Operation` the only thing with `copying`.
 _A_COLUMN = '"declared_type"'
 _A_MODEL = '"dropping"'
+_AN_OPERATION = '"copying"'
+_EVERY_SHAPE = (_A_COLUMN, _A_MODEL, _AN_OPERATION)
 
 
 # EVERY STEP FILE'S TEXT, READ ONCE, WHEN THIS MODULE LOADS. The reading is up
@@ -51,7 +60,6 @@ def _files_writing(field: str, said: dict[str, str]) -> set[str]:
 # work rather than a number. Each comes off as it moves to the shared builder,
 # and the list may only ever get shorter.
 STILL_THEIR_OWN_WAY = {
-    "test_query_run_statement_steps.py",
     "test_spell_view_steps.py",
     "test_spell_operation_steps.py",
     "test_answer_from_rows_steps.py",
@@ -66,22 +74,23 @@ STILL_THEIR_OWN_WAY = {
 }
 
 
-@pytest.mark.parametrize("field", [_A_COLUMN, _A_MODEL])
+@pytest.mark.parametrize("field", _EVERY_SHAPE)
 def test_no_new_file_writes_one_out_by_hand(field: str) -> None:
     """A file not on the list may not start building these itself."""
     new = _files_writing(field, WHAT_EACH_STEP_FILE_SAYS) - STILL_THEIR_OWN_WAY
     assert not new, (
         f"{sorted(new)} write a shape out by hand that {field} identifies. "
-        f"`tests/conftest.py` has `a_model` and `a_column` with every field "
-        f"required, so use those: a record that gains a field has to fail every "
-        f"call site at once, and a dict written out here fails none of them."
+        f"`tests/conftest.py` has `a_model`, `a_column`, `a_constraint` and "
+        f"`an_operation` with every field required, so use those: a record that "
+        f"gains a field has to fail every call site at once, and a dict written "
+        f"out here fails none of them."
     )
 
 
 def test_the_list_only_ever_gets_shorter() -> None:
     """A name on the list that no longer builds one comes off it."""
     said = WHAT_EACH_STEP_FILE_SAYS
-    building = _files_writing(_A_COLUMN, said) | _files_writing(_A_MODEL, said)
+    building = set().union(*(_files_writing(field, said) for field in _EVERY_SHAPE))
     stale = STILL_THEIR_OWN_WAY - building
     assert not stale, (
         f"{sorted(stale)} no longer build a model or a column by hand, so take "

@@ -27,10 +27,12 @@ the second scenario tells a refusal from an answer without catching anything.
 from __future__ import annotations
 
 import inspect
+from typing import cast
 
 from pytest_bdd import given, parsers, scenarios, then
 
 from declaro_persistum.types import Column, Declared, Model, Operation, OperationKind
+from tests.conftest import an_operation
 
 scenarios("../features/core/name_what_is_ambiguous.feature")
 
@@ -85,12 +87,22 @@ LOSES_WHAT_WAS_IN_IT: dict[OperationKind, bool] = {GONE: True, APPEARED: False}
 
 def _about_a_column(kind: OperationKind, table: str, column: str) -> Operation:
     """The operation a comparison emits for a column that is gone or appeared."""
-    return {
-        "kind": kind,
-        "table": table,
-        "detail": {COLUMN: column},
-        "destroys": LOSES_WHAT_WAS_IN_IT[kind],
-    }
+    return cast(
+        Operation,
+        an_operation(
+            kind=kind,
+            table=table,
+            column=column,
+            columns=[],
+            indexes=[],
+            constraints=[],
+            copying=[],
+            values=[],
+            renamed_to=None,
+            view=None,
+            destroys=LOSES_WHAT_WAS_IN_IT[kind],
+        ),
+    )
 
 
 def _the_answer_for(operations: list[Operation], declared: Declared) -> object:
@@ -246,7 +258,7 @@ def _one_rename_comes_back(scenario: dict) -> None:
 
     rename = answer[0]
     assert rename["table"] == operations[0]["table"], rename
-    assert rename["detail"] == {COLUMN: gone, TO: appeared}, rename
+    assert (rename["column"], rename["renamed_to"]) == (gone, appeared), rename
 
     # WHICH WAY ROUND IT IS WRITTEN, read off the model rather than off a
     # literal. `renamed_from` sits on the new column and carries the old name,
@@ -254,10 +266,10 @@ def _one_rename_comes_back(scenario: dict) -> None:
     # in opposite directions would rename a column to itself and lose the
     # other, and nothing would say so.
     declaring = scenario["declared"]["models"][0]["columns"][0]
-    assert rename["detail"][COLUMN] == declaring["renamed_from"], (
+    assert rename["column"] == declaring["renamed_from"], (
         f"the old name belongs under {COLUMN}: {rename} against {declaring}"
     )
-    assert rename["detail"][TO] == declaring["name"], (
+    assert rename["renamed_to"] == declaring["name"], (
         f"the new name belongs under {TO}: {rename} against {declaring}"
     )
     assert rename["destroys"] is False, f"a rename keeps the rows, so it destroys nothing: {rename}"

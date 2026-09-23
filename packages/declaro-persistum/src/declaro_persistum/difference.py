@@ -105,12 +105,14 @@ DESTROYS: dict[OperationKind, bool] = {
 def _operation(
     kind: OperationKind,
     name: str,
-    detail: dict[str, Value],
+    column: str | None,
     columns: list[Column],
     indexes: list[Index],
     constraints: list[Constraint],
     copying: list[str],
     values: list[Value],
+    renamed_to: str | None,
+    view: View | None,
 ) -> Operation:
     """One operation, carrying everything its kind names and whether it destroys.
 
@@ -118,20 +120,27 @@ def _operation(
     name there, because a view is the object the operation acts on and the type
     has one field for it.
 
-    EVERY CALLER WRITES ALL FIVE LISTS OUT, and most of them write `[]`. An
-    argument with a default would let a caller forget one and be answered with
-    an empty list that reads exactly like a table with no columns, which is the
-    shape this package already refuses in `src/`.
+    EVERY CALLER WRITES EVERY FIELD OUT, and most of them write `[]` or the named
+    absence. An argument with a default would let a caller forget one and be
+    answered with an empty list that reads exactly like a table with no columns,
+    which is the shape this package already refuses in `src/`.
+
+    THE FOUR THAT WERE A BAG UNTIL 2026-09-23 are `column`, `renamed_to` and the
+    view. They were keys in a dict called `detail`, which let this function emit
+    `create_view` operations carrying no view at all: nothing checked, and every
+    one of them was refused downstream for a key nobody had put in.
     """
     return Operation(
         kind=kind,
         table=name,
-        detail=detail,
+        column=column,
         columns=columns,
         indexes=indexes,
         constraints=constraints,
         copying=copying,
         values=values,
+        renamed_to=renamed_to,
+        view=view,
         destroys=DESTROYS[kind],
     )
 
@@ -160,12 +169,14 @@ def _columns_of(live: Table, target: Table) -> list[Operation]:
         _operation(
             "add_column",
             name,
-            {"column": column, "declared_type": wanted[column]["declared_type"]},
+            column,
             [wanted[column]],
             [],
+            target["constraints"],
             [],
             [],
-            [],
+            None,
+            None,
         )
         for column in wanted
         if column not in held
@@ -174,12 +185,14 @@ def _columns_of(live: Table, target: Table) -> list[Operation]:
         _operation(
             "drop_column",
             name,
-            {"column": column},
+            column,
             target["columns"],
             target["indexes"],
             target["constraints"],
             carried_across,
             [],
+            None,
+            None,
         )
         for column in held
         if column not in wanted
@@ -188,16 +201,14 @@ def _columns_of(live: Table, target: Table) -> list[Operation]:
         _operation(
             "alter_column",
             name,
-            {
-                "column": column,
-                "from_type": held[column]["declared_type"],
-                "to_type": wanted[column]["declared_type"],
-            },
+            column,
             target["columns"],
             target["indexes"],
             target["constraints"],
             carried_across,
             [],
+            None,
+            None,
         )
         for column in wanted
         if column in held and held[column]["declared_type"] != wanted[column]["declared_type"]
@@ -217,20 +228,22 @@ def _views_of(live: Schema, target: Schema) -> list[Operation]:
     wanted = _by_name(target["views"])
 
     created = [
-        _operation("create_view", name, {}, [], [], [], [], [])
+        _operation("create_view", name, None, [], [], [], [], [], None, wanted[name])
         for name in wanted
         if name not in held
     ]
     dropped = [
-        _operation("drop_view", name, {}, [], [], [], [], []) for name in held if name not in wanted
+        _operation("drop_view", name, None, [], [], [], [], [], None, held[name])
+        for name in held
+        if name not in wanted
     ]
     replaced = [
         operation
         for name in wanted
         if name in held and held[name] != wanted[name]
         for operation in (
-            _operation("drop_view", name, {}, [], [], [], [], []),
-            _operation("create_view", name, {}, [], [], [], [], []),
+            _operation("drop_view", name, None, [], [], [], [], [], None, held[name]),
+            _operation("create_view", name, None, [], [], [], [], [], None, wanted[name]),
         )
     ]
     return created + dropped + replaced
@@ -253,18 +266,20 @@ def difference(live: Schema, target: Schema) -> list[Operation]:
         _operation(
             "create_table",
             name,
-            {},
+            None,
             wanted[name]["columns"],
             wanted[name]["indexes"],
             wanted[name]["constraints"],
             [],
             [],
+            None,
+            None,
         )
         for name in wanted
         if name not in held
     ]
     dropped = [
-        _operation("drop_table", name, {}, [], [], [], [], [])
+        _operation("drop_table", name, None, [], [], [], [], [], None, None)
         for name in held
         if name not in wanted
     ]

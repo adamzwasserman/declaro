@@ -351,17 +351,28 @@ class Schema(TypedDict):
     views: list[View]
 
 
-# A MIGRATION COULD NOT CREATE A TABLE UNTIL THESE FIVE FIELDS EXISTED. `detail`
-# holds single values, so a new table's columns had nowhere to sit: `difference`
-# could say "create `people`" and `spell_operation` was handed a name with no way
-# to learn that `people` has an `id` and a `name`. Thirty-six scenarios failed on
-# it, all of them the first statement any migration runs.
+# A MIGRATION COULD NOT CREATE A TABLE UNTIL THESE FIVE FIELDS EXISTED. They
+# used to live in a bag called `detail` holding single values, so a new table's
+# columns had nowhere to sit: `difference` could say "create `people`" and
+# `spell_operation` was handed a name with no way to learn that `people` has an
+# `id` and a `name`. Thirty-six scenarios failed on it, all of them the first
+# statement any migration runs. The bag itself went on 2026-09-23.
 #
 # EACH IS EMPTY ON EVERY KIND THAT NAMES NONE, which is a value rather than an
 # absence, so nothing has to be looked up and found missing.
 class Operation(TypedDict):
     kind: OperationKind
     table: str
+    # WHICH COLUMN THIS CHANGE IS ABOUT, for the four kinds that name one:
+    # drop_column, alter_column, rename_column and add_column. Every other kind
+    # carries NOTHING here, which is a reading of the kind rather than a hole.
+    #
+    # IT WAS A KEY IN A BAG CALLED `detail` UNTIL 2026-09-23, alongside `to`,
+    # `name` and `select`. Those three had homes already: a rename's target is
+    # `renamed_to`, a dropped index is the one in `indexes`, and a view is
+    # `view`, which carries a declaration rather than a SELECT somebody wrote
+    # out. Only the column had nowhere, so only the column became a field.
+    column: str | None
     # A new table's columns, and a changed table's whole shape afterwards.
     columns: list[Column]
     # What a SQLite rebuild puts back: that engine alters a column by making a

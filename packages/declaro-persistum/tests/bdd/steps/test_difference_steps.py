@@ -320,7 +320,7 @@ def _there_is_an_alter_for_that_column(scenario: dict) -> None:
     """A column held as one type and declared as another is altered in place.
     Dropping and adding it would empty the column on the way past."""
     altered = [
-        operation["detail"]["column"]
+        operation["column"]
         for operation in _answer(scenario)
         if operation["kind"] == "alter_column"
     ]
@@ -332,7 +332,7 @@ def _there_is_an_alter_for_that_column(scenario: dict) -> None:
 def _there_is_an_add_column_for(scenario: dict, column: str, table: str) -> None:
     """A column only the models declare is added to the table that holds it."""
     added = [
-        (operation["table"], operation["detail"]["column"])
+        (operation["table"], operation["column"])
         for operation in _answer(scenario)
         if operation["kind"] == "add_column"
     ]
@@ -380,6 +380,30 @@ def _an_operation_is_produced_for_the_changed_view(scenario: dict) -> None:
     acted_on = [operation["table"] for operation in _answer(scenario)]
 
     assert "recent" in acted_on, f"the operations name {acted_on}, and none of them is the view"
+
+
+@then("each operation carries the view it names, with its declaration")
+def _each_operation_carries_its_view(scenario: dict) -> None:
+    """A name is not enough to spell a CREATE VIEW with.
+
+    A DROP CARRIES THE VIEW THAT IS THERE AND A CREATE CARRIES THE ONE DECLARED.
+    They differ, which is the whole reason both operations came back, so this
+    reads each one against the schema it came from rather than against a literal.
+    """
+    from_the_schema = {
+        "drop_view": {view["name"]: view for view in scenario["live"]["views"]},
+        "create_view": {view["name"]: view for view in scenario["target"]["views"]},
+    }
+    for operation in _answer(scenario):
+        carried = operation["view"]
+        assert carried is not None, (
+            f"a {operation['kind']} on {operation['table']!r} carries no view, so "
+            f"whoever spells it has a name and no query: {operation}"
+        )
+        assert carried == from_the_schema[operation["kind"]][operation["table"]], (
+            f"a {operation['kind']} carries {carried}, and the schema it came "
+            f"from declares {from_the_schema[operation['kind']][operation['table']]}"
+        )
 
 
 # =============================================================================

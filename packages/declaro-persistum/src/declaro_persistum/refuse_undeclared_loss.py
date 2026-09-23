@@ -87,7 +87,7 @@ def _columns_this_table_means_to_lose(table: str, declared: Declared) -> list[st
 def _a_column_dropped(operation: Operation, declared: Declared) -> Undeclared | None:
     """Dropping a column loses what was in it."""
     table = operation["table"]
-    column = str(operation["detail"]["column"])
+    column = str(operation["column"])
     return _PERMITTED[column in _columns_this_table_means_to_lose(table, declared)](
         f"the column {table}.{column}, and every value in it",
         f"Name {column!r} in dropping on the {table} model to lose {table}.{column}.",
@@ -97,7 +97,7 @@ def _a_column_dropped(operation: Operation, declared: Declared) -> Undeclared | 
 def _a_column_narrowed(operation: Operation, declared: Declared) -> Undeclared | None:
     """Narrowing a type loses whatever no longer fits."""
     table = operation["table"]
-    column = str(operation["detail"]["column"])
+    column = str(operation["column"])
     return _PERMITTED[column in _columns_this_table_means_to_lose(table, declared)](
         f"whatever no longer fits in {table}.{column}",
         f"Name {column!r} in dropping on the {table} model to lose it.",

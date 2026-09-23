@@ -58,7 +58,7 @@ from declaro_persistum.types import (
     Table,
     Value,
 )
-from tests.conftest import NARROWS_BY_NOTHING, a_column, a_constraint
+from tests.conftest import NARROWS_BY_NOTHING, a_column, a_constraint, an_operation
 
 pytestmark = [pytest.mark.bdd, pytest.mark.precommit]
 
@@ -130,7 +130,7 @@ def _pointing_at(column: Column, parent: str | None, on_delete: OnDelete) -> Col
 def _operation(
     kind: str,
     table: str,
-    detail: dict[str, Value],
+    column: str | None,
     columns: list[Column],
     indexes: list[Index],
     constraints: list[Any],
@@ -139,21 +139,27 @@ def _operation(
 ) -> Operation:
     """One schema change, as the differ would hand it over.
 
-    EVERY FIELD IS WRITTEN OUT, including the empty ones. An argument with a
-    default would let a scenario forget a table's columns and be answered with
-    an empty list, which reads exactly like a table that has none.
+    IT IS `tests/conftest.py`'s BUILDER WITH THE FOUR FIELDS NO SCENARIO HERE
+    VARIES FILLED IN. Nothing in this feature renames a table or carries a view,
+    so those two are the named absence at every call, and nothing here asks
+    whether the change destroys anything.
     """
-    return {
-        "kind": kind,  # type: ignore[typeddict-item]
-        "table": table,
-        "detail": detail,
-        "columns": columns,
-        "indexes": indexes,
-        "constraints": constraints,
-        "copying": copying,
-        "values": values,
-        "destroys": False,
-    }
+    return cast(
+        Operation,
+        an_operation(
+            kind=kind,
+            table=table,
+            column=column,
+            columns=columns,
+            indexes=indexes,
+            constraints=constraints,
+            copying=copying,
+            values=values,
+            renamed_to=None,
+            view=None,
+            destroys=False,
+        ),
+    )
 
 
 def _values(statement: Statement) -> tuple[Value, ...]:
@@ -337,7 +343,7 @@ def _a_table_whose_status_is_one_of(scenario: dict, table: str, one: str, other:
         _operation(
             "create_table",
             THE_STATUSES,
-            {},
+            None,
             [statuses],
             [],
             [_rule("primary_key", "value")],
@@ -351,7 +357,7 @@ def _a_table_whose_status_is_one_of(scenario: dict, table: str, one: str, other:
         _operation(
             "create_table",
             table,
-            {},
+            None,
             [_column("id", "integer"), status],
             [],
             [_rule("primary_key", "id")],
@@ -362,7 +368,7 @@ def _a_table_whose_status_is_one_of(scenario: dict, table: str, one: str, other:
     )
     _spell_and_run(
         connection,
-        _operation("insert_enum_values", table, {"column": "status"}, [], [], [], [], [one, other]),
+        _operation("insert_enum_values", table, "status", [], [], [], [], [one, other]),
         "sqlite",
     )
 
@@ -465,7 +471,7 @@ def _declared(scenario: dict, declaring: Table) -> None:
         _operation(
             "create_table",
             table["name"],
-            {},
+            None,
             table["columns"],
             table["indexes"],
             table["constraints"],
@@ -573,7 +579,7 @@ def _an_index_on_a_column(scenario: dict, unique: str | None, name: str, column:
     table["indexes"].append(index)
     _spell_and_run(
         scenario["connection"],
-        _operation("create_index", table["name"], {}, [], [index], [], [], []),
+        _operation("create_index", table["name"], None, [], [index], [], [], []),
         "sqlite",
     )
 
@@ -741,7 +747,7 @@ def _a_column_is_added(scenario: dict, name: str, declared: str, default: str, e
     scenario["operation"] = _operation(
         "add_column",
         "invoices",
-        {"column": name},
+        name,
         [_column(name, declared)],
         [],
         _DEFAULTING_TO[default](name),
@@ -759,7 +765,7 @@ def _an_operation_no_table_covers(scenario: dict) -> None:
     `bulldoze_table` is not in `OperationKind`, so no engine has a row for it
     and no engine ever will until somebody declares it.
     """
-    scenario["operation"] = _operation("bulldoze_table", "invoices", {}, [], [], [], [], [])
+    scenario["operation"] = _operation("bulldoze_table", "invoices", None, [], [], [], [], [])
     scenario["engine"] = "sqlite"
     scenario["answer"] = spell_operation(scenario["operation"], "sqlite")
 
@@ -801,7 +807,7 @@ def _a_table_is_created_with_a_check(scenario: dict, name: str, column: str, val
         _operation(
             "create_table",
             "ledger",
-            {},
+            None,
             [_column(column, "integer")],
             [],
             [constraint, _rule("primary_key", column)],
@@ -836,7 +842,7 @@ def _a_table_with_one_rule(scenario: dict, kind: str, column: str, value: str) -
     scenario["operation"] = _operation(
         "create_table",
         "parts",
-        {},
+        None,
         [_column(column, "text")],
         [],
         [_rule(kind, column, carried)],
@@ -853,7 +859,7 @@ def _a_rule_of_no_kind(scenario: dict) -> None:
     scenario["operation"] = _operation(
         "create_table",
         "parts",
-        {},
+        None,
         [_column("code", "text")],
         [],
         [_rule("smells_nice", "code")],
@@ -870,7 +876,7 @@ def _a_default_no_engine_takes(scenario: dict) -> None:
     scenario["operation"] = _operation(
         "create_table",
         "parts",
-        {},
+        None,
         [_column("status", "text")],
         [],
         [_rule("default", "status", cast(Value, {"a": "dict"}))],
@@ -906,7 +912,7 @@ def _a_table_whose_column_is_ruled(scenario: dict, name: str, column: str, rule:
         _operation(
             "create_table",
             name,
-            {},
+            None,
             [_column("code", "text"), _column("status", "text")],
             [],
             [_THE_RULE_A_SENTENCE_DECLARES[rule](column)],
@@ -915,6 +921,108 @@ def _a_table_whose_column_is_ruled(scenario: dict, name: str, column: str, rule:
         ),
         "sqlite",
     )
+
+
+# --- a view, which carries a declaration and never a SELECT ------------------
+
+
+def _a_view(name: str, table: str) -> dict:
+    """A view over every row of one table, as `View` declares one."""
+    return {
+        "name": name,
+        "declaration": {
+            "model": table,
+            "wanted": "all",
+            "columns": [],
+            "condition": NARROWS_BY_NOTHING,
+            "order": {},
+            "grouping": [],
+            "having": NARROWS_BY_NOTHING,
+            "paging": None,
+            "rows": None,
+            "shaping": "dictionaries",
+            "across": None,
+        },
+        "freshness": None,
+    }
+
+
+@when(parsers.re(r'a view "(?P<name>[^"]+)" selecting from "(?P<table>[^"]+)" is created$'))
+def _a_view_is_created(scenario: dict, name: str, table: str) -> None:
+    """The table the view reads, then the view, both spelled by the function."""
+    scenario["connection"] = _a_database()
+    scenario["engine"] = "sqlite"
+    scenario["table"] = table
+    _spell_and_run(
+        scenario["connection"],
+        _operation(
+            "create_table",
+            table,
+            None,
+            [_column("id", "integer"), _column("status", "text")],
+            [],
+            [_rule("primary_key", "id")],
+            [],
+            [],
+        ),
+        "sqlite",
+    )
+    scenario["view"] = name
+    scenario["operation"] = cast(
+        Operation,
+        an_operation(
+            kind="create_view",
+            table=name,
+            column=None,
+            columns=[],
+            indexes=[],
+            constraints=[],
+            copying=[],
+            values=[],
+            renamed_to=None,
+            view=_a_view(name, table),
+            destroys=False,
+        ),
+    )
+    scenario["answer"] = _spell_and_run(scenario["connection"], scenario["operation"], "sqlite")
+
+
+@when("a view is created and the operation carries no view")
+def _a_view_operation_carrying_nothing(scenario: dict) -> None:
+    """An operation whose kind names a view and whose `view` is the absence."""
+    scenario["engine"] = "sqlite"
+    scenario["operation"] = cast(
+        Operation,
+        an_operation(
+            kind="create_view",
+            table="recent",
+            column=None,
+            columns=[],
+            indexes=[],
+            constraints=[],
+            copying=[],
+            values=[],
+            renamed_to=None,
+            view=None,
+            destroys=False,
+        ),
+    )
+    scenario["answer"] = spell_operation(scenario["operation"], "sqlite")
+
+
+@then(parsers.re(r'the CREATE VIEW names "(?P<name>[^"]+)" and selects from "(?P<table>[^"]+)"$'))
+def _the_create_view_names(scenario: dict, name: str, table: str) -> None:
+    text = " ".join(statement["text"] for statement in _spelled(scenario))
+    assert name in text and table in text, (
+        f"the statement reads {text!r}, and the scenario asks for a view {name!r} over {table!r}"
+    )
+
+
+@then("the engine reads the view back")
+def _the_engine_reads_the_view_back(scenario: dict) -> None:
+    """A CREATE VIEW the engine took is a view the engine will select from."""
+    held = scenario["connection"].execute(f'SELECT * FROM "{scenario["view"]}"').fetchall()
+    assert held == [], f"the view holds {held!r}, and nothing was written to the table under it"
 
 
 _A_LOOKUP_CHANGE: dict[str, str] = {
@@ -943,7 +1051,7 @@ def _a_status_is_changed(scenario: dict, value: str, change: str, engine: str | 
     operation = _operation(
         _A_LOOKUP_CHANGE[change],
         scenario.get("table", "orders"),
-        {"column": "status"},
+        "status",
         [],
         [],
         [],
@@ -1023,7 +1131,7 @@ def _rebuilt(
     table: str,
     columns: list[Column],
     constraints: list[Constraint],
-    detail: dict[str, Value],
+    column: str,
 ) -> None:
     """Carry out the change that turns the live table into this shape."""
     declared = scenario["schema"][table]
@@ -1031,7 +1139,7 @@ def _rebuilt(
     operation = _operation(
         "alter_column",
         table,
-        detail,
+        column,
         columns,
         declared["indexes"],
         constraints,
@@ -1039,7 +1147,7 @@ def _rebuilt(
         [],
     )
     scenario["schema"][table] = {**declared, "columns": columns, "constraints": constraints}
-    scenario["altered"] = detail["column"]
+    scenario["altered"] = column
     _carried_out(scenario, operation)
 
 
@@ -1061,7 +1169,7 @@ def _a_column_is_altered(
     columns, constraints = _AN_ALTERATION[change](
         declared["columns"], declared["constraints"], column, value or ""
     )
-    _rebuilt(scenario, where, columns, constraints, {"column": column})
+    _rebuilt(scenario, where, columns, constraints, column)
 
 
 @when(parsers.re(r'^I drop column "(?P<name>[^"]+)"$'))
@@ -1077,7 +1185,7 @@ def _a_column_is_dropped(scenario: dict, name: str) -> None:
     operation = _operation(
         "drop_column",
         where,
-        {"column": column},
+        column,
         columns,
         declared["indexes"],
         rules,
@@ -1119,7 +1227,7 @@ def _a_foreign_key_is_changed(
             for declared in scenario["schema"][where]["columns"]
         ],
         scenario["schema"][where]["constraints"],
-        {"column": column},
+        column,
     )
 
 
@@ -1137,7 +1245,7 @@ def _the_first_table_loosened(scenario: dict) -> None:
         name,
         columns,
         _without(scenario["schema"][name]["constraints"], columns[-1]["name"], "not_null"),
-        {"column": columns[-1]["name"]},
+        columns[-1]["name"],
     )
 
 
@@ -1158,7 +1266,7 @@ def _entirely_new_column_names(scenario: dict) -> None:
             {**rule, "columns": [f"fresh_{held}" for held in rule["columns"]]}
             for rule in scenario["schema"][name]["constraints"]
         ],
-        {"column": scenario["schema"][name]["columns"][0]["name"]},
+        scenario["schema"][name]["columns"][0]["name"],
     )
 
 
@@ -1171,7 +1279,7 @@ def _a_copy_that_cannot_work(scenario: dict) -> None:
         name,
         columns,
         _ruling(scenario["schema"][name]["constraints"], columns[1]["name"], "not_null"),
-        {"column": columns[1]["name"]},
+        columns[1]["name"],
     )
 
 
@@ -1202,7 +1310,7 @@ def _spelled(scenario: dict) -> list[Statement]:
 @then("the column arrives, and the table it lands on is never dropped")
 def _the_column_arrives_and_the_table_stays(scenario: dict) -> None:
     """PostgreSQL alters a table in place, so the rows it holds are never moved."""
-    column = scenario["operation"]["detail"]["column"]
+    column = scenario["operation"]["column"]
     text = [statement["text"] for statement in _spelled(scenario)]
     assert [line for line in text if f'ADD COLUMN "{column}"' in line] != [], (
         f"nothing here adds {column!r} to the table: {text}"
@@ -1254,7 +1362,7 @@ def _the_statement_writes_that_engines_boolean(scenario: dict) -> None:
         _operation(
             "add_column",
             "invoices",
-            {"column": "settled"},
+            "settled",
             [_column("settled", "boolean")],
             [],
             [],

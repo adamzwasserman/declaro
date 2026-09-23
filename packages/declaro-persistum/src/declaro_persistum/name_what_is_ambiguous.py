@@ -25,9 +25,9 @@ WHICH WAY ROUND A RENAME IS WRITTEN DOWN, because two functions reading this
 pair in opposite directions would rename a column to itself and lose the other
 without anything saying so. A model is not symmetric here: `renamed_from` sits
 on the NEW column and its value is the OLD name. The operation reads the same
-way round. `detail["column"]` holds the old name, which is the name the live
-database still has and the value `renamed_from` carries. `detail["to"]` holds
-the new name, which is the declaring column's own `name`.
+way round. `operation["column"]` holds the old name, which is the name the live
+database still has and the value `renamed_from` carries. `operation["renamed_to"]`
+holds the new name, which is the declaring column's own `name`.
 
 A RENAME MOVES A COLUMN INSIDE ONE TABLE. So a gone column is only ever paired
 with a column that appeared on the same table. Pairing across tables would
@@ -82,7 +82,7 @@ FOLDED_IN = "folded into the rename"
 def _each(operations: list[Operation], kind: OperationKind) -> list[tuple[int, str, str]]:
     """Where it sits, its table and its column, for every operation of one kind."""
     return [
-        (at, operation["table"], str(operation["detail"][COLUMN]))
+        (at, operation["table"], str(operation["column"]))
         for at, operation in enumerate(operations)
         if operation["kind"] == kind
     ]
@@ -118,13 +118,27 @@ def _asked_to_lose(declared: Declared) -> dict[tuple[str, str], str]:
 
 
 def _a_rename(operation: Operation, appeared: str) -> Operation:
-    """The one operation that replaces a gone column and the one that appeared."""
-    return {
-        "kind": RENAMED,
-        "table": operation["table"],
-        "detail": {COLUMN: operation["detail"][COLUMN], TO: appeared},
-        "destroys": False,
-    }
+    """The one operation that replaces a gone column and the one that appeared.
+
+    IT CARRIES WHAT THE DROP CARRIED, so the rebuild the rename turns into has
+    the table's columns, indexes and rules to build from. Until 2026-09-23 this
+    wrote four keys and left five fields off the record it claimed to return,
+    and nothing noticed, because the four it wrote were the four its own tests
+    read back.
+    """
+    return Operation(
+        kind=RENAMED,
+        table=operation["table"],
+        column=operation["column"],
+        columns=operation["columns"],
+        indexes=operation["indexes"],
+        constraints=operation["constraints"],
+        copying=operation["copying"],
+        values=operation["values"],
+        renamed_to=appeared,
+        view=operation["view"],
+        destroys=False,
+    )
 
 
 # WHAT BECOMES OF ONE OPERATION, keyed by the three answers and nothing else. A

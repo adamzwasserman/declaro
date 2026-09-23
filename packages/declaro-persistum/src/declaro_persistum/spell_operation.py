@@ -61,12 +61,6 @@ column, in the engine, where the rows are.
 WHAT STILL CANNOT BE SPELLED, named here because a silent gap is worse than a
 loud one.
 
-A KEY ON MORE THAN ONE COLUMN, DECLARED AS A FACET. `primary_key` is also a
-facet of a `Column`, so two columns can each claim to be the key, and
-`column_definition` writes an inline PRIMARY KEY for each of them. The table
-level constraint is the shape that works, and nothing here refuses the other
-one.
-
 THE PRAGMA THAT MAKES A REBUILD POSSIBLE BELONGS TO WHOEVER COMMITS. Dropping a
 table another table points at is refused while foreign keys are enforced, so the
 applier turns enforcement off around a rebuild and checks the keys before it
@@ -80,6 +74,7 @@ from collections.abc import Callable
 from typing import Any, cast, get_args
 
 from declaro_persistum.how_to_spell import how_to_spell
+from declaro_persistum.spell_view import spell_view
 from declaro_persistum.types import (
     NOTHING,
     Column,
@@ -94,6 +89,7 @@ from declaro_persistum.types import (
     Reference,
     Statement,
     Value,
+    View,
 )
 
 THE_ENGINES = get_args(Engine)
@@ -148,7 +144,7 @@ def _the_first_fault_or[Built](pieces: list[Any], build: Callable[[], Built]) ->
     """A refusal anywhere in the pieces is the answer; otherwise build one.
 
     A piece is a type this package could not spell, a default it could not
-    write, or a column whose facets it does not know. Any one of them is the
+    write, or a rule of a kind nothing has a clause for. Any one of them is the
     answer, because the statement it would have gone into cannot be written.
     """
     faults = cast("list[Fault]", list(filter(_is_fault, pieces)))
@@ -159,16 +155,6 @@ def _the_first_fault_or[Built](pieces: list[Any], build: Callable[[], Built]) ->
 def _for_engine(engine: str, known: Callable[[], Any]) -> Any:
     """Answer for an engine this package ships, and refuse any other."""
     return {True: known, False: lambda: _no_such_engine(engine)}[engine in THE_ENGINES]()
-
-
-def _one_of(found: list[Value], absent: Value) -> Value:
-    """The value found, or the named absence when nothing was found."""
-    return ([absent] + found)[len(found)]
-
-
-def _present(detail: dict[str, Value], key: str) -> list[Value]:
-    """What a key holds, as a list, so an absent key is an empty one."""
-    return [detail[name] for name in filter(detail.__contains__, [key])]
 
 
 # --- identifiers -------------------------------------------------------------
@@ -601,8 +587,7 @@ def temporary_name(table: str) -> str:
 # --- one change, one engine, the statements that carry it out ----------------
 
 
-def _missing(operation: Operation, engine: Engine, wanted: tuple[str, ...]) -> Fault:
-    absent = list(filter(lambda key: key not in operation["detail"], wanted))
+def _missing(operation: Operation, engine: Engine, absent: list[str]) -> Fault:
     return _refused(
         f"A {operation['kind']} on {operation['table']} was handed to {engine} "
         f"without {', '.join(absent)}.",
@@ -616,17 +601,41 @@ def _needing(
     wanted: tuple[str, ...],
     build: Callable[[], list[Statement] | Fault],
 ) -> list[Statement] | Fault:
-    """Spell the change when its detail carries what the spelling reads."""
-    absent = list(filter(lambda key: key not in operation["detail"], wanted))
+    """Spell the change when the operation carries what the spelling reads.
+
+    EVERY FIELD IS PRESENT ON EVERY OPERATION, so what an absent one looks like
+    is the named absence rather than a key nobody put in. Until 2026-09-23 these
+    lived in a bag called `detail` and the question was whether a key was there
+    at all, which is how `Operation` came to declare four fields nobody filled
+    and carry four nobody declared.
+    """
+    absent = [name for name in wanted if _FIELD_A_SPELLING_READS[name](operation) is NOTHING]
     return {
-        True: lambda: _missing(operation, engine, wanted),
+        True: lambda: _missing(operation, engine, absent),
         False: build,
     }[absent != []]()
 
 
+# WHAT A SPELLING ASKS FOR -> WHERE THE OPERATION KEEPS IT. A rename's target is
+# `renamed_to`. A dropped index is the one index the operation carries. A view's
+# name is on the view, which carries a declaration rather than a SELECT anybody
+# wrote out. Only the column has a field of its own.
+_FIELD_A_SPELLING_READS: dict[str, Callable[[Operation], Any]] = {
+    "column": lambda operation: _or_nothing(operation["column"]),
+    "to": lambda operation: _or_nothing(operation["renamed_to"]),
+    "index": lambda operation: ([NOTHING, *operation["indexes"]])[len(operation["indexes"][:1])],
+    "view": lambda operation: _or_nothing(operation["view"]),
+}
+
+
+def _or_nothing[Held](held: Held | None) -> Held | str:
+    """A field's value, or the named absence when the field holds none."""
+    return ([NOTHING, held])[held is not None]  # type: ignore[return-value]
+
+
 def _word(operation: Operation, key: str) -> str:
-    """One piece of an operation's detail, which is a name or a clause."""
-    return cast(str, operation["detail"][key])
+    """One name a spelling reads, out of the field the operation keeps it in."""
+    return cast(str, _FIELD_A_SPELLING_READS[key](operation))
 
 
 def _empty_handed(operation: Operation, engine: Engine, field: str) -> Fault:
@@ -657,10 +666,10 @@ def _named_column(operation: Operation, engine: Engine) -> Column | Fault:
     """The column an add or an alter names, out of the columns it carries.
 
     An `add_column` carries the one column it adds. An `alter_column` carries
-    the whole table as it will be afterwards, and `detail` says which of them
+    the whole table as it will be afterwards, and `column` says which of them
     changed, so one lookup answers for both.
     """
-    wanted = _one_of(_present(operation["detail"], "column"), NOTHING)
+    wanted = _or_nothing(operation["column"])
     found = [column for column in operation["columns"] if column["name"] == wanted]
     answer: dict[bool, Callable[[], Column | Fault]] = {
         True: lambda: found[0],
@@ -951,35 +960,50 @@ def _create_index(operation: Operation, engine: Engine) -> list[Statement] | Fau
 
 
 def _drop_index(operation: Operation, engine: Engine) -> list[Statement] | Fault:
+    """The one index the operation carries, dropped by its own name."""
     return _needing(
         operation,
         engine,
-        ("name",),
-        lambda: [_statement(f"DROP INDEX {QUOTE[engine](_word(operation, 'name'))}", [])],
+        ("index",),
+        lambda: [_statement(f"DROP INDEX {QUOTE[engine](operation['indexes'][0]['name'])}", [])],
     )
 
 
 def _create_view(operation: Operation, engine: Engine) -> list[Statement] | Fault:
-    return _needing(
-        operation,
-        engine,
-        ("name", "select"),
-        lambda: [
-            _statement(
-                f"CREATE VIEW {QUOTE[engine](_word(operation, 'name'))} AS "
-                f"{_word(operation, 'select')}",
-                [],
-            )
-        ],
-    )
+    """The view the operation carries, with `fn spell_view` writing its SELECT.
+
+    A VIEW HOLDS A DECLARATION, NEVER A SELECT. Until 2026-09-23 this read a
+    finished SELECT out of `detail`, which meant whoever built the operation
+    wrote SQL, and `fn spell_view` was already written and reached by nothing.
+    A declaration is what a caller can be refused on and what a second engine
+    can be spelled from; a string is neither.
+    """
+
+    def spelled() -> list[Statement] | Fault:
+        view = cast(View, operation["view"])
+        select = spell_view(view, engine)
+        return _the_first_fault_or(
+            [select],
+            lambda: [
+                _statement(
+                    f"CREATE VIEW {QUOTE[engine](view['name'])} AS "
+                    f"{cast(Statement, select)['text']}",
+                    list(cast(Statement, select)["parameters"].values()),
+                )
+            ],
+        )
+
+    return _needing(operation, engine, ("view",), spelled)
 
 
 def _drop_view(operation: Operation, engine: Engine) -> list[Statement] | Fault:
     return _needing(
         operation,
         engine,
-        ("name",),
-        lambda: [_statement(f"DROP VIEW {QUOTE[engine](_word(operation, 'name'))}", [])],
+        ("view",),
+        lambda: [
+            _statement(f"DROP VIEW {QUOTE[engine](cast(View, operation['view'])['name'])}", [])
+        ],
     )
 
 

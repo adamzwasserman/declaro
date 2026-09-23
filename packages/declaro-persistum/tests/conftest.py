@@ -577,6 +577,48 @@ def a_constraint(*, name: str, kind: str, columns: list, rule: dict, value):
     }
 
 
+def an_operation(
+    *,
+    kind: str,
+    table: str,
+    column: str | None,
+    columns: list,
+    indexes: list,
+    constraints: list,
+    copying: list,
+    values: list,
+    renamed_to: str | None,
+    view: dict | None,
+    destroys: bool,
+):
+    """One `Operation`, every field said out loud.
+
+    ELEVEN ARGUMENTS AND NOT ONE OF THEM OPTIONAL. Six step files wrote this
+    record out by hand, and between them they wrote four fields the type does
+    not have and left five off that it does. Every one of those files was green
+    the day `Operation` lost `detail`, because a dict nothing compares against
+    the declaration agrees with whatever the file that wrote it reads back.
+
+    WHICH FIELDS A KIND READS is the kind's business, not this function's. A
+    create_table reads its columns and its rules; a drop_column reads `column`;
+    a create_view reads `view`. Every one of them is written at every call site
+    so that a field added to the record fails six files at once.
+    """
+    return {
+        "kind": kind,
+        "table": table,
+        "column": column,
+        "columns": columns,
+        "indexes": indexes,
+        "constraints": constraints,
+        "copying": copying,
+        "values": values,
+        "renamed_to": renamed_to,
+        "view": view,
+        "destroys": destroys,
+    }
+
+
 def a_model(
     *,
     name: str,

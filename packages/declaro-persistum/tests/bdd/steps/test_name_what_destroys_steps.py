@@ -31,13 +31,14 @@ or a connection. Each scenario states what comes back.
 
 from __future__ import annotations
 
-from typing import Any, get_args
+from typing import Any, cast, get_args
 
 import pytest
 from pytest_bdd import parsers, scenarios, then, when
 
 from declaro_persistum.name_what_destroys import name_what_destroys
 from declaro_persistum.types import Operation, OperationKind
+from tests.conftest import an_operation
 
 pytestmark = [pytest.mark.bdd, pytest.mark.precommit]
 
@@ -53,35 +54,33 @@ scenarios("../features/core/name_what_destroys.feature")
 # in belongs to another function. What this one answers is that the parent's own
 # rows go, and they go whether or not anything refers to them.
 
+
+def _one(kind: str, table: str, column: str | None) -> Operation:
+    """One operation, built where every step file builds one."""
+    return cast(
+        Operation,
+        an_operation(
+            kind=kind,
+            table=table,
+            column=column,
+            columns=[],
+            indexes=[],
+            constraints=[],
+            copying=[],
+            values=[],
+            renamed_to=None,
+            view=None,
+            destroys=False,
+        ),
+    )
+
+
 WHAT_THE_LIBRARY_WORKED_OUT: dict[str, list[Operation]] = {
-    "drop a column": [
-        {
-            "kind": "drop_column",
-            "table": "users",
-            "detail": {"column": "nickname"},
-            "destroys": False,
-        }
-    ],
-    "drop a table": [{"kind": "drop_table", "table": "legacy", "detail": {}, "destroys": False}],
-    "narrow a column's type": [
-        {
-            "kind": "alter_column",
-            "table": "users",
-            "detail": {"column": "age"},
-            "destroys": False,
-        }
-    ],
-    "drop a table other rows point at": [
-        {"kind": "drop_table", "table": "parents", "detail": {}, "destroys": False}
-    ],
-    "add a column": [
-        {
-            "kind": "add_column",
-            "table": "users",
-            "detail": {"column": "email"},
-            "destroys": False,
-        }
-    ],
+    "drop a column": [_one("drop_column", "users", "nickname")],
+    "drop a table": [_one("drop_table", "legacy", None)],
+    "narrow a column's type": [_one("alter_column", "users", "age")],
+    "drop a table other rows point at": [_one("drop_table", "parents", None)],
+    "add a column": [_one("add_column", "users", "email")],
 }
 
 # What each operation is called once it is in the plan's list of losses.
@@ -145,9 +144,7 @@ def test_every_kind_of_operation_gets_an_answer() -> None:
     is the list, and every member of it is handed in.
     """
     kinds = get_args(OperationKind)
-    operations: list[Operation] = [
-        {"kind": kind, "table": "t", "detail": {"column": "c"}, "destroys": False} for kind in kinds
-    ]
+    operations: list[Operation] = [_one(kind, "t", "c") for kind in kinds]
 
     answered = name_what_destroys(operations)["operations"]
 

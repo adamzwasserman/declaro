@@ -121,6 +121,7 @@ module declaro-persistum
 
   type Operation = { kind: OperationKind
                      table: str
+                     column: str | NOTHING
                      columns: list<Column>
                      indexes: list<Index>
                      constraints: list<Constraint>

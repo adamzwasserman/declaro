@@ -47,7 +47,7 @@ from declaro_persistum.compile_statement import compile_statement
 from declaro_persistum.crew_make import crew_make
 from declaro_persistum.query_run_statement import query_run_statement
 from declaro_persistum.spell_operation import spell_operation
-from tests.conftest import POSTGRESQL_PROBE_URL
+from tests.conftest import POSTGRESQL_PROBE_URL, a_column, an_operation
 
 scenarios("../features/query/query_run_statement.feature")
 
@@ -147,32 +147,22 @@ def _declaration(table: str, wanted: str, rows: list[dict] | None) -> dict:
 
 def _a_table_of(table: str, kind: str) -> dict:
     """One schema operation about `table`, as `Operation` declares one."""
-    return {
-        "kind": kind,
-        "table": table,
-        "detail": {},
-        "columns": [
-            {
-                "name": "id",
-                "declared_type": "integer",
-                "renamed_from": None,
-                "references": None,
-                "facets": {},
-            },
-            {
-                "name": "note",
-                "declared_type": "text",
-                "renamed_from": None,
-                "references": None,
-                "facets": {},
-            },
+    return an_operation(
+        kind=kind,
+        table=table,
+        column=None,
+        columns=[
+            a_column(name="id", declared_type="integer", renamed_from=None, references=None),
+            a_column(name="note", declared_type="text", renamed_from=None, references=None),
         ],
-        "indexes": [],
-        "constraints": [],
-        "copying": [],
-        "values": [],
-        "destroys": False,
-    }
+        indexes=[],
+        constraints=[],
+        copying=[],
+        values=[],
+        renamed_to=None,
+        view=None,
+        destroys=False,
+    )
 
 
 def _compiled(db: dict, declaration: dict) -> dict:

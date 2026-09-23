@@ -123,6 +123,26 @@ Feature: spell_operation -- One schema change into the statements that carry it 
     When a table is created whose "status" starts at a value no engine can be told
     Then it is refused, saying what a default may be
   # ============================================
+  # A view, which holds a declaration and never a SELECT
+  # ============================================
+  #
+  # UNTIL 2026-09-23 THIS READ A FINISHED SELECT SOMEBODY ELSE HAD WRITTEN. The
+  # operation carried the text, so whoever built it wrote SQL, and the one
+  # function here that turns a declaration into a SELECT was reached by nothing.
+  # A declaration is what a caller can be refused on and what a second engine can
+  # be spelled from. A string is neither.
+
+  @precommit @sqlite
+  Scenario: a declared view is created from its declaration
+    When a view "recent" selecting from "orders" is created
+    Then the CREATE VIEW names "recent" and selects from "orders"
+    And the engine reads the view back
+
+  @precommit
+  Scenario: a view operation carrying no view is refused
+    When a view is created and the operation carries no view
+    Then a fault comes back naming the operation and the engine
+  # ============================================
   # A value the statement does not carry
   # ============================================
   #

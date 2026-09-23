@@ -28,10 +28,10 @@ a model's `dropping`. Under-marking loses rows at a deploy nobody is watching.
 
 WHAT IT READS OUT OF AN OPERATION, and it reads nothing else. `operation["table"]`
 is the table the operation is about, and the view's name for a view operation.
-`operation["detail"]["column"]` is the column name, for the four kinds that name
-one, so that the plan says `users.nickname` rather than `users`. A kind whose
-detail is missing that key raises rather than naming the table and letting a
-reader think the whole table goes.
+`operation["column"]` is the column name, for the four kinds that name one, so
+that the plan says `users.nickname` rather than `users`. A kind that carries no
+column there is named after its table by the table below, never by this, so a
+reader is never told the whole table goes when one column does.
 
 A MARK THAT ARRIVED ALREADY SET IS REPLACED, NEVER READ. Every operation handed
 back carries the answer this table gives, whatever the operation said about
@@ -81,7 +81,7 @@ def _the_table(operation: Operation) -> str:
 
 def _the_column(operation: Operation) -> str:
     """What a reader calls an operation that takes one column."""
-    return f"{operation['table']}.{operation['detail']['column']}"
+    return f"{operation['table']}.{operation['column']}"
 
 
 # --- what the plan calls each one ------------------------------------------
