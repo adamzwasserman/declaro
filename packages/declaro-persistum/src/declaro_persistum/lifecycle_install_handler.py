@@ -25,9 +25,16 @@ then runs the library's shutdown, reaches the chain, and runs the library's
 shutdown again. `WHAT_WAS_THERE` is written with `setdefault` so the first answer
 is the only answer.
 
-IT CHAINS, IT NEVER REPLACES. A host application may already handle SIGTERM, and
-a library that takes that slot and keeps it has changed the behaviour of a
-program that asked for a database. The handler this module installs runs the
+IT CHAINS, IT NEVER REPLACES, AND THAT IS MEASURED RATHER THAN IMAGINED.
+`uvicorn/server.py:321` does this:
+
+    original_handlers = {sig: signal.signal(sig, self.handle_exit) for sig in HANDLED_SIGNALS}
+
+uvicorn takes SIGTERM and SIGINT when the server starts, so it can drain the
+requests already in flight. A database opens inside the application's startup,
+which runs after that, so this library installs second and displaces uvicorn's
+handler. Without chaining, uvicorn never drains: every in-flight request dies
+mid-response on every deploy. The handler this module installs runs the
 library's door and then runs the handler it displaced.
 
 THE ORDER IS WHY `IN_ORDER` IS DATA. The door has to run first. A host handler
@@ -60,10 +67,6 @@ HostHandler = Callable[[int, FrameType | None], object]
 # WHAT THE PLATFORM SENDS ON THE WAY OUT. SIGTERM is what a host asking for a
 # clean stop sends; SIGINT is the same request typed at a terminal.
 WHAT_THE_PLATFORM_SENDS: tuple[signal.Signals, ...] = (signal.SIGTERM, signal.SIGINT)
-
-# SIGNAL NUMBER -> WHAT ANSWERED IT BEFORE THE LIBRARY TOOK IT. Written once per
-# signal, on the first install, and read by the chain.
-WHAT_WAS_THERE: dict[int, object] = {}
 
 _OPEN_IT_FROM_THE_MAIN_THREAD = (
     "Open the database from the main thread, which is the only thread the "
@@ -118,20 +121,6 @@ RUN_THE_DISPLACED_HANDLER: dict[bool, Callable[[Any, int, FrameType | None], boo
 }
 
 
-def whatever_was_there(number: int, frame: FrameType | None) -> bool:
-    """Run the handler this signal had before the library took it.
-
-    True when a handler the host application installed ran, False when the
-    signal had none of ours to run.
-
-    `WHAT_WAS_THERE[number]` has no default on purpose: a signal reaching this
-    that the library never took is a bug in the installer, and a missing row
-    says so at the lookup rather than by quietly running nothing.
-    """
-    previous = WHAT_WAS_THERE[number]
-    return RUN_THE_DISPLACED_HANDLER[callable(previous)](previous, number, frame)
-
-
 def the_door(_number: int, _frame: FrameType | None) -> None:
     """Hand the signal to the door that receives it.
 
@@ -149,25 +138,73 @@ def the_door(_number: int, _frame: FrameType | None) -> None:
 
 # THE DOOR FIRST, THE HOST'S HANDLER SECOND. A host handler that exits would end
 # the process, so everything the library owes has to have happened by then.
-IN_ORDER: tuple[Callable[[int, FrameType | None], object], ...] = (the_door, whatever_was_there)
+# WHAT MARKS A HANDLER AS THIS LIBRARY'S. The platform hands back whatever is in
+# the slot, and the one question the installer asks of it is whether this library
+# already put it there. An attribute on the function answers that by looking at
+# the object the platform returned, which is reading the platform rather than
+# reading a record of our own.
+OURS = "_declaro_persistum_handler"
 
 
-def THE_HANDLER(number: int, frame: FrameType | None) -> None:
-    """What the platform calls when it asks this process to stop."""
-    for step in IN_ORDER:
-        step(number, frame)
+def a_handler_that_chains(displaced: object) -> Callable[[int, FrameType | None], None]:
+    """Build the function the platform will call, carrying what it displaced.
+
+    THE DISPLACED HANDLER IS IN THE FUNCTION, NOT IN A RECORD BESIDE IT. It used
+    to live in a module dict keyed by signal number: one function wrote it and
+    another read it, so what the chain did depended on something no caller could
+    see, and the dict could hold any number at all. A slop audit on 2026-09-24
+    named that dict as the one piece of unbounded state in this package and
+    graded the package on it.
+
+    Bound here it is neither. There is one value, it is fixed when the handler
+    is made, and the handler is the only thing that can reach it.
+
+    THE DOOR FIRST, THE HOST'S HANDLER SECOND. A host handler that exits would
+    end the process, so everything the library owes has to have happened by then.
+    """
+
+    def handler(number: int, frame: FrameType | None) -> None:
+        the_door(number, frame)
+        RUN_THE_DISPLACED_HANDLER[callable(displaced)](displaced, number, frame)
+
+    setattr(handler, OURS, True)
+    return handler
+
+
+def _leave_it_alone(_number: int) -> bool:
+    """This library is already in this slot, so a second install changes nothing.
+
+    READING THE PLATFORM TWICE IS THE MISTAKE THIS EXISTS TO STOP. The second
+    read finds this library's own handler, a new one built around it would chain
+    to it, and every signal would then run the shutdown twice.
+    """
+    return False
+
+
+def _put_ours_in_front(number: int) -> bool:
+    """Take the slot, carrying whatever the platform had in it."""
+    signal.signal(number, a_handler_that_chains(signal.getsignal(number)))
+    return True
+
+
+_WHETHER_THIS_LIBRARY_IS_ALREADY_THERE: dict[bool, Callable[[int], bool]] = {
+    True: _leave_it_alone,
+    False: _put_ours_in_front,
+}
 
 
 def lifecycle_install_handler() -> None | Fault:
     """Put the library's handler in front of the signals that end a process.
 
-    Twice changes nothing: the same function object goes back in each signal's
-    slot, and what was there before is recorded only the first time.
+    Twice changes nothing. The platform is asked what is in each slot, and a
+    handler this library already put there is left where it is: nothing here
+    remembers whether it has run before, because the slot itself is the record.
     """
     try:
         for number in WHAT_THE_PLATFORM_SENDS:
-            WHAT_WAS_THERE.setdefault(number, signal.getsignal(number))
-            signal.signal(number, THE_HANDLER)
+            _WHETHER_THIS_LIBRARY_IS_ALREADY_THERE[getattr(signal.getsignal(number), OURS, False)](
+                number
+            )
     except (ValueError, OSError) as refused:
         return _the_platform_refused(str(refused))
     return NOTHING

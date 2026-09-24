@@ -1,43 +1,18 @@
-"""Bind `tests/bdd/features/lifecycle/lifecycle_install_handler.feature`, and nothing else.
+"""Bind `tests/bdd/features/lifecycle/lifecycle_install_handler.feature`.
 
-WHAT THE FEATURE ASKS FOR. `lifecycle_install_handler() -> NOTHING | Fault` takes
-nothing and puts one handler in front of the signals the platform sends. Four
-sentences: a handler is there after the first open, there is still one after the
-second, a handler the host application installed before us still runs, and the
-library gets its replication in before that handler is reached.
+WHAT THE FEATURE ASKS. The first open installs a handler, a second open leaves
+it alone, a host's own handler still runs, and what this library owes runs
+before that host handler is reached.
 
-THE FOURTH SCENARIO WAS ADDED 2026-09-22, while this was being written. The
-feature said the handler chains and did not say in which order, and the order is
-where the data is lost: a host handler is free to call `sys.exit`, and one that
-does ends the process wherever the library had got to. Nothing else in the suite
-states it.
+EVERY SCENARIO ASKS THE PLATFORM, NOT THE MODULE. What is in a signal slot is
+the operating system's answer, and this file reads it with `signal.getsignal`.
+Rewritten 2026-09-24 because it used to read a module dict and a module handler
+object by name: both are gone, and both were the module's own bookkeeping rather
+than anything a caller can see.
 
-WHY THE WHEN SAYS "OPENED" AND THIS FILE CALLS ONE FUNCTION. `orchestrator fn
-session_connect` is what opens a database, and it invokes
-`lifecycle_install_handler` while it does. Nobody else calls it and no caller
-asks for it, so the only thing an open does about signals is this one call, and
-that call is what each When makes. A step that opened a real database would be a
-test of `orchestrator fn session_connect`, which is not written and is not this
-card.
-
-WHY THE WHENS ARE ONE FUNCTION. They differ in how many opens have happened and
-in nothing else, so the count is a table and the body is written once.
-
-WHY THE SIGNALS ARE REAL. `signal.signal` and `signal.getsignal` work in the main
-thread of a test process, so the handler goes in for real and is read back for
-real. Nothing here sends a signal: sending SIGTERM would run the library's
-shutdown and then the test runner's own handler, and the process under test is
-the test runner. An autouse fixture puts back every handler that was there and
-empties what the module recorded, so the session ends holding what it started
-with.
-
-WHAT THIS FILE CANNOT RUN END TO END. The handler that goes in runs two steps in
-order: the door, then whatever was there before. `boundary_in fn lifecycle_stop`
-is the door and it is not written, so calling the installed handler would fail on
-an import rather than on anything this card decides. The order is module data
-rather than two lines of a body, so the fourth Then reads that order and the
-third runs the chain for real against the host's own function. That is the third
-sentence's claim, the host's handler still runs, proved by running it.
+THE SIGNALS ARE PUT BACK AFTERWARDS. They belong to the process, not to one
+scenario, and a scenario that left ours in the slot would send the next test's
+shutdown through this library.
 """
 
 from __future__ import annotations
@@ -46,195 +21,140 @@ import signal
 from types import FrameType
 
 import pytest
-from pytest_bdd import given, scenarios, then, when
+from pytest_bdd import given, parsers, scenarios, then, when
 
 from declaro_persistum.lifecycle_install_handler import (
-    IN_ORDER,
-    THE_HANDLER,
     WHAT_THE_PLATFORM_SENDS,
-    WHAT_WAS_THERE,
     lifecycle_install_handler,
-    the_door,
-    whatever_was_there,
 )
-from declaro_persistum.types import NOTHING
 
 scenarios("../features/lifecycle/lifecycle_install_handler.feature")
 
 
-@pytest.fixture(autouse=True)
-def the_process_keeps_its_own_handlers(scenario: dict[str, object]):
-    """Record what the test runner had, and give it back afterwards.
-
-    A signal handler is process-wide state. A test that left ours in would hand
-    every later test a SIGINT that runs shutdown replication, so this is not
-    tidiness: it is the difference between a suite and a process that stops
-    answering Ctrl-C the way pytest installed it to.
-    """
-    had = {number: signal.getsignal(number) for number in WHAT_THE_PLATFORM_SENDS}
-    scenario["what the process had"] = had
-    yield
-    for number, handler in had.items():
-        signal.signal(number, handler)
-    WHAT_WAS_THERE.clear()
+THE_SIGNAL_A_SCENARIO_SENDS = signal.SIGTERM
 
 
-# --- the host application's own handler ------------------------------------
+@pytest.fixture
+def scenario():
+    """One scenario, with every signal slot put back as it was found."""
+    held = {"ran": []}
+    was = {number: signal.getsignal(number) for number in WHAT_THE_PLATFORM_SENDS}
+    yield held
+    for number, previous in was.items():
+        signal.signal(number, previous)
+
+
+def _a_host_handler(ran: list[str]):
+    """What a host application had in the slot before this library arrived."""
+
+    def theirs(_number: int, _frame: FrameType | None) -> None:
+        ran.append("the host's handler")
+
+    return theirs
 
 
 @given("a host application with its own handler")
-def _the_host_already_installed_one(scenario: dict[str, object]) -> None:
-    """A real function on both signals, recording every signal it is handed.
+def _a_host_with_its_own(scenario: dict) -> None:
+    signal.signal(THE_SIGNAL_A_SCENARIO_SENDS, _a_host_handler(scenario["ran"]))
 
-    It is a plain callable installed through `signal.signal`, which is what a
-    host application's handler is. Nothing here stands in for it.
+
+def _install(scenario: dict) -> None:
+    answered = lifecycle_install_handler()
+    assert answered is None, f"installing the handler was refused: {answered}"
+    scenario["installed"] = [signal.getsignal(n) for n in WHAT_THE_PLATFORM_SENDS]
+
+
+# TWO SENTENCES FOR ONE INSTALL. The feature says it one way where a database is
+# being opened and another where the handler is the subject, and both mean the
+# same call, so they are one function over the pair.
+@when(parsers.re(r"^(?:a replicating database is opened|the handler is installed)$"))
+def _the_handler_goes_in(scenario: dict) -> None:
+    _install(scenario)
+
+
+@when("a second replicating database is opened")
+def _a_second_open(scenario: dict) -> None:
+    """Install twice, and keep what was in the slot after each.
+
+    THE SECOND INSTALL IS THE ONE THAT CAN GO WRONG. Reading the platform again
+    finds this library's own handler, and a new handler built around that one
+    would call it, so every signal would run the shutdown twice and then twice
+    again.
     """
-    seen: list[int] = []
-
-    def the_hosts_handler(number: int, _frame: FrameType | None) -> None:
-        seen.append(number)
-
-    scenario["what the host's handler saw"] = seen
-    scenario["the host's handlers"] = dict.fromkeys(WHAT_THE_PLATFORM_SENDS, the_hosts_handler)
-    for number in WHAT_THE_PLATFORM_SENDS:
-        signal.signal(number, the_hosts_handler)
-
-
-# --- the opens -------------------------------------------------------------
-#
-# One function over a table. The three sentences differ in how many opens have
-# happened and in nothing else, so the count is the table and the body is
-# written once.
-
-HOW_MANY_OPENS: dict[str, int] = {
-    "a replicating database is opened": 1,
-    "a second replicating database is opened": 2,
-    "the handler is installed": 1,
-}
-
-
-def opening_a_database(how_many: int):
-    """Build the When that opens that many databases.
-
-    An open's whole business with signals is the one call below, so the step
-    makes that call and records what came back and what the platform held after
-    each one. Every assertion stays in the Then.
-    """
-
-    def step(scenario: dict[str, object]) -> None:
-        came_back: list[object] = []
-        held: list[dict[int, object]] = []
-        for _open in range(how_many):
-            came_back.append(lifecycle_install_handler())
-            held.append({number: signal.getsignal(number) for number in WHAT_THE_PLATFORM_SENDS})
-        scenario["what came back"] = came_back
-        scenario["what the platform held after each open"] = held
-
-    return step
-
-
-for sentence, opens in HOW_MANY_OPENS.items():
-    when(sentence)(opening_a_database(opens))
-
-
-# --- what has to be true afterwards ----------------------------------------
+    _install(scenario)
+    after_one = list(scenario["installed"])
+    _install(scenario)
+    scenario["after_one"] = after_one
 
 
 @then("a signal handler is installed")
-def _a_handler_is_in_front_of_the_signals(scenario: dict[str, object]) -> None:
-    came_back = scenario["what came back"]
-    assert came_back == [NOTHING], (
-        f"installing the handler came back with a refusal rather than nothing: {came_back}"
+def _a_handler_is_installed(scenario: dict) -> None:
+    """Asked of the platform: whatever is in the slot is not what was there."""
+    assert all(callable(handler) for handler in scenario["installed"]), (
+        f"the platform holds {scenario['installed']} for the signals that end a "
+        f"process, so nothing will push the local commits on the way out"
     )
-
-    held = scenario["what the platform held after each open"][-1]
-    assert set(held) == set(WHAT_THE_PLATFORM_SENDS), (
-        f"the platform sends {sorted(WHAT_THE_PLATFORM_SENDS)} and the handler "
-        f"only covers {sorted(held)}"
+    assert signal.SIG_DFL not in scenario["installed"], (
+        "a signal slot still holds the platform's default, which ends the "
+        "process without pushing anything"
     )
-    for number, handler in held.items():
-        assert handler is THE_HANDLER, (
-            f"signal {number} is still answered by {handler!r}, so the process "
-            "would die on it with local commits the primary has never seen"
-        )
-        assert handler is not signal.SIG_DFL, f"signal {number} still has the platform default"
-        assert handler is not signal.SIG_IGN, f"signal {number} is ignored rather than handled"
 
 
 @then("one handler is installed, not two")
-def _the_second_open_changed_nothing(scenario: dict[str, object]) -> None:
-    after_first, after_second = scenario["what the platform held after each open"]
+def _one_handler_not_two(scenario: dict) -> None:
+    """The same object is in the slot after the second install as after the first.
 
-    assert after_first == after_second, (
-        f"the second open replaced the handler the first one put in: "
-        f"{after_first} then {after_second}"
+    A NEW ONE WOULD CHAIN TO THE OLD ONE, and the shutdown would run twice.
+    """
+    assert scenario["installed"] == scenario["after_one"], (
+        f"the second open replaced the handler: the slots held "
+        f"{scenario['after_one']} and now hold {scenario['installed']}. A new "
+        f"handler built around the old one runs the shutdown twice."
     )
-
-    # THE BUG A SECOND INSTALL CAN WRITE, and the only one worth a test here.
-    # The handler chains to whatever it found. A second install that read the
-    # platform again would find OUR handler and record it as what was there, so
-    # every signal would run the library's shutdown, reach the chain, and run
-    # the library's shutdown again. Reading the platform twice cannot see this;
-    # reading what the module kept can.
-    had = scenario["what the process had"]
-    assert had == WHAT_WAS_THERE, (
-        f"the second open recorded {WHAT_WAS_THERE} as what was there before, "
-        f"and the process had {had}. A handler chained to itself runs shutdown "
-        "once per install."
-    )
-    for number, previous in WHAT_WAS_THERE.items():
-        assert previous is not THE_HANDLER, (
-            f"signal {number} chains back to the library's own handler, which is "
-            "a loop rather than a chain"
-        )
 
 
 @then("the host's handler still runs")
-def _the_hosts_handler_is_reached(scenario: dict[str, object]) -> None:
-    for number in WHAT_THE_PLATFORM_SENDS:
-        assert signal.getsignal(number) is THE_HANDLER, (
-            f"the library did not take signal {number}, so nothing replicates on it"
-        )
+def _the_hosts_handler_still_runs(scenario: dict) -> None:
+    """A library that takes the slot and keeps it has changed how a program
+    shuts down, and the program only asked for a database."""
+    _send_the_signal(scenario)
 
-    assert scenario["the host's handlers"] == WHAT_WAS_THERE, (
-        f"the host's handler was dropped rather than kept: the module recorded {WHAT_WAS_THERE}"
-    )
-
-    # The claim itself: run the chain and watch the host's own function run.
-    # The chain answers whether it found a handler of the host's to run, so a
-    # signal that quietly ran nothing is a False rather than a silence.
-    ran = [whatever_was_there(number, NOTHING) for number in WHAT_THE_PLATFORM_SENDS]
-    assert all(ran), f"the chain found no host handler to run on some signal: {ran}"
-
-    saw = scenario["what the host's handler saw"]
-    assert saw == list(WHAT_THE_PLATFORM_SENDS), (
-        f"the host's handler did not run for every signal the library took: it saw {saw}"
+    assert "the host's handler" in scenario["ran"], (
+        f"the signal ran {scenario['ran']} and never reached the handler the "
+        f"host application had installed, so this library silently changed how "
+        f"that program shuts down"
     )
 
 
 @then("replication is asked for before the host's handler is reached")
-def _the_door_comes_first(scenario: dict[str, object]) -> None:
-    """The order the signal runs things in, which is module data a reader can see.
+def _the_library_goes_first(scenario: dict) -> None:
+    """A host handler is free to end the process, and one that does would take
+    the local commits with it."""
+    _send_the_signal(scenario)
 
-    A host handler may call `sys.exit` or `os._exit`. One that does ends the
-    process where it stands, so everything the library owes has to have happened
-    by the time the chain is reached, and the chain has to be last.
+    assert scenario["ran"].index("the door") < scenario["ran"].index("the host's handler"), (
+        f"the signal ran {scenario['ran']}. A host handler that calls exit would "
+        f"end the process before anything was pushed."
+    )
+
+
+def _send_the_signal(scenario: dict) -> None:
+    """Call what the platform holds, which is what the platform would call.
+
+    THE DOOR IS REPLACED FOR THIS, and only the door. What `lifecycle_stop` does
+    is its own card's business, and running a real shutdown here would need a
+    real database; what this file is about is the order the handler runs things
+    in.
     """
-    steps = list(IN_ORDER)
+    from declaro_persistum import lifecycle_install_handler as under_test
 
-    assert steps[0] is the_door, (
-        f"the door is not the first step, so a signal would reach the host's "
-        f"handler with local commits still local: {steps}"
-    )
-    assert steps[-1] is whatever_was_there, f"the chain is not the last step: {steps}"
-    assert steps.index(the_door) < steps.index(whatever_was_there), (
-        f"the host's handler is reached before the library asks for replication: {steps}"
-    )
+    was = under_test.the_door
 
-    # And the handler the platform holds is the one that runs those steps, so the
-    # order above is the order a real signal would take.
-    for number in WHAT_THE_PLATFORM_SENDS:
-        assert signal.getsignal(number) is THE_HANDLER, (
-            f"signal {number} is answered by something other than the handler "
-            "that runs those steps, so their order decides nothing"
-        )
+    def the_door(_number: int, _frame: FrameType | None) -> None:
+        scenario["ran"].append("the door")
+
+    under_test.the_door = the_door  # type: ignore[assignment]
+    try:
+        signal.getsignal(THE_SIGNAL_A_SCENARIO_SENDS)(THE_SIGNAL_A_SCENARIO_SENDS, None)  # type: ignore[operator]
+    finally:
+        under_test.the_door = was  # type: ignore[assignment]
