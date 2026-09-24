@@ -11,7 +11,7 @@ Feature: query_answer -- Turning a caller's question into an answer
 
   Scenario: a write is deposited
     When a caller declares one new person
-    Then the write went to the room
+    Then the write went to the crew
     And a ticket came back
 
   Scenario: several rows declared together do not take a ticket
