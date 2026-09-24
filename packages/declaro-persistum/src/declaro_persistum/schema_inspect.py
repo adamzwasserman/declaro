@@ -54,6 +54,7 @@ what it could not see.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from typing import Any, cast
 
 from declaro_persistum.query_run_statement import query_run_statement
@@ -62,6 +63,7 @@ from declaro_persistum.types import (
     Condition,
     Connection,
     Constraint,
+    DeclaredType,
     Engine,
     Fault,
     Index,
@@ -139,14 +141,82 @@ async def _ask(
     return cast("Rows | Fault", answer)
 
 
-def _a_column(row: dict[str, Any]) -> Column:
-    """One live column, out of the answer every engine gives under one set of names."""
+def _plainly(spelled: str) -> str:
+    """One engine's word for a type, with what varies between columns cut off.
+
+    An engine answers "VARCHAR(255)" and "NUMERIC(10, 2)" where this package
+    says text and decimal. What is inside the brackets is a `length` constraint
+    here, never part of what the column holds, and the case is the engine's
+    habit rather than a fact about the column.
+    """
+    return spelled.split("(")[0].strip().lower()
+
+
+def _no_word_for_it(spelled: str, table: str, _types: dict[str, DeclaredType]) -> Fault:
+    """A type nothing here has a word for, refused rather than guessed at.
+
+    Guessing would put a column in the live schema that the database does not
+    hold, and `fn difference` would then plan a migration against it.
+    """
+    return Fault(
+        kind="refused",
+        what_went_wrong=(
+            f"The column in {table!r} is a {spelled!r}, and this package has no "
+            f"word of its own for that."
+        ),
+        what_to_do_instead=(
+            "Add that spelling to the engine's row in `THE_FIVE_QUESTIONS`, "
+            "beside the word this package uses for what the column holds. "
+            "Reading it as the nearest thing would put a column in the live "
+            "schema that the database does not hold, and the next migration "
+            "would be planned against it."
+        ),
+    )
+
+
+def _the_word_this_package_uses(
+    spelled: str, _table: str, types: dict[str, DeclaredType]
+) -> DeclaredType:
+    return types[_plainly(spelled)]
+
+
+_WHETHER_THIS_ENGINE_SPELLING_IS_KNOWN: dict[bool, Callable[..., DeclaredType | Fault]] = {
+    True: _the_word_this_package_uses,
+    False: _no_word_for_it,
+}
+
+
+def _a_column(row: dict[str, Any], table: str, types: dict[str, DeclaredType]) -> Column | Fault:
+    """One live column, in this package's words rather than the engine's.
+
+    THE TYPE IS TRANSLATED HERE AND NOWHERE ELSE. `Column.declared_type` is a
+    vocabulary of eleven words no engine uses. Passing the engine's own word
+    through made `fn difference` read every column of every already-migrated
+    database as changed, so every deploy after the first was refused for
+    destroying data that nothing was going to touch.
+    """
+    spelled = str(row["declared_type"])
+    held = _WHETHER_THIS_ENGINE_SPELLING_IS_KNOWN[_plainly(spelled) in types](spelled, table, types)
+    return _WHETHER_THE_TYPE_WAS_READ[_is_fault(held)](row, held)
+
+
+def _whatever_refused_it(_row: dict[str, Any], held: object) -> Fault:
+    return cast("Fault", held)
+
+
+def _a_column_holding_it(row: dict[str, Any], held: object) -> Column:
     return Column(
         name=str(row["name"]),
-        declared_type=str(row["declared_type"]),  # type: ignore[typeddict-item]
+        declared_type=cast("DeclaredType", held),
         renamed_from=None,
         references=None,
     )
+
+
+_WHETHER_THE_TYPE_WAS_READ: dict[bool, Callable[..., Column | Fault]] = {
+    True: _whatever_refused_it,
+    False: _a_column_holding_it,
+}
 
 
 def _an_index(row: dict[str, Any]) -> Index:
@@ -240,21 +310,45 @@ async def _one_table(
     refused = [
         _refused(about, cast(Fault, answer)) for about, answer in asked.items() if _is_fault(answer)
     ]
-    return cast("Table | Fault", _THE_FIRST_REFUSAL_OR[refused != []](refused, asked, name))
+    return _THE_FIRST_REFUSAL_OR[refused != []](refused, asked, name, inspecting["types"])
 
 
-def _the_first_refusal(refused: list[Fault], _asked: dict[str, Any], _name: str) -> Fault:
+def _the_first_refusal(
+    refused: list[Fault], _asked: dict[str, Any], _name: str, _types: dict[str, DeclaredType]
+) -> Fault:
     return refused[0]
 
 
-def _a_table_out_of_the_answers(_refused: list[Fault], asked: dict[str, Any], name: str) -> Table:
+def _a_table_out_of_the_answers(
+    _refused: list[Fault], asked: dict[str, Any], name: str, types: dict[str, DeclaredType]
+) -> Table | Fault:
     columns = cast(Rows, asked["columns"])
+    read = [_a_column(row, name, types) for row in columns]
+    unreadable = [one for one in read if _is_fault(one)]
+    return _WHETHER_EVERY_COLUMN_WAS_READ[unreadable != []](asked, name, read, unreadable)
+
+
+def _a_type_nothing_here_knows(
+    _asked: dict[str, Any], _name: str, _read: list[Any], unreadable: list[Any]
+) -> Fault:
+    return cast("Fault", unreadable[0])
+
+
+def _every_column_read(
+    asked: dict[str, Any], name: str, read: list[Any], _unreadable: list[Any]
+) -> Table:
     return Table(
         name=name,
-        columns=[_a_column(row) for row in columns],
+        columns=cast("list[Column]", read),
         indexes=[_an_index(row) for row in cast(Rows, asked["indexes"])],
-        constraints=_the_rules_in(cast(Rows, asked["constraints"]), columns),
+        constraints=_the_rules_in(cast(Rows, asked["constraints"]), cast(Rows, asked["columns"])),
     )
+
+
+_WHETHER_EVERY_COLUMN_WAS_READ: dict[bool, Callable[..., Table | Fault]] = {
+    True: _a_type_nothing_here_knows,
+    False: _every_column_read,
+}
 
 
 _THE_FIRST_REFUSAL_OR = {True: _the_first_refusal, False: _a_table_out_of_the_answers}

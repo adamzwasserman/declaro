@@ -75,6 +75,17 @@ WHAT_EACH_GIVEN_MAKES: dict[str, tuple[str, ...]] = {
         "CREATE TABLE parts (id integer primary key, code text)",
         "CREATE INDEX idx_code ON parts (code)",
     ),
+    # THE WORDS ARE THE ENGINE'S OWN AND THE CASE IS DELIBERATE. Every other row
+    # here writes `integer` and `text` in lower case, which is what this package
+    # calls them, so no row in this file ever showed the two vocabularies apart.
+    "a database whose columns the engine calls INTEGER and TEXT": (
+        "CREATE TABLE spelled (id INTEGER PRIMARY KEY, label TEXT)",
+    ),
+    # `money` is a type all three engines accept and none of their rows in
+    # `THE_FIVE_QUESTIONS` carries a word for.
+    "a column the engine describes in a word no table here carries": (
+        "CREATE TABLE prices (id integer primary key, amount money)",
+    ),
     "a database holds a table no model declares": (
         "CREATE TABLE nobody_declared_me (id integer primary key)",
     ),
@@ -88,6 +99,8 @@ WHAT_TO_TAKE_AWAY = (
     "DROP TABLE IF EXISTS notes",
     "DROP TABLE IF EXISTS parts",
     "DROP TABLE IF EXISTS nobody_declared_me",
+    "DROP TABLE IF EXISTS spelled",
+    "DROP TABLE IF EXISTS prices",
 )
 
 
@@ -223,6 +236,23 @@ _WHAT_EACH_ENGINE_HAS_TO_CLEAR = {
     "turso": 0,
     "postgresql": len(WHAT_TO_TAKE_AWAY),
 }
+
+
+def _the_raw_answers(scenario: dict) -> dict[str, object]:
+    """What each engine said, refusal and all.
+
+    The reader below this one asserts that nothing refused, which is right for
+    every scenario expecting a schema back and wrong for the two expecting a
+    refusal. A loop over nothing runs no assertion and publishes a pass, so
+    the count is checked here too.
+    """
+    answers = scenario["answers"]
+    wanted = set(scenario.get("only", tuple(THE_THREE_ENGINES)))
+
+    assert set(answers) == wanted, (
+        f"only {sorted(answers)} were inspected, and this scenario asks for {sorted(wanted)}"
+    )
+    return answers
 
 
 def _every_engine_answered(scenario: dict) -> dict[str, object]:
@@ -390,4 +420,74 @@ def _what_nothing_satisfies_yet(scenario: dict, sentence: str) -> None:
             f"on {engine} no column of `books` carries where its key points, so "
             f"a differ comparing this against the models adds the key again on "
             f"every deploy: {table['columns']}"
+        )
+
+
+# WHAT THE ENGINES CALL THE TWO TYPES IN THAT TABLE. Read off the drivers rather
+# than guessed: SQLite hands back whatever word the CREATE TABLE used, and
+# PostgreSQL answers `information_schema` with its own.
+WHAT_AN_ENGINE_WOULD_HAVE_SAID = frozenset(
+    {"INTEGER", "TEXT", "int4", "integer", "character varying", "text"} - {"integer", "text"}
+)
+
+
+@then("the columns come back holding integer and text")
+def _in_this_packages_words(scenario: dict) -> None:
+    """`Column.declared_type` is eleven words no engine uses.
+
+    Until 2026-09-24 the engine's own word went straight through, so opening a
+    database this library had already migrated read every column as changed and
+    was refused for destroying data nothing was going to touch.
+    """
+    for engine, answer in _every_engine_answered(scenario).items():
+        held = {
+            column["name"]: column["declared_type"]
+            for column in _the_table(answer, "spelled")["columns"]
+        }
+
+        assert held == {"id": "integer", "label": "text"}, (
+            f"on {engine} the live columns came back holding {held}, and a model "
+            f"declaring integer and text could never match that"
+        )
+
+
+@then("nothing in the answer is spelled the way the engine spells it")
+def _no_engine_word_survives(scenario: dict) -> None:
+    for engine, answer in _every_engine_answered(scenario).items():
+        engines_own = [
+            column["declared_type"]
+            for table in answer["tables"]  # type: ignore[index]
+            for column in table["columns"]
+            if column["declared_type"] in WHAT_AN_ENGINE_WOULD_HAVE_SAID
+        ]
+
+        assert engines_own == [], (
+            f"on {engine} the live schema carries {engines_own}, which is the "
+            f"engine's own word and not one this package has"
+        )
+
+
+@then("it is refused naming the word and the table it came from")
+def _a_word_nothing_here_knows(scenario: dict) -> None:
+    """Reading it as the nearest thing would put a column in the live schema
+    that the database does not hold, and the next migration would be planned
+    against that column."""
+    for engine, answer in _the_raw_answers(scenario).items():
+        assert isinstance(answer, dict) and frozenset(answer) == THE_THREE_FACTS_IN_A_FAULT, (
+            f"on {engine} a column this package has no word for came back as a "
+            f"schema rather than a refusal: {answer}"
+        )
+        said = str(answer["what_went_wrong"])
+        assert "money" in said and "prices" in said, (
+            f"on {engine} the refusal names neither the word nor the table it "
+            f"came from, so nobody can find it: {said!r}"
+        )
+
+
+@then("no column comes back holding a guess")
+def _nothing_was_guessed(scenario: dict) -> None:
+    for engine, answer in _the_raw_answers(scenario).items():
+        assert "tables" not in answer, (
+            f"on {engine} a schema came back beside the refusal, and a caller "
+            f"reading it would migrate against a column nobody could read"
         )

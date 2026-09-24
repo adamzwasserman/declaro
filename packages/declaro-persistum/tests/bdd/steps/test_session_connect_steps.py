@@ -1,0 +1,624 @@
+"""Bind `tests/bdd/features/session/session_connect.feature`.
+
+WHAT THE FEATURE ASKS. The handle comes back only after the database matches its
+models, a database already matching is not touched, the library makes the crew,
+the engine is decided from the target before anything opens, a destructive change
+nobody declared stops the open, and the handle carries what everything downstream
+reads.
+
+EVERY BOUND SCENARIO RUNS ON A REAL SQLITE FILE. What these scenarios turn on is
+whether a table is there when the handle goes back, and a stand-in that recorded
+calls would pass while the database was still empty. The tables are read off the
+file with a second connection after the open has finished.
+
+THE MODELS ARE PYDANTIC CLASSES DECLARED INSIDE A STEP, NEVER AT MODULE LEVEL.
+`reader fn schema_read_declared` walks every Pydantic class alive in the process,
+so a class held at import time joins every other test's migration for the whole
+run. Each scenario holds its own in its own record and lets go at the end.
+
+THE CREW STOPS AND THE CONNECTIONS CLOSE INSIDE THE LOOP THAT OPENED THEM. A
+drainer is an `asyncio` task and a task started in one loop cannot be stopped
+from another, so one async function opens, reads back what the assertions need,
+and shuts the whole thing down before any Then runs.
+
+WHAT EACH SENTENCE SETS UP IS A TABLE, NOT A FUNCTION EACH. Nine Given sentences
+differ only by which tables they put in the file and whether they can run at all.
+Written as nine bodies they were nine copies of two lines, and the one that
+drifted would have drifted silently.
+
+SIX SCENARIOS ARE `xfail` AND EACH NAMES WHAT IS MISSING. A skip would say the
+line was satisfied when it was not. Every Then under an `xfail` is written to
+fail loudly on a real check, so deleting a guard turns the scenario red and names
+the piece somebody has to build.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import pathlib
+from typing import Any
+
+import pytest
+from pytest_bdd import given, parsers, scenarios, then, when
+
+from declaro_persistum.crew_stop import crew_stop
+from declaro_persistum.session_close_connection import session_close_connection
+from declaro_persistum.session_connect import session_connect
+from declaro_persistum.types import NOTHING
+from tests.conftest import a_connecting, a_plan, a_report, a_schema, declaring
+
+scenarios("../features/session/session_connect.feature")
+
+
+THE_THREE_FACTS_IN_A_FAULT = frozenset({"kind", "what_went_wrong", "what_to_do_instead"})
+
+# WHAT THE DOOR READS OFF THE ENVIRONMENT AND HANDS OVER. `boundary_in fn
+# session_open` declares that it reads DECLARO_CONNECTIONS and DECLARO_CREW_SIZE,
+# so both numbers arrive already read. Handing nothing instead is what a
+# deployment that set neither looks like, and every scenario here would then be
+# testing that refusal rather than what it says it tests.
+HOW_MANY_CONNECTIONS_THIS_DEPLOYMENT_ASKED_FOR = 4
+HOW_MANY_DRAINERS_THIS_DEPLOYMENT_ASKED_FOR = 2
+
+THE_TABLE_THE_MODELS_DECLARE = "people"
+
+
+def _is_fault(piece: object) -> bool:
+    return isinstance(piece, dict) and frozenset(piece) == THE_THREE_FACTS_IN_A_FAULT
+
+
+def _what_the_door_hands_over(target: str) -> dict:
+    """The record `boundary_in fn session_open` builds, with nothing filled in.
+
+    Built through `a_connecting` rather than written out here. `Connecting` has
+    nineteen fields, and a step file writing its own is the thirteenth file
+    doing what cost this suite two silent days when `Column` lost `facets`.
+    """
+    return a_connecting(
+        target=target,
+        shutdown="exit_immediately",
+        primary=NOTHING,
+        token=NOTHING,
+        connections_asked=HOW_MANY_CONNECTIONS_THIS_DEPLOYMENT_ASKED_FOR,
+        crew_asked=HOW_MANY_DRAINERS_THIS_DEPLOYMENT_ASKED_FOR,
+        engine="sqlite",
+        settings={},
+        permitted=0,
+        crew_size=0,
+        writers=[],
+        connections=[],
+        channel=NOTHING,
+        declared=declaring(models=[], views=[], dropping_tables=[], dropping_views=[]),
+        live=a_schema(tables=[], views=[]),
+        wanted_schema=a_schema(tables=[], views=[]),
+        needs_migration=False,
+        migration=a_report(plan=a_plan(operations=[], destroys=[]), applied=0),
+        database=None,
+    )
+
+
+# --- what each sentence sets up ------------------------------------------------
+#
+# A ROW HOLDS ONLY WHAT ITS SENTENCE SETS, AND THE REST STAYS AS IT WAS. Two
+# Given sentences in one scenario are two rows applied in turn, so a row naming
+# `tables` when its sentence says nothing about tables wipes what the sentence
+# before it put there. "No model asking to drop it" says nothing about tables,
+# and a row carrying an empty list for it emptied the database the line above
+# had just filled. Every row still carries `why_not`, because that is the one
+# question asked of every sentence.
+
+WHAT_EACH_GIVEN_SETS: dict[str, dict] = {
+    "a database with no tables": {"why_not": "", "tables": []},
+    "a database whose schema already matches the models": {
+        "why_not": "",
+        "tables": ["CREATE TABLE people (id INTEGER NOT NULL, name TEXT NOT NULL)"],
+    },
+    # `Model.dropping` is how a model asks to lose a column, and the Background's
+    # model declares none. This sentence sets nothing up; it says what is absent.
+    "no model asking to drop it": {"why_not": ""},
+    "the engine refuses the thirtieth": {"why_not": ""},
+    "a replicated database whose local copy is empty": {
+        "why_not": (
+            "Needs a live Turso primary holding rows, and a token for it. "
+            "`boundary_out fn session_open_channel` opens against a real primary "
+            "and proves the channel with one pull, so a stand-in here would say "
+            "nothing about whether the copy was filled before the handle went back."
+        ),
+    },
+    "models declaring every kind of change a migration can plan": {
+        "why_not": (
+            "Needs one set of models that draws all twelve kinds in "
+            "`OperationKind` out of `fn difference`, including a rename, a view "
+            "and an enum. `tests/conftest.py` builds one operation at a time and "
+            "nothing builds a declaration that reaches every kind."
+        ),
+    },
+    "a plan of five operations, two of which the database already has": {
+        "why_not": (
+            "`fn difference` emits only what differs, so a plan of five where the "
+            "database already holds two cannot come out of it. Either the plan is "
+            "handed in from outside, which no door does, or the report counts "
+            "statements the engine treated as no-ops, which nothing measures."
+        ),
+    },
+    "a database whose disk fills partway through the migration": {
+        "why_not": (
+            "Needs a disk that fills on the tenth statement and not the first. A "
+            "full filesystem cannot be asked for from inside the process, and a "
+            "driver stand-in raising on the tenth call would be testing the "
+            "stand-in's counter rather than the engine's answer."
+        ),
+    },
+    "a migration that stops on an engine that cannot undo what already ran": {
+        "why_not": (
+            "Needs a Turso database and a migration whose second operation that "
+            "engine refuses. `fn difference` builds the plan out of the models, "
+            "so nothing here can put a failing operation in the middle of one."
+        ),
+    },
+}
+
+
+def _one_of(sentences: tuple[str, ...]) -> str:
+    return "^(?P<sentence>" + "|".join(sentences) + ")$"
+
+
+def _it_can_run(_why_not: str) -> bool:
+    """Nothing is missing, so the scenario goes on. Answered rather than left."""
+    return True
+
+
+def _it_cannot_run_yet(why_not: str) -> bool:
+    """`pytest.xfail` names the missing piece and ends the scenario here."""
+    pytest.xfail(why_not)
+
+
+_WHETHER_ANYTHING_IS_MISSING: dict[bool, Any] = {False: _it_can_run, True: _it_cannot_run_yet}
+
+
+@pytest.fixture
+def scenario(tmp_path: pathlib.Path) -> dict:
+    return {
+        "tmp": tmp_path,
+        "models": [],
+        "tables": [],
+        "lost": "",
+        "why_not": "",
+        # `tables` IS WHAT GOES INTO THE FILE FIRST; `holds` IS WHAT IT HOLDS
+        # AFTERWARDS, read back off the file by the When. Two words, because one
+        # would have the open's answer overwriting the scenario's own setup.
+        #
+        # A SCENARIO THAT NAMES NO DATABASE STILL OPENS ONE. "The library makes
+        # the crew" and "the handle carries what everything downstream reads"
+        # say nothing about the database, so they open a fresh empty file and
+        # the migration puts the declared table into it.
+        "target": f"sqlite:///{tmp_path / 'opened.db'}",
+    }
+
+
+@given('models declaring a table "people" with columns id and name')
+def _the_models(scenario: dict) -> None:
+    from pydantic import BaseModel
+
+    # honest-code-allow: L1.21.5 -- a host's model IS a Pydantic class.
+    # `HOW-IT-SHOULD-WORK.md:34`: "You write Pydantic models. That is your only
+    # description of the database." `reader fn schema_read_declared` reads
+    # exactly these, so a fixture declaring anything else would be testing an
+    # input the library never receives.
+    class Person(BaseModel):
+        __tablename__ = "people"
+        id: int
+        name: str
+
+    scenario["models"].append(Person)
+
+
+@given(parsers.re(_one_of(tuple(sorted(WHAT_EACH_GIVEN_SETS, key=len, reverse=True)))))
+def _what_was_set_up(scenario: dict, sentence: str) -> None:
+    scenario.update(WHAT_EACH_GIVEN_SETS[sentence])
+    _WHETHER_ANYTHING_IS_MISSING[scenario["why_not"] != ""](scenario["why_not"])
+
+
+@given(parsers.parse('a model that no longer declares the column "{column}"'))
+def _a_column_no_model_declares(scenario: dict, column: str) -> None:
+    """The column is in the database and in no model, which is a loss."""
+    scenario["tables"] = [
+        f"CREATE TABLE people (id INTEGER NOT NULL, name TEXT NOT NULL, {column} TEXT NOT NULL)"
+    ]
+    scenario["lost"] = column
+    scenario["why_not"] = ""
+
+
+@given(parsers.parse('models whose migration is thirty operations on "{engine}"'))
+def _thirty_operations(scenario: dict, engine: str) -> None:
+    scenario["engine_asked"] = engine
+    pytest.xfail(
+        "Needs a way to declare thirty models and make the thirtieth operation "
+        "fail on each of the three engines. Nothing in this suite builds a "
+        "migration of a named length, and nothing makes one operation fail "
+        "without making the whole batch invalid."
+    )
+
+
+# --- opening it ------------------------------------------------------------------
+
+
+def _the_scenarios_own(_named: str | None, scenario: dict) -> str:
+    return str(scenario["target"])
+
+
+def _the_one_in_the_sentence(named: str, _scenario: dict) -> str:
+    return named
+
+
+_WHICH_DATABASE_IS_OPENED: dict[bool, Any] = {
+    True: _the_scenarios_own,
+    False: _the_one_in_the_sentence,
+}
+
+# ONE SENTENCE IN FIVE SPELLINGS, AND ONE FUNCTION BEHIND THEM. "It", "the
+# database" and "a local database" all mean the one this scenario set up; the
+# other two name a target or an engine inside the sentence.
+_HOW_A_CALLER_SAYS_IT = (
+    r"^a caller opens (?:it|the database|a local database|"
+    r'"(?P<named>[a-z]+://[^"]*)"|a "(?P<engine>[a-z]+)" database)$'
+)
+
+
+@when(parsers.re(_HOW_A_CALLER_SAYS_IT))
+def _a_caller_opens_a_database(scenario: dict, named: str | None, engine: str | None) -> None:
+    """The edge, and the only place in this file that touches a database.
+
+    THREE LOOPS AND NOT ONE, AND THAT IS ASYNCIO'S RULE RATHER THAN A CHOICE. A
+    drainer is a task and a task started in one loop cannot be stopped from
+    another, so the open and its shutdown share the middle loop. Putting the
+    tables in and reading them back open connections of their own and close
+    them again, so each gets its own.
+    """
+    scenario["engine_asked"] = engine
+    target = _WHICH_DATABASE_IS_OPENED[named is None](named, scenario)
+    a_file = target.startswith("sqlite:///")
+
+    asyncio.run(_WHETHER_TO_PUT_TABLES_IN_IT[a_file](scenario, target))
+    scenario.update(asyncio.run(_open_and_shut(target)))
+    scenario.update(asyncio.run(_WHETHER_IT_IS_A_FILE_HERE[a_file](target)))
+
+
+async def _open_and_shut(target: str) -> dict:
+    """Open it, then stop every drainer and close every connection it opened.
+
+    Both happen in one loop because a task started in one cannot be stopped
+    from another. What comes back is plain data, so no Then needs a loop.
+    """
+    answer = await session_connect(_what_the_door_hands_over(target))  # type: ignore[arg-type]
+    # HOW MANY DRAINERS WERE RUNNING, counted by whatever stopped them. Counted
+    # afterwards it read zero on a crew that had been running fine, because
+    # stopping a crew empties its list of drainers.
+    return {"answer": answer, "running": await _shut_down_whatever_opened(answer)}
+
+
+def _the_record_in(scenario: dict) -> dict:
+    """What the open filled in, for a Then that has already read the answer.
+
+    NOTHING HERE HANDS BACK "NO RECORD". Every Then that reaches for a field
+    asserts the open was not refused first, in its own words, so the reader that
+    used to answer with nothing for a refusal is gone and so is every caller
+    that had to test what came back before using it.
+    """
+    return dict(scenario["answer"])
+
+
+def _the_path_in(target: str) -> str:
+    return target.replace("sqlite:///", "")
+
+
+async def _whatever_the_scenario_built(scenario: dict, target: str) -> int:
+    """Put the tables a Given asked for into the file, before anything opens it."""
+    import aiosqlite
+
+    connection = await aiosqlite.connect(_the_path_in(target), isolation_level=None)
+    for statement in scenario["tables"]:
+        await connection.execute(statement)
+    await connection.close()
+    return len(scenario["tables"])
+
+
+async def _what_the_database_holds_now(target: str) -> dict:
+    """Asked of the database with a connection of its own, never of the record."""
+    import aiosqlite
+
+    connection = await aiosqlite.connect(_the_path_in(target), isolation_level=None)
+    tables = await connection.execute_fetchall(
+        "SELECT name FROM sqlite_master WHERE type = 'table'"
+    )
+    columns = await connection.execute_fetchall(
+        f"PRAGMA table_info({THE_TABLE_THE_MODELS_DECLARE})"
+    )
+    await connection.close()
+    return {"holds": [str(row[0]) for row in tables], "columns": [str(row[1]) for row in columns]}
+
+
+async def _nothing_to_put_anywhere(_scenario: dict, _target: str) -> int:
+    """No file here to put tables in, so none go in. It is still an answer."""
+    return 0
+
+
+_WHETHER_TO_PUT_TABLES_IN_IT: dict[bool, Any] = {
+    True: _whatever_the_scenario_built,
+    False: _nothing_to_put_anywhere,
+}
+
+
+async def _nothing_on_this_machine(_target: str) -> dict:
+    """A target no driver on this machine reaches holds nothing to read back."""
+    return {"holds": [], "columns": []}
+
+
+_WHETHER_IT_IS_A_FILE_HERE: dict[bool, Any] = {
+    True: _what_the_database_holds_now,
+    False: _nothing_on_this_machine,
+}
+
+
+# --- shutting it down again -------------------------------------------------------
+
+
+async def _nothing_was_opened(_answer: object) -> int:
+    """The open was refused before it built a handle, so no drainer ever ran."""
+    return 0
+
+
+async def _stop_and_close(answer: object) -> int:
+    """Stop every drainer, close every connection, and say how many ran.
+
+    The count is taken before the crew stops, because stopping it empties the
+    list, and it is what a scenario reads to say the crew came back running.
+    """
+    handle = dict(answer)["database"]  # type: ignore[call-overload]
+    running = len(handle["crew"]["drainers"])
+    await crew_stop(handle["crew"])
+    for connection in [*handle["writers"], *handle["connections"]]:
+        await session_close_connection(connection)
+    return running
+
+
+_WHETHER_THERE_IS_ANYTHING_TO_SHUT: dict[bool, Any] = {
+    True: _nothing_was_opened,
+    False: _stop_and_close,
+}
+
+
+async def _shut_down_whatever_opened(answer: object) -> int:
+    return await _WHETHER_THERE_IS_ANYTHING_TO_SHUT[_is_fault(answer)](answer)
+
+
+def _the_words_of(answer: object) -> str:
+    """Everything a fault says, so an assertion reads one string and not two."""
+    return str(answer["what_went_wrong"]) + str(answer["what_to_do_instead"])  # type: ignore[index]
+
+
+# --- what must be true afterwards ---------------------------------------------------
+
+
+@then("the table exists before the handle is returned")
+def _the_table_is_there(scenario: dict) -> None:
+    """A handle handed back while the database is still behind its models is a
+    handle whose first question fails on a column the models declare."""
+    assert not _is_fault(scenario["answer"]), f"the open was refused: {scenario['answer']}"
+    assert THE_TABLE_THE_MODELS_DECLARE in scenario["holds"], (
+        f"the handle came back and the database holds {scenario['holds']}, so a "
+        f"caller's first question fails on a table the models declare"
+    )
+
+
+@then("no statement changed it")
+def _nothing_ran(scenario: dict) -> None:
+    assert not _is_fault(scenario["answer"]), f"the open was refused: {scenario['answer']}"
+    ran = _the_record_in(scenario)["migration"]
+
+    assert ran["applied"] == 0, (
+        f"the database already matched its models and the migration ran "
+        f"{ran['applied']} changes against it"
+    )
+    assert ran["plan"]["operations"] == [], (
+        f"nothing had to change and the plan holds {ran['plan']['operations']}"
+    )
+
+
+# THREE SENTENCES SAYING THE SAME THING, WHICH IS ONE ASSERTION OVER A TABLE.
+# What differs is the words the failure is reported in, and the words are the
+# rows.
+WHAT_A_HANDLE_MEANS_HERE: dict[str, str] = {
+    "the handle comes back": ("the open was refused, and a caller with no handle has no database"),
+    "none came back refused as one this engine cannot write": (
+        "a change a model declares came back with no spelling for this engine"
+    ),
+}
+
+
+@then(parsers.re(_one_of(tuple(sorted(WHAT_A_HANDLE_MEANS_HERE, key=len, reverse=True)))))
+def _it_was_not_refused(scenario: dict, sentence: str) -> None:
+    assert not _is_fault(scenario["answer"]), (
+        f"{WHAT_A_HANDLE_MEANS_HERE[sentence]}: {scenario['answer']}"
+    )
+    assert _the_record_in(scenario)["database"] is not None, (
+        "the open answered without a handle in it"
+    )
+
+
+WHAT_A_REFUSAL_MEANS_HERE: dict[str, str] = {
+    "the open is refused": (
+        "a change destroying a column no model asked to lose was allowed through"
+    ),
+    "a fault comes back instead of a handle": (
+        "the migration stopped and the open answered with a handle anyway"
+    ),
+    "nothing read it back off the connection": (
+        "a target no driver could reach came back with a handle, so something "
+        "decided the engine after opening rather than before"
+    ),
+}
+
+
+@then(parsers.re(_one_of(tuple(sorted(WHAT_A_REFUSAL_MEANS_HERE, key=len, reverse=True)))))
+def _it_was_refused(scenario: dict, sentence: str) -> None:
+    assert _is_fault(scenario["answer"]), (
+        f"{WHAT_A_REFUSAL_MEANS_HERE[sentence]}: {scenario['answer']}"
+    )
+    assert "database" not in scenario["answer"], "a refusal came back carrying a handle"
+
+
+# WHAT EACH SENTENCE NEEDS TO FIND IN THE REFUSAL'S OWN WORDS. Four sentences,
+# each looking for its own phrases in the one string a fault amounts to.
+WHAT_EACH_REFUSAL_HAS_TO_SAY: dict[str, tuple[str, ...]] = {
+    "the engine was decided from the target": ("postgres",),
+    "it names the operation it stopped on and what the engine said": (
+        "stopped on",
+        "The engine said",
+    ),
+    "the fault says the database is part way through its migration": ("part way through",),
+    "it tells the operator to look at the database by hand": ("by hand",),
+}
+
+
+@then(parsers.re(_one_of(tuple(sorted(WHAT_EACH_REFUSAL_HAS_TO_SAY, key=len, reverse=True)))))
+def _the_refusal_says_it(scenario: dict, sentence: str) -> None:
+    said = _the_words_of(scenario["answer"])
+    missing = [one for one in WHAT_EACH_REFUSAL_HAS_TO_SAY[sentence] if one not in said]
+
+    assert missing == [], (
+        f"the refusal never says {missing}, which is what an operator reading "
+        f"it has to find: {said!r}"
+    )
+
+
+@then("the crew came with the handle")
+def _the_crew_came_with_it(scenario: dict) -> None:
+    crew = _the_record_in(scenario)["database"]["crew"]
+
+    assert crew is not None, (
+        "the handle carries no crew, so a write deposited against it waits for "
+        "a drainer that does not exist"
+    )
+    assert crew["size"] == HOW_MANY_DRAINERS_THIS_DEPLOYMENT_ASKED_FOR, (
+        f"the deployment asked for {HOW_MANY_DRAINERS_THIS_DEPLOYMENT_ASKED_FOR} "
+        f"drainers and the crew came back sized {crew['size']}"
+    )
+
+
+@then("nobody had to make one")
+def _nobody_had_to_make_one(scenario: dict) -> None:
+    """A crew a caller had to build is a crew a caller can leave out.
+
+    What a caller hands over is a number. The bells a drainer sleeps on, the
+    list of arrivals and the tickets are made in here, and a caller who never
+    heard of any of them still gets a crew that runs.
+    """
+    assert "crew" not in _what_the_door_hands_over(str(scenario["target"])), (
+        "the caller hands a crew over, so a caller who left it out would get a "
+        "database that takes writes and never runs them"
+    )
+    assert scenario["running"] == HOW_MANY_DRAINERS_THIS_DEPLOYMENT_ASKED_FOR, (
+        f"the deployment asked for {HOW_MANY_DRAINERS_THIS_DEPLOYMENT_ASKED_FOR} "
+        f"drainers and {scenario['running']} were running when the handle came "
+        f"back, so a write deposited against this database would sit there"
+    )
+
+
+@then("the refusal names the column and what to declare to allow it")
+def _the_refusal_names_the_column(scenario: dict) -> None:
+    said = _the_words_of(scenario["answer"])
+
+    assert scenario["lost"] in said, f"the refusal does not name the column it stopped on: {said!r}"
+    assert "dropping" in said, (
+        f"the refusal does not say what to declare to allow the loss, so an "
+        f"operator is left to guess: {said!r}"
+    )
+
+
+@then("the column is still there")
+def _the_column_survived(scenario: dict) -> None:
+    assert scenario["lost"] in scenario["columns"], (
+        f"the open was refused and the column went anyway. The table holds {scenario['columns']}."
+    )
+
+
+@then("the copy was filled from the primary before the handle was returned")
+def _the_copy_was_filled_first(scenario: dict) -> None:
+    """A cold copy holds no rows until it has pulled, and the migration reads the
+    live schema off that copy. Reading it before the pull plans a migration that
+    creates every table the primary already has."""
+    assert not _is_fault(scenario["answer"]), f"the open was refused: {scenario['answer']}"
+    assert scenario["holds"] != [], (
+        "the handle came back and the local copy is still empty, so nothing "
+        "pulled from the primary before the open finished"
+    )
+    assert _the_record_in(scenario)["migration"]["applied"] == 0, (
+        f"the copy came back matching its primary and the migration still ran "
+        f"{_the_record_in(scenario)['migration']['applied']} changes, which is a migration "
+        f"planned against an empty database"
+    )
+
+
+@then("the handle carries its engine, its connections, its writers and its crew")
+def _the_handle_carries_it_all(scenario: dict) -> None:
+    assert not _is_fault(scenario["answer"]), f"the open was refused: {scenario['answer']}"
+    handle = _the_record_in(scenario)["database"]
+
+    assert handle["engine"] == "sqlite", (
+        f"the handle names {handle['engine']!r}, and every later call reads that "
+        f"word to pick a driver"
+    )
+    assert handle["connections"] != [], "the handle holds no connection to ask a question on"
+    assert len(handle["writers"]) == HOW_MANY_DRAINERS_THIS_DEPLOYMENT_ASKED_FOR, (
+        f"the crew has {HOW_MANY_DRAINERS_THIS_DEPLOYMENT_ASKED_FOR} drainers "
+        f"and the handle holds {len(handle['writers'])} writers, so a drainer "
+        f"would have to share a connection"
+    )
+    assert handle["crew"]["size"] == HOW_MANY_DRAINERS_THIS_DEPLOYMENT_ASKED_FOR, (
+        f"the handle holds a crew sized {handle['crew']['size']}"
+    )
+
+
+@then(parsers.parse('the twenty-nine before it are "{survives}"'))
+def _what_the_failure_left(scenario: dict, survives: str) -> None:
+    """SQLite and PostgreSQL take the batch as one transaction; Turso commits as
+    it goes. What an operator finds the next morning is the difference."""
+    held = {"undone": 0, "kept": 29}[survives]
+
+    assert _the_record_in(scenario)["migration"]["applied"] == held, (
+        f"the thirtieth change failed on {scenario['engine_asked']} and the "
+        f"report says {_the_record_in(scenario)['migration']['applied']} ran, where this engine "
+        f"leaves the twenty-nine before it {survives}"
+    )
+
+
+@then("every change reached the database")
+def _every_change_landed(scenario: dict) -> None:
+    assert not _is_fault(scenario["answer"]), f"the open was refused: {scenario['answer']}"
+    ran = _the_record_in(scenario)["migration"]
+    planned = len(ran["plan"]["operations"])
+
+    assert ran["applied"] == planned, f"the plan holds {planned} changes and {ran['applied']} ran"
+
+
+@then("the report names all five operations it planned")
+def _the_report_names_the_plan(scenario: dict) -> None:
+    planned = _the_record_in(scenario)["migration"]["plan"]["operations"]
+
+    assert len(planned) == 5, f"the report names {len(planned)} operations, not the five it planned"
+
+
+@then("the report says three of them ran")
+def _the_report_counts_what_ran(scenario: dict) -> None:
+    assert _the_record_in(scenario)["migration"]["applied"] == 3, (
+        f"the report says {_the_record_in(scenario)['migration']['applied']} ran, and a caller "
+        f"reading it cannot tell how much of the plan the database took"
+    )
+
+
+@then("it says what to do instead")
+def _it_says_what_to_do(scenario: dict) -> None:
+    assert str(scenario["answer"]["what_to_do_instead"]).strip() != "", (
+        "the fault leaves an operator with nothing to do next"
+    )

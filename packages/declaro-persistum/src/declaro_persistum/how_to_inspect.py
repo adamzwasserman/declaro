@@ -54,7 +54,7 @@ NO FALLBACK ON THE READ. `THE_FIVE_QUESTIONS[engine]`, never `.get`.
 
 from __future__ import annotations
 
-from declaro_persistum.types import Engine, Inspecting, Statement
+from declaro_persistum.types import DeclaredType, Engine, Inspecting, Statement
 
 
 def _asked(text: str) -> Statement:
@@ -70,6 +70,75 @@ def _about_one_table(text: str) -> Statement:
 # SQLITE AND TURSO READ THEIR OWN CATALOGUE TABLE AND THEIR OWN PRAGMAS.
 # `architecture.md:257` warns that an unfetched PRAGMA is a silent no-op, which
 # is a fact about running these rather than about writing them down.
+# WHAT EACH ENGINE CALLS THE THINGS A COLUMN CAN HOLD. `Column.declared_type`
+# is a vocabulary of eleven words no engine uses, and every engine answers its
+# columns question in its own words instead. Without this table `fn difference`
+# compared "INTEGER" against "integer", read every column as changed, and every
+# open of a database this library had migrated was refused for destroying data.
+# Measured 2026-09-24 by opening one SQLite file twice.
+#
+# IT IS READ WITH THE PARENTHESES CUT OFF AND THE CASE FOLDED DOWN, because an
+# engine answers "VARCHAR(255)" and "NUMERIC(10,2)" for what this package calls
+# text and decimal. The length inside the brackets is a `length` constraint
+# here, never part of what the column holds.
+_WHAT_SQLITE_CALLS_THEM: dict[str, DeclaredType] = {
+    "text": "text",
+    "varchar": "text",
+    "char": "text",
+    "clob": "text",
+    "integer": "integer",
+    "int": "integer",
+    "bigint": "integer",
+    "smallint": "integer",
+    "real": "float",
+    "double": "float",
+    "float": "float",
+    "numeric": "decimal",
+    "decimal": "decimal",
+    "boolean": "boolean",
+    "blob": "bytes",
+    "date": "date",
+    "time": "time",
+    "datetime": "datetime",
+    "timestamp": "datetime",
+    "uuid": "uuid",
+    "json": "json",
+}
+
+_WHAT_POSTGRESQL_CALLS_THEM: dict[str, DeclaredType] = {
+    "text": "text",
+    "character varying": "text",
+    "character": "text",
+    "varchar": "text",
+    "integer": "integer",
+    "bigint": "integer",
+    "smallint": "integer",
+    "int4": "integer",
+    "int8": "integer",
+    "int2": "integer",
+    "serial": "integer",
+    "bigserial": "integer",
+    "real": "float",
+    "double precision": "float",
+    "float8": "float",
+    "float4": "float",
+    "numeric": "decimal",
+    "decimal": "decimal",
+    "boolean": "boolean",
+    "bool": "boolean",
+    "bytea": "bytes",
+    "date": "date",
+    "time": "time",
+    "time without time zone": "time",
+    "timestamp": "datetime",
+    "timestamp without time zone": "datetime",
+    "timestamp with time zone": "datetime",
+    "uuid": "uuid",
+    "json": "json",
+    "jsonb": "json",
+}
+
+
 _LIKE_SQLITE: Inspecting = {
     "tables": _asked("SELECT name AS name FROM sqlite_master WHERE type = 'table'"),
     "columns": _about_one_table(
@@ -94,6 +163,7 @@ _LIKE_SQLITE: Inspecting = {
     "views": _asked(
         "SELECT name AS name, sql AS spelled_out FROM sqlite_master WHERE type = 'view'"
     ),
+    "types": _WHAT_SQLITE_CALLS_THEM,
 }
 
 # ONE ROW PER ENGINE, AND ADDING AN ENGINE IS ONE MORE LINE. PostgreSQL keeps
@@ -143,6 +213,7 @@ THE_FIVE_QUESTIONS: dict[Engine, Inspecting] = {
             "SELECT table_name AS name, view_definition AS spelled_out "
             "FROM information_schema.views WHERE table_schema = 'public'"
         ),
+        "types": _WHAT_POSTGRESQL_CALLS_THEM,
     },
 }
 

@@ -27,7 +27,7 @@ import typing
 from pytest_bdd import given, parsers, scenarios, then, when
 
 from declaro_persistum.how_to_inspect import how_to_inspect
-from declaro_persistum.types import Engine, Inspecting
+from declaro_persistum.types import DeclaredType, Engine, Inspecting
 
 scenarios("../features/core/how_to_inspect.feature")
 
@@ -84,11 +84,37 @@ def _every_engine_gives_five(said: dict[str, Inspecting]) -> None:
 def _not_all_alike(said: dict[str, Inspecting]) -> None:
     """Two engines sharing a row is right. All three sharing one is not."""
     written = {
-        tuple(sorted((name, q["text"]) for name, q in answer.items())) for answer in said.values()
+        tuple(sorted((name, answer[name]["text"]) for name in THE_QUESTIONS))  # type: ignore[literal-required]
+        for answer in said.values()
     }
     assert len(written) > 1, (
         "all three engines are asked the same five questions, so the table says "
         "nothing a single constant would not have said"
+    )
+
+
+# WHICH FIELDS OF `Inspecting` ARE QUESTIONS. It gained `types` on 2026-09-24,
+# which is this engine's own word for each thing a column can hold rather than
+# anything asked of a database. Walking every field treated that table as a
+# question and reported all three engines as broken.
+THE_QUESTIONS = ("tables", "columns", "indexes", "constraints", "views")
+WHAT_ELSE_IT_CARRIES = ("types",)
+
+
+@then("the record holds the five questions and nothing else unaccounted for")
+def _nothing_unaccounted_for(said: dict[str, Inspecting]) -> None:
+    """A field added to `Inspecting` fails here rather than being walked as a
+    question by every assertion below it."""
+    strays = [
+        (engine, name)
+        for engine, answer in said.items()
+        for name in answer
+        if name not in (*THE_QUESTIONS, *WHAT_ELSE_IT_CARRIES)
+    ]
+
+    assert not strays, (
+        f"{strays} are on `Inspecting` and this file does not know whether each "
+        f"is a question a database answers or a table this package reads"
     )
 
 
@@ -97,8 +123,8 @@ def _text_and_values_apart(said: dict[str, Inspecting]) -> None:
     wrong = [
         (engine, name)
         for engine, answer in said.items()
-        for name, question in answer.items()
-        if sorted(question) != ["parameters", "text"] or not question["text"]
+        for name in THE_QUESTIONS
+        if sorted(answer[name]) != ["parameters", "text"] or not answer[name]["text"]  # type: ignore[literal-required]
     ]
     assert not wrong, (
         f"{wrong} are not statements, so the driver has nothing to bind and the "
@@ -111,8 +137,9 @@ def _the_name_is_bound(said: dict[str, Inspecting]) -> None:
     pasted = [
         (engine, name)
         for engine, answer in said.items()
-        for name, question in answer.items()
-        if question["parameters"] and not _A_BOUND_NAME.search(question["text"])
+        for name in THE_QUESTIONS
+        if answer[name]["parameters"]  # type: ignore[literal-required]
+        and not _A_BOUND_NAME.search(answer[name]["text"])  # type: ignore[literal-required]
     ]
     assert not pasted, (
         f"{pasted} take a value and have nowhere to bind it, so a table's name "
@@ -124,8 +151,8 @@ def _the_name_is_bound(said: dict[str, Inspecting]) -> None:
     asked_per_table = [
         (engine, name)
         for engine, answer in said.items()
-        for name, question in answer.items()
-        if question["parameters"]
+        for name in THE_QUESTIONS
+        if answer[name]["parameters"]  # type: ignore[literal-required]
     ]
     assert asked_per_table, (
         "not one question on any engine takes a value, so either nothing is "
@@ -302,4 +329,36 @@ def _the_same_words(answered: dict[str, dict[str, tuple]], claim: str) -> None:
     )
     assert set(said.values()) <= {0, 1}, (
         f"{of_the_column!r} answers {said}, and this field is 0 or 1 everywhere"
+    )
+
+
+@then("each one says what it calls the things a column can hold")
+def _it_says_what_it_calls_them(said: dict[str, Inspecting]) -> None:
+    """An engine that named none of its own words would leave every column of a
+    live schema untranslatable, and `reader fn schema_inspect` would refuse the
+    whole read."""
+    silent = [engine for engine, answer in said.items() if answer["types"] == {}]
+
+    assert not silent, (
+        f"{silent} name no word of their own for what a column holds, so every "
+        f"column read off one of them would be refused"
+    )
+
+
+@then("every word it hands back is one this package uses")
+def _every_word_is_one_of_ours(said: dict[str, Inspecting]) -> None:
+    """The right-hand side of the table is `DeclaredType` and nothing else. A
+    word outside it would put a column in the live schema that no model could
+    ever match, and the next migration would be planned against it."""
+    ours = frozenset(typing.get_args(DeclaredType))
+    strays = [
+        (engine, spelled, word)
+        for engine, answer in said.items()
+        for spelled, word in answer["types"].items()
+        if word not in ours
+    ]
+
+    assert not strays, (
+        f"{strays} translate an engine's word into something `DeclaredType` "
+        f"does not carry, so no model could ever match that column"
     )

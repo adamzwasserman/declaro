@@ -104,7 +104,8 @@ module declaro-persistum
                       columns: Statement
                       indexes: Statement
                       constraints: Statement
-                      views: Statement } note "the five questions one engine answers about itself, so reading a schema back names no engine"
+                      views: Statement
+                      types: dict<str, DeclaredType> } note "the five questions one engine answers about itself and its own word for each thing a column can hold, so reading a schema back names no engine"
 
   # WHAT THE DIFFER EMITS. Each operation says whether carrying it out destroys
   # something, so the library says which of them do, derived from the models
@@ -295,7 +296,7 @@ module declaro-persistum
 
   # --- column 2: one orchestrator per door --------------------------------
 
-  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault awaited invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, crew_size, session_open_writer, session_open_channel, crew_make, crew_start, replicates, lifecycle_install_handler, lifecycle_register, channel_pull, schema_read_declared, refuse_owned_names, schema_from_declared, schema_inspect, migration_needed, difference, name_what_is_ambiguous, order_operations, name_what_destroys, what_an_operation_carries, refuse_undeclared_loss, how_to_migrate, how_to_inspect, how_to_spell, capability_of, mechanism_for, spell_view, spell_operation, query_run_statement, log_write note "works out the engine, connects, and builds the handle everything downstream reads"
+  orchestrator fn session_connect : (connecting: Connecting) -> Connecting | Fault awaited invokes engine_of, refuse_unusable_settings, permitted_connections, session_open_connection, crew_size, session_open_writer, session_open_channel, crew_make, crew_start, replicates, lifecycle_install_handler, lifecycle_register, channel_pull, schema_read_declared, refuse_owned_names, schema_from_declared, schema_inspect, migration_needed, difference, name_what_is_ambiguous, order_operations, name_what_destroys, what_an_operation_carries, refuse_undeclared_loss, how_to_migrate, how_to_inspect, capability_of, mechanism_for, spell_operation, how_to_write, query_run_statement, query_run_together, log_write note "works out the engine, connects, and builds the handle everything downstream reads"
 
   orchestrator fn query_answer : (asking: Answering) -> Answering | Fault awaited invokes by_grammar, refuse_undeclared_columns, refuse_some_columns_as_an_object, join_between, compile_statement, travels_together, query_run_statement, query_run_together, crew_deposit, crew_release_ticket, refusal_reaches_caller, answer_from_rows, answer_from_receipt, log_write note "turns a caller's question into rows or a number, waiting on the crew when it is a write"
 
@@ -340,7 +341,7 @@ module declaro-persistum
 
   reader fn schema_read_declared : () -> Declared | Fault side_effect reads "models" note "asks the code which models and views it declares"
 
-  reader fn schema_inspect : (connection: Connection, engine: Engine, inspecting: Inspecting) -> Schema | Fault awaited side_effect reads "database" note "asks a database the five questions and builds what it holds out of the answers; the engine is carried to the driver and never read here"
+  reader fn schema_inspect : (connection: Connection, engine: Engine, inspecting: Inspecting) -> Schema | Fault awaited side_effect reads "database" note "asks a database the five questions and builds what it holds out of the answers"
 
   boundary_out fn log_write : (event: dict<str, Value>) -> NOTHING side_effect writes "log" note "writes a line an operator reads afterwards; a failure never travels here"
 
@@ -433,7 +434,7 @@ module declaro-persistum
 
   fn how_to_compare : (operator: Operator, engine: Engine) -> Comparing | Fault note "reads the operators table and hands back how this engine writes this comparison"
 
-  fn spell_operation : (operation: Operation, engine: Engine) -> list<Statement> | Fault invokes how_to_spell note "turns one schema change into the statements that carry it out"
+  fn spell_operation : (operation: Operation, engine: Engine) -> list<Statement> | Fault invokes how_to_spell, spell_view note "turns one schema change into the statements that carry it out"
 
   # --- what a question across models reaches -------------------------------
 

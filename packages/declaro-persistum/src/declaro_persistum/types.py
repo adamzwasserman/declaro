@@ -428,6 +428,13 @@ class Inspecting(TypedDict):
     indexes: Statement
     constraints: Statement
     views: Statement
+    # THIS ENGINE'S OWN WORD FOR EACH THING A COLUMN CAN HOLD, keyed by the word
+    # with its parentheses cut off and its case folded down. `DeclaredType` is
+    # eleven words no engine uses, and an engine answers its columns question in
+    # its own: SQLite says INTEGER where this package says integer. Comparing
+    # those two strings read every column as changed, so no database this
+    # library had migrated could be opened a second time.
+    types: dict[str, DeclaredType]
 
 
 class Spelling(TypedDict):

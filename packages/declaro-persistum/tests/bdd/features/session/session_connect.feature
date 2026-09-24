@@ -23,12 +23,18 @@ Feature: session_connect -- Everything that has to be true before a handle goes 
     Then no statement changed it
     And the handle comes back
 
-  # MOVED HERE 2026-09-21 from `room_make.feature`. `room_make` takes no
-  # arguments, opens nothing and never sees a database, so it cannot answer what
-  # a caller gets back. Building the handle is this orchestrator's work.
-  Scenario: the library makes the waiting room, not the caller
+  # MOVED HERE 2026-09-21 from the feature for the crew's own maker. `crew_make`
+  # takes no arguments, opens nothing and never sees a database, so it cannot
+  # answer what a caller gets back. Building the handle is this orchestrator's
+  # work.
+  #
+  # REWORDED 2026-09-24. It said "waiting room", and there is no waiting room in
+  # the declaration. `type Crew` is what holds the writes that have arrived and
+  # the drainers that run them, and a scenario naming a thing the declaration
+  # does not have is a scenario nothing can bind.
+  Scenario: the library makes the crew, not the caller
     When a caller opens it
-    Then the room came with the handle
+    Then the crew came with the handle
     And nobody had to make one
 
   Scenario: the engine is worked out before anything is opened
@@ -47,11 +53,15 @@ Feature: session_connect -- Everything that has to be true before a handle goes 
   Scenario: a cold copy is filled before the handle goes back
     Given a replicated database whose local copy is empty
     When a caller opens it
-    Then the copy was filled from Turso before the handle was returned
+    Then the copy was filled from the primary before the handle was returned
 
+  # REWORDED 2026-09-24. It named Turso, and no scenario here names an engine:
+  # a caller writes a target and the library reads the engine off it. It also
+  # said "its connection" and "its room". `type Database` carries a list of
+  # connections, a list of writers and a crew.
   Scenario: the handle carries what everything downstream reads
     When a caller opens a local database
-    Then the handle carries its engine, its connection, its writers and its room
+    Then the handle carries its engine, its connections, its writers and its crew
 
   # ------------------------------------------------------------------
   # FOLDED IN FROM `applier/what_an_applier_says_about_itself.feature` on 2026-09-21, one feature

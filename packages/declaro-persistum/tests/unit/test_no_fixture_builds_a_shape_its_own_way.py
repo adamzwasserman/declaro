@@ -39,7 +39,33 @@ _STEPS = pathlib.Path(__file__).resolve().parents[1] / "bdd" / "steps"
 _A_COLUMN = "declared_type"
 _A_MODEL = "dropping"
 _AN_OPERATION = "copying"
-_EVERY_SHAPE = (_A_COLUMN, _A_MODEL, _AN_OPERATION)
+# ADDED 2026-09-24, on the day `orchestrator fn session_connect` was written.
+# `Connecting` has nineteen fields and one function fills them, `Schema` and
+# `Declared` and `Report` and `Plan` ride inside it, and a step file writing
+# `{"tables": [], "views": []}` at a call site is building a `Schema` by hand.
+# The docstring above says the next record belongs here on the day it lands,
+# and five of them landed together.
+_A_CONNECTING = "connections_asked"
+_A_DECLARED = "dropping_tables"
+_A_REPORT = "applied"
+_A_PLAN = "destroys"
+_EVERY_SHAPE = (
+    _A_COLUMN,
+    _A_MODEL,
+    _AN_OPERATION,
+    _A_CONNECTING,
+    _A_DECLARED,
+    _A_REPORT,
+    _A_PLAN,
+)
+
+# `Schema` IS NOT WATCHED, AND THIS IS THE REASON RATHER THAN AN OVERSIGHT. It
+# has two fields, `tables` and `views`, and it owns neither: `Inspecting` also
+# has `tables` and `Declared` also has `views`. Watching `tables` fired on
+# `test_how_to_inspect_steps.py:160`, which keys the names each engine's answer
+# has to come back under and builds no schema at all. A gate that fires on the
+# wrong file gets switched off, so `Schema` waits for a field of its own.
+# `tests/conftest.py` has `a_schema` and every step file should still call it.
 
 # WHAT A BUILD LOOKS LIKE, WHICH IS NOT THE SAME AS A MENTION. Building one of
 # these by hand means writing a dict literal, so the field has to appear as a

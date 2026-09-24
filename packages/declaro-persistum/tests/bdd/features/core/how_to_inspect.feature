@@ -23,6 +23,21 @@ Feature: how_to_inspect -- The five questions an engine answers about itself
     When every engine the package names is asked
     Then more than one set of five comes back
 
+  # ADDED 2026-09-24, with `types`. `Inspecting` grew a sixth field that is not
+  # a question: this engine's own word for each thing a column can hold, which
+  # `reader fn schema_inspect` reads so the live schema comes back in this
+  # package's words. Every check below walked the record field by field and
+  # treated the new table as a question, and all three engines read as broken.
+  # A seventh field has to be accounted for here before anything else sees it.
+  Scenario: nothing is on the record that this file cannot account for
+    When every engine the package names is asked
+    Then the record holds the five questions and nothing else unaccounted for
+
+  Scenario: an engine's own word for a type is on the record
+    When every engine the package names is asked
+    Then each one says what it calls the things a column can hold
+    And every word it hands back is one this package uses
+
   Scenario: every question keeps its values out of its text
     When every engine the package names is asked
     Then each question carries its text and its values apart

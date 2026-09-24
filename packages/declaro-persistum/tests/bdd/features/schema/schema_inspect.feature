@@ -14,6 +14,28 @@ Feature: schema_inspect -- Asking a database what it currently holds
     When it is inspected
     Then an empty schema comes back, and that is not a failure
 
+  # ADDED 2026-09-24, after opening the same database twice was measured. The
+  # first open created the table; the second was refused, saying it would
+  # destroy every column in it. Nothing was wrong with either column. The engine
+  # calls them INTEGER and TEXT, this package calls them integer and text, and
+  # `fn difference` compares the two words and sees every column changed. On
+  # SQLite a changed column is a table rebuild, a rebuild destroys data, and no
+  # model asked to lose anything, so the open stopped.
+  #
+  # So no database this library migrated could be opened again, which is every
+  # deploy after the first.
+  Scenario: the types come back in this package's words, not the engine's
+    Given a database whose columns the engine calls INTEGER and TEXT
+    When it is inspected
+    Then the columns come back holding integer and text
+    And nothing in the answer is spelled the way the engine spells it
+
+  Scenario: a type this engine spells in a way nothing here knows is refused
+    Given a column the engine describes in a word no table here carries
+    When it is inspected
+    Then it is refused naming the word and the table it came from
+    And no column comes back holding a guess
+
   Scenario: nothing decides anything from it
     When a database holds a table no model declares
     Then the table is not adopted into the target schema

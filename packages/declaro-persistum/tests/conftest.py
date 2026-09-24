@@ -642,3 +642,131 @@ def a_model(
         "indexes": indexes,
         "constraints": constraints,
     }
+
+
+# =============================================================================
+# The five shapes an open carries, so a step file writes none of them by hand
+# =============================================================================
+#
+# `type Connecting` HAS NINETEEN FIELDS AND ONE FUNCTION FILLS THEM. It is the
+# widest record in the declaration, it is the only argument
+# `orchestrator fn session_connect` takes, and a step file that wrote it out
+# itself would be the thirteenth file doing what cost this suite two silent days
+# already. `Column` lost `facets` on 2026-09-22 and twelve files stayed green;
+# eight files hand-built a `Room` and the room changed under them inside a day.
+#
+# FOUR SMALLER RECORDS RIDE INSIDE IT, so they get builders too. Writing
+# `{"tables": [], "views": []}` at a call site is building a `Schema` by hand,
+# and it is the same defect wearing a shorter name.
+
+
+# THREE RECORDS OF TWO FIELDS EACH, AND ONE FUNCTION BUILDS ALL THREE. Written
+# out they were three bodies differing by two strings apiece, which is a table
+# with the strings in the rows. The row is the record's field names, in the order
+# the declaration writes them.
+WHAT_EACH_SHORT_RECORD_HOLDS: dict[str, tuple[str, str]] = {
+    # What a database holds, or what the models ask for.
+    "schema": ("tables", "views"),
+    # The changes to make, and which of them lose data.
+    "plan": ("operations", "destroys"),
+    # The plan, and how many of its operations ran. There is no error string on
+    # it: what stopped a migration comes back as a `Fault` instead of a report,
+    # so a caller holding a report is holding an account of one that finished.
+    "report": ("plan", "applied"),
+}
+
+
+def _a_record_of(kind: str):
+    """Build the builder for one of the short records.
+
+    EVERY FIELD IS STILL REQUIRED AND THE CALL STILL NAMES EACH ONE. The check
+    is made here rather than by a signature, and it refuses a call that leaves
+    one out and a call that invents one. A field added to a row then fails every
+    call site at once, which is the only thing that keeps a fixture up with a
+    declaration.
+    """
+    fields = WHAT_EACH_SHORT_RECORD_HOLDS[kind]
+
+    def build(**said):
+        assert set(said) == set(fields), (
+            f"a {kind} holds {list(fields)} and this call named {sorted(said)}"
+        )
+        return {name: said[name] for name in fields}
+
+    return build
+
+
+a_schema = _a_record_of("schema")
+a_plan = _a_record_of("plan")
+a_report = _a_record_of("report")
+
+
+def declaring(*, models: list, views: list, dropping_tables: list, dropping_views: list):
+    """One `Declared`: everything the host's code says about its database.
+
+    `dropping_tables` and `dropping_views` are how a project says a whole table
+    or view goes. A column's loss is declared on the model that survives it;
+    a table that is gone has no model left to say anything, so it is said here.
+    """
+    return {
+        "models": models,
+        "views": views,
+        "dropping_tables": dropping_tables,
+        "dropping_views": dropping_views,
+    }
+
+
+def a_connecting(
+    *,
+    target: str,
+    shutdown: str,
+    primary: str | None,
+    token: str | None,
+    connections_asked: int | None,
+    crew_asked: int | None,
+    engine: str,
+    settings: dict,
+    permitted: int,
+    crew_size: int,
+    writers: list,
+    connections: list,
+    channel: object,
+    declared: dict,
+    live: dict,
+    wanted_schema: dict,
+    needs_migration: bool,
+    migration: dict,
+    database: dict | None,
+):
+    """One `Connecting`, every field said out loud.
+
+    NINETEEN ARGUMENTS AND NOT ONE OF THEM OPTIONAL. Six of the nineteen are
+    what a caller hands in and thirteen are what the open fills, and a default
+    on any of them would let a step file say a database was opened with numbers
+    nobody in that scenario chose.
+
+    `connections_asked` AND `crew_asked` ARE TWO NUMBERS, NOT ONE. They were one
+    field until 2026-09-22, and opening with the crew set to 2 and the
+    connections to 4 opened four writers.
+    """
+    return {
+        "target": target,
+        "shutdown": shutdown,
+        "primary": primary,
+        "token": token,
+        "connections_asked": connections_asked,
+        "crew_asked": crew_asked,
+        "engine": engine,
+        "settings": settings,
+        "permitted": permitted,
+        "crew_size": crew_size,
+        "writers": writers,
+        "connections": connections,
+        "channel": channel,
+        "declared": declared,
+        "live": live,
+        "wanted_schema": wanted_schema,
+        "needs_migration": needs_migration,
+        "migration": migration,
+        "database": database,
+    }
