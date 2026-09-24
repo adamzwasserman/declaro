@@ -173,7 +173,6 @@ KNOWN_UNBOUND: dict[str, str] = {
     "the_models_are_the_truth.feature": _ONE_EACH,
     "the_schema_is_declared.feature": _ONE_EACH,
     "the_test_for_any_function.feature": _ONE_EACH,
-    "turso_push.feature": _ONE_EACH,
     "validating_a_schema.feature": _ONE_EACH,
     "values.feature": _ONE_EACH,
     "what_the_library_owns.feature": _ONE_EACH,
