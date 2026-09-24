@@ -36,10 +36,25 @@ _STEPS = pathlib.Path(__file__).resolve().parents[1] / "bdd" / "steps"
 # Read off the declaration's own records rather than guessed: a `Column` is the
 # only thing with `declared_type`, a `Model` the only thing with `dropping`, and
 # an `Operation` the only thing with `copying`.
-_A_COLUMN = '"declared_type"'
-_A_MODEL = '"dropping"'
-_AN_OPERATION = '"copying"'
+_A_COLUMN = "declared_type"
+_A_MODEL = "dropping"
+_AN_OPERATION = "copying"
 _EVERY_SHAPE = (_A_COLUMN, _A_MODEL, _AN_OPERATION)
+
+# WHAT A BUILD LOOKS LIKE, WHICH IS NOT THE SAME AS A MENTION. Building one of
+# these by hand means writing a dict literal, so the field has to appear as a
+# key with a value after it. On 2026-09-24 this gate fired on a file that named
+# `declared_type` in a set of names an engine has to answer under, which builds
+# nothing and is exactly the kind of false positive that gets a gate switched
+# off. Every instrument has a horizon; this one's is that a field named in a
+# string is not a field being filled in.
+#
+# `declared_type=` IS NOT ONE OF THESE SPELLINGS, AND THAT IS DELIBERATE. It is
+# how `a_column` is called, which is the cure rather than the disease. Adding it
+# turned this gate on four files that had already been moved to the shared
+# builders, which is the shape of a gate that counts the cure and gets turned
+# off for it.
+_ASSIGNED = ('"{field}":', "'{field}':")
 
 
 # EVERY STEP FILE'S TEXT, READ ONCE, WHEN THIS MODULE LOADS. The reading is up
@@ -52,8 +67,9 @@ WHAT_EACH_STEP_FILE_SAYS: dict[str, str] = {
 
 
 def _files_writing(field: str, said: dict[str, str]) -> set[str]:
-    """Which of those files write a dict carrying this field."""
-    return {name for name, text in said.items() if field in text}
+    """Which of those files assign this field, rather than merely naming it."""
+    spellings = [spelling.format(field=field) for spelling in _ASSIGNED]
+    return {name for name, text in said.items() if any(spelling in text for spelling in spellings)}
 
 
 # EVERY FILE THAT STILL BUILDS ONE ITSELF, listed by name so this gate names the

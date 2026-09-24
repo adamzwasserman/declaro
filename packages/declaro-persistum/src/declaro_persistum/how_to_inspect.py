@@ -21,6 +21,28 @@ TURSO ANSWERS AS SQLITE DOES, AND THAT IS A ROW AND NOT AN ALIAS. Turso is a
 Rust rewrite aiming at SQLite compatibility rather than a fork of it, so the day
 its catalogue differs is a day one row changes and nothing else does.
 
+EVERY QUESTION NAMES ITS OWN ANSWER, AND THAT IS WHAT MAKES THE READER
+ENGINE-FREE. Measured 2026-09-24 against real databases: the columns question
+answered under `cid, name, type, notnull, dflt_value, pk` on SQLite and
+`column_name, data_type, is_nullable, column_default` on PostgreSQL, and
+nullability came back as 0 and 1 on one and as 'YES' and 'NO' on the other. A
+reader handed those would have to know which engine it was talking to, which is
+the one thing `Inspecting` exists to prevent. So each question aliases its
+output to one set of names and casts its answers to one set of words, in the
+SQL, where the engine differences already live.
+
+WHAT EVERY ENGINE ANSWERS, QUESTION BY QUESTION:
+
+    tables       name
+    columns      name, declared_type, must_hold_something, starts_at, is_key
+    indexes      name, is_unique, spelled_out
+    constraints  name, kind, spelled_out
+    views        name, spelled_out
+
+`must_hold_something` and `is_key` are 0 or 1 everywhere. `spelled_out` is the
+engine's own text for a thing it keeps no structured answer about, and
+`reader fn schema_inspect` is what reads it.
+
 NO FALLBACK ON THE READ. `THE_FIVE_QUESTIONS[engine]`, never `.get`.
 """
 
@@ -43,13 +65,29 @@ def _about_one_table(text: str) -> Statement:
 # `architecture.md:257` warns that an unfetched PRAGMA is a silent no-op, which
 # is a fact about running these rather than about writing them down.
 _LIKE_SQLITE: Inspecting = {
-    "tables": _asked("SELECT name FROM sqlite_master WHERE type = 'table'"),
-    "columns": _about_one_table("SELECT * FROM pragma_table_info(:table)"),
-    "indexes": _about_one_table("SELECT * FROM pragma_index_list(:table)"),
-    "constraints": _about_one_table(
-        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = :table"
+    "tables": _asked("SELECT name AS name FROM sqlite_master WHERE type = 'table'"),
+    "columns": _about_one_table(
+        # `notnull` AND `unique` ARE KEYWORDS, so the pragma's own column names
+        # are quoted on the way out. Unquoted, SQLite answers `near "notnull":
+        # syntax error` and the whole read fails.
+        "SELECT name AS name, type AS declared_type, "
+        '"notnull" AS must_hold_something, dflt_value AS starts_at, pk AS is_key '
+        "FROM pragma_table_info(:table)"
     ),
-    "views": _asked("SELECT name, sql FROM sqlite_master WHERE type = 'view'"),
+    "indexes": _about_one_table(
+        'SELECT name AS name, "unique" AS is_unique, origin AS spelled_out '
+        "FROM pragma_index_list(:table)"
+    ),
+    # SQLITE KEEPS NO CATALOGUE OF RULES, only the text it was created with. So
+    # the answer is one row carrying the whole CREATE TABLE, and the kind is the
+    # word this package uses for that: `reader fn schema_inspect` reads the text.
+    "constraints": _about_one_table(
+        "SELECT name AS name, 'in_the_ddl' AS kind, sql AS spelled_out "
+        "FROM sqlite_master WHERE type = 'table' AND name = :table"
+    ),
+    "views": _asked(
+        "SELECT name AS name, sql AS spelled_out FROM sqlite_master WHERE type = 'view'"
+    ),
 }
 
 # ONE ROW PER ENGINE, AND ADDING AN ENGINE IS ONE MORE LINE. PostgreSQL keeps
@@ -60,25 +98,39 @@ THE_FIVE_QUESTIONS: dict[Engine, Inspecting] = {
     "turso": _LIKE_SQLITE,
     "postgresql": {
         "tables": _asked(
-            "SELECT table_name FROM information_schema.tables "
+            "SELECT table_name AS name FROM information_schema.tables "
             "WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"
         ),
+        # THE TWO CASTS ARE WHAT MAKE THE ANSWER READ ALIKE. PostgreSQL says
+        # 'YES' and 'NO' where SQLite says 0 and 1, and it keeps no per-column
+        # key flag at all, so the key is read off `pg_index` and counted.
         "columns": _about_one_table(
-            "SELECT column_name, data_type, is_nullable, column_default "
-            "FROM information_schema.columns "
-            "WHERE table_schema = 'public' AND table_name = :table"
+            "SELECT c.column_name AS name, c.data_type AS declared_type, "
+            "CASE WHEN c.is_nullable = 'NO' THEN 1 ELSE 0 END AS must_hold_something, "
+            "c.column_default AS starts_at, "
+            "CASE WHEN EXISTS ("
+            "  SELECT 1 FROM pg_index i "
+            "  JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
+            "  WHERE i.indrelid = to_regclass(:table) AND i.indisprimary "
+            "    AND a.attname = c.column_name"
+            ") THEN 1 ELSE 0 END AS is_key "
+            "FROM information_schema.columns c "
+            "WHERE c.table_schema = 'public' AND c.table_name = :table"
         ),
         "indexes": _about_one_table(
-            "SELECT indexname, indexdef FROM pg_indexes "
+            "SELECT indexname AS name, "
+            "CASE WHEN indexdef LIKE 'CREATE UNIQUE%' THEN 1 ELSE 0 END AS is_unique, "
+            "indexdef AS spelled_out FROM pg_indexes "
             "WHERE schemaname = 'public' AND tablename = :table"
         ),
         "constraints": _about_one_table(
-            "SELECT conname, contype, pg_get_constraintdef(oid) FROM pg_constraint "
+            "SELECT conname AS name, contype AS kind, "
+            "pg_get_constraintdef(oid) AS spelled_out FROM pg_constraint "
             "WHERE conrelid = to_regclass(:table)"
         ),
         "views": _asked(
-            "SELECT table_name, view_definition FROM information_schema.views "
-            "WHERE table_schema = 'public'"
+            "SELECT table_name AS name, view_definition AS spelled_out "
+            "FROM information_schema.views WHERE table_schema = 'public'"
         ),
     },
 }

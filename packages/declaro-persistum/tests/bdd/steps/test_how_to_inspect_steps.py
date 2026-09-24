@@ -18,10 +18,13 @@ and values apart, and a bound name where a name is needed.
 
 from __future__ import annotations
 
+import asyncio
+import pathlib
 import re
+import tempfile
 import typing
 
-from pytest_bdd import given, scenarios, then, when
+from pytest_bdd import given, parsers, scenarios, then, when
 
 from declaro_persistum.how_to_inspect import how_to_inspect
 from declaro_persistum.types import Engine, Inspecting
@@ -122,4 +125,179 @@ def _the_name_is_bound(said: dict[str, Inspecting]) -> None:
     assert asked_per_table, (
         "not one question on any engine takes a value, so either nothing is "
         "asked per table or a name is being written straight into the text"
+    )
+
+
+# --- the questions run against real databases --------------------------------
+#
+# ONE ROW PER ENGINE, THREE ENTRIES EACH: how a database is made with something
+# in it, how a question is put to it, and how it is closed. The answers are
+# read back as the names the engine gave them, which is the whole of what these
+# two scenarios ask about.
+
+WHAT_A_SCENARIO_PUTS_IN_A_DATABASE = (
+    "CREATE TABLE parent (id integer primary key, tag text)",
+    "CREATE TABLE child (id integer primary key, note text NOT NULL, "
+    "parent_id integer REFERENCES parent(id))",
+    "CREATE INDEX idx_note ON child (note)",
+    # A VIEW, BECAUSE THE FIFTH QUESTION IS ABOUT VIEWS. asyncpg gives no column
+    # names at all for an empty result, so a database with no view cannot say
+    # what the views question answers under.
+    "CREATE VIEW recent AS SELECT id FROM child",
+)
+
+THE_TABLE_THE_QUESTIONS_ARE_ABOUT = "child"
+
+# What every engine's answer to each question has to be called. The reader takes
+# five questions and a connection and names no engine, which is only possible if
+# these are the names whatever answered.
+WHAT_EACH_ANSWER_IS_CALLED: dict[str, set[str]] = {
+    "tables": {"name"},
+    "columns": {"name", "declared_type", "must_hold_something", "starts_at", "is_key"},
+    "indexes": {"name", "is_unique", "spelled_out"},
+    "constraints": {"name", "kind", "spelled_out"},
+    "views": {"name", "spelled_out"},
+}
+
+
+async def _ask_sqlite(folder, questions: Inspecting, table: str) -> dict[str, tuple]:
+    """One database, made once, then asked all five."""
+    import aiosqlite
+
+    connection = await aiosqlite.connect(folder / "s.db", isolation_level=None)
+    try:
+        for making in WHAT_A_SCENARIO_PUTS_IN_A_DATABASE:
+            await connection.execute(making)
+
+        async def ask(text: str) -> tuple:
+            cursor = await connection.execute(
+                text.replace(":table", "?"), [table] if ":table" in text else []
+            )
+            names = [column[0] for column in cursor.description]
+            return names, [dict(zip(names, row, strict=True)) for row in await cursor.fetchall()]
+
+        return {name: await ask(questions[name]["text"]) for name in WHAT_EACH_ANSWER_IS_CALLED}
+    finally:
+        await connection.close()
+
+
+async def _ask_turso(folder, questions: Inspecting, table: str) -> dict[str, tuple]:
+    import turso.aio
+
+    connection = await turso.aio.connect(str(folder / "t.db"))
+    try:
+        cursor = connection.cursor()
+        for making in WHAT_A_SCENARIO_PUTS_IN_A_DATABASE:
+            await cursor.execute(making)
+
+        async def ask(text: str) -> tuple:
+            await cursor.execute(text.replace(":table", "?"), [table] if ":table" in text else [])
+            names = [column[0] for column in cursor.description]
+            return names, [dict(zip(names, row, strict=True)) for row in await cursor.fetchall()]
+
+        return {name: await ask(questions[name]["text"]) for name in WHAT_EACH_ANSWER_IS_CALLED}
+    finally:
+        await connection.close()
+
+
+async def _ask_postgresql(_folder, questions: Inspecting, table: str) -> dict[str, tuple]:
+    """The probe database outlives this process, so the tables go afterwards."""
+    import asyncpg
+
+    from tests.conftest import POSTGRESQL_PROBE_URL
+
+    connection = await asyncpg.connect(POSTGRESQL_PROBE_URL)
+    try:
+        for making in WHAT_A_SCENARIO_PUTS_IN_A_DATABASE:
+            await connection.execute(making)
+
+        async def ask(text: str) -> tuple:
+            asked = text.replace(":table", "$1")
+            records = await connection.fetch(asked, *([table] if "$1" in asked else []))
+            names = list(records[0].keys()) if records else []
+            return names, [dict(record) for record in records]
+
+        return {name: await ask(questions[name]["text"]) for name in WHAT_EACH_ANSWER_IS_CALLED}
+    finally:
+        for dropping in (
+            "DROP VIEW IF EXISTS recent",
+            "DROP TABLE IF EXISTS child",
+            "DROP TABLE IF EXISTS parent",
+        ):
+            await connection.execute(dropping)
+        await connection.close()
+
+
+HOW_TO_ASK_EACH_ENGINE = {
+    "sqlite": _ask_sqlite,
+    "turso": _ask_turso,
+    "postgresql": _ask_postgresql,
+}
+
+
+@when("each engine is asked its five questions against a real database", target_fixture="answered")
+def _each_engine_is_asked_for_real() -> dict[str, dict[str, tuple]]:
+    """Every engine, every question, against a database with something in it.
+
+    NOTHING IS A STAND-IN. What is being asserted is the shape an engine hands
+    back, and a double would be deciding that shape rather than reporting it,
+    which is the exact failure this scenario exists to have caught.
+    """
+
+    async def _asked() -> dict[str, dict[str, tuple]]:
+        held: dict[str, dict[str, tuple]] = {}
+        for engine, ask in HOW_TO_ASK_EACH_ENGINE.items():
+            questions = how_to_inspect(engine)  # type: ignore[arg-type]
+            with tempfile.TemporaryDirectory() as made:
+                held[engine] = await ask(
+                    pathlib.Path(made), questions, THE_TABLE_THE_QUESTIONS_ARE_ABOUT
+                )
+        return held
+
+    return asyncio.run(_asked())
+
+
+@then("the answers come back under the same names on every engine")
+def _the_same_names(answered: dict[str, dict[str, tuple]]) -> None:
+    """A reader handed differently named answers has to know which engine it is
+    talking to, which is the one thing `Inspecting` exists to prevent."""
+    assert set(answered) == set(HOW_TO_ASK_EACH_ENGINE), (
+        f"only {sorted(answered)} were asked, and a row nobody ran is a row nobody has seen answer"
+    )
+    for engine, asked in answered.items():
+        for question, wanted in WHAT_EACH_ANSWER_IS_CALLED.items():
+            names, _rows = asked[question]
+            assert set(names) == wanted, (
+                f"{engine} answers its {question} question under {sorted(names)} "
+                f"and every engine has to answer under {sorted(wanted)}"
+            )
+
+
+@then(
+    parsers.re(
+        r"^a column that (?P<claim>must hold something|is the key) reads the same on every engine$"
+    )
+)
+def _the_same_words(answered: dict[str, dict[str, tuple]], claim: str) -> None:
+    """Names alone are not enough: SQLite said 0 and 1 where PostgreSQL said
+    'YES' and 'NO', so a reader comparing them would read every PostgreSQL
+    column as nullable and rebuild every table on every deploy."""
+    under, of_the_column = {
+        "must hold something": ("must_hold_something", "note"),
+        "is the key": ("is_key", "id"),
+    }[claim]
+
+    said = {}
+    for engine, asked in answered.items():
+        _names, rows = asked["columns"]
+        found = [row for row in rows if row["name"] == of_the_column]
+        assert found, f"{engine} did not answer about the column {of_the_column!r}: {rows}"
+        said[engine] = found[0][under]
+
+    assert len(set(said.values())) == 1, (
+        f"{of_the_column!r} answers {said} across the engines, and a reader "
+        f"comparing those has to know which engine it is talking to"
+    )
+    assert set(said.values()) <= {0, 1}, (
+        f"{of_the_column!r} answers {said}, and this field is 0 or 1 everywhere"
     )
