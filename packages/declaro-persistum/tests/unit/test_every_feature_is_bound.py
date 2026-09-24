@@ -120,7 +120,6 @@ KNOWN_UNBOUND: dict[str, str] = {
     "lifecycle_register.feature": _NEEDS_A_DELETED_FUNCTION,
     "replicates.feature": _NEEDS_A_DELETED_FUNCTION,
     "schema_read_declared.feature": _NEEDS_A_DELETED_FUNCTION,
-    "crew_run_write.feature": _ONE_EACH,
     "migration_report.feature": _DELETED_2026_09_23,
     "query_answer.feature": _DELETED_2026_09_23,
     "query_ask.feature": _DELETED_2026_09_23,

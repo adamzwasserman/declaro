@@ -27,9 +27,16 @@ from declaro_persistum.types import Engine, Transacting
 # ONE ROW PER ENGINE, AND ADDING AN ENGINE IS ONE MORE LINE. An engine that
 # opens nothing says so with an empty statement, which is a real answer here
 # rather than an absence: PostgreSQL genuinely writes nothing to begin.
+#
+# ALL THREE ARE POSITIONAL, AND TWO OF THEM SAID NAMED UNTIL 2026-09-24. SQLite
+# and Turso read `?` and PostgreSQL reads `$1`, and `fn compile_statement`
+# writes exactly those, so every value travels by its place and no driver here
+# reads the names it was given. Nothing in this package read the field, which is
+# why nothing caught it: a field nobody reads is a field nobody keeps true. The
+# scenario in `how_to_write.feature` reads this against the compiler now.
 TRANSACTING: dict[Engine, Transacting] = {
-    "turso": {"begin": "BEGIN CONCURRENT", "parameters": "named", "commits": True},
-    "sqlite": {"begin": "BEGIN IMMEDIATE", "parameters": "named", "commits": True},
+    "turso": {"begin": "BEGIN CONCURRENT", "parameters": "positional", "commits": True},
+    "sqlite": {"begin": "BEGIN IMMEDIATE", "parameters": "positional", "commits": True},
     "postgresql": {"begin": "", "parameters": "positional", "commits": False},
 }
 

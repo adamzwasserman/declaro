@@ -18,6 +18,7 @@ import typing
 
 from pytest_bdd import given, parsers, scenarios, then, when
 
+from declaro_persistum.compile_statement import compile_statement
 from declaro_persistum.how_to_write import how_to_write
 from declaro_persistum.types import Engine, Transacting
 
@@ -97,3 +98,44 @@ def _all_answered_and_differ(said: dict[str, Transacting]) -> None:
         f"{doubled} were given the same answer, so one engine's row was copied "
         f"over another's and every scenario above would still pass"
     )
+
+
+# WHAT A PLACEHOLDER LOOKS LIKE WHEN IT IS NAMED, and what it looks like when it
+# is positional. A driver reading a name needs `:p1` or `%(p1)s` in the text; a
+# driver counting them takes `?` or `$1` and reads no name at all.
+_A_NAMED_PLACEHOLDER = (":", "%(")
+
+
+@then("each one's parameter style matches the placeholders its statements carry")
+def _the_style_matches_the_placeholders(said: dict[str, Transacting]) -> None:
+    """The claim is read against `fn compile_statement`, which writes the text.
+
+    A FIELD NOBODY READS IS A FIELD NOBODY KEEPS TRUE. This one said SQLite and
+    Turso take named values while the compiler was writing `?` for both, and
+    every runner in this package hands the values over as a list without asking,
+    so nothing was ever wrong enough to fail.
+    """
+    asked = {
+        "model": "people",
+        "wanted": "add",
+        "columns": [],
+        "condition": {"each": {}, "any_of": [], "none_of": []},
+        "order": {},
+        "grouping": [],
+        "having": {"each": {}, "any_of": [], "none_of": []},
+        "paging": None,
+        "rows": [{"name": "Ada"}],
+        "shaping": "dictionaries",
+        "across": None,
+    }
+    for engine, answer in said.items():
+        statement = compile_statement(asked, engine)  # type: ignore[arg-type]
+        assert "text" in statement, f"{engine} could not compile the write: {statement}"
+        named = any(mark in statement["text"] for mark in _A_NAMED_PLACEHOLDER)
+        wanted = {True: "named", False: "positional"}[named]
+        assert answer["parameters"] == wanted, (
+            f"{engine} says its values go in {answer['parameters']!r} and "
+            f"`fn compile_statement` writes {statement['text']!r}, which is "
+            f"{wanted}. A runner reading this field would hand the driver the "
+            f"wrong shape and the write would never run."
+        )

@@ -21,3 +21,12 @@ Feature: how_to_write -- What one engine needs around a write
   Scenario: every engine answers
     When every engine the package names is asked
     Then each one answers, and no two engines get the same answer
+
+  # ADDED 2026-09-24. The answer carries how values go to the driver, and it said
+  # "named" for SQLite and Turso, which write `?`. Nothing read the field, so
+  # nothing caught it: every runner in this package hands the values over as a
+  # list and never asks. A field nobody reads is a field nobody keeps true.
+
+  Scenario: how values go to the driver is what the compiler actually writes
+    When every engine the package names is asked
+    Then each one's parameter style matches the placeholders its statements carry
