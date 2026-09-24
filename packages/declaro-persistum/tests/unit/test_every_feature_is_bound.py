@@ -151,7 +151,6 @@ KNOWN_UNBOUND: dict[str, str] = {
     "largest.feature": _ONE_EACH,
     "lifecycle_shut_down.feature": _ONE_EACH,
     "lifecycle_stop.feature": _ONE_EACH,
-    "lifecycle_turn.feature": _ONE_EACH,
     "nothing_reaches_past_the_surface.feature": _ONE_EACH,
     "nothing_takes_a_default.feature": _ONE_EACH,
     "of.feature": _ONE_EACH,
