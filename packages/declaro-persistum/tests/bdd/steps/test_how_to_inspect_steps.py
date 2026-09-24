@@ -37,7 +37,12 @@ THE_FIVE = frozenset(typing.get_type_hints(Inspecting))
 # A question asked once per table has to bind that table's name. Which of the
 # five those are is the engine's business, so this finds them by the parameter
 # rather than by naming them here.
-_A_BOUND_NAME = re.compile(r":\w+")
+# A PLACEHOLDER, IN ANY OF THE THREE SPELLINGS THE DRIVERS READ. SQLite and
+# Turso read `?` and PostgreSQL reads `$1`, which is what `fn compile_statement`
+# writes too. Until 2026-09-24 this looked for `:table`, and every driver refused
+# a question written that way: "Binding 1 (':table') is a named parameter, but
+# you supplied a sequence".
+_A_BOUND_NAME = re.compile(r"[?]|[$]\d+")
 
 
 @given("any engine", target_fixture="answered")
@@ -170,9 +175,7 @@ async def _ask_sqlite(folder, questions: Inspecting, table: str) -> dict[str, tu
             await connection.execute(making)
 
         async def ask(text: str) -> tuple:
-            cursor = await connection.execute(
-                text.replace(":table", "?"), [table] if ":table" in text else []
-            )
+            cursor = await connection.execute(text, [table] if "?" in text else [])
             names = [column[0] for column in cursor.description]
             return names, [dict(zip(names, row, strict=True)) for row in await cursor.fetchall()]
 
@@ -191,7 +194,7 @@ async def _ask_turso(folder, questions: Inspecting, table: str) -> dict[str, tup
             await cursor.execute(making)
 
         async def ask(text: str) -> tuple:
-            await cursor.execute(text.replace(":table", "?"), [table] if ":table" in text else [])
+            await cursor.execute(text, [table] if "?" in text else [])
             names = [column[0] for column in cursor.description]
             return names, [dict(zip(names, row, strict=True)) for row in await cursor.fetchall()]
 
@@ -212,8 +215,7 @@ async def _ask_postgresql(_folder, questions: Inspecting, table: str) -> dict[st
             await connection.execute(making)
 
         async def ask(text: str) -> tuple:
-            asked = text.replace(":table", "$1")
-            records = await connection.fetch(asked, *([table] if "$1" in asked else []))
+            records = await connection.fetch(text, *([table] if "$1" in text else []))
             names = list(records[0].keys()) if records else []
             return names, [dict(record) for record in records]
 

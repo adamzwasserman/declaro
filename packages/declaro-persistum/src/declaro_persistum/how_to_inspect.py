@@ -17,6 +17,12 @@ five are asked once per table, and the table's name is a value the driver binds
 rather than characters pasted into the question. SQLite and Turso answer from
 `sqlite_master`; PostgreSQL answers from `information_schema`.
 
+EACH QUESTION CARRIES ITS OWN ENGINE'S PLACEHOLDER, for the same reason
+`fn compile_statement` writes `?` for SQLite and Turso and `$1` for PostgreSQL:
+all three drivers count their placeholders and read no name. A question written
+with `:table` came back refused by every one of them, measured 2026-09-24:
+"Binding 1 (':table') is a named parameter, but you supplied a sequence".
+
 TURSO ANSWERS AS SQLITE DOES, AND THAT IS A ROW AND NOT AN ALIAS. Turso is a
 Rust rewrite aiming at SQLite compatibility rather than a fork of it, so the day
 its catalogue differs is a day one row changes and nothing else does.
@@ -72,18 +78,18 @@ _LIKE_SQLITE: Inspecting = {
         # syntax error` and the whole read fails.
         "SELECT name AS name, type AS declared_type, "
         '"notnull" AS must_hold_something, dflt_value AS starts_at, pk AS is_key '
-        "FROM pragma_table_info(:table)"
+        "FROM pragma_table_info(?)"
     ),
     "indexes": _about_one_table(
         'SELECT name AS name, "unique" AS is_unique, origin AS spelled_out '
-        "FROM pragma_index_list(:table)"
+        "FROM pragma_index_list(?)"
     ),
     # SQLITE KEEPS NO CATALOGUE OF RULES, only the text it was created with. So
     # the answer is one row carrying the whole CREATE TABLE, and the kind is the
     # word this package uses for that: `reader fn schema_inspect` reads the text.
     "constraints": _about_one_table(
         "SELECT name AS name, 'in_the_ddl' AS kind, sql AS spelled_out "
-        "FROM sqlite_master WHERE type = 'table' AND name = :table"
+        "FROM sqlite_master WHERE type = 'table' AND name = ?"
     ),
     "views": _asked(
         "SELECT name AS name, sql AS spelled_out FROM sqlite_master WHERE type = 'view'"
@@ -111,22 +117,27 @@ THE_FIVE_QUESTIONS: dict[Engine, Inspecting] = {
             "CASE WHEN EXISTS ("
             "  SELECT 1 FROM pg_index i "
             "  JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
-            "  WHERE i.indrelid = to_regclass(:table) AND i.indisprimary "
+            "  WHERE i.indrelid = to_regclass($1) AND i.indisprimary "
             "    AND a.attname = c.column_name"
             ") THEN 1 ELSE 0 END AS is_key "
             "FROM information_schema.columns c "
-            "WHERE c.table_schema = 'public' AND c.table_name = :table"
+            "WHERE c.table_schema = 'public' AND c.table_name = $1"
         ),
         "indexes": _about_one_table(
             "SELECT indexname AS name, "
             "CASE WHEN indexdef LIKE 'CREATE UNIQUE%' THEN 1 ELSE 0 END AS is_unique, "
             "indexdef AS spelled_out FROM pg_indexes "
-            "WHERE schemaname = 'public' AND tablename = :table"
+            "WHERE schemaname = 'public' AND tablename = $1"
         ),
         "constraints": _about_one_table(
-            "SELECT conname AS name, contype AS kind, "
+            # `contype` IS A ONE-CHARACTER TYPE AND asyncpg HANDS IT BACK AS BYTES,
+            # measured 2026-09-24: `b'c'` rather than `c`, so a reader comparing
+            # it against a word never matched and every CHECK was left out of
+            # the live schema. The cast makes it text, here, with the rest of
+            # what PostgreSQL says differently.
+            "SELECT conname AS name, contype::text AS kind, "
             "pg_get_constraintdef(oid) AS spelled_out FROM pg_constraint "
-            "WHERE conrelid = to_regclass(:table)"
+            "WHERE conrelid = to_regclass($1)"
         ),
         "views": _asked(
             "SELECT table_name AS name, view_definition AS spelled_out "

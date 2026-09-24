@@ -340,7 +340,7 @@ module declaro-persistum
 
   reader fn schema_read_declared : () -> Declared | Fault side_effect reads "models" note "asks the code which models and views it declares"
 
-  reader fn schema_inspect : (connection: Connection, inspecting: Inspecting) -> Schema | Fault awaited side_effect reads "database" note "asks a database the five questions and builds what it holds out of the answers"
+  reader fn schema_inspect : (connection: Connection, engine: Engine, inspecting: Inspecting) -> Schema | Fault awaited side_effect reads "database" note "asks a database the five questions and builds what it holds out of the answers; the engine is carried to the driver and never read here"
 
   boundary_out fn log_write : (event: dict<str, Value>) -> NOTHING side_effect writes "log" note "writes a line an operator reads afterwards; a failure never travels here"
 
