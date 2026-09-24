@@ -92,6 +92,21 @@ def _what_was_set_up(scenario: dict, sentence: str) -> None:
     scenario.update(WHAT_EACH_GIVEN_SETS[sentence])
 
 
+# BOTH HALVES SAY WHETHER THE WRITER IS OPEN AFTERWARDS, so neither is a call
+# made for its effect, and the scenario can read that back rather than tracking
+# it in a flag beside the call.
+async def _close_it(writer) -> bool:
+    await writer.close()
+    return False
+
+
+async def _leave_it_open(_writer) -> bool:
+    return True
+
+
+_WHETHER_TO_CLOSE_IT = {True: _close_it, False: _leave_it_open}
+
+
 @when("a turn arrives")
 def _a_turn_arrives(scenario: dict) -> None:
     scenario.update(asyncio.run(_one_turn(scenario)))
@@ -117,26 +132,15 @@ async def _one_turn(scenario: dict) -> dict:
     for note in scenario["notes"]:
         assert isinstance(crew_deposit(crew, _a_write(note)), str)
 
-    await _WHETHER_THE_WRITER_IS_CLOSED[scenario["closed"]](writer)
+    open_afterwards = await _WHETHER_TO_CLOSE_IT[scenario["closed"]](writer)
     raised = None
     try:
         answer = await lifecycle_turn(Draining(db=db, writer=writer, stop=crew["stop"], idle=0.0))
     except BaseException as came_out:  # noqa: BLE001
         answer, raised = None, came_out
     rows = await _rows_in(writer, scenario["closed"])
-    await _WHETHER_THE_WRITER_IS_CLOSED[not scenario["closed"]](writer)
+    await _WHETHER_TO_CLOSE_IT[open_afterwards](writer)
     return {"answer": answer, "raised": raised, "rows": rows, "sync": ran}
-
-
-async def _close_it(writer) -> None:
-    await writer.close()
-
-
-async def _leave_it_open(_writer) -> None:
-    return None
-
-
-_WHETHER_THE_WRITER_IS_CLOSED = {True: _close_it, False: _leave_it_open}
 
 
 async def _rows_in(writer, closed: bool) -> list[tuple]:
