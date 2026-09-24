@@ -28,6 +28,7 @@ module declaro-persistum
   type Waiter = handle note "where one caller's outcome is put; awaited once, never read"
   type Doorbell = handle note "how a sleeping drainer is told there is work, or told to stop"
   type Drainer = handle note "one running worker, held so a crew can be stopped"
+  type Turn = handle note "one pass of a drainer's loop, handed to the crew because a boundary starts what it is given and never decides what that is"
   type Narrowing = dict<str, AskedValue> note "a caller's narrowing as they wrote it: a bare value, a named operator, or `or` and `not` holding more of the same"
   type AskedValue = Value | Row | Rows | Condition | Narrowing | list<Narrowing> | list<str> | list<Value> | dict<str, Direction> note "what may stand beside a key in a caller's question"
   type Asked = dict<str, AskedValue> note "a caller's question, as they phrased it"
@@ -317,7 +318,7 @@ module declaro-persistum
 
   boundary_out fn session_open_channel : (target: str, primary: str, token: str) -> Channel | Fault awaited side_effect reads_writes "primary" note "opens the one line to the primary, held for the life of the database"
 
-  boundary_out fn crew_start : (db: Database) -> Crew | Fault awaited side_effect writes "crew" note "hands one drainer per writer to the runtime, and keeps them so they can be stopped"
+  boundary_out fn crew_start : (db: Database, turn: Turn) -> Crew | Fault awaited side_effect writes "crew" note "hands one drainer per writer to the runtime, each running the turn it was given, and keeps them so they can be stopped"
 
   boundary_out fn crew_stop : (crew: Crew) -> NOTHING | Fault awaited side_effect writes "crew" note "stops every drainer and waits for each to put its connection down"
 
