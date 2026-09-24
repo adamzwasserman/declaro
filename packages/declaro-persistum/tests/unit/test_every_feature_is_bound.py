@@ -118,7 +118,6 @@ _NEXT_UP = (
 
 KNOWN_UNBOUND: dict[str, str] = {
     "lifecycle_register.feature": _NEEDS_A_DELETED_FUNCTION,
-    "replicates.feature": _NEEDS_A_DELETED_FUNCTION,
     "schema_read_declared.feature": _NEEDS_A_DELETED_FUNCTION,
     "migration_report.feature": _DELETED_2026_09_23,
     "query_answer.feature": _DELETED_2026_09_23,
@@ -150,7 +149,6 @@ KNOWN_UNBOUND: dict[str, str] = {
     "grouped_by.feature": _ONE_EACH,
     "having.feature": _ONE_EACH,
     "largest.feature": _ONE_EACH,
-    "lifecycle_catch_up.feature": _ONE_EACH,
     "lifecycle_shut_down.feature": _ONE_EACH,
     "lifecycle_stop.feature": _ONE_EACH,
     "lifecycle_turn.feature": _ONE_EACH,
