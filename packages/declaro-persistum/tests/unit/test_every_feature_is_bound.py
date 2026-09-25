@@ -123,7 +123,6 @@ KNOWN_UNBOUND: dict[str, str] = {
     "query_answer.feature": _DELETED_2026_09_23,
     "query_ask.feature": _DELETED_2026_09_23,
     "schema_inspect.feature": _DELETED_2026_09_23,
-    "session_open.feature": _DELETED_2026_09_23,
     "turso_pull.feature": _DELETED_2026_09_23,
     "a_condition_is_data.feature": _ONE_EACH,
     "a_failure_is_a_value.feature": _ONE_EACH,
