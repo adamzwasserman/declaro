@@ -170,7 +170,6 @@ KNOWN_UNBOUND: dict[str, str] = {
     "having.feature": _A_WORD_IN_A_QUESTION,
     "largest.feature": _A_WORD_IN_A_QUESTION,
     "nothing_reaches_past_the_surface.feature": _A_RULE_ABOUT_THE_SOURCE,
-    "nothing_takes_a_default.feature": _A_RULE_ABOUT_THE_SOURCE,
     "of.feature": _A_WORD_IN_A_QUESTION,
     "one.feature": _A_WORD_IN_A_QUESTION,
     "one_function_says_things.feature": _A_RULE_ABOUT_THE_SOURCE,
