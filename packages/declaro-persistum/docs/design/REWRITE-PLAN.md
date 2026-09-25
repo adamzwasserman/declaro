@@ -1,105 +1,88 @@
 # Rewriting declaro-persistum from its declaration
 
-Written 2026-09-21. The declaration is `docs/design/persistum.hd`: 66 functions, 5 doors, 5 orchestrators, and a pure core between them. Every function has a feature file of its own name under `tests/bdd/features/`. The source in `src/` predates all of it: 67 modules, 30,013 lines, written before the declaration existed and never reconciled with it.
+The rewrite is done: every function the declaration names now has a module, and 626 tests pass with 33 xfail and none failing. Measured 2026-09-25.
 
-This plan deletes that source and builds the declared one, one function at a time, from the inside out. Inside out means a function is written only after everything it calls exists, so a pure function is tested with values and nothing else, and a database is only involved once the work reaches a boundary that is declared to touch one.
+This was the plan. Now it is the record of what happened.
 
-## What the call graph says about order
+## The numbers
 
-The graph is flat by design. 56 functions call nothing at all, 5 orchestrators call those, and 5 doors call one orchestrator each. Pure functions never call each other, which is what makes them testable one at a time, and it also means depth cannot be the build order. The order below is by what a function needs to exist before it can be written: its types, then the functions its own chain reads.
+| | Planned 2026-09-21 | Measured 2026-09-25 |
+|---|---|---|
+| Functions declared | 66 | 75 |
+| Modules in `src/declaro_persistum/` | 0 after stage 0 | 76 |
+| Doors | 5 | 4 |
+| Orchestrators | 5 | 4 |
+| Readers | not counted | 5 |
+| Output boundaries | 12 | 18 |
+| Pure functions | 37 | 44 |
+| Tests passing | 0 after stage 0 | 626 |
+| `if` statements in `src/` | 0 | 0 |
+| Feature files | 110 | 120 |
+| Step files | 0 after stage 0 | 77 |
+| Features nothing runs | 110 | 48 |
 
-## Stage 0: clear the ground
+## The declaration
 
-1. Branch from `design/persistum-declaration`.
-2. Delete `src/declaro_persistum/` entirely, all 67 modules.
-3. Delete the 178 unit test files that import the package, and the 23 step files that import it. They test the code being deleted; their scenarios survive in the feature files, which are the specification.
-4. Keep, untouched: `tests/bdd/features/` (110 files), `docs/design/`, `pyproject.toml`, the six environment fixtures, the new declared-shape fixtures, and the 19 gates that import nothing from the package.
-5. Add every feature file to `KNOWN_UNBOUND` with one reason: the function is declared and not built. Each comes off as its stage binds it.
-6. Prove the ground is clear: `grep -r "declaro_persistum" tests/` returns only the gates that name it as a string, and `uv run pytest` collects with no errors.
+`docs/design/persistum.hd` passes all four checks, run 2026-09-25: it parses, `validate(module)` returns nothing, the explorer's checker returns nothing, and it draws 47 data edges.
 
-After stage 0 the suite runs the gates and nothing else. That is the honest state: nothing is built, so nothing passes.
+The old source predated all of it, 67 modules and 30,013 lines that nobody had ever reconciled with the declaration. Stage 0 deleted it along with 178 unit tests and 23 step files, so 2,955 passing tests went to zero and came back one function at a time.
 
-**Cost, stated plainly.** 2,955 passing tests go to zero, and the count comes back one function at a time.
+## How each function got built
 
-## The loop, which is the same for every function
+Each function was one commit. The loop:
 
-Each function is one commit. The loop never changes:
-
-1. Read its feature file and the lines of `HOW-IT-SHOULD-WORK.md` or `docs/architecture.md` it cites. Read nothing else.
-2. Write its step file, `tests/bdd/steps/test_<name>_steps.py`, binding only that feature.
+1. Read its feature file and the lines it cites. Read nothing else.
+2. Write its step file, binding only that feature.
 3. Take the feature off `KNOWN_UNBOUND`.
-4. Run it. Every scenario is red, and the red says what is missing rather than that a name is undefined.
-5. Write the function, at the signature the declaration gives, in a module named for its family.
-6. Run until green. Nothing else may go red.
-7. Re-check the declaration: the explorer's map, the validator, the orphan count. A function whose signature drifted from the card is a fault in one of the two, and the card is the one that is right unless a source says otherwise.
+4. Run it, and every scenario turns red saying what is missing rather than that a name is undefined.
+5. Write the function at the signature the declaration gives.
+6. Run until green, and nothing else may go red.
+7. Check the declaration four ways.
 8. Commit, named for the function.
 
-Rules that hold at every step, from `CLAUDE.md` and the declaration:
+The order got fixed on 2026-09-24: the `.hd` first, then the feature, then the fixtures in `tests/conftest.py`, then the code. Writing code first and patching the declaration after produced two modules that had to be thrown out and written again.
 
-- No `if` without a dated approval in a comment. A branch is usually a table or a tighter type.
-- No default argument values. Absence is `NOTHING`, resolved at a boundary.
-- A failure comes back in the return type, never a log line, and it says what to do differently.
+Rules that held throughout:
+
+- No `if` without a dated approval in a comment. `src/` has none.
+- No default arguments. Absence is `NOTHING`, resolved at a boundary.
+- A failure comes back in the return type, and it says what to do differently.
 - A pure function reads no clock, no random source, no environment, no connection.
-- A handle is held and passed to a boundary, never read.
+- A handle gets held and passed to a boundary, and nobody reads it.
 - No defensive check the signature already makes.
 
-## Stage 1: the types
+## Twelve functions got renamed or dropped
 
-Every record, vocabulary and set in the declaration becomes a `TypedDict` or a `Literal`, in one module. 30 types, 8 sets, 10 vocabularies.
+The old plan listed 66 functions. Twelve of those names are gone: `answer_from_ticket`, `migration_report`, `query_begin_concurrent`, `query_collect`, `query_deliver`, `room_deposit`, `room_make`, `room_post_receipt`, `room_release_ticket`, `room_run_write`, `turso_pull`, `turso_push`.
 
-Done when a new gate passes: every type named in `persistum.hd` exists in the code with the same fields and the same members, and nothing else is exported. That gate is the poka-yoke for the whole rewrite, because it fails the moment the two drift.
+The five `room_*` functions are the crew now, because the declaration has no waiting room in it: `type Crew` holds the writes that arrived and the drainers that run them. The five cards are `crew_make`, `crew_deposit`, `crew_release_ticket`, `crew_post_receipt` and `crew_run_write`.
 
-## Stage 2: the pure core, in dependency order within each family
+`turso_push` and `turso_pull` are `channel_push` and `channel_pull` now, because no card in the declaration names an engine.
 
-Each of these is the loop above. They are grouped by the chain they serve, and within a group there is no order that matters, because none of them calls another.
+`answer_from_ticket` is `answer_from_receipt`, and the two said opposite things: the old one said a write answers with its ticket, while `HOW-IT-SHOULD-WORK.md` says a write returns a count. Its feature file got deleted on 2026-09-25.
 
-**Opening, 6.** `engine_of`, `refuse_unusable_settings`, `permitted_connections`, `crew_size`, `replicates`, `migration_needed`.
+`query_deliver` and `query_collect` folded into `query_answer` and `query_ask`. `migration_report` is the `Report` a `Connecting` carries. `query_begin_concurrent` had a zero-byte feature file and went with it.
 
-**Asking, 9.** `declaration_from_pseudo_sql`, `declaration_from_django`, `declaration_from_prisma`, `declaration_from_sqlalchemy`, `refuse_undeclared_columns`, `join_between`, `compile_statement`, `travels_together`, `answer_from_rows`.
+## Stage 7 checklist
 
-**Writing and collecting, 5.** `answer_from_ticket`, `receipt_for`, `refusal_reaches_caller`, `next_in_order`, `writer_waiting`.
+- **`KNOWN_UNBOUND` is empty.** No. 48 features are still on it. 23 of them are words a caller writes in a question, like `add` and `count`, which the declaration carries as vocabulary rather than as cards. Another 15 are rules about this source that a gate in `tests/unit/` already checks, 6 describe a command line the declaration does not name, and 4 wait on real work.
+- **The whole suite is green.** Yes, with 626 passing, 33 xfail and none failing.
+- **The explorer's checker and the validator return nothing.** Yes.
+- **The types gate still passes.** Yes, because every type in the declaration exists in the code with the same fields.
+- **The conditional ratchet reads zero.** Yes, and I counted rather than assumed it: `src/` holds no `if` statement at all.
 
-**Retrying, 3.** `worth_retrying`, `budget_spent`, `next_wait`.
+## The command line
 
-**Schema, 11.** `schema_from_declared`, `refuse_owned_names`, `difference`, `name_what_is_ambiguous`, `order_operations`, `name_what_destroys`, `refuse_undeclared_loss`, `capability_of`, `mechanism_for`, `spell_operation`, `spell_view`.
+`src/declaro_persistum/cli/` holds code that the declaration never names: there is no command-line function, no `route` and no `entry`, and nothing in the rewrite calls that folder. Six feature files describe it and none of them run.
 
-**Shutdown and the room, 3.** `progress_line`, `migration_report`, `room_make`.
+Either declare it or delete it, and Adam decides which. Until then the folder ships unreached and those six features sit on `KNOWN_UNBOUND`.
 
-37 functions, 37 commits, no database involved in any of them. This is the whole middle of the package and it is written before anything opens a connection.
+## Two things still broken
 
-## Stage 3: the readers
+No target spells a local Turso, because `fn engine_of` reads a bare path as SQLite and `libsql://` names a primary's address. So `docs/architecture.md` describes a deployment nobody can ask for, and `session_open.feature` carries a scenario that names this gap and cannot pass.
 
-Five, and each one needs a real database rather than a stand-in, because a stand-in that gets a driver contract wrong has manufactured a defect here twice: `clock_read`, `lifecycle_read_registered`, `schema_read_declared`, `schema_inspect`, `turso_pull`.
+Two sides name a constraint differently: `schema_inspect` calls a NOT NULL rule `not_null_id` while `schema_read_declared` calls the same rule `nn_id`. Nothing compares those names today, so nothing is broken yet. The same defect in column types was live and broke every deploy after the first, until `Inspecting` gained the engine's own word for each thing a column can hold.
 
-`schema_inspect` is the largest: it reads a live schema back on three engines, and the scenarios folded into its feature from the old pragma readers say what that has to survive, including a quoted name and a CHECK the engine keeps only in its DDL.
+## Out of scope
 
-## Stage 4: the output boundaries
-
-Twelve, in this order, because each proves the connection the next one needs: `session_open_connection`, `session_open_writer`, `session_close_connection`, `query_run_statement`, `query_begin_concurrent`, `room_run_write`, `query_run_together`, `room_deposit`, `room_release_ticket`, `room_post_receipt`, `turso_push`, `log_write`, `lifecycle_install_handler`, `lifecycle_register`.
-
-These are the first functions that touch anything outside the process. Each runs against SQLite locally, PostgreSQL at `postgresql://postgres:postgres@localhost/declaro_probe`, and Turso against the credentials already in `.env`.
-
-## Stage 5: the orchestrators
-
-Five, in ascending size: `query_deliver` (3 calls), `lifecycle_shut_down` (7), `lifecycle_catch_up` (11), `query_answer` (9), `session_connect` (25).
-
-`session_connect` last, because it reaches nearly everything: the engine decision, the connections, the crew, the whole migration, and the handle it finally hands back.
-
-## Stage 6: the doors
-
-Five, and each should be thin: `session_open`, `query_ask`, `query_collect`, `lifecycle_stop`, `lifecycle_turn`. A door that needs more than to receive, call one orchestrator and return is a door doing work that belongs behind it.
-
-## Stage 7: the gates come back on
-
-The rewrite is done when all of these hold at once:
-
-- `KNOWN_UNBOUND` is empty. Every feature is bound exactly once.
-- The whole suite is green.
-- The explorer's checker and the validator both return nothing on all five declarations.
-- The types gate from stage 1 still passes, so the code and the declaration still say the same thing.
-- `honest-check` reports nothing on `src/`.
-- The conditional ratchet reads zero, because the rewrite started from zero.
-
-## What is deliberately not in this plan
-
-The command line, the transfer tool, ximinez and observe have declarations of their own and are not touched. The statement store stays out until somebody times a compile against a round trip. The three feature files that describe a design we removed, the awaited flush, the remembered rename and the plan a person reads, are named in the declaration as scenarios to change, and changing them is not part of this.
+The transfer tool, ximinez and observe have declarations of their own and nobody touched them. The statement store stays out until somebody times a compile against a round trip.
