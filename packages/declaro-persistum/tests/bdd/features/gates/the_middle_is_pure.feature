@@ -5,17 +5,17 @@ Feature: The middle is pure
   which are which: a plain `fn` in `docs/design/persistum.hd` is pure, and every
   function that reaches outside the process carries a role that says so.
 
+  I/O IS NOT THE ONLY WAY OUT. A function that reads a clock, a random source or
+  an environment variable is impure even though it opened no connection. A
+  function whose answer changes between two identical calls is not pure,
+  whatever it touched to make that happen.
+
   # REWRITTEN 2026-09-25. Every scenario here described a gate that read
   # `@helper` and `@boundary` decorators, and no such decorator exists anywhere
   # in this package. It was written for the source that was deleted on
   # 2026-09-21. The declaration marks purity now, by role, so the gate reads the
   # declaration and the modules named in it. Nothing was checking this at all
   # until today, and the whole architecture rests on it.
-
-  I/O IS NOT THE ONLY WAY OUT. A function that reads a clock, a random source or
-  an environment variable is impure even though it opened no connection. A
-  function whose answer changes between two identical calls is not pure,
-  whatever it touched to make that happen.
 
   Scenario: every pure function in the declaration is pure in the code
     When the gate reads the declaration and every module it names

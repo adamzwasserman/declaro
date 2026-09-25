@@ -181,7 +181,6 @@ KNOWN_UNBOUND: dict[str, str] = {
     "replace.feature": _A_WORD_IN_A_QUESTION,
     "smallest.feature": _A_WORD_IN_A_QUESTION,
     "sum.feature": _A_WORD_IN_A_QUESTION,
-    "the_middle_is_pure.feature": _A_RULE_ABOUT_THE_SOURCE,
     "the_models_are_the_truth.feature": _A_RULE_ABOUT_THE_SOURCE,
     "the_schema_is_declared.feature": _A_RULE_ABOUT_THE_SOURCE,
     "the_test_for_any_function.feature": _A_RULE_ABOUT_THE_SOURCE,
