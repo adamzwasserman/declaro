@@ -44,7 +44,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
 from declaro_persistum.session_connect import session_connect
-from declaro_persistum.types import Connecting, Database, Fault, Shutdown
+from declaro_persistum.types import NOTHING, Connecting, Database, Fault, Shutdown
 
 # WHAT THE DEPLOYMENT SETS, AND WHICH FIELD EACH ONE FILLS. Adding a number the
 # deployment states is one more row, and the name a deployment writes is beside
@@ -71,13 +71,19 @@ def _not_a_number(name: str, written: str) -> Fault:
 
 
 def _nothing_was_set(_name: str, _written: str | None) -> int | None:
-    """The deployment said nothing, and that is passed on rather than filled in.
+    """The deployment said nothing, and that absence is the answer.
 
-    `fn permitted_connections` and `fn crew_size` each refuse it by name, and
-    each says what that number is for. Choosing one here would be the silent
-    default those two exist to stop.
+    IT HANDS BACK `NOTHING`, WHICH IS THIS PACKAGE'S WORD FOR IT. Written as a
+    bare `None` it reads as a function somebody left half finished, and
+    `types.py:123` says why the word exists: Python has one empty value and a
+    reader has to see which of the two meanings is meant.
+
+    The absence travels on rather than being filled in here.
+    `fn permitted_connections` and `fn crew_size` each refuse it by name and
+    each says what that number is for, and choosing one here would be the
+    silent default those two exist to stop.
     """
-    return None
+    return NOTHING
 
 
 def _whatever_it_was_set_to(name: str, written: str | None) -> int | Fault:
@@ -150,7 +156,7 @@ def _nothing_opened_yet(
             "crew_size": 0,
             "writers": [],
             "connections": [],
-            "channel": None,
+            "channel": NOTHING,
             "declared": {
                 "models": [],
                 "views": [],
@@ -161,7 +167,7 @@ def _nothing_opened_yet(
             "wanted_schema": {"tables": [], "views": []},
             "needs_migration": False,
             "migration": {"plan": {"operations": [], "destroys": []}, "applied": 0},
-            "database": None,
+            "database": NOTHING,
         },
     )
 
