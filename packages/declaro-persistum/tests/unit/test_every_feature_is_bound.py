@@ -68,15 +68,15 @@ _SPEC = (
     "does not exist yet, and binding it would assert nothing a reader can act on"
 )
 
-_ONE_EACH = (
-    "Nothing is built. The source was deleted on 2026-09-21 and every function "
-    "comes back one at a time, each binding its own feature as it lands. "
-    "Originally: one function, one feature, written while the declaration was being "
-    "reconciled against the features in September 2026. The function it "
-    "describes is declared in docs/design/persistum.hd and not yet built, so "
-    "binding it today would turn every scenario red and say only 'not built'. "
-    "It comes off this list when its function exists."
-)
+# `_ONE_EACH` WAS HERE AND IT WAS WRONG ABOUT ALL 46 OF THEM. It said "the
+# function it describes is declared in docs/design/persistum.hd and not yet
+# built", which stopped being true on 2026-09-25, when the last card got its
+# module. Not one of the 46 waits for a function: 23 are words in a question, 15
+# are rules about this source, 6 describe a command line the declaration never
+# names, one contradicted HOW-IT-SHOULD-WORK.md and one was an empty file. A
+# reason that covers 46 files and describes none of them is a list pretending to
+# be a ratchet, so it is three reasons now and each says what would take its
+# files off.
 
 _DELETED_2026_09_23 = (
     "Deleted on 2026-09-23, with its code, because the declaration moved under "
@@ -116,60 +116,86 @@ _NEXT_UP = (
     "and unbuilt is one somebody can read."
 )
 
+_A_WORD_IN_A_QUESTION = (
+    "Not a function, and the old reason said it was. `add`, `count`, `ordered_by` "
+    "and the twenty others are words a caller writes in a question, and the "
+    "declaration carries them as vocabulary rather than as cards: what each one "
+    "means is `fn compile_statement` reading a `Declaration`, and what a caller "
+    "sees is `boundary_in fn query_ask`. So there is no module to wait for and "
+    "never was. Each comes off this list when its scenarios are written against "
+    "the door a caller actually calls, which is a rewrite of the feature rather "
+    "than a step file for it."
+)
+
+_A_RULE_ABOUT_THE_SOURCE = (
+    "Not a function either. Each of these asserts something about this "
+    "codebase: that the middle is pure, that nothing takes a default, that no "
+    "string is interpolated. A scenario cannot be bound to a card because there "
+    "is no card; it is bound to a scan of `src/`, which is what every gate in "
+    "`tests/unit/` already is. Several are covered there under other names and "
+    "nothing ties the two together. Each comes off this list when its gate names "
+    "the feature it satisfies."
+)
+
+_THE_DECLARATION_HAS_NO_CLI = (
+    "The declaration names no command-line function at all. Measured "
+    "2026-09-25: zero cards match a CLI name and no `route` or `entry` is "
+    "declared, while `src/declaro_persistum/cli/` exists and nothing in "
+    "`docs/design/persistum.hd` reaches it. So these describe a surface the "
+    "declaration does not have, and binding one would test code the "
+    "architecture does not claim. Each comes off this list when the CLI is "
+    "declared, or goes with the CLI if it is not."
+)
+
 KNOWN_UNBOUND: dict[str, str] = {
     "lifecycle_register.feature": _NEEDS_A_DELETED_FUNCTION,
     "schema_read_declared.feature": _NEEDS_A_DELETED_FUNCTION,
     "migration_report.feature": _DELETED_2026_09_23,
-    "query_answer.feature": _DELETED_2026_09_23,
-    "query_ask.feature": _DELETED_2026_09_23,
-    "schema_inspect.feature": _DELETED_2026_09_23,
     "turso_pull.feature": _DELETED_2026_09_23,
-    "a_condition_is_data.feature": _ONE_EACH,
-    "a_failure_is_a_value.feature": _ONE_EACH,
-    "a_model_declares_and_does_nothing_else.feature": _ONE_EACH,
-    "absence_is_an_answer.feature": _ONE_EACH,
-    "absence_survives_the_boundary.feature": _ONE_EACH,
-    "add.feature": _ONE_EACH,
-    "all.feature": _ONE_EACH,
-    "answer_from_ticket.feature": _ONE_EACH,
-    "average.feature": _ONE_EACH,
-    "change.feature": _ONE_EACH,
-    "change_all.feature": _ONE_EACH,
-    "command_dispatch.feature": _ONE_EACH,
-    "count.feature": _ONE_EACH,
-    "count_distinct.feature": _ONE_EACH,
-    "distinct.feature": _ONE_EACH,
-    "engine_selection.feature": _ONE_EACH,
-    "every_engine_is_in_every_table.feature": _ONE_EACH,
-    "everything_gets_declared.feature": _ONE_EACH,
-    "exists.feature": _ONE_EACH,
-    "first.feature": _ONE_EACH,
-    "grouped_by.feature": _ONE_EACH,
-    "having.feature": _ONE_EACH,
-    "largest.feature": _ONE_EACH,
-    "nothing_reaches_past_the_surface.feature": _ONE_EACH,
-    "nothing_takes_a_default.feature": _ONE_EACH,
-    "of.feature": _ONE_EACH,
-    "one.feature": _ONE_EACH,
-    "one_function_says_things.feature": _ONE_EACH,
-    "ordered_by.feature": _ONE_EACH,
-    "overwriting_a_snapshot.feature": _ONE_EACH,
-    "page.feature": _ONE_EACH,
-    "preparing_the_target.feature": _ONE_EACH,
-    "query_begin_concurrent.feature": _ONE_EACH,
-    "remove.feature": _ONE_EACH,
-    "remove_all.feature": _ONE_EACH,
-    "replace.feature": _ONE_EACH,
-    "smallest.feature": _ONE_EACH,
-    "sum.feature": _ONE_EACH,
-    "the_middle_is_pure.feature": _ONE_EACH,
-    "the_models_are_the_truth.feature": _ONE_EACH,
-    "the_schema_is_declared.feature": _ONE_EACH,
-    "the_test_for_any_function.feature": _ONE_EACH,
-    "validating_a_schema.feature": _ONE_EACH,
-    "values.feature": _ONE_EACH,
-    "what_the_library_owns.feature": _ONE_EACH,
-    "whose_fault_is_a_failed_table.feature": _ONE_EACH,
+    "a_condition_is_data.feature": _A_RULE_ABOUT_THE_SOURCE,
+    "a_failure_is_a_value.feature": _A_RULE_ABOUT_THE_SOURCE,
+    "a_model_declares_and_does_nothing_else.feature": _A_RULE_ABOUT_THE_SOURCE,
+    "absence_is_an_answer.feature": _A_RULE_ABOUT_THE_SOURCE,
+    "absence_survives_the_boundary.feature": _A_RULE_ABOUT_THE_SOURCE,
+    "add.feature": _A_WORD_IN_A_QUESTION,
+    "all.feature": _A_WORD_IN_A_QUESTION,
+    "average.feature": _A_WORD_IN_A_QUESTION,
+    "change.feature": _A_WORD_IN_A_QUESTION,
+    "change_all.feature": _A_WORD_IN_A_QUESTION,
+    "command_dispatch.feature": _THE_DECLARATION_HAS_NO_CLI,
+    "count.feature": _A_WORD_IN_A_QUESTION,
+    "count_distinct.feature": _A_WORD_IN_A_QUESTION,
+    "distinct.feature": _A_WORD_IN_A_QUESTION,
+    "engine_selection.feature": _THE_DECLARATION_HAS_NO_CLI,
+    "every_engine_is_in_every_table.feature": _A_RULE_ABOUT_THE_SOURCE,
+    "everything_gets_declared.feature": _A_RULE_ABOUT_THE_SOURCE,
+    "exists.feature": _A_WORD_IN_A_QUESTION,
+    "first.feature": _A_WORD_IN_A_QUESTION,
+    "grouped_by.feature": _A_WORD_IN_A_QUESTION,
+    "having.feature": _A_WORD_IN_A_QUESTION,
+    "largest.feature": _A_WORD_IN_A_QUESTION,
+    "nothing_reaches_past_the_surface.feature": _A_RULE_ABOUT_THE_SOURCE,
+    "nothing_takes_a_default.feature": _A_RULE_ABOUT_THE_SOURCE,
+    "of.feature": _A_WORD_IN_A_QUESTION,
+    "one.feature": _A_WORD_IN_A_QUESTION,
+    "one_function_says_things.feature": _A_RULE_ABOUT_THE_SOURCE,
+    "ordered_by.feature": _A_WORD_IN_A_QUESTION,
+    "overwriting_a_snapshot.feature": _THE_DECLARATION_HAS_NO_CLI,
+    "page.feature": _A_WORD_IN_A_QUESTION,
+    "preparing_the_target.feature": _THE_DECLARATION_HAS_NO_CLI,
+    "remove.feature": _A_WORD_IN_A_QUESTION,
+    "remove_all.feature": _A_WORD_IN_A_QUESTION,
+    "replace.feature": _A_WORD_IN_A_QUESTION,
+    "smallest.feature": _A_WORD_IN_A_QUESTION,
+    "sum.feature": _A_WORD_IN_A_QUESTION,
+    "the_middle_is_pure.feature": _A_RULE_ABOUT_THE_SOURCE,
+    "the_models_are_the_truth.feature": _A_RULE_ABOUT_THE_SOURCE,
+    "the_schema_is_declared.feature": _A_RULE_ABOUT_THE_SOURCE,
+    "the_test_for_any_function.feature": _A_RULE_ABOUT_THE_SOURCE,
+    "validating_a_schema.feature": _THE_DECLARATION_HAS_NO_CLI,
+    "values.feature": _A_WORD_IN_A_QUESTION,
+    "what_the_library_owns.feature": _A_RULE_ABOUT_THE_SOURCE,
+    "whose_fault_is_a_failed_table.feature": _THE_DECLARATION_HAS_NO_CLI,
 }
 
 # `scenarios("../features/x.feature")` and `scenarios("../features")` both bind.
@@ -259,4 +285,26 @@ def test_the_ratchet_can_actually_see_a_feature_file(on_disk):
     assert any(_scenario_count(text) > 0 for text in features.values()), (
         "every feature file parsed as zero scenarios, so the counter is broken "
         "and the reports above would be meaningless"
+    )
+
+
+def test_the_list_only_ever_gets_shorter(on_disk):
+    """A name on KNOWN_UNBOUND that is now bound comes off it.
+
+    THE LIST HELD THREE STALE NAMES AND NOTHING NOTICED, found 2026-09-25.
+    `query_answer`, `query_ask` and `schema_inspect` had step files binding
+    every scenario in them and were still listed as shipping unexecuted. The
+    guard above only looks at features with no binder, so a name that stopped
+    being true sat there silently, and the count of what is specified and
+    unbuilt read three higher than it was.
+
+    A ratchet that does not tighten is a list.
+    """
+    features, steps = on_disk
+    bound = _bindings(features, steps)
+    stale = sorted(f.name for f, binders in bound.items() if binders and f.name in KNOWN_UNBOUND)
+
+    assert not stale, (
+        f"{stale} are on KNOWN_UNBOUND and are bound by a step file, so the "
+        f"list says they ship unexecuted and they do not. Take each one off it."
     )
