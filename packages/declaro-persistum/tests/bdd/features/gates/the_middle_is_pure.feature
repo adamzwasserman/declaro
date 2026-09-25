@@ -1,46 +1,41 @@
 @bdd @specification
 Feature: The middle is pure
-  Diffing, ordering, ambiguity detection, validation and SQL rendering are functions
-  over data, and none of them touches the world. I/O happens at named edges, each
-  carrying `@boundary`, so the edges can be counted rather than argued about.
+  Diffing, ordering, ambiguity detection, validation and SQL rendering are
+  functions over data, and none of them touches the world. The declaration says
+  which are which: a plain `fn` in `docs/design/persistum.hd` is pure, and every
+  function that reaches outside the process carries a role that says so.
 
-  I/O IS NOT THE ONLY WAY OUT. A function that reads a clock, a random source, an
-  environment variable or the filesystem is impure and today passes, because the
-  existing check reads a list of calls that reach the network or the disk. A function
-  whose answer changes between two identical calls is not pure, whatever it touched
-  to make that happen.
+  # REWRITTEN 2026-09-25. Every scenario here described a gate that read
+  # `@helper` and `@boundary` decorators, and no such decorator exists anywhere
+  # in this package. It was written for the source that was deleted on
+  # 2026-09-21. The declaration marks purity now, by role, so the gate reads the
+  # declaration and the modules named in it. Nothing was checking this at all
+  # until today, and the whole architecture rests on it.
 
-  Scenario: a helper that opens a connection is refused
-    Given a function marked `@helper` that executes on a connection
-    When the gate runs
-    Then it fails and names that function
+  I/O IS NOT THE ONLY WAY OUT. A function that reads a clock, a random source or
+  an environment variable is impure even though it opened no connection. A
+  function whose answer changes between two identical calls is not pure,
+  whatever it touched to make that happen.
 
-  Scenario: a helper that reads the clock is refused
-    Given a function marked `@helper` that calls `time.time`
-    When the gate runs
-    Then it fails, because two identical calls can answer differently
+  Scenario: every pure function in the declaration is pure in the code
+    When the gate reads the declaration and every module it names
+    Then no plain `fn` reads a clock, a random source or the environment
+    And no plain `fn` opens a file, a connection or a socket
 
-  Scenario: a helper that reads a random source is refused
-    Given a function marked `@helper` that calls `random` or `uuid4`
-    When the gate runs
-    Then it fails
-
-  Scenario: a helper that reads the environment is refused
-    Given a function marked `@helper` that reads `os.environ`
-    When the gate runs
-    Then it fails
+  Scenario: a pure function does not reach a boundary
+    When the gate reads the declaration and every module it names
+    Then no plain `fn` imports a function the declaration marks as a boundary
 
   Scenario: a boundary may do all of those
-    Given a function marked `@boundary` that reads the clock and opens a connection
-    When the gate runs
-    Then it passes, because a boundary is where that belongs
-
-  Scenario: a boundary that touches nothing is refused
-    Given a function marked `@boundary` that reaches outside for nothing
-    When the gate runs
-    Then it fails, because the marker declares an edge that is not there
+    When the gate reads the declaration and every module it names
+    Then a function declared `boundary_in`, `boundary_out` or `reader` is not reported
 
   Scenario: the gate finds a planted impurity of every kind it claims to catch
-    Given one planted helper for each impurity the gate names
-    When the gate runs
+    Given one planted pure function for each impurity the gate names
+    When the gate runs over them
     Then it finds every one of them
+
+  Scenario: the gate can see the functions it claims to check
+    When the gate reads the declaration and every module it names
+    Then it found a module for every plain `fn` the declaration declares
+    And that count is more than forty

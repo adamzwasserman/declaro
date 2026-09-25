@@ -137,15 +137,12 @@ _A_RULE_ABOUT_THE_SOURCE = (
     "the feature it satisfies."
 )
 
-_THE_DECLARATION_HAS_NO_CLI = (
-    "The declaration names no command-line function at all. Measured "
-    "2026-09-25: zero cards match a CLI name and no `route` or `entry` is "
-    "declared, while `src/declaro_persistum/cli/` exists and nothing in "
-    "`docs/design/persistum.hd` reaches it. So these describe a surface the "
-    "declaration does not have, and binding one would test code the "
-    "architecture does not claim. Each comes off this list when the CLI is "
-    "declared, or goes with the CLI if it is not."
-)
+# `_THE_DECLARATION_HAS_NO_CLI` WAS HERE AND ITS SIX FILES ARE GONE. Adam chose
+# on 2026-09-25: delete the command line. `src/declaro_persistum/cli/` held no
+# Python at all, only stale bytecode that stage 0 left behind, and
+# `pyproject.toml` shipped a `declaro` command pointing at a module that raised
+# ModuleNotFoundError on import. Seven other folders were in the same state and
+# went with it. Git has all of it.
 
 KNOWN_UNBOUND: dict[str, str] = {
     "lifecycle_register.feature": _NEEDS_A_DELETED_FUNCTION,
@@ -162,11 +159,9 @@ KNOWN_UNBOUND: dict[str, str] = {
     "average.feature": _A_WORD_IN_A_QUESTION,
     "change.feature": _A_WORD_IN_A_QUESTION,
     "change_all.feature": _A_WORD_IN_A_QUESTION,
-    "command_dispatch.feature": _THE_DECLARATION_HAS_NO_CLI,
     "count.feature": _A_WORD_IN_A_QUESTION,
     "count_distinct.feature": _A_WORD_IN_A_QUESTION,
     "distinct.feature": _A_WORD_IN_A_QUESTION,
-    "engine_selection.feature": _THE_DECLARATION_HAS_NO_CLI,
     "every_engine_is_in_every_table.feature": _A_RULE_ABOUT_THE_SOURCE,
     "everything_gets_declared.feature": _A_RULE_ABOUT_THE_SOURCE,
     "exists.feature": _A_WORD_IN_A_QUESTION,
@@ -180,9 +175,7 @@ KNOWN_UNBOUND: dict[str, str] = {
     "one.feature": _A_WORD_IN_A_QUESTION,
     "one_function_says_things.feature": _A_RULE_ABOUT_THE_SOURCE,
     "ordered_by.feature": _A_WORD_IN_A_QUESTION,
-    "overwriting_a_snapshot.feature": _THE_DECLARATION_HAS_NO_CLI,
     "page.feature": _A_WORD_IN_A_QUESTION,
-    "preparing_the_target.feature": _THE_DECLARATION_HAS_NO_CLI,
     "remove.feature": _A_WORD_IN_A_QUESTION,
     "remove_all.feature": _A_WORD_IN_A_QUESTION,
     "replace.feature": _A_WORD_IN_A_QUESTION,
@@ -192,10 +185,8 @@ KNOWN_UNBOUND: dict[str, str] = {
     "the_models_are_the_truth.feature": _A_RULE_ABOUT_THE_SOURCE,
     "the_schema_is_declared.feature": _A_RULE_ABOUT_THE_SOURCE,
     "the_test_for_any_function.feature": _A_RULE_ABOUT_THE_SOURCE,
-    "validating_a_schema.feature": _THE_DECLARATION_HAS_NO_CLI,
     "values.feature": _A_WORD_IN_A_QUESTION,
     "what_the_library_owns.feature": _A_RULE_ABOUT_THE_SOURCE,
-    "whose_fault_is_a_failed_table.feature": _THE_DECLARATION_HAS_NO_CLI,
 }
 
 # `scenarios("../features/x.feature")` and `scenarios("../features")` both bind.

@@ -17,9 +17,9 @@ This was the plan. Now it is the record of what happened.
 | Pure functions | 37 | 44 |
 | Tests passing | 0 after stage 0 | 626 |
 | `if` statements in `src/` | 0 | 0 |
-| Feature files | 110 | 120 |
+| Feature files | 110 | 114 |
 | Step files | 0 after stage 0 | 77 |
-| Features nothing runs | 110 | 48 |
+| Features nothing runs | 110 | 42 |
 
 ## The declaration
 
@@ -65,17 +65,17 @@ The five `room_*` functions are the crew now, because the declaration has no wai
 
 ## Stage 7 checklist
 
-- **`KNOWN_UNBOUND` is empty.** No. 48 features are still on it. 23 of them are words a caller writes in a question, like `add` and `count`, which the declaration carries as vocabulary rather than as cards. Another 15 are rules about this source that a gate in `tests/unit/` already checks, 6 describe a command line the declaration does not name, and 4 wait on real work.
+- **`KNOWN_UNBOUND` is empty.** No. 42 features are still on it. 23 of them are words a caller writes in a question, like `add` and `count`, which the declaration carries as vocabulary rather than as cards. Another 15 are rules about this source that a gate in `tests/unit/` already checks, and 4 wait on real work.
 - **The whole suite is green.** Yes, with 626 passing, 33 xfail and none failing.
 - **The explorer's checker and the validator return nothing.** Yes.
 - **The types gate still passes.** Yes, because every type in the declaration exists in the code with the same fields.
 - **The conditional ratchet reads zero.** Yes, and I counted rather than assumed it: `src/` holds no `if` statement at all.
 
-## The command line
+## The command line is gone
 
-`src/declaro_persistum/cli/` holds code that the declaration never names: there is no command-line function, no `route` and no `entry`, and nothing in the rewrite calls that folder. Six feature files describe it and none of them run.
+Adam deleted it on 2026-09-25. The declaration named no command-line function, no `route` and no `entry`, and nothing in the rewrite called that folder.
 
-Either declare it or delete it, and Adam decides which. Until then the folder ships unreached and those six features sit on `KNOWN_UNBOUND`.
+`src/declaro_persistum/cli/` turned out to hold no Python at all, only stale bytecode that stage 0 left behind, and seven other folders were in the same state. Meanwhile `pyproject.toml` shipped a `declaro` command pointing at `declaro_persistum.cli.main`, which raised ModuleNotFoundError on import, so anyone who installed this package and typed `declaro` got a stack trace. All of it went, along with the six feature files that described it.
 
 ## Two things still broken
 
