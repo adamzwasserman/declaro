@@ -162,7 +162,6 @@ KNOWN_UNBOUND: dict[str, str] = {
     "count.feature": _A_WORD_IN_A_QUESTION,
     "count_distinct.feature": _A_WORD_IN_A_QUESTION,
     "distinct.feature": _A_WORD_IN_A_QUESTION,
-    "every_engine_is_in_every_table.feature": _A_RULE_ABOUT_THE_SOURCE,
     "everything_gets_declared.feature": _A_RULE_ABOUT_THE_SOURCE,
     "exists.feature": _A_WORD_IN_A_QUESTION,
     "first.feature": _A_WORD_IN_A_QUESTION,
