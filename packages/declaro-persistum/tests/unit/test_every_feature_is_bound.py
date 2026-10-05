@@ -103,10 +103,20 @@ _READS_A_RECORD_THAT_MOVED = (
     "signatures alone called it fine. What moved was inside a record it reads: "
     "`Declaration` gained the shape a caller asks its rows back in, and "
     "`Database` lost its primary and gained a channel and a crew. "
-    "`declaration_from_pseudo_sql` survives untouched, three lines that read no "
-    "field of anything, and only its step file went, because the reader it calls "
-    "is gone. Each comes back when its function is written against the record as "
-    "it now stands."
+    "`declaration_from_pseudo_sql` was deleted outright on 2026-10-05 along with "
+    "the other three grammar readers and the word-list they shared. Each comes "
+    "back when its function is written against the record as it now stands."
+)
+
+_THE_WRITING_IS_AHEAD_OF_THE_CODE = (
+    "Written on 2026-10-05, after the declaration gained the card and before"
+    "the code did, which is the order: the declaration, the feature, the"
+    "setup, then the code. The four grammar readers and their word-lists are"
+    "gone, because they took a dict somebody else had already taken apart and"
+    "differed only by two renamed keys. A caller writes text now, `fn"
+    "grammar_of` reads which spelling it is off the punctuation, and one"
+    "reader parses all four. Each of these comes off the list the day its"
+    "function lands."
 )
 
 _NEXT_UP = (
@@ -149,6 +159,11 @@ KNOWN_UNBOUND: dict[str, str] = {
     "schema_read_declared.feature": _NEEDS_A_DELETED_FUNCTION,
     "migration_report.feature": _DELETED_2026_09_23,
     "turso_pull.feature": _DELETED_2026_09_23,
+    "asked_from_written.feature": _THE_WRITING_IS_AHEAD_OF_THE_CODE,
+    "copy_on_disk.feature": _THE_WRITING_IS_AHEAD_OF_THE_CODE,
+    "declaration_from_asked.feature": _THE_WRITING_IS_AHEAD_OF_THE_CODE,
+    "grammar_of.feature": _THE_WRITING_IS_AHEAD_OF_THE_CODE,
+    "methods_of.feature": _THE_WRITING_IS_AHEAD_OF_THE_CODE,
     "a_condition_is_data.feature": _A_RULE_ABOUT_THE_SOURCE,
     "a_failure_is_a_value.feature": _A_RULE_ABOUT_THE_SOURCE,
     "a_model_declares_and_does_nothing_else.feature": _A_RULE_ABOUT_THE_SOURCE,
