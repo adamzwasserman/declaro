@@ -74,6 +74,7 @@ from declaro_persistum.replicates import replicates
 from declaro_persistum.schema_from_declared import schema_from_declared
 from declaro_persistum.schema_inspect import schema_inspect
 from declaro_persistum.schema_read_declared import schema_read_declared
+from declaro_persistum.session_close_connection import session_close_connection
 from declaro_persistum.session_open_channel import session_open_channel
 from declaro_persistum.session_open_connection import session_open_connection
 from declaro_persistum.session_open_writer import session_open_writer
@@ -785,6 +786,96 @@ async def session_connect(connecting: Connecting) -> Connecting | Fault:
     instead, and every step after it does nothing.
     """
     carried: object = connecting
+    opened: Connecting = connecting
     for step in THE_ORDER:
         carried = await _WHETHER_SOMETHING_ALREADY_REFUSED_IT[_is_fault(carried)](step, carried)
+        opened = _WHATEVER_IS_STILL_A_RECORD[_is_fault(carried)](opened, carried)
+    closed = await _WHETHER_IT_REFUSED_AFTER_OPENING[_is_fault(carried)](opened)
+    log_write(_WHAT_TO_SAY_ABOUT_THE_ANSWER[_is_fault(carried)](opened, carried, closed))
     return cast("Connecting | Fault", carried)
+
+
+def _the_last_record_before_the_refusal(opened: Connecting, _carried: object) -> Connecting:
+    """A refusal replaces the record, so the record before it is the one that
+    knows what had been opened by then."""
+    return opened
+
+
+def _the_record_this_step_made(_opened: Connecting, carried: object) -> Connecting:
+    return cast("Connecting", carried)
+
+
+_WHATEVER_IS_STILL_A_RECORD: dict[bool, Callable[[Connecting, object], Connecting]] = {
+    True: _the_last_record_before_the_refusal,
+    False: _the_record_this_step_made,
+}
+
+
+async def _close_what_was_opened(opened: Connecting) -> int:
+    """Every connection this open made, closed because the caller never got them.
+
+    WHY A REFUSED OPEN CLOSES ITS OWN CONNECTIONS. The steps that open come
+    before the steps that refuse, so a refusal at `fn refuse_undeclared_loss`
+    happens with a reader and every writer already open. The caller gets a fault
+    and no handle, so no caller can ever have written through them: there is
+    nothing to push and nothing to lose by closing. Leaving them open costs a
+    file handle and an operating system thread for the life of the process, and
+    the driver's own thread is not a daemon, so a process that was going to exit
+    does not. Measured 2026-10-02: three threads outlived every test run.
+    """
+    held = [*opened["writers"], *opened["connections"]]
+    for connection in held:
+        await session_close_connection(connection)
+    return len(held)
+
+
+async def _nothing_was_opened(_opened: Connecting) -> int:
+    """The open finished, so the caller holds the connections and closes them at
+    shutdown. Nothing was closed here, and that is the answer rather than a
+    silence: both halves hand back a count the line below reads."""
+    return 0
+
+
+_WHETHER_IT_REFUSED_AFTER_OPENING: dict[bool, Callable[[Connecting], Awaitable[int]]] = {
+    True: _close_what_was_opened,
+    False: _nothing_was_opened,
+}
+
+
+# WHAT AN OPERATOR READS, EITHER WAY. A refused open wrote nothing to the log
+# until 2026-10-03, so a deploy that stopped on a destructive change left the
+# person reading the log with no line at all. Both halves build a record, because
+# a logging call made for its effect in one branch and skipped in the other is
+# the shape that let the refusal go unrecorded.
+def _say_it_refused(opened: Connecting, carried: object, closed: int) -> dict[str, object]:
+    fault = cast("Fault", carried)
+    return {
+        "event": "database_refused",
+        "level": "error",
+        "target": opened["target"],
+        "kind": fault["kind"],
+        "why": fault["what_went_wrong"],
+        "what_to_do_instead": fault["what_to_do_instead"],
+        "connections_closed": closed,
+    }
+
+
+def _say_it_opened_at_all(opened: Connecting, _carried: object, closed: int) -> dict[str, object]:
+    """The open succeeded, and `fn _say_it_opened` has already said what it took.
+
+    This line is what the shape costs: one record saying the open finished and
+    closed nothing, rather than a branch that logs on one path and not the other.
+    """
+    return {
+        "event": "database_open_finished",
+        "target": opened["target"],
+        "connections_closed": closed,
+    }
+
+
+_WHAT_TO_SAY_ABOUT_THE_ANSWER: dict[
+    bool, Callable[[Connecting, object, int], dict[str, object]]
+] = {
+    True: _say_it_refused,
+    False: _say_it_opened_at_all,
+}

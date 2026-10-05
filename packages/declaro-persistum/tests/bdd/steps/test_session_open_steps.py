@@ -38,7 +38,7 @@ from pytest_bdd import given, parsers, scenarios, then, when
 
 from declaro_persistum.crew_stop import crew_stop
 from declaro_persistum.session_close_connection import session_close_connection
-from declaro_persistum.session_open import session_open
+from declaro_persistum.session_open import CouldNotOpen, session_open
 
 scenarios("../features/opening/session_open.feature")
 
@@ -53,7 +53,15 @@ WHAT_THIS_MACHINE_SAYS = {"DECLARO_CONNECTIONS": "4", "DECLARO_CREW_SIZE": "2"}
 
 
 def _is_fault(piece: object) -> bool:
-    return isinstance(piece, dict) and frozenset(piece) == THE_THREE_FACTS_IN_A_FAULT
+    """Whether this is a refusal, however it arrived.
+
+    A `Fault` is the three facts in a dict, which is how a refusal travels inside
+    the package. `CouldNotOpen` is that same Fault on its way out of the door,
+    and it carries it, so both are refusals and the scenarios read them alike.
+    """
+    return isinstance(piece, CouldNotOpen) or (
+        isinstance(piece, dict) and frozenset(piece) == THE_THREE_FACTS_IN_A_FAULT
+    )
 
 
 def _one_of(sentences: tuple[str, ...]) -> str:
@@ -157,6 +165,19 @@ WHAT_EACH_GIVEN_OPENS: dict[str, dict] = {
     'a database opened from "app.db"': {"opens": ["app.db"], "why_not": ""},
 }
 
+# WHAT THE THREE SCENARIOS ABOUT A DESTROYED COLUMN STILL NEED. Each row says
+# what it sets up and why it cannot run yet, in the words of its own sentence, so
+# the reason is beside the sentence rather than in a list somewhere else.
+WHAT_EACH_GIVEN_ABOUT_A_LOSS_NEEDS: dict[str, dict] = {
+    "a database holding a column no surviving model names": {
+        "opens": [],
+        "why_not": "Needs a fixture that opens a real database through `boundary_in fn session_open` with models that would drop a column. `tests/bdd/steps/test_session_connect_steps.py` builds exactly that for `orchestrator fn session_connect`, which returns the fault rather than raising it, and building it a second way here is what `test_no_fixture_builds_a_shape_its_own_way` exists to refuse. The feature is written against the declaration and the binding waits on one fixture both files read.",
+    },
+    "no model asking to drop it": {"why_not": ""},
+    "a model naming that column in dropping": {"why_not": ""},
+    "a second change in the same plan that destroys nothing": {"why_not": ""},
+}
+
 
 def _it_can_run(_why_not: str) -> bool:
     """Nothing is missing, so the scenario goes on. Answered rather than left."""
@@ -212,10 +233,28 @@ _WHETHER_IT_NAMES_A_SCHEME: dict[bool, Any] = {
 }
 
 
-@given(parsers.re(_one_of(tuple(sorted(WHAT_EACH_GIVEN_OPENS, key=len, reverse=True)))))
+@given(
+    parsers.re(
+        _one_of(
+            tuple(
+                sorted(
+                    {**WHAT_EACH_GIVEN_OPENS, **WHAT_EACH_GIVEN_ABOUT_A_LOSS_NEEDS},
+                    key=len,
+                    reverse=True,
+                )
+            )
+        )
+    )
+)
 @when(parsers.re(_one_of(tuple(sorted(WHAT_EACH_SENTENCE_OPENS, key=len, reverse=True)))))
 def _what_the_sentence_opens(scenario: dict, sentence: str) -> None:
-    scenario.update({**WHAT_EACH_GIVEN_OPENS, **WHAT_EACH_SENTENCE_OPENS}[sentence])
+    scenario.update(
+        {
+            **WHAT_EACH_GIVEN_OPENS,
+            **WHAT_EACH_GIVEN_ABOUT_A_LOSS_NEEDS,
+            **WHAT_EACH_SENTENCE_OPENS,
+        }[sentence]
+    )
     _WHETHER_ANYTHING_IS_MISSING[scenario["why_not"] != ""](scenario["why_not"])
     _WHETHER_THE_MACHINE_SAYS_IT[scenario["unset"] != ""](scenario)
     scenario["answers"] = asyncio.run(_open_each_and_shut(scenario))
@@ -251,12 +290,24 @@ async def _open_each_and_shut(scenario: dict) -> list[Any]:
         for target in scenario["opens"]
     ]
     for one in opened:
-        await _WHETHER_THERE_IS_ANYTHING_TO_SHUT["crew" not in one](one)
+        await _WHETHER_THERE_IS_ANYTHING_TO_SHUT[not isinstance(one, dict) or "crew" not in one](
+            one
+        )
     return opened
 
 
 async def _every_argument_given(target: str, primary: str | None) -> Any:
-    return await session_open(target, "exit_immediately", primary, None)
+    """The call, and what it raised if it raised.
+
+    `boundary_in fn session_open` raises rather than handing a refusal back, so
+    the exception is what a scenario reads. Catching it here and keeping it is
+    how a Then asks what the refusal said, the same way the shutdown scenario
+    keeps the error Python itself makes.
+    """
+    try:
+        return await session_open(target, "exit_immediately", primary, None)
+    except CouldNotOpen as refused:
+        return refused
 
 
 async def _with_the_shutdown_left_off(target: str, primary: str | None) -> Any:
@@ -303,7 +354,9 @@ def _the_one_answer(scenario: dict) -> Any:
 
 
 def _the_words_of(answer: object) -> str:
-    return str(answer["what_went_wrong"]) + str(answer["what_to_do_instead"])  # type: ignore[index]
+    """Everything the refusal says, whether it arrived raised or returned."""
+    fault = getattr(answer, "fault", answer)
+    return str(fault["what_went_wrong"]) + str(fault["what_to_do_instead"])  # type: ignore[index]
 
 
 # --- what must be true afterwards ---------------------------------------------------
@@ -480,9 +533,16 @@ def _only_the_target_says(scenario: dict) -> None:
     assert "target" in inspect.signature(session_open).parameters
 
 
-@then("it is refused")
-def _it_was_refused(scenario: dict) -> None:
-    assert _is_fault(_the_one_answer(scenario)), f"it was not refused: {_the_one_answer(scenario)}"
+@then("the call raises and no database comes back")
+def _it_raised(scenario: dict) -> None:
+    """A returned refusal is one a deployment can ignore and serve anyway."""
+    answer = _the_one_answer(scenario)
+
+    assert isinstance(answer, CouldNotOpen), (
+        f"the open was refused and the refusal came back as a value rather than "
+        f"being raised, so a caller who ignores it boots a server against a "
+        f"database it never got: {answer!r}"
+    )
 
 
 # WHAT EACH SENTENCE NEEDS TO FIND IN THE REFUSAL'S OWN WORDS. Four sentences,

@@ -100,7 +100,7 @@ Feature: session_open -- One door, and the target says what is behind it
   # that an engine may have no use for, so that is what this asks about now.
   Scenario: a primary given for an engine that cannot replicate is refused
     When a caller opens "app.db" with a primary
-    Then it is refused
+    Then the call raises and no database comes back
     And the refusal names sqlite and says it has nothing to replicate to
     And no connection was opened
 
@@ -115,15 +115,56 @@ Feature: session_open -- One door, and the target says what is behind it
 
   # ------------------------------------------------------- what it refuses to open
 
-  Scenario: a target no engine claims is refused before anything is opened
+  # EVERY REFUSAL HERE RAISES, AND THAT IS THIS DOOR ALONE. Adam ruled on
+  # 2026-10-03 that a change nobody declared which would destroy data has to
+  # prevent a server starting, and a returned value cannot do that: a caller who
+  # ignores the return boots and serves requests against nothing. So
+  # `boundary_in fn session_open` returns `Database` and raises `could_not_open`,
+  # and it is the one function in the package that raises at all. Everywhere
+  # inside, a failure is still a value. The framework spec confines an exception
+  # to the boundary and this is the boundary.
+
+  Scenario: a target no engine claims raises before anything is opened
     When a caller opens "mysql://localhost/todo"
-    Then it is refused
+    Then the call raises and no database comes back
     And no file was created and no connection was attempted
 
   Scenario: a target that detects but cannot be reached fails at opening, not at detecting
     When a caller opens "postgresql://unreachable.invalid/todo"
     Then the engine was decided first, and postgresql
     And what failed is the connection, and the failure says so
+
+  # ------------------------------------- a loss nobody declared stops the deploy
+
+  # THIS IS THE CASE THE RAISE EXISTS FOR. The models are the desired state, so a
+  # column missing from a model reads as a column to drop, and it reads exactly
+  # the same as a typo in the model. One costs a rename in a pull request and the
+  # other costs the column. `fn refuse_undeclared_loss` already refuses it. What
+  # these scenarios add is that the refusal reaches the process rather than the
+  # return value.
+
+  Scenario: a change that would destroy data nobody declared stops the server coming up
+    Given a database holding a column no surviving model names
+    And no model asking to drop it
+    When a caller opens that database
+    Then the call raises and no database comes back
+    And what it raises names the table and the column
+    And a caller who ignores what came back still cannot serve
+
+  Scenario: the same change declared is applied without raising
+    Given a database holding a column no surviving model names
+    And a model naming that column in dropping
+    When a caller opens that database
+    Then a database comes back
+    And the column is gone
+
+  Scenario: it raises before it applies anything
+    Given a database holding a column no surviving model names
+    And no model asking to drop it
+    And a second change in the same plan that destroys nothing
+    When a caller opens that database
+    Then the call raises and no database comes back
+    And the change that destroys nothing did not run either
 
   # DELETED 2026-09-25: "the budget has no default". It said the retry budget is
   # part of the declaration that opens a database, and the door has no budget
@@ -138,10 +179,10 @@ Feature: session_open -- One door, and the target says what is behind it
   # matters, which is that nothing fills it in.
   Scenario: the deployment states how many connections, and nothing fills it in
     When a database is opened on a machine that says nothing about connections
-    Then it is refused
+    Then the call raises and no database comes back
     And the refusal says the number is a property of the machine
 
   Scenario: the deployment states how big the crew is, and nothing fills that in either
     When a database is opened on a machine that says nothing about the crew
-    Then it is refused
+    Then the call raises and no database comes back
     And the refusal names the crew rather than the connections

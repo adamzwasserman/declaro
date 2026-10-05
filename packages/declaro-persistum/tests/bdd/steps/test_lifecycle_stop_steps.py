@@ -19,6 +19,7 @@ is whether it was asked and whether it took what it was given.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import pathlib
 
 import pytest
@@ -84,14 +85,35 @@ def _one_of(sentences: tuple[str, ...]) -> str:
 
 @pytest.fixture
 def scenario(tmp_path: pathlib.Path) -> dict:
-    """One scenario, with the register emptied afterwards whatever happened.
+    """One scenario, with the register emptied and every connection closed.
 
     THE REGISTER IS MODULE STATE THAT OUTLIVES A SCENARIO, so leaving a database
     on it hands the next scenario a connection that is already closed.
+
+    WHAT THIS SCENARIO OPENED, THIS SCENARIO CLOSES, and that is the test's job
+    rather than the library's. Shutdown closes a database it finished with; a
+    database whose crew it could not stop it leaves alone, so these scenarios own
+    the closing. Measured 2026-10-02: without this, the malformed-crew scenario
+    left two connections open, aiosqlite gave each one a thread it never marks as
+    a daemon, and `uv run pytest` never exited at all.
     """
-    held = {"tmp": tmp_path}
+    held: dict = {"tmp": tmp_path}
     yield held
     REGISTERED.clear()
+    asyncio.run(_close_what_this_scenario_opened(held.get("databases", [])))
+
+
+async def _close_what_this_scenario_opened(databases: list[Database]) -> None:
+    """Every connection this scenario made, closed whether shutdown reached it.
+
+    A connection shutdown already closed refuses a second close on some drivers
+    and takes it on others, so the refusal is the answer here rather than a
+    failure: what matters is that none is left open.
+    """
+    for db in databases:
+        for connection in [*db["writers"], *db["connections"]]:
+            with contextlib.suppress(Exception):
+                await connection.close()  # type: ignore[attr-defined]
 
 
 @given(parsers.re(_one_of(tuple(sorted(WHAT_EACH_GIVEN_SETS, key=len, reverse=True)))))

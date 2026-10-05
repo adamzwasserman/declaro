@@ -1,9 +1,21 @@
 """The one door a caller opens a database at.
 
-    boundary_in fn session_open : (target: str, shutdown: Shutdown, primary: str | NOTHING, token: str | NOTHING) -> Database | Fault awaited
+    boundary_in fn session_open : (target: str, shutdown: Shutdown, primary: str | NOTHING, token: str | NOTHING) -> Database awaited
     side_effect reads "caller"
     side_effect reads "env:DECLARO_CREW_SIZE"
     side_effect reads "env:DECLARO_CONNECTIONS"
+    raises could_not_open
+
+THE ONE FUNCTION HERE THAT RAISES, AND IT RAISES SO A SERVER CANNOT START ON A
+DATABASE THAT WOULD NOT OPEN. Everywhere inside this package a failure comes back
+as a value, because a value cannot be dropped by accident and an exception skips
+every handler between the failure and whoever catches it. At this door the
+reasoning inverts. The caller is a deployment bringing a server up, and a value
+it ignores is a server answering requests against a database it never got. The
+worst thing that value can be hiding is a change that would destroy data nobody
+declared, which has to stop the deploy rather than be reported to it. Adam ruled
+that on 2026-10-03. The framework spec confines an exception to the boundary, in
+four places, and this is the boundary.
 
 THE TARGET SAYS WHICH ENGINE, SO NOBODY NAMES ONE. `open_sqlite`,
 `open_postgresql` and `open_turso` each stamped a constant, so a caller decided
@@ -172,8 +184,33 @@ def _nothing_opened_yet(
     )
 
 
-def _whatever_refused_it(opened: object) -> Fault:
-    return cast("Fault", opened)
+class CouldNotOpen(Exception):
+    """The one exception this package raises, and only this door raises it.
+
+    IT CARRIES THE FAULT RATHER THAN RESTATING IT. `type Fault` already says what
+    went wrong and what to do instead, and a second record for the same three
+    facts is a second thing to keep in step. `fault` is the one that came back,
+    and `str()` of this is what an operator reads in the log the platform keeps.
+    """
+
+    def __init__(self, fault: Fault) -> None:
+        self.fault = fault
+        super().__init__(f"{fault['what_went_wrong']} {fault['what_to_do_instead']}")
+
+
+def _whatever_refused_it(opened: object) -> Database:
+    """A refusal leaves as an exception, so no caller can boot past it.
+
+    WHY THIS ONE PLACE RAISES WHEN NOTHING ELSE IN THE PACKAGE DOES. A failure is
+    a value everywhere inside, because a value cannot be dropped by accident and
+    an exception skips every handler between here and whoever catches it. At this
+    door the reasoning inverts: the caller is a deployment starting a server, and
+    a value it ignores is a server answering requests against a database it never
+    got. The worst of those is a change that would destroy data nobody declared,
+    which has to stop the deploy rather than be reported to it. The framework
+    spec confines an exception to the boundary, and this is the boundary.
+    """
+    raise CouldNotOpen(cast("Fault", opened))
 
 
 def _the_handle_in_it(opened: object) -> Database:
@@ -181,7 +218,7 @@ def _the_handle_in_it(opened: object) -> Database:
     return cast("Database", dict(opened)["database"])  # type: ignore[call-overload]
 
 
-_WHETHER_THE_OPEN_WAS_REFUSED: dict[bool, Callable[[object], Database | Fault]] = {
+_WHETHER_THE_OPEN_WAS_REFUSED: dict[bool, Callable[[object], Database]] = {
     True: _whatever_refused_it,
     False: _the_handle_in_it,
 }
@@ -189,7 +226,7 @@ _WHETHER_THE_OPEN_WAS_REFUSED: dict[bool, Callable[[object], Database | Fault]] 
 
 async def session_open(
     target: str, shutdown: Shutdown, primary: str | None, token: str | None
-) -> Database | Fault:
+) -> Database:
     """Open the database the target names, and hand back what every later call reads.
 
     `target` says where it is, and the engine is read off it: a bare path is
@@ -198,8 +235,12 @@ async def session_open(
     stop. `primary` and `token` are where a replica pulls from and what that
     primary accepts, and a database with no primary passes nothing for both.
 
-    Anything that refused the open comes back as a `Fault` in the return value,
-    naming what went wrong and what to do instead. Nothing here raises.
+    ANYTHING THAT REFUSED THE OPEN RAISES `CouldNotOpen`, carrying the `Fault`
+    that says what went wrong and what to do instead. This is the one function in
+    the package that raises, and it raises so that a deployment cannot start a
+    server on a database it never got. A value handed back here can be ignored,
+    and the worst thing it can be hiding is a change that would destroy data
+    nobody declared. Inside the package a failure is still a value everywhere.
     """
     machine = _what_the_machine_says()
     refused = [one for one in machine.values() if _is_fault(one)]
@@ -215,9 +256,9 @@ async def _the_machine_is_set_wrong(
     _token: str | None,
     _machine: dict[str, Any],
     refused: list[Any],
-) -> Database | Fault:
+) -> Database:
     """A variable set to something that is not a count, said before anything opens."""
-    return cast("Fault", refused[0])
+    raise CouldNotOpen(cast("Fault", refused[0]))
 
 
 async def _go_and_open_it(
@@ -227,12 +268,12 @@ async def _go_and_open_it(
     token: str | None,
     machine: dict[str, Any],
     _refused: list[Any],
-) -> Database | Fault:
+) -> Database:
     opened = await session_connect(_nothing_opened_yet(target, shutdown, primary, token, machine))
     return _WHETHER_THE_OPEN_WAS_REFUSED[_is_fault(opened)](opened)
 
 
-_WHETHER_THE_MACHINE_MADE_SENSE: dict[bool, Callable[..., Awaitable[Database | Fault]]] = {
+_WHETHER_THE_MACHINE_MADE_SENSE: dict[bool, Callable[..., Awaitable[Database]]] = {
     True: _the_machine_is_set_wrong,
     False: _go_and_open_it,
 }
