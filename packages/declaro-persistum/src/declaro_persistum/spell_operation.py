@@ -711,11 +711,31 @@ def _table_body(operation: Operation, engine: Engine) -> str | Fault:
 
 
 def _create_table(operation: Operation, engine: Engine) -> list[Statement] | Fault:
+    """The table, and then one statement per index it carries.
+
+    THE INDEXES WERE LOST UNTIL 2026-10-07. A new table arrives here carrying the
+    columns, the rules and the indexes it is meant to end with, and this spelled
+    only the table. `fn what_an_operation_carries` said `create_table` carries
+    indexes and this returned one statement, so the indexes went nowhere and the
+    deployment got a table, no index and a success report. The same defect shipped
+    in 0.1.11, where the differ packed them in and the applier never read them,
+    and another project lost four indexes in production to it.
+
+    AN INDEX CANNOT GO INSIDE THE CREATE TABLE, so this has to be more than one
+    statement, which is why `fn spell_operation` hands back a list.
+    """
+
     def spelled() -> list[Statement] | Fault:
         body = _table_body(operation, engine)
         return _the_first_fault_or(
             [body],
-            lambda: [_statement(f"CREATE TABLE {QUOTE[engine](operation['table'])} ({body})", [])],
+            lambda: [
+                _statement(f"CREATE TABLE {QUOTE[engine](operation['table'])} ({body})", []),
+                *[
+                    _index_statement(index, operation["table"], engine)
+                    for index in operation["indexes"]
+                ],
+            ],
         )
 
     return _carrying(operation, engine, "columns", spelled)

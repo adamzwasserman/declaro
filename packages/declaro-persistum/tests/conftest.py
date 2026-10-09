@@ -555,6 +555,57 @@ def a_reference(*, table: str, column: str, on_delete: str):
 NARROWS_BY_NOTHING = {"each": {}, "any_of": [], "none_of": []}
 
 
+def a_declaration(
+    *,
+    model: str,
+    wanted: str,
+    columns: list,
+    condition: dict,
+    order: dict,
+    grouping: list,
+    having: dict,
+    paging: dict | None,
+    rows: list | None,
+    shaping: str,
+    across: list | None,
+):
+    """One `Declaration`, every field said out loud.
+
+    ELEVEN ARGUMENTS AND NOT ONE OF THEM OPTIONAL. Four step files write this
+    record out by hand today, which is how a `Condition` of `{}` got written in a
+    `having` and raised `KeyError: 'each'` three calls later, in a module that had
+    nothing to do with whoever wrote it.
+
+    EVERY FIELD IS THERE EVEN WHEN THE WORD DOES NOT READ IT. A view's SELECT is
+    the same whichever shape a caller wants rows back in, and `shaping` is still
+    written at the call site, because a declaration carries every field however
+    few the caller named.
+    """
+    return {
+        "model": model,
+        "wanted": wanted,
+        "columns": columns,
+        "condition": condition,
+        "order": order,
+        "grouping": grouping,
+        "having": having,
+        "paging": paging,
+        "rows": rows,
+        "shaping": shaping,
+        "across": across,
+    }
+
+
+def a_view(*, name: str, declaration: dict, freshness: str | None):
+    """One `View`, every field said out loud.
+
+    A VIEW HOLDS A DECLARATION AND NEVER A SELECT. `freshness` of `None` is a
+    plain view rather than a materialized one, and that is a real answer rather
+    than a field left off.
+    """
+    return {"name": name, "declaration": declaration, "freshness": freshness}
+
+
 def a_constraint(*, name: str, kind: str, columns: list, rule: dict, value):
     """One `Constraint`, every field said out loud.
 

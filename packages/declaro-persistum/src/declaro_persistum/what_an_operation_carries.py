@@ -50,12 +50,20 @@ CARRIES: dict[OperationKind, Carrying] = {
     "add_column": _filling(columns=True),
     "drop_column": _filling(columns=True),
     "alter_column": _filling(columns=True, constraints=True, indexes=True, copying=True),
-    "rename_column": _filling(columns=True),
+    # RENAMING NEEDS THE NEW NAME AND NOT THE COLUMN DEFINITIONS, and this row
+    # said the opposite until 2026-10-07. It claimed `columns` and denied
+    # `renamed_to`, so a change built from the row alone was refused by
+    # `fn spell_operation` for want of the field the row said it did not need.
+    "rename_column": _filling(renamed_to=True),
     "rename_table": _filling(renamed_to=True),
     "create_index": _filling(indexes=True),
     "drop_index": _filling(indexes=True),
     "create_view": _filling(view=True),
-    "drop_view": _NOTHING_BUT_ITS_NAME,
+    # DROPPING A VIEW NEEDS THE VIEW AND NOT ONLY ITS NAME, because whether it
+    # was materialized decides the statement: PostgreSQL drops a materialized
+    # view with different words. This row said the name was enough until
+    # 2026-10-07, and all three engines refused a change built from it.
+    "drop_view": _filling(view=True),
     "insert_enum_values": _filling(values=True),
     "remove_enum_values": _filling(values=True),
 }
