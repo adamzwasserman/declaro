@@ -43,7 +43,12 @@ from pytest_bdd import given, parsers, scenarios, then, when
 
 from declaro_persistum.crew_stop import crew_stop
 from declaro_persistum.session_close_connection import session_close_connection
-from declaro_persistum.session_connect import session_connect
+from declaro_persistum.session_connect import (
+    THE_CHANNEL_IN_ORDER,
+    THE_LIVE_SCHEMA_READ,
+    THE_ORDER,
+    session_connect,
+)
 from declaro_persistum.types import NOTHING
 from tests.conftest import a_connecting, a_plan, a_report, a_schema, declaring
 
@@ -67,18 +72,22 @@ def _is_fault(piece: object) -> bool:
     return isinstance(piece, dict) and frozenset(piece) == THE_THREE_FACTS_IN_A_FAULT
 
 
-def _what_the_door_hands_over(target: str) -> dict:
+def _what_the_door_hands_over(target: str, primary: object, token: object) -> dict:
     """The record `boundary_in fn session_open` builds, with nothing filled in.
 
     Built through `a_connecting` rather than written out here. `Connecting` has
     nineteen fields, and a step file writing its own is the thirteenth file
     doing what cost this suite two silent days when `Column` lost `facets`.
+
+    THE PRIMARY AND THE TOKEN COME FROM THE SCENARIO, because a replicated open
+    is the same door with two of the caller's four words filled in. Every local
+    scenario hands nothing for both, which is what a caller opening a file does.
     """
     return a_connecting(
         target=target,
         shutdown="exit_immediately",
-        primary=NOTHING,
-        token=NOTHING,
+        primary=primary,
+        token=token,
         connections_asked=HOW_MANY_CONNECTIONS_THIS_DEPLOYMENT_ASKED_FOR,
         crew_asked=HOW_MANY_DRAINERS_THIS_DEPLOYMENT_ASKED_FOR,
         engine="sqlite",
@@ -123,6 +132,30 @@ WHAT_EACH_GIVEN_SETS: dict[str, dict] = {
             "`boundary_out fn session_open_channel` opens against a real primary "
             "and proves the channel with one pull, so a stand-in here would say "
             "nothing about whether the copy was filled before the handle went back."
+        ),
+    },
+    # THE ONE PRIMARY THIS MACHINE HAS IS multicardz'S OWN, holding twenty-three
+    # tables no test model declares, and `fn difference` plans a drop_table for
+    # every live table the models do not declare. So the open refuses on
+    # undeclared loss before the push is reached, and a declaration asking for
+    # those drops would plan to empty somebody's database. A drainer pushes on a
+    # free turn, so that plan could reach the primary. Measured 2026-10-10 by
+    # hand instead: a replica holding an unpushed CREATE TABLE still holds it
+    # after a pull, and a push after that pull reaches the primary.
+    "a replicated database holding a table the primary never got": {
+        "why_not": (
+            "Needs a primary of this suite's own. TEST_TURSO_URL names "
+            "multicardz's staging database, whose tables no test model declares, "
+            "so this open refuses on undeclared loss before any push runs."
+        ),
+    },
+    "a replicated database whose push will not land": {
+        "why_not": (
+            "Needs a push that fails on a channel that opened. "
+            "`boundary_out fn session_open_channel` proves the channel with one "
+            "pull, so a primary that is not there is refused at the open and "
+            "says so in the channel's words rather than the push's. Making the "
+            "push alone fail means the primary going away between two calls."
         ),
     },
     "models declaring every kind of change a migration can plan": {
@@ -184,6 +217,16 @@ def scenario(tmp_path: pathlib.Path) -> dict:
         "tables": [],
         "lost": "",
         "why_not": "",
+        # WHAT A CALLER OPENING A FILE HANDS FOR THE OTHER TWO WORDS. A
+        # replicated scenario writes a primary and a token over these.
+        "primary": NOTHING,
+        "token": NOTHING,
+        # THE TABLE A REPLICATED SCENARIO PUTS IN ITS COPY, and what a second
+        # replica sees on the primary afterwards. Empty here so that pulling the
+        # guard off a scenario that cannot run yet fails on the assertion and
+        # names what is missing, rather than on a key nobody filled.
+        "table": "",
+        "on_the_primary": [],
         # `tables` IS WHAT GOES INTO THE FILE FIRST; `holds` IS WHAT IT HOLDS
         # AFTERWARDS, read back off the file by the When. Two words, because one
         # would have the open's answer overwriting the scenario's own setup.
@@ -265,6 +308,20 @@ _HOW_A_CALLER_SAYS_IT = (
 )
 
 
+@when("the channel's three steps are read in the order they run")
+def _where_the_channel_steps_sit(scenario: dict) -> None:
+    """Where each of the three sits in the whole order.
+
+    `THE_CHANNEL_IN_ORDER` is spliced into `THE_ORDER` rather than written into
+    it, so these are the same three closures the open runs and their positions
+    are read off the order itself.
+    """
+    scenario["where_each_step_sits"] = {
+        word: THE_ORDER.index(step) for word, step in THE_CHANNEL_IN_ORDER
+    }
+    scenario["where_the_schema_is_read"] = THE_ORDER.index(THE_LIVE_SCHEMA_READ)
+
+
 @when(parsers.re(_HOW_A_CALLER_SAYS_IT))
 def _a_caller_opens_a_database(scenario: dict, named: str | None, engine: str | None) -> None:
     """The edge, and the only place in this file that touches a database.
@@ -280,17 +337,19 @@ def _a_caller_opens_a_database(scenario: dict, named: str | None, engine: str | 
     a_file = target.startswith("sqlite:///")
 
     asyncio.run(_WHETHER_TO_PUT_TABLES_IN_IT[a_file](scenario, target))
-    scenario.update(asyncio.run(_open_and_shut(target)))
+    scenario.update(asyncio.run(_open_and_shut(target, scenario["primary"], scenario["token"])))
     scenario.update(asyncio.run(_WHETHER_IT_IS_A_FILE_HERE[a_file](target)))
 
 
-async def _open_and_shut(target: str) -> dict:
+async def _open_and_shut(target: str, primary: object, token: object) -> dict:
     """Open it, then stop every drainer and close every connection it opened.
 
     Both happen in one loop because a task started in one cannot be stopped
     from another. What comes back is plain data, so no Then needs a loop.
     """
-    answer = await session_connect(_what_the_door_hands_over(target))  # type: ignore[arg-type]
+    answer = await session_connect(  # type: ignore[arg-type]
+        _what_the_door_hands_over(target, primary, token)
+    )
     # HOW MANY DRAINERS WERE RUNNING, counted by whatever stopped them. Counted
     # afterwards it read zero on a crew that had been running fine, because
     # stopping a crew empties its list of drainers.
@@ -478,6 +537,7 @@ WHAT_EACH_REFUSAL_HAS_TO_SAY: dict[str, tuple[str, ...]] = {
     ),
     "the fault says the database is part way through its migration": ("part way through",),
     "it tells the operator to look at the database by hand": ("by hand",),
+    "the refusal says the local commits could not be sent": ("Local commits could not be sent",),
 }
 
 
@@ -514,7 +574,7 @@ def _nobody_had_to_make_one(scenario: dict) -> None:
     list of arrivals and the tickets are made in here, and a caller who never
     heard of any of them still gets a crew that runs.
     """
-    assert "crew" not in _what_the_door_hands_over(str(scenario["target"])), (
+    assert "crew" not in _what_the_door_hands_over(str(scenario["target"]), NOTHING, NOTHING), (
         "the caller hands a crew over, so a caller who left it out would get a "
         "database that takes writes and never runs them"
     )
@@ -560,6 +620,46 @@ def _the_copy_was_filled_first(scenario: dict) -> None:
     )
 
 
+@then("the push runs after the channel opens and before the pull")
+def _the_push_sits_between_them(scenario: dict) -> None:
+    """Nothing can be sent before the channel is open, and what is local has to
+    go up before anything comes down on top of it."""
+    sits = scenario["where_each_step_sits"]
+
+    assert sits["open"] < sits["push"] < sits["pull"], (
+        f"the open runs the channel at {sits['open']}, the push at "
+        f"{sits['push']} and the pull at {sits['pull']}. A pull before the push "
+        f"brings the primary's schema down onto local changes that never left it"
+    )
+
+
+@then("both run before the live schema is read")
+def _they_run_before_the_schema_is_read(scenario: dict) -> None:
+    """On a replicated database the live schema is the local copy. A copy holding
+    changes the primary never got reads as a copy that matches its models, so the
+    migration plans nothing and nothing sends them again."""
+    sits = scenario["where_each_step_sits"]
+    read_at = scenario["where_the_schema_is_read"]
+
+    assert max(sits.values()) < read_at, (
+        f"the live schema is read at {read_at} and the channel's steps run at "
+        f"{sits}, so the schema is read off a copy that has not sent what it holds"
+    )
+
+
+@then("the primary has that table")
+def _the_primary_has_that_table(scenario: dict) -> None:
+    """Read through a copy that never saw the write.
+
+    Asking the copy that pushed answers from the local file and says nothing
+    about what left the machine, which is the whole of what a push is for.
+    """
+    assert scenario["table"] in scenario["on_the_primary"], (
+        f"this copy held {scenario['table']!r} and a second replica pulling from "
+        f"the primary sees {scenario['on_the_primary']}, so the open never sent it"
+    )
+
+
 @then("the handle carries its engine, its connections, its writers and its crew")
 def _the_handle_carries_it_all(scenario: dict) -> None:
     assert not _is_fault(scenario["answer"]), f"the open was refused: {scenario['answer']}"
@@ -582,9 +682,16 @@ def _the_handle_carries_it_all(scenario: dict) -> None:
 
 @then(parsers.parse('the twenty-nine before it are "{survives}"'))
 def _what_the_failure_left(scenario: dict, survives: str) -> None:
-    """SQLite and PostgreSQL take the batch as one transaction; Turso commits as
-    it goes. What an operator finds the next morning is the difference."""
-    held = {"undone": 0, "kept": 29}[survives]
+    """All three engines take the batch as one transaction, so nothing a stopped
+    migration ran is there the next morning.
+
+    THE TABLE HELD A `kept` ROW UNTIL 2026-10-10, for the reading that Turso
+    commits each change as it makes it. Measured against pyturso that day and it
+    is false, so the feature's Turso row says "undone" with the other two and the
+    row that answered "kept" is gone. A feature row saying anything but "undone"
+    now fails at this lookup, which is what the table is for.
+    """
+    held = {"undone": 0}[survives]
 
     assert _the_record_in(scenario)["migration"]["applied"] == held, (
         f"the thirtieth change failed on {scenario['engine_asked']} and the "

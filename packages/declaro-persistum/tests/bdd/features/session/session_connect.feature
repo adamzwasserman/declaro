@@ -55,6 +55,34 @@ Feature: session_connect -- Everything that has to be true before a handle goes 
     When a caller opens it
     Then the copy was filled from the primary before the handle was returned
 
+  # ADDED 2026-10-10, AND THIS IS multicardz'S PRODUCTION FAILURE WRITTEN DOWN. A
+  # deploy created a table on the local copy. The push that would have sent it
+  # never landed, and the deploy stamped the schema as done anyway. Every open
+  # after that pulled, found a copy that matched the models, planned no
+  # migration, and sent nothing. The primary went without the table for weeks
+  # while every open reported success.
+  #
+  # MEASURED THE SAME DAY, because the order only matters if a pull keeps what is
+  # local: it does. A replica holding an unpushed CREATE TABLE still holds it
+  # after a pull, and a push after that pull reaches the primary. So the push
+  # goes up before the live schema is read, and a copy whose changes never left
+  # is never read as a copy that matches its models.
+  Scenario: the push goes up before anything comes down
+    When the channel's three steps are read in the order they run
+    Then the push runs after the channel opens and before the pull
+    And both run before the live schema is read
+
+  Scenario: an open sends what is local to the primary before it reads the live schema
+    Given a replicated database holding a table the primary never got
+    When a caller opens it
+    Then the primary has that table
+
+  Scenario: an open whose push did not land is refused
+    Given a replicated database whose push will not land
+    When a caller opens it
+    Then the open is refused
+    And the refusal says the local commits could not be sent
+
   # REWORDED 2026-09-24. It named Turso, and no scenario here names an engine:
   # a caller writes a target and the library reads the engine off it. It also
   # said "its connection" and "its room". `type Database` carries a list of
@@ -70,10 +98,15 @@ Feature: session_connect -- Everything that has to be true before a handle goes 
   # I want one bad operation on Turso not to undo the thirty before it
   # So that a stopped deploy is repaired from what the database actually holds
   #
-  # SQLite and PostgreSQL wrap the whole batch, so one failure undoes all of
-  # it. Turso commits as it goes, so a failure keeps what already landed. That
-  # difference is what an operator finds the next morning, so it is stated as
-  # what survives rather than as the word an engine answers with.
+  # All three engines wrap the whole batch, so one failure undoes all of it.
+  # What an operator finds the next morning is stated as what survives rather
+  # than as the word an engine answers with.
+  #
+  # THE TURSO ROW SAID "kept" UNTIL 2026-10-10, on the reasoning that Turso
+  # commits each change as it makes it. Measured against pyturso that day and it
+  # is false: plain `BEGIN` rolls back a created table and an added column, and a
+  # three-statement batch whose middle statement fails leaves the database
+  # holding only what it started with.
   #
   # REWRITTEN 2026-09-21. Six scenarios read the migration machinery itself:
   # which engine each piece of it names, which words it uses for the scope of a
@@ -92,7 +125,7 @@ Feature: session_connect -- Everything that has to be true before a handle goes 
     Examples:
       | engine     | survives |
       | sqlite     | undone   |
-      | turso      | kept     |
+      | turso      | undone   |
       | postgresql | undone   |
 
   @precommit

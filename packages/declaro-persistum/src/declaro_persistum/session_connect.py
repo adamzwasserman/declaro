@@ -27,11 +27,12 @@ at request time, in front of somebody.
 
 WHAT A FAILED MIGRATION LEAVES BEHIND IS THE ENGINE'S ANSWER, NOT THIS
 FUNCTION'S. `fn how_to_migrate` says whether an engine takes a batch as one
-transaction or commits each change as it makes it. SQLite and PostgreSQL take the
-batch, so a failure on the thirtieth change undoes the twenty-nine before it.
-Turso commits as it goes, so those twenty-nine are there the next morning. The
-fault says which happened, because that is what an operator has to know before
-they decide what to do.
+transaction or commits each change as it makes it. All three take the batch, so a
+failure on the thirtieth change undoes the twenty-nine before it. The fault says
+which happened, because that is what an operator has to know before they decide
+what to do. The Turso row said it commits as it goes until 2026-10-10; measured
+against pyturso that day, plain `BEGIN` rolls a created table and an added column
+all the way back.
 
 THE HANDLE IS BUILT BEFORE THE CREW STARTS. A drainer is handed the database it
 drains, so the database has to exist before the first drainer runs. The crew
@@ -47,6 +48,7 @@ from typing import Any, cast
 
 from declaro_persistum.capability_of import capability_of
 from declaro_persistum.channel_pull import channel_pull
+from declaro_persistum.channel_push import channel_push
 from declaro_persistum.crew_make import crew_make
 from declaro_persistum.crew_size import crew_size
 from declaro_persistum.crew_start import crew_start
@@ -304,6 +306,29 @@ _A_CHANNEL_TO_THE_PRIMARY = _asking(
     awaited=True,
 )
 
+# WHAT IS LOCAL GOES UP BEFORE ANYTHING COMES DOWN, and this is multicardz's
+# production failure written down. A deploy created a table on the local copy.
+# The push that would have sent it never landed, and the deploy recorded the
+# schema as done anyway. Every open after that pulled, read a copy that matched
+# the models, planned no migration and sent nothing, so the primary went without
+# the table for weeks while every open reported success.
+#
+# A PUSH THAT DOES NOT LAND REFUSES THE OPEN, which `fn _asking` gives it: a
+# fault from any step is the answer and every step after it hands that fault on.
+# A caller handed a handle here would write into a copy whose changes cannot
+# leave, and on ephemeral disk those writes die with the process.
+#
+# MEASURED 2026-10-10, because the order only matters if a pull keeps what is
+# local: it does. A replica holding an unpushed CREATE TABLE still holds it after
+# a pull, and a push after that pull reaches the primary.
+_SEND_WHAT_IS_LOCAL = _asking(
+    fills="channel",
+    ask=channel_push,
+    hand=lambda connecting: (connecting["channel"],),
+    into=lambda _answer, connecting: connecting["channel"],
+    awaited=True,
+)
+
 # A COLD COPY HOLDS NO ROWS UNTIL IT HAS PULLED ONCE, and the migration below
 # reads the live schema off this copy. Reading it before the pull reads an empty
 # database, and plans a migration that creates every table the primary has.
@@ -313,6 +338,39 @@ _FILL_THE_COPY = _asking(
     hand=lambda connecting: (connecting["channel"],),
     into=lambda _answer, connecting: connecting["channel"],
     awaited=True,
+)
+
+# THE CHANNEL'S THREE STEPS, IN THE ORDER THEY RUN, and the order is the whole of
+# what they say. They are a table rather than three entries written into
+# `THE_ORDER` so that a test reads them by name: a tuple of nineteen closures
+# says nothing about which one is the push.
+#
+# A LOCAL DATABASE HAS NO CHANNEL AND TAKES ALL THREE DO-NOTHING HALVES. The
+# first asks whether the caller named a primary and the other two ask whether a
+# channel was opened, which is one question each rather than one answer carried
+# between them.
+THE_CHANNEL_IN_ORDER: tuple[tuple[str, Step], ...] = (
+    (
+        "open",
+        _either(
+            question=_whether_it_is_set("primary"),
+            ways={True: _A_CHANNEL_TO_THE_PRIMARY, False: _as_it_stands},
+        ),
+    ),
+    (
+        "push",
+        _either(
+            question=_whether_it_is_set("channel"),
+            ways={True: _SEND_WHAT_IS_LOCAL, False: _as_it_stands},
+        ),
+    ),
+    (
+        "pull",
+        _either(
+            question=_whether_it_is_set("channel"),
+            ways={True: _FILL_THE_COPY, False: _as_it_stands},
+        ),
+    ),
 )
 
 
@@ -629,6 +687,23 @@ def _whether_anything_has_to_run(connecting: Connecting) -> bool:
     return connecting["needs_migration"]
 
 
+# WHAT THE DATABASE HOLDS NOW, asked of the database rather than of a file. It is
+# named because the channel steps above have to run before it: on a replicated
+# database this reads the local copy, so a copy holding changes that never
+# reached the primary reads as a copy that matches its models.
+THE_LIVE_SCHEMA_READ = _asking(
+    fills="live",
+    ask=schema_inspect,
+    hand=lambda connecting: (
+        connecting["connections"][0],
+        connecting["engine"],
+        how_to_inspect(connecting["engine"]),
+    ),
+    into=_the_answer_itself,
+    awaited=True,
+)
+
+
 # --- the order, as data ----------------------------------------------------------
 #
 # A TEST CAN READ IT, AND NOTHING HERE DECIDES IT AT RUN TIME.
@@ -690,14 +765,8 @@ THE_ORDER: tuple[Step, ...] = (
         into=_the_answer_itself,
         awaited=True,
     ),
-    _either(
-        question=_whether_it_is_set("primary"),
-        ways={True: _A_CHANNEL_TO_THE_PRIMARY, False: _as_it_stands},
-    ),
-    _either(
-        question=_whether_it_is_set("channel"),
-        ways={True: _FILL_THE_COPY, False: _as_it_stands},
-    ),
+    # Open the channel, send what is local, then bring down what is not.
+    *(step for _word, step in THE_CHANNEL_IN_ORDER),
     _build_the_handle,
     # One drainer per writer, each spending its turns at `fn lifecycle_turn`.
     _asking(
@@ -738,18 +807,7 @@ THE_ORDER: tuple[Step, ...] = (
         into=_the_answer_itself,
         awaited=False,
     ),
-    # What the database holds now, asked of the database rather than of a file.
-    _asking(
-        fills="live",
-        ask=schema_inspect,
-        hand=lambda connecting: (
-            connecting["connections"][0],
-            connecting["engine"],
-            how_to_inspect(connecting["engine"]),
-        ),
-        into=_the_answer_itself,
-        awaited=True,
-    ),
+    THE_LIVE_SCHEMA_READ,
     _either(
         question=_whether_it_is_behind_its_models,
         ways={True: _work_out_what_changes, False: _nothing_to_migrate},
