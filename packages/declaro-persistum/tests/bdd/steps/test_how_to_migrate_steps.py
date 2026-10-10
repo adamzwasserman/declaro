@@ -15,6 +15,7 @@ declared first.
 
 from __future__ import annotations
 
+import pathlib
 import typing
 
 from pytest_bdd import given, parsers, scenarios, then, when
@@ -53,6 +54,28 @@ WHY_IT_MATTERS = {
         "a recovery would start over from the top and re-run operations that already landed"
     ),
 }
+
+
+@then("the word a migration group opens with is BEGIN")
+def _the_migration_word(answered: str) -> None:
+    """A schema change needs an exclusive transaction, so the record's word is wrong for it.
+
+    `fn how_to_write` hands the crew `BEGIN CONCURRENT` for data writes, and
+    Turso refuses DDL inside one: "DDL statements require an exclusive
+    transaction (use BEGIN instead of BEGIN CONCURRENT)", measured 2026-10-10.
+    So `fn query_run_together` opens a group with the plain word, and this reads
+    that out of its source rather than trusting the comment beside it.
+    """
+    said = pathlib.Path("src/declaro_persistum/query_run_together.py").read_text(encoding="utf-8")
+
+    assert '_BEGIN = "BEGIN"' in said, (
+        "the word a migration group opens with is not plain BEGIN, and Turso "
+        "refuses every schema change inside a concurrent transaction"
+    )
+    assert "BEGIN CONCURRENT" not in said, (
+        "a migration group opens concurrently somewhere in query_run_together, "
+        "and Turso refuses DDL in a concurrent transaction"
+    )
 
 
 @then(
