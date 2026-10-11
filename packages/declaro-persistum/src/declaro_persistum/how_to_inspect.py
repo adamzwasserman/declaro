@@ -139,8 +139,32 @@ _WHAT_POSTGRESQL_CALLS_THEM: dict[str, DeclaredType] = {
 }
 
 
+# WHAT THE ENGINE KEEPS FOR ITSELF, LEFT OUT OF THE TABLES QUESTION. The models
+# are not allowed to declare one of these, so a live schema carrying one plans a
+# drop nobody can allow, and the open stops on a table the engine put there.
+#
+# MEASURED 2026-10-10, AND IT REFUSED EVERY REPLICATED OPEN. A Turso primary
+# carries `turso_cdc`, `turso_cdc_version` and an internal sequence beside
+# `sqlite_sequence`, and the open came back with "the column in 'sqlite_sequence'
+# is a '', and this package has no word of its own for that": that table's one
+# column has no declared type at all. A plain sqlite database refuses the same
+# way as soon as a key counts up by itself, which is what makes `sqlite_sequence`.
+_WHAT_SQLITE_OWNS = "AND name NOT LIKE 'sqlite_%'"
+
+# TURSO OWNS MORE, AND THIS IS THE DAY THE TWO ROWS CAME APART. They held the
+# same five questions because Turso aims at SQLite's catalogue, and the feature
+# said one row would change on the day the catalogues differed. A sqlite database
+# may hold a table a deployment named `turso_anything`, so the two exclusions are
+# not the same exclusion.
+_WHAT_TURSO_OWNS = (
+    f"{_WHAT_SQLITE_OWNS} AND name NOT LIKE 'turso_%' AND name NOT LIKE '\\_\\_turso%' ESCAPE '\\'"
+)
+
+
 _LIKE_SQLITE: Inspecting = {
-    "tables": _asked("SELECT name AS name FROM sqlite_master WHERE type = 'table'"),
+    "tables": _asked(
+        f"SELECT name AS name FROM sqlite_master WHERE type = 'table' {_WHAT_SQLITE_OWNS}"
+    ),
     "columns": _about_one_table(
         # `notnull` AND `unique` ARE KEYWORDS, so the pragma's own column names
         # are quoted on the way out. Unquoted, SQLite answers `near "notnull":
@@ -169,9 +193,16 @@ _LIKE_SQLITE: Inspecting = {
 # ONE ROW PER ENGINE, AND ADDING AN ENGINE IS ONE MORE LINE. PostgreSQL keeps
 # every answer in `information_schema`, and a CHECK lives in `pg_constraint`
 # because `information_schema` does not carry its text.
+_LIKE_TURSO: Inspecting = {
+    **_LIKE_SQLITE,
+    "tables": _asked(
+        f"SELECT name AS name FROM sqlite_master WHERE type = 'table' {_WHAT_TURSO_OWNS}"
+    ),
+}
+
 THE_FIVE_QUESTIONS: dict[Engine, Inspecting] = {
     "sqlite": _LIKE_SQLITE,
-    "turso": _LIKE_SQLITE,
+    "turso": _LIKE_TURSO,
     "postgresql": {
         "tables": _asked(
             "SELECT table_name AS name FROM information_schema.tables "

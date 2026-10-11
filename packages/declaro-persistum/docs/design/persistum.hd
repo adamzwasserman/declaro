@@ -431,7 +431,7 @@ module declaro-persistum
 
   fn how_to_migrate : (engine: Engine) -> MigrationMode note "reads the facts table and hands back how far back a failed migration rolls"
 
-  fn how_to_inspect : (engine: Engine) -> Inspecting note "reads the inspectors table and hands back the five questions this engine answers about itself"
+  fn how_to_inspect : (engine: Engine) -> Inspecting note "reads the inspectors table and hands back the five questions this engine answers about itself" note "the tables question leaves out the tables the engine keeps for itself, because the models are not allowed to declare one and a live schema that holds one plans a drop for it: measured 2026-10-10, a replicated open refused every Turso primary over turso_cdc and sqlite_sequence, and a sqlite database with an autoincrement column refused the same way"
 
   fn how_to_spell : (kind: OperationKind, engine: Engine) -> Spelling | Fault note "reads the generators table and hands back how this engine writes this change"
 

@@ -362,3 +362,109 @@ def _every_word_is_one_of_ours(said: dict[str, Inspecting]) -> None:
         f"{strays} translate an engine's word into something `DeclaredType` "
         f"does not carry, so no model could ever match that column"
     )
+
+
+# --- the tables question, and what the engine keeps for itself ----------------
+#
+# ADDED 2026-10-10 AFTER A REAL OPEN REFUSED. The tables question asked for every
+# table in the catalogue, and a Turso primary keeps four of its own there. The
+# open came back with "the column in 'sqlite_sequence' is a '', and this package
+# has no word of its own for that". A plain sqlite database refuses the same way
+# as soon as a key counts up by itself.
+
+THE_TABLE_THE_MODELS_DECLARE = "people"
+
+# WHAT EACH SENTENCE PUTS IN A DATABASE. Two sentences, one row each, because
+# written out they were one function differing by two statements.
+WHAT_EACH_SENTENCE_PUTS_IN: dict[str, tuple[str, ...]] = {
+    "whose table has a key that counts up by itself": (
+        f"CREATE TABLE {THE_TABLE_THE_MODELS_DECLARE} "
+        f"(id integer primary key autoincrement, name text)",
+        f"INSERT INTO {THE_TABLE_THE_MODELS_DECLARE} (name) VALUES ('ada')",
+    ),
+    'holding a table named "turso_cdc"': (
+        f"CREATE TABLE {THE_TABLE_THE_MODELS_DECLARE} (id integer primary key, name text)",
+        "CREATE TABLE turso_cdc (change_id integer primary key, note text)",
+    ),
+}
+
+_HOW_A_SCENARIO_NAMES_ITS_DATABASE = (
+    r'^a "(?P<engine>sqlite|turso)" database '
+    r"(?P<sentence>whose table has a key that counts up by itself"
+    r'|holding a table named "turso_cdc")$'
+)
+
+
+async def _what_sqlite_answers(folder: pathlib.Path, making: tuple[str, ...], asking: str) -> list:
+    import aiosqlite
+
+    connection = await aiosqlite.connect(folder / "owned.db", isolation_level=None)
+    try:
+        for statement in making:
+            await connection.execute(statement)
+        cursor = await connection.execute(asking, [])
+        return [str(row[0]) for row in await cursor.fetchall()]
+    finally:
+        await connection.close()
+
+
+async def _what_turso_answers(folder: pathlib.Path, making: tuple[str, ...], asking: str) -> list:
+    import turso.aio
+
+    connection = await turso.aio.connect(str(folder / "owned.db"))
+    try:
+        cursor = connection.cursor()
+        for statement in making:
+            await cursor.execute(statement)
+        await cursor.execute(asking, [])
+        return [str(row[0]) for row in await cursor.fetchall()]
+    finally:
+        await connection.close()
+
+
+_WHAT_EACH_ENGINE_ANSWERS = {"sqlite": _what_sqlite_answers, "turso": _what_turso_answers}
+
+
+@given(parsers.re(_HOW_A_SCENARIO_NAMES_ITS_DATABASE), target_fixture="to_ask")
+def _a_database_the_engine_keeps_something_in(engine: str, sentence: str) -> tuple:
+    return (engine, WHAT_EACH_SENTENCE_PUTS_IN[sentence])
+
+
+@when("its tables question is asked", target_fixture="answered_names")
+def _the_tables_question_is_asked(to_ask: tuple) -> list:
+    """Asked of a real database, because what the engine keeps there is the whole
+    point and a stand-in would be deciding it."""
+    engine, making = to_ask
+
+    async def _asked() -> list:
+        with tempfile.TemporaryDirectory() as made:
+            return await _WHAT_EACH_ENGINE_ANSWERS[engine](
+                pathlib.Path(made), making, how_to_inspect(engine)["tables"]["text"]
+            )
+
+    return asyncio.run(_asked())
+
+
+@then("the answer holds the table the models declare and nothing the engine owns")
+def _only_what_the_models_declare(answered_names: list) -> None:
+    assert answered_names == [THE_TABLE_THE_MODELS_DECLARE], (
+        f"the tables question answered {answered_names}, and a live schema "
+        f"holding a table no model may declare plans a drop nobody can allow, "
+        f"so the open stops on a table the engine put there"
+    )
+
+
+@given(parsers.parse('the engine "{engine}"'), target_fixture="its_question")
+def _the_engine_named(engine: str) -> str:
+    return how_to_inspect(engine)["tables"]["text"]  # type: ignore[arg-type]
+
+
+@then("its tables question names the schema it asks about")
+def _it_names_its_schema(its_question: str) -> None:
+    """PostgreSQL keeps its own tables in other schemas, so naming one is how it
+    leaves them out, and it has asked that way all along."""
+    assert "table_schema" in its_question, (
+        f"the question asks the whole server rather than one schema, so every "
+        f"table in information_schema and pg_catalog reads as a live table: "
+        f"{its_question!r}"
+    )

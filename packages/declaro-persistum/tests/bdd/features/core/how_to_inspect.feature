@@ -7,6 +7,44 @@ Feature: how_to_inspect -- The five questions an engine answers about itself
   It asks so the two can be compared, never so it can decide what belongs. The
   models say what should be there.
 
+  # ADDED 2026-10-10 AFTER A REAL OPEN REFUSED. A replicated open against a Turso
+  # primary came back with "the column in 'sqlite_sequence' is a '', and this
+  # package has no word of its own for that", because the tables question asked
+  # for every table in the catalogue and the engine keeps four of its own there:
+  # `sqlite_sequence`, `turso_cdc`, `turso_cdc_version` and an internal sequence.
+  # A plain sqlite database refuses the same way as soon as one column is
+  # autoincrement, which is what puts `sqlite_sequence` there.
+  #
+  # THE MODELS ARE NOT ALLOWED TO DECLARE ONE, which is what makes this the
+  # question's business and not the differ's. `fn refuse_owned_names` already
+  # refuses a model named after one of this package's own tables, so a live schema
+  # carrying a table no model may declare plans a drop nobody can allow, and the
+  # open stops on a table the engine put there.
+  Scenario Outline: a database whose key counts up for itself still reads back
+    Given a "<engine>" database whose table has a key that counts up by itself
+    When its tables question is asked
+    Then the answer holds the table the models declare and nothing the engine owns
+
+    Examples:
+      | engine |
+      | sqlite |
+      | turso  |
+
+  # THE LOG TURSO KEEPS OF ITS OWN CHANGES. A replica carries `turso_cdc`,
+  # `turso_cdc_version` and an internal sequence beside them, and they are the
+  # engine's bookkeeping. This asks a local database holding one by that name,
+  # because a replica is the only place the engine makes them itself.
+  Scenario: the log an engine keeps of its own changes is left out
+    Given a "turso" database holding a table named "turso_cdc"
+    When its tables question is asked
+    Then the answer holds the table the models declare and nothing the engine owns
+
+  # POSTGRESQL KEEPS ITS OWN TABLES IN ANOTHER SCHEMA, so naming the schema is how
+  # it leaves them out, and it has asked that way all along.
+  Scenario: postgresql asks about one schema and not the whole server
+    Given the engine "postgresql"
+    Then its tables question names the schema it asks about
+
   Scenario: an engine gives five questions
     Given any engine
     Then the answer carries a question about its tables, its columns, its indexes, its rules and its views
