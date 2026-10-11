@@ -552,6 +552,11 @@ class Connecting(TypedDict):
     # set to 2 and the connections to 4 opened four writers.
     crew_asked: int | None
     engine: Engine
+    # WHAT THE DISK HELD BEFORE ANYTHING OPENED. Added 2026-10-10. It is read
+    # before the first connection, because opening one makes the file: measured
+    # that day, `turso.aio.connect` leaves a database at a path that held nothing
+    # a moment earlier, so the same question asked later always answers yes.
+    copy_was_here: bool
     settings: dict[str, Value]
     permitted: int
     crew_size: int

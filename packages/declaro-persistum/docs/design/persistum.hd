@@ -248,6 +248,7 @@ module declaro-persistum
                       connections_asked: int | NOTHING
                       crew_asked: int | NOTHING
                       engine: Engine
+                      copy_was_here: bool
                       settings: dict<str, Value>
                       permitted: int
                       crew_size: int
@@ -259,7 +260,7 @@ module declaro-persistum
                       wanted_schema: Schema
                       needs_migration: bool
                       migration: Report
-                      database: Database } note "what session_connect carries while it opens a database"
+                      database: Database } note "what session_connect carries while it opens a database, and copy_was_here is the disk's answer from before anything opened, because opening a connection makes the file: measured 2026-10-10, turso.aio.connect leaves a database at a path that held nothing a moment earlier, so the same question asked later always answers yes"
 
   type ShuttingDown = { databases: list<Database>
                         started_at: float
@@ -294,7 +295,7 @@ module declaro-persistum
 
   reader fn clock_read : () -> float side_effect reads "clock" note "asks the clock what time it is"
 
-  reader fn copy_on_disk : (path: str) -> bool side_effect reads "disk" note "whether a file is already there; the calling program cannot know, so the library looks"
+  reader fn copy_on_disk : (target: str) -> bool side_effect reads "disk" note "whether a copy is already there; the calling program cannot know, so the library looks" note "it takes the target a caller wrote and reads the path out of it, which session_open_connection and session_open_channel also do inside themselves: an output boundary is a terminus and cannot invoke a card, so that reading is written in each place that needs it and a card for it would be a fourth copy rather than one" note "session_connect asks before it opens anything, because opening makes the file"
 
   boundary_in fn lifecycle_turn : (draining: Draining) -> NOTHING | Fault awaited side_effect reads "crew" invokes lifecycle_catch_up note "one drainer's turn, which arrives because that drainer woke"
 

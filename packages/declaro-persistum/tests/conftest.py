@@ -776,6 +776,7 @@ def a_connecting(
     connections_asked: int | None,
     crew_asked: int | None,
     engine: str,
+    copy_was_here: bool,
     settings: dict,
     permitted: int,
     crew_size: int,
@@ -791,10 +792,10 @@ def a_connecting(
 ):
     """One `Connecting`, every field said out loud.
 
-    NINETEEN ARGUMENTS AND NOT ONE OF THEM OPTIONAL. Six of the nineteen are
-    what a caller hands in and thirteen are what the open fills, and a default
-    on any of them would let a step file say a database was opened with numbers
-    nobody in that scenario chose.
+    TWENTY ARGUMENTS AND NOT ONE OF THEM OPTIONAL. Six of the twenty are what a
+    caller hands in and fourteen are what the open fills, and a default on any of
+    them would let a step file say a database was opened with numbers nobody in
+    that scenario chose.
 
     `connections_asked` AND `crew_asked` ARE TWO NUMBERS, NOT ONE. They were one
     field until 2026-09-22, and opening with the crew set to 2 and the
@@ -808,6 +809,7 @@ def a_connecting(
         "connections_asked": connections_asked,
         "crew_asked": crew_asked,
         "engine": engine,
+        "copy_was_here": copy_was_here,
         "settings": settings,
         "permitted": permitted,
         "crew_size": crew_size,

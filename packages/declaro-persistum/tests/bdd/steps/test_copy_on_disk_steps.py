@@ -77,6 +77,23 @@ def _a_file_that_is_there(scenario: dict) -> None:
     scenario["path"] = str(made)
 
 
+@given(parsers.parse('a database file already on this machine, written as a "{scheme}" target'))
+def _a_file_written_as_a_target(scenario: dict, scheme: str) -> None:
+    """The same file, written the way a deployment writes it.
+
+    Four slashes, because the path is absolute and one slash belongs to the
+    `://`. That is what the two doors read, and it is what a caller hands over.
+    """
+    made = scenario["tmp"] / A_FILE_THAT_IS_THERE
+    made.write_bytes(b"")
+    scenario["path"] = f"{scheme}:///{made}"
+
+
+@given("a target naming a postgresql server")
+def _a_target_naming_a_server(scenario: dict) -> None:
+    scenario["path"] = "postgresql://localhost/declarotodo"
+
+
 @given("a path where no file has been made")
 def _a_path_with_nothing_at_it(scenario: dict) -> None:
     scenario["path"] = str(scenario["tmp"] / "nothing.db")
@@ -150,13 +167,6 @@ def _it_is_asked_twice(scenario: dict) -> None:
     first = copy_on_disk(scenario["path"])
     pathlib.Path(scenario["path"]).unlink()
     scenario["answers"] = (first, copy_on_disk(scenario["path"]))
-
-
-@when("a caller opens it")
-def _a_caller_opens_it(scenario: dict) -> None:
-    """Reached only if somebody takes the guard off one of the two scenarios
-    above, and then the Thens read the empty record and say what is missing."""
-    scenario["asked"] = True
 
 
 # --- what must be true afterwards --------------------------------------------

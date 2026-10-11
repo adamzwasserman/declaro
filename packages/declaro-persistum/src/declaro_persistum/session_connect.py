@@ -49,6 +49,7 @@ from typing import Any, cast
 from declaro_persistum.capability_of import capability_of
 from declaro_persistum.channel_pull import channel_pull
 from declaro_persistum.channel_push import channel_push
+from declaro_persistum.copy_on_disk import copy_on_disk
 from declaro_persistum.crew_make import crew_make
 from declaro_persistum.crew_size import crew_size
 from declaro_persistum.crew_start import crew_start
@@ -294,6 +295,16 @@ def _whether_it_is_set(field: str) -> Callable[[Connecting], bool]:
     return asked
 
 
+def _whether_the_copy_can_be_behind(connecting: Connecting) -> tuple[bool, bool]:
+    """Is there a channel, and was a copy already here when the open started?
+
+    Two questions and four rows, because a local database has no channel and a
+    machine that started with nothing has nothing to catch up on. Only a
+    replicated open on a copy that was already here pulls.
+    """
+    return (connecting["channel"] is not NOTHING, connecting["copy_was_here"])
+
+
 _A_CHANNEL_TO_THE_PRIMARY = _asking(
     fills="channel",
     ask=session_open_channel,
@@ -337,17 +348,18 @@ _SEND_WHAT_IS_LOCAL = _asking(
     awaited=True,
 )
 
-# WHAT THIS PULL IS STILL FOR, AND IT IS NOT THE COLD COPY ANY MORE. The push
-# above fills a copy with nothing on it, so this pull brings down what the
-# primary gained from somebody else: several services share one primary here, and
-# a copy that was already on this machine is the one that can be behind. The
-# migration below reads the live schema off this copy, so a copy that is behind
-# plans a change the primary already has.
+# WHAT THIS PULL IS FOR, AND IT IS NOT THE COLD COPY. The push above fills a copy
+# with nothing on it, so this pull brings down what the primary gained from
+# somebody else: several services share one primary here, and a copy that was
+# already on this machine is the one that can be behind. The migration below
+# reads the live schema off this copy, so a copy that is behind plans a change
+# the primary already has.
 #
-# IT RUNS ON EVERY REPLICATED OPEN AND A COLD ONE DOES NOT NEED IT, which is what
-# `reader fn copy_on_disk` was written to decide. Wiring that in needs the disk
-# asked before any connection opens, because `turso.aio.connect` makes the file,
-# and it needs a field on `Connecting` to carry the answer that far.
+# A MACHINE THAT STARTED WITH NOTHING SKIPS IT, which is what `reader fn
+# copy_on_disk` decides and why the disk is asked before anything opens. Nobody
+# tells this library which kind of start it is: a rebuild wipes the files, a soft
+# restart keeps them, a provisioned disk keeps them, and the same open handles all
+# three by asking.
 _FILL_THE_COPY = _asking(
     fills="channel",
     ask=channel_pull,
@@ -383,8 +395,13 @@ THE_CHANNEL_IN_ORDER: tuple[tuple[str, Step], ...] = (
     (
         "pull",
         _either(
-            question=_whether_it_is_set("channel"),
-            ways={True: _FILL_THE_COPY, False: _as_it_stands},
+            question=_whether_the_copy_can_be_behind,
+            ways={
+                (True, True): _FILL_THE_COPY,
+                (True, False): _as_it_stands,
+                (False, True): _as_it_stands,
+                (False, False): _as_it_stands,
+            },
         ),
     ),
 )
@@ -731,6 +748,17 @@ THE_ORDER: tuple[Step, ...] = (
     _asking(
         fills="engine",
         ask=engine_of,
+        hand=lambda connecting: (connecting["target"],),
+        into=_the_answer_itself,
+        awaited=False,
+    ),
+    # BEFORE ANYTHING OPENS, BECAUSE OPENING MAKES THE FILE. Measured 2026-10-10:
+    # `turso.aio.connect` leaves a database at a path that held nothing a moment
+    # earlier, so this question asked after the connections are open answers yes
+    # on a machine that started with an empty disk.
+    _asking(
+        fills="copy_was_here",
+        ask=copy_on_disk,
         hand=lambda connecting: (connecting["target"],),
         into=_the_answer_itself,
         awaited=False,

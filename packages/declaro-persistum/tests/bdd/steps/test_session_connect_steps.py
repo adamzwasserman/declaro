@@ -91,6 +91,7 @@ def _what_the_door_hands_over(target: str, primary: object, token: object) -> di
         connections_asked=HOW_MANY_CONNECTIONS_THIS_DEPLOYMENT_ASKED_FOR,
         crew_asked=HOW_MANY_DRAINERS_THIS_DEPLOYMENT_ASKED_FOR,
         engine="sqlite",
+        copy_was_here=False,
         settings={},
         permitted=0,
         crew_size=0,
@@ -306,6 +307,55 @@ _HOW_A_CALLER_SAYS_IT = (
     r"^a caller opens (?:it|the database|a local database|"
     r'"(?P<named>[a-z]+://[^"]*)"|a "(?P<engine>[a-z]+)" database)$'
 )
+
+
+class _AChannelThatRecordsWhatRan:
+    """What stands in for the primary being reachable.
+
+    IT RECORDS WHETHER IT WAS ASKED, which is the one thing the scenario below
+    wants to know: a copy that was already here has to catch up with the other
+    services on the primary, and a machine that started with nothing was filled
+    by the push and has nothing to catch up on. `pull` answers the way the
+    driver's does, with nothing, so this is a probe and not a second opinion
+    about what a pull does.
+    """
+
+    def __init__(self, ran: list[str]) -> None:
+        self._ran = ran
+
+    async def pull(self) -> None:
+        self._ran.append("pull")
+
+
+WHETHER_A_COPY_WAS_HERE: dict[str, bool] = {"already here": True, "not here yet": False}
+WHAT_BEING_ASKED_LOOKS_LIKE: dict[str, list[str]] = {"asked": ["pull"], "left alone": []}
+
+
+@given(parsers.parse("a replicated open whose copy was {state}"))
+def _a_replicated_open(scenario: dict, state: str) -> None:
+    ran: list[str] = []
+    scenario["ran"] = ran
+    scenario["record"] = {
+        **_what_the_door_hands_over(str(scenario["target"]), "libsql://wherever", "a-token"),
+        "channel": _AChannelThatRecordsWhatRan(ran),
+        "copy_was_here": WHETHER_A_COPY_WAS_HERE[state],
+    }
+
+
+@when("the step that brings the primary down runs")
+def _the_pull_step_runs(scenario: dict) -> None:
+    """The step out of the order the open runs, not a copy of it."""
+    scenario["answer"] = asyncio.run(dict(THE_CHANNEL_IN_ORDER)["pull"](scenario["record"]))
+
+
+@then(parsers.parse("the primary was {reached}"))
+def _whether_the_primary_was_reached(scenario: dict, reached: str) -> None:
+    assert not _is_fault(scenario["answer"]), f"the step refused: {scenario['answer']}"
+    assert scenario["ran"] == WHAT_BEING_ASKED_LOOKS_LIKE[reached], (
+        f"the copy's own answer about the disk was "
+        f"{scenario['record']['copy_was_here']} and the channel saw "
+        f"{scenario['ran']}, where this start {reached} the primary"
+    )
 
 
 @when("the channel's three steps are read in the order they run")

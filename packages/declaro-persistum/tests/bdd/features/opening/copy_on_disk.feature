@@ -47,6 +47,26 @@ Feature: copy_on_disk -- Is there already a copy here
     When copy_on_disk is asked about its path
     Then it answers yes
 
+  # IT IS ASKED ABOUT THE TARGET A CALLER WROTE, AND THE SCHEME IS PART OF THAT.
+  # `orchestrator fn session_connect` holds the target and nothing else when it
+  # asks, because it asks before it opens anything.
+  Scenario Outline: a file written as a "<scheme>" target answers yes
+    Given a database file already on this machine, written as a "<scheme>" target
+    When copy_on_disk is asked about it
+    Then it answers yes
+
+    Examples:
+      | scheme |
+      | sqlite |
+      | libsql |
+
+  # A TARGET NAMING A SERVER HAS NO COPY ON ANY DISK, and no answer here is the
+  # one a caller acts on either: only the two engines that live on a disk ask.
+  Scenario: a target naming a server answers no
+    Given a target naming a postgresql server
+    When copy_on_disk is asked about it
+    Then it answers no
+
   Scenario: a path with nothing at it answers no
     Given a path where no file has been made
     When copy_on_disk is asked about it

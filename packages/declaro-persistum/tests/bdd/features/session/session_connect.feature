@@ -72,6 +72,25 @@ Feature: session_connect -- Everything that has to be true before a handle goes 
     Then the push runs after the channel opens and before the pull
     And both run before the live schema is read
 
+  # NOBODY TELLS THIS LIBRARY WHICH KIND OF START IT IS, so the open asks the
+  # disk. A rebuild wipes the files, a soft restart keeps them, and a provisioned
+  # disk keeps them, and the same open has to handle all three. The push above
+  # fills a machine that started with nothing, so the only copy that can be
+  # behind the primary is one that was already here, and only that one pulls.
+  #
+  # THE DISK IS ASKED BEFORE ANYTHING OPENS, because opening makes the file:
+  # measured 2026-10-10, `turso.aio.connect` leaves a database at a path that
+  # held nothing a moment earlier.
+  Scenario Outline: the pull runs only when a copy was already on this machine
+    Given a replicated open whose copy was <state>
+    When the step that brings the primary down runs
+    Then the primary was <reached>
+
+    Examples:
+      | state        | reached    |
+      | already here | asked      |
+      | not here yet | left alone |
+
   Scenario: an open sends what is local to the primary before it reads the live schema
     Given a replicated database holding a table the primary never got
     When a caller opens it

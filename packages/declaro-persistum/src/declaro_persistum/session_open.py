@@ -163,6 +163,10 @@ def _nothing_opened_yet(
             # module naming an engine, which is the one thing it exists not to
             # do, and `tests/unit/test_only_the_renderer_knows_an_engine.py`
             # said so on 2026-09-25.
+            # NOT A GUESS AT WHAT THE DISK HOLDS. False is the empty value of
+            # its type, and `session_connect` asks the disk and writes the
+            # answer in before it opens anything.
+            "copy_was_here": False,
             "settings": {},
             "permitted": 0,
             "crew_size": 0,
