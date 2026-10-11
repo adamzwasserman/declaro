@@ -160,7 +160,6 @@ KNOWN_UNBOUND: dict[str, str] = {
     "migration_report.feature": _DELETED_2026_09_23,
     "turso_pull.feature": _DELETED_2026_09_23,
     "asked_from_written.feature": _THE_WRITING_IS_AHEAD_OF_THE_CODE,
-    "copy_on_disk.feature": _THE_WRITING_IS_AHEAD_OF_THE_CODE,
     "declaration_from_asked.feature": _THE_WRITING_IS_AHEAD_OF_THE_CODE,
     "grammar_of.feature": _THE_WRITING_IS_AHEAD_OF_THE_CODE,
     "methods_of.feature": _THE_WRITING_IS_AHEAD_OF_THE_CODE,

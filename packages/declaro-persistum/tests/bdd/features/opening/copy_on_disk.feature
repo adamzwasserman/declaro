@@ -11,9 +11,9 @@ Feature: copy_on_disk -- Is there already a copy here
   # the staging primary. Nothing in the declaration asked whether a copy was there,
   # so filling one was assumed rather than chosen.
 
-  IT ANSWERS YES OR NO AND NEVER A FAULT. A path that cannot be read holds no copy
-  this library can use, which is the same answer the caller acts on, so there is
-  nothing a refusal would add.
+  # IT ANSWERS YES OR NO AND NEVER A FAULT. A path that cannot be read holds no
+  # copy this library can use, which is the same answer the caller acts on, so
+  # there is nothing a refusal would add.
 
   Scenario: a file that is there answers yes
     Given a database file already on this machine
