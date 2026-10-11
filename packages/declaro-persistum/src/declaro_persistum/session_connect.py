@@ -787,6 +787,16 @@ THE_ORDER: tuple[Step, ...] = (
         into=_the_answer_itself,
         awaited=False,
     ),
+    # THE CHANNEL'S WORK COMES BEFORE ANY CONNECTION TO THE COPY, and the driver
+    # insists on it. Measured 2026-10-10: with a reader and two writers already
+    # open on the replica, the pull refuses with "sync engine operation failed:
+    # database error: Database is busy", so an open that connected first could
+    # never bring the primary down. The push goes through either way, which is
+    # why this only showed up on a copy that was already here.
+    #
+    # IT IS ALSO THE RIGHT ORDER TO READ A SCHEMA IN. The copy has to be current
+    # before anything asks it what it holds, and the connections are what ask.
+    *(step for _word, step in THE_CHANNEL_IN_ORDER),
     _asking(
         fills="connections",
         ask=session_open_connection,
@@ -809,8 +819,6 @@ THE_ORDER: tuple[Step, ...] = (
         into=_the_answer_itself,
         awaited=True,
     ),
-    # Open the channel, send what is local, then bring down what is not.
-    *(step for _word, step in THE_CHANNEL_IN_ORDER),
     _build_the_handle,
     # One drainer per writer, each spending its turns at `fn lifecycle_turn`.
     _asking(

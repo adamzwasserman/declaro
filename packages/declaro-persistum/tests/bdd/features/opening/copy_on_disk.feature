@@ -95,14 +95,14 @@ Feature: copy_on_disk -- Is there already a copy here
     When copy_on_disk is asked twice and the file is deleted between the asks
     Then it answers yes and then no
 
-  Scenario: a warm copy is not filled again
-    Given a replicated database whose copy is already on this machine
-    When a caller opens it
-    Then the copy was not pulled at open
-    And the open did not wait on the primary
-
-  Scenario: a cold copy is filled
-    Given a replicated database with no copy on this machine
-    When a caller opens it
-    Then the copy was pulled once
-    And the live schema was read after that pull, not before
+  # TWO SCENARIOS WENT TO `session/session_connect.feature` ON 2026-10-10, where
+  # the order they describe lives. They were "a warm copy is not filled again" and
+  # "a cold copy is filled", and they said the saving backwards: a copy that was
+  # already here is the one that can be behind the primary, because several
+  # services share it, and a copy that was not here is filled by the push the open
+  # makes anyway. So the pull runs for the warm start and not the cold one, which
+  # is the opposite of what those two asked for.
+  #
+  # WHAT THIS CARD ANSWERS IS YES OR NO. What an open does with the answer is the
+  # open's business, and a scenario here that opened a database would be this
+  # feature describing another card's order.

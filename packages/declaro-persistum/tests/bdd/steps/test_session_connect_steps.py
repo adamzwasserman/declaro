@@ -35,12 +35,17 @@ the piece somebody has to build.
 from __future__ import annotations
 
 import asyncio
+import os
 import pathlib
+import tempfile
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
 from pytest_bdd import given, parsers, scenarios, then, when
 
+from declaro_persistum.channel_pull import channel_pull
+from declaro_persistum.channel_push import channel_push
 from declaro_persistum.crew_stop import crew_stop
 from declaro_persistum.session_close_connection import session_close_connection
 from declaro_persistum.session_connect import (
@@ -49,6 +54,7 @@ from declaro_persistum.session_connect import (
     THE_ORDER,
     session_connect,
 )
+from declaro_persistum.session_open_channel import session_open_channel
 from declaro_persistum.types import NOTHING
 from tests.conftest import a_connecting, a_plan, a_report, a_schema, declaring
 
@@ -127,36 +133,26 @@ WHAT_EACH_GIVEN_SETS: dict[str, dict] = {
     # model declares none. This sentence sets nothing up; it says what is absent.
     "no model asking to drop it": {"why_not": ""},
     "the engine refuses the thirtieth": {"why_not": ""},
-    "a replicated database whose local copy is empty": {
-        "why_not": (
-            "Needs a live Turso primary holding rows, and a token for it. "
-            "`boundary_out fn session_open_channel` opens against a real primary "
-            "and proves the channel with one pull, so a stand-in here would say "
-            "nothing about whether the copy was filled before the handle went back."
-        ),
-    },
-    # THE ONE PRIMARY THIS MACHINE HAS IS multicardz'S OWN, holding twenty-three
-    # tables no test model declares, and `fn difference` plans a drop_table for
-    # every live table the models do not declare. So the open refuses on
-    # undeclared loss before the push is reached, and a declaration asking for
-    # those drops would plan to empty somebody's database. A drainer pushes on a
-    # free turn, so that plan could reach the primary. Measured 2026-10-10 by
-    # hand instead: a replica holding an unpushed CREATE TABLE still holds it
-    # after a pull, and a push after that pull reaches the primary.
+    # THE TWO REPLICATED SENTENCES RUN AGAINST THIS SUITE'S OWN PRIMARY, named by
+    # TEST_TURSO_PRIMARY_URL and made 2026-10-10. They were parked until then,
+    # because the only primary on this machine was multicardz's staging database:
+    # its tables no test model declares, and `fn difference` plans a drop for
+    # every live table the models do not declare, so the open refused on
+    # undeclared loss before anything these scenarios ask about happened.
+    "a replicated database whose local copy is empty": {"why_not": "", "primary_holds": "people"},
     "a replicated database holding a table the primary never got": {
-        "why_not": (
-            "Needs a primary of this suite's own. TEST_TURSO_URL names "
-            "multicardz's staging database, whose tables no test model declares, "
-            "so this open refuses on undeclared loss before any push runs."
-        ),
+        "why_not": "",
+        "local_only": True,
     },
     "a replicated database whose push will not land": {
         "why_not": (
-            "Needs a push that fails on a channel that opened. "
-            "`boundary_out fn session_open_channel` proves the channel with one "
-            "pull, so a primary that is not there is refused at the open and "
-            "says so in the channel's words rather than the push's. Making the "
-            "push alone fail means the primary going away between two calls."
+            "Needs a push that fails on a channel that opened. A primary that is "
+            "not there opens a channel and refuses at the push, which is this "
+            "scenario, except that the push also carries the open's first and "
+            "only proof of the channel: the refusal names the primary either "
+            "way, so nothing here can tell a push that failed from a channel "
+            "that was never good. Telling them apart means the primary going "
+            "away between two calls."
         ),
     },
     "models declaring every kind of change a migration can plan": {
@@ -211,13 +207,24 @@ _WHETHER_ANYTHING_IS_MISSING: dict[bool, Any] = {False: _it_can_run, True: _it_c
 
 
 @pytest.fixture
-def scenario(tmp_path: pathlib.Path) -> dict:
-    return {
+def scenario(tmp_path: pathlib.Path) -> Iterator[dict]:
+    """What a scenario carries, and the primary left as it was found.
+
+    THE PRIMARY OUTLIVES THIS PROCESS, so a table a scenario put there is a
+    table the next run meets. Whatever goes in `to_clean` comes off the primary
+    at the end, through a copy of its own.
+    """
+    held = {
         "tmp": tmp_path,
         "models": [],
         "tables": [],
         "lost": "",
         "why_not": "",
+        # WHAT A REPLICATED SENTENCE ASKS FOR: a table to put on the primary
+        # before the open, or a table to put in the local copy and never push.
+        "primary_holds": "",
+        "local_only": False,
+        "to_clean": [],
         # WHAT A CALLER OPENING A FILE HANDS FOR THE OTHER TWO WORDS. A
         # replicated scenario writes a primary and a token over these.
         "primary": NOTHING,
@@ -238,6 +245,139 @@ def scenario(tmp_path: pathlib.Path) -> dict:
         # the migration puts the declared table into it.
         "target": f"sqlite:///{tmp_path / 'opened.db'}",
     }
+    yield held
+    _take_off_the_primary(held)
+
+
+def _the_suites_own_primary() -> tuple[str, str]:
+    """The primary this suite replicates from, or a failure naming what is missing.
+
+    IT IS NOT THE ONE `TEST_TURSO_URL` NAMES. That one is multicardz's staging
+    central database, whose tables no test model declares, so an open against it
+    plans a drop for every one of them and refuses before anything a scenario
+    here asks about happens.
+    """
+    url = os.environ.get("TEST_TURSO_PRIMARY_URL", "")
+    token = os.environ.get("TEST_TURSO_PRIMARY_AUTH_TOKEN", "")
+    missing = [
+        name
+        for name, value in (
+            ("TEST_TURSO_PRIMARY_URL", url),
+            ("TEST_TURSO_PRIMARY_AUTH_TOKEN", token),
+        )
+        if not value
+    ]
+    assert not missing, (
+        f"{', '.join(missing)} is not set in .env, and the replicated scenarios "
+        f"run against a real primary of this suite's own. A skip would read as a "
+        f"tested backend."
+    )
+    return url, token
+
+
+async def _a_channel_at(folder: pathlib.Path, name: str) -> Any:
+    """One channel of this copy's own, opened through the door that opens them."""
+    url, token = _the_suites_own_primary()
+    channel = await session_open_channel(str(folder / name), url, token)
+    assert not _is_fault(channel), f"the channel did not open: {channel}"
+    return channel
+
+
+async def _put_it_on_the_primary(statements: tuple[str, ...]) -> None:
+    """Run these on a copy of their own and send them up."""
+    with tempfile.TemporaryDirectory() as made:
+        channel = await _a_channel_at(pathlib.Path(made), "setup.db")
+        cursor = channel.cursor()
+        for statement in statements:
+            await cursor.execute(statement)
+        await channel.commit()
+        assert await channel_push(channel) is None, "the setup push did not land"
+        await channel.close()
+
+
+def _nothing_is_replicated(scenario: dict) -> None:
+    """A local database, so there is no primary and no copy to arrange."""
+    return None
+
+
+def _a_primary_already_holding_the_table(scenario: dict) -> None:
+    """The primary holds what the models declare, and this machine holds nothing.
+
+    The table is spelled the way the migration would spell it, so a copy that
+    pulled it is a copy that matches its models and plans no migration.
+    """
+    url, token = _the_suites_own_primary()
+    table = scenario["primary_holds"]
+    asyncio.run(
+        _put_it_on_the_primary((f"CREATE TABLE {table} (id INTEGER NOT NULL, name TEXT NOT NULL)",))
+    )
+    scenario["to_clean"].append(table)
+    scenario.update(
+        {
+            "primary": url,
+            "token": token,
+            "table": table,
+            "target": f"libsql:///{scenario['tmp'] / 'cold' / 'copy.db'}",
+        }
+    )
+
+
+def _a_copy_holding_what_the_primary_never_got(scenario: dict) -> None:
+    """A commit made on this copy and never sent, which is the failure this is for.
+
+    The copy is made and written through its own channel, which is then closed:
+    one sync connection per replica, measured 2026-08-12, so the open cannot
+    have a second one while this is holding the first.
+    """
+    url, token = _the_suites_own_primary()
+    # THE TABLE THE MODELS DECLARE, AND IT HAS TO BE. A table no model declares
+    # is a table the open plans a drop for, and it refuses the undeclared loss
+    # before anything this scenario asks about can be read. That refusal is
+    # right, and it is `a destructive change nobody declared stops the open`
+    # above. What this scenario is about is the deploy that made its own table
+    # and never got it up, so the table is the one the deploy declared.
+    table = THE_TABLE_THE_MODELS_DECLARE
+    folder = scenario["tmp"] / "warm"
+    path = f"libsql:///{folder / 'copy.db'}"
+
+    async def _write_it_locally() -> None:
+        channel = await _a_channel_at(folder, "copy.db")
+        cursor = channel.cursor()
+        await cursor.execute(f"CREATE TABLE {table} (id INTEGER NOT NULL, name TEXT NOT NULL)")
+        await cursor.execute(f"INSERT INTO {table} VALUES (1, 'never sent')")
+        await channel.commit()
+        await channel.close()
+
+    asyncio.run(_write_it_locally())
+    scenario["to_clean"].append(table)
+    scenario.update({"primary": url, "token": token, "table": table, "target": path})
+
+
+# WHICH SETUP A SENTENCE ASKS FOR, read off what its row set. A fourth
+# combination would be a sentence asking for both, which none does, and the read
+# has no fallback so it would say so.
+_HOW_THE_COPY_AND_THE_PRIMARY_START: dict[tuple[bool, bool], Any] = {
+    (False, False): _nothing_is_replicated,
+    (True, False): _a_primary_already_holding_the_table,
+    (False, True): _a_copy_holding_what_the_primary_never_got,
+}
+
+
+def _take_off_the_primary(scenario: dict) -> None:
+    """Leave the primary as it was found, through a copy of its own."""
+
+    async def _dropped() -> None:
+        with tempfile.TemporaryDirectory() as made:
+            channel = await _a_channel_at(pathlib.Path(made), "cleanup.db")
+            cursor = channel.cursor()
+            for table in scenario["to_clean"]:
+                await cursor.execute(f"DROP TABLE IF EXISTS {table}")
+            await channel.commit()
+            await channel_push(channel)
+            await channel.close()
+
+    for _ in scenario["to_clean"][:1]:
+        asyncio.run(_dropped())
 
 
 @given('models declaring a table "people" with columns id and name')
@@ -261,6 +401,9 @@ def _the_models(scenario: dict) -> None:
 def _what_was_set_up(scenario: dict, sentence: str) -> None:
     scenario.update(WHAT_EACH_GIVEN_SETS[sentence])
     _WHETHER_ANYTHING_IS_MISSING[scenario["why_not"] != ""](scenario["why_not"])
+    _HOW_THE_COPY_AND_THE_PRIMARY_START[(scenario["primary_holds"] != "", scenario["local_only"])](
+        scenario
+    )
 
 
 @given(parsers.parse('a model that no longer declares the column "{column}"'))
@@ -384,11 +527,11 @@ def _a_caller_opens_a_database(scenario: dict, named: str | None, engine: str | 
     """
     scenario["engine_asked"] = engine
     target = _WHICH_DATABASE_IS_OPENED[named is None](named, scenario)
-    a_file = target.startswith("sqlite:///")
+    scheme = target.partition("://")[0]
 
-    asyncio.run(_WHETHER_TO_PUT_TABLES_IN_IT[a_file](scenario, target))
+    asyncio.run(_WHAT_GOES_IN_FIRST[scheme](scenario, target))
     scenario.update(asyncio.run(_open_and_shut(target, scenario["primary"], scenario["token"])))
-    scenario.update(asyncio.run(_WHETHER_IT_IS_A_FILE_HERE[a_file](target)))
+    scenario.update(asyncio.run(_WHAT_IT_HOLDS_AFTERWARDS[scheme](target)))
 
 
 async def _open_and_shut(target: str, primary: object, token: object) -> dict:
@@ -418,7 +561,8 @@ def _the_record_in(scenario: dict) -> dict:
 
 
 def _the_path_in(target: str) -> str:
-    return target.replace("sqlite:///", "")
+    """Where the copy lives, out of the target, the way the doors read one."""
+    return target.partition("://")[2].removeprefix("/")
 
 
 async def _whatever_the_scenario_built(scenario: dict, target: str) -> int:
@@ -452,9 +596,14 @@ async def _nothing_to_put_anywhere(_scenario: dict, _target: str) -> int:
     return 0
 
 
-_WHETHER_TO_PUT_TABLES_IN_IT: dict[bool, Any] = {
-    True: _whatever_the_scenario_built,
-    False: _nothing_to_put_anywhere,
+# WHAT GOES INTO A DATABASE BEFORE THE OPEN, AND WHAT IS READ BACK AFTER IT, one
+# row per scheme a scenario writes. A replicated scenario arranges its own copy
+# and its own primary in its Given, so nothing goes in here for one, and what it
+# holds afterwards is read with a connection of its own.
+_WHAT_GOES_IN_FIRST: dict[str, Any] = {
+    "sqlite": _whatever_the_scenario_built,
+    "libsql": _nothing_to_put_anywhere,
+    "postgresql": _nothing_to_put_anywhere,
 }
 
 
@@ -463,9 +612,29 @@ async def _nothing_on_this_machine(_target: str) -> dict:
     return {"holds": [], "columns": []}
 
 
-_WHETHER_IT_IS_A_FILE_HERE: dict[bool, Any] = {
-    True: _what_the_database_holds_now,
-    False: _nothing_on_this_machine,
+async def _what_the_copy_holds_now(target: str) -> dict:
+    """Asked of the replica on disk, with a connection of its own.
+
+    IT IS A PLAIN CONNECTION AND NOT A CHANNEL, because the question is what this
+    machine holds. A channel would be a second sync connection to the replica,
+    which the driver refuses, and it would pull before answering.
+    """
+    import turso.aio
+
+    connection = await turso.aio.connect(_the_path_in(target))
+    cursor = connection.cursor()
+    await cursor.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    tables = [str(row[0]) for row in await cursor.fetchall()]
+    await cursor.execute(f"PRAGMA table_info({THE_TABLE_THE_MODELS_DECLARE})")
+    columns = [str(row[1]) for row in await cursor.fetchall()]
+    await connection.close()
+    return {"holds": tables, "columns": columns}
+
+
+_WHAT_IT_HOLDS_AFTERWARDS: dict[str, Any] = {
+    "sqlite": _what_the_database_holds_now,
+    "libsql": _what_the_copy_holds_now,
+    "postgresql": _nothing_on_this_machine,
 }
 
 
@@ -697,13 +866,27 @@ def _they_run_before_the_schema_is_read(scenario: dict) -> None:
     )
 
 
-@then("the primary has that table")
-def _the_primary_has_that_table(scenario: dict) -> None:
-    """Read through a copy that never saw the write.
+async def _what_a_second_replica_sees(folder: pathlib.Path) -> list[str]:
+    """What the primary holds, read through a copy that never saw the write.
 
-    Asking the copy that pushed answers from the local file and says nothing
+    ASKING THE COPY THAT PUSHED WOULD ANSWER FROM THE LOCAL FILE and say nothing
     about what left the machine, which is the whole of what a push is for.
     """
+    channel = await _a_channel_at(folder, "second.db")
+    assert await channel_pull(channel) is None, "the second replica could not pull"
+    cursor = channel.cursor()
+    await cursor.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    held = [str(row[0]) for row in await cursor.fetchall()]
+    await channel.close()
+    return held
+
+
+@then("the primary has that table")
+def _the_primary_has_that_table(scenario: dict) -> None:
+    with tempfile.TemporaryDirectory() as made:
+        scenario["on_the_primary"] = asyncio.run(_what_a_second_replica_sees(pathlib.Path(made)))
+
+    assert not _is_fault(scenario["answer"]), f"the open was refused: {scenario['answer']}"
     assert scenario["table"] in scenario["on_the_primary"], (
         f"this copy held {scenario['table']!r} and a second replica pulling from "
         f"the primary sees {scenario['on_the_primary']}, so the open never sent it"

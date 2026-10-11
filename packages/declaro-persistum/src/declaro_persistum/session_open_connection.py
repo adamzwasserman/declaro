@@ -195,14 +195,21 @@ async def _open_turso(target: str, _connections: int) -> Connection | Fault:
     and not there yet, so nothing here assumes a pragma works because SQLite has
     one, and it has no recursive CTE at all.
     """
-    import turso
     import turso.aio
 
     head, separator, rest = target.partition("://")
     path = _THE_PATH_IN[separator](target, rest)
     try:
         connection = await turso.aio.connect(path)
-    except (turso.Error, OSError) as unreachable:
+    # EVERY ERROR AND NOT `turso.Error`, AND THE DRIVER LEAVES NO CHOICE.
+    # Measured 2026-10-10: a path whose folder does not exist raises
+    # `turso.IoError: open: NotFound`, whose bases are `Exception` and nothing
+    # else. It is not a `turso.Error`, not an `OSError`, and `turso.IoError`
+    # itself is not reachable as an attribute of the module, so it cannot be
+    # named in an except clause at all. Caught as `turso.Error` it went straight
+    # through this door and raised out of a boundary, which is the one thing a
+    # boundary here does not do.
+    except Exception as unreachable:  # noqa: BLE001
         return _could_not_be_reached(target, unreachable)
 
     return connection

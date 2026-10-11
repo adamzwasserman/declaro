@@ -13,12 +13,9 @@ THE FOLDER THAT IS LOCKED IS UNLOCKED AGAIN AT THE END, by the fixture rather
 than by the scenario. A folder left at mode 000 defeats the cleanup that removes
 the temporary tree, and the failure lands on whichever test runs next.
 
-TWO SCENARIOS ARE `xfail` AND BOTH NAME THE SAME MISSING DECISION. They ask what
-a caller's open does with the answer, and `orchestrator fn session_connect` does
-not ask it yet: `boundary_out fn session_open_channel` proves the channel with a
-pull of its own, so every replicated open waits on the primary once before
-anything here could decide whether to wait again. Which of the two pulls goes is
-the author's decision, not this file's.
+NOTHING HERE OPENS A DATABASE. Two scenarios used to, and they went to
+`session/session_connect.feature` on 2026-10-10 where the order lives. This card
+answers yes or no; what an open does with the answer belongs to the open.
 """
 
 from __future__ import annotations
@@ -121,36 +118,6 @@ def _a_path_it_may_not_read(scenario: dict) -> None:
     scenario["path"] = str(folder / "app.db")
 
 
-# TWO SENTENCES THAT CANNOT RUN YET, AND EACH SAYS WHY. They ask what an open
-# does with this answer, and the open does not ask yet.
-_WHAT_AN_OPEN_WOULD_HAVE_TO_DECIDE = (
-    "Needs `orchestrator fn session_connect` to ask this reader, and to ask it "
-    "before it opens a connection, because `turso.aio.connect` makes the file. "
-    "Measured 2026-10-10: a push as the first call fills a cold replica by "
-    "itself and proves the channel the same way a pull does, so the pull this "
-    "reader would guard is the one a warm copy needs to catch up with the other "
-    "services on the primary. Which pull goes is the author's call."
-)
-
-WHAT_EACH_REPLICATED_SENTENCE_SETS: dict[str, str] = {
-    "a replicated database whose copy is already on this machine": (
-        _WHAT_AN_OPEN_WOULD_HAVE_TO_DECIDE
-    ),
-    "a replicated database with no copy on this machine": _WHAT_AN_OPEN_WOULD_HAVE_TO_DECIDE,
-}
-
-
-@given(
-    parsers.re(
-        "^(?P<sentence>"
-        + "|".join(sorted(WHAT_EACH_REPLICATED_SENTENCE_SETS, key=len, reverse=True))
-        + ")$"
-    )
-)
-def _a_replicated_database(sentence: str) -> None:
-    pytest.xfail(WHAT_EACH_REPLICATED_SENTENCE_SETS[sentence])
-
-
 # --- asking ------------------------------------------------------------------
 
 
@@ -240,39 +207,4 @@ def _two_asks_two_answers(scenario: dict) -> None:
         f"the two asks either side of a delete answered {scenario['answers']}, so "
         f"something is remembering the first answer and a caller is told about a "
         f"file that is gone"
-    )
-
-
-@then("the copy was not pulled at open")
-def _the_copy_was_not_pulled(scenario: dict) -> None:
-    assert scenario["pulls"] == [], (
-        f"the copy was already here and the open pulled {scenario['pulls']}, "
-        f"which costs a round trip to the primary for a copy that is current"
-    )
-
-
-@then("the open did not wait on the primary")
-def _the_open_did_not_wait(scenario: dict) -> None:
-    assert scenario["waited_on_the_primary"] is False, (
-        "the open waited on the primary for a copy that was already here, and a "
-        "deployment measures that wait at about two seconds"
-    )
-
-
-@then("the copy was pulled once")
-def _the_copy_was_pulled_once(scenario: dict) -> None:
-    assert len(scenario["pulls"]) == 1, (
-        f"a cold copy holds no rows until it has pulled, and the open pulled "
-        f"{len(scenario['pulls'])} times"
-    )
-
-
-@then("the live schema was read after that pull, not before")
-def _the_schema_was_read_after_the_pull(scenario: dict) -> None:
-    """Reading it first reads an empty database and plans a migration that
-    creates every table the primary already has."""
-    assert scenario["where_the_schema_was_read"] > len(scenario["pulls"]) - 1, (
-        f"the live schema was read at step "
-        f"{scenario['where_the_schema_was_read']} and the copy was filled by "
-        f"{scenario['pulls']}, so the migration was planned against an empty copy"
     )

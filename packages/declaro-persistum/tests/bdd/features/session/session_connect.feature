@@ -91,7 +91,12 @@ Feature: session_connect -- Everything that has to be true before a handle goes 
       | already here | asked      |
       | not here yet | left alone |
 
-  Scenario: an open sends what is local to the primary before it reads the live schema
+  # THIS ONE SHOWS THE FAILURE IS GONE, AND THE SCENARIO ABOVE IS WHAT PINS THE
+  # PUSH. Measured 2026-10-10: with the push step taken out, the table still
+  # reached the primary, because a drainer pushes on a free turn and the open
+  # starts the crew before it finishes. So this cannot tell which call sent it,
+  # and the order scenario above can.
+  Scenario: a table the primary never got reaches it when the copy is opened
     Given a replicated database holding a table the primary never got
     When a caller opens it
     Then the primary has that table
