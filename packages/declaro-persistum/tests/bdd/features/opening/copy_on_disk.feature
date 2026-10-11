@@ -15,6 +15,33 @@ Feature: copy_on_disk -- Is there already a copy here
   # copy this library can use, which is the same answer the caller acts on, so
   # there is nothing a refusal would add.
 
+  # MEASURED 2026-10-10 against the staging primary, and three facts decide where
+  # this reader is asked and what its answer is worth.
+  #
+  # `turso.aio.connect(path)` MAKES THE FILE. A path with nothing at it holds an
+  # empty database a moment later. So the disk has to be asked before any
+  # connection opens, and `orchestrator fn session_connect` opens its reader and
+  # its writers well before the channel. Asked where the channel work happens,
+  # this reader answers yes on a machine that started with nothing.
+  #
+  # A PUSH AS THE FIRST CALL ON A COLD REPLICA FILLS IT. The cold copy held all
+  # twenty-three of the primary's tables after the push alone, and the pull after
+  # that push brought down nothing. The driver builds its sync half on the first
+  # call, whichever call that is, and `bootstrap_if_empty` does the filling.
+  #
+  # A PUSH PROVES THE CHANNEL EXACTLY AS A PULL DOES. On a primary that does not
+  # exist it raises the same `AttributeError: 'NoneType' object has no attribute
+  # 'push'`, because the driver never built the sync half and never said so.
+  # Before either call, a dead channel and a live one are the same object with
+  # `_conn` set to None, so nothing can be told apart without a round trip.
+  #
+  # WHAT THAT LEAVES OPEN, AND IT IS THE AUTHOR'S CALL. The two scenarios below
+  # say a warm copy is not filled again, on the reading that a warm copy is
+  # current. It is not: several services share one primary here, so a copy that
+  # was already on this machine is the one that may be behind, and a cold copy is
+  # the one the push has already filled. The saving and the staleness are the
+  # other way round from what these two scenarios say.
+
   Scenario: a file that is there answers yes
     Given a database file already on this machine
     When copy_on_disk is asked about its path

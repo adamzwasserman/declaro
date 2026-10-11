@@ -107,11 +107,12 @@ def _a_path_it_may_not_read(scenario: dict) -> None:
 # TWO SENTENCES THAT CANNOT RUN YET, AND EACH SAYS WHY. They ask what an open
 # does with this answer, and the open does not ask yet.
 _WHAT_AN_OPEN_WOULD_HAVE_TO_DECIDE = (
-    "Needs `orchestrator fn session_connect` to ask this reader before it fills "
-    "a copy. It does not: `boundary_out fn session_open_channel` proves the "
-    "channel with one pull, which runs on every replicated open before anything "
-    "could decide whether a copy needs filling, so a warm copy waits on the "
-    "primary whatever this reader answers."
+    "Needs `orchestrator fn session_connect` to ask this reader, and to ask it "
+    "before it opens a connection, because `turso.aio.connect` makes the file. "
+    "Measured 2026-10-10: a push as the first call fills a cold replica by "
+    "itself and proves the channel the same way a pull does, so the pull this "
+    "reader would guard is the one a warm copy needs to catch up with the other "
+    "services on the primary. Which pull goes is the author's call."
 )
 
 WHAT_EACH_REPLICATED_SENTENCE_SETS: dict[str, str] = {
