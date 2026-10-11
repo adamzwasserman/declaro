@@ -295,12 +295,18 @@ async def _put_it_on_the_primary(statements: tuple[str, ...]) -> None:
         await channel.close()
 
 
-def _nothing_is_replicated(scenario: dict) -> None:
+# ALL THREE HAND BACK WHAT THE SCENARIO LEARNED, and the caller writes it down.
+# The do-nothing row answers with an empty record rather than with nothing: a
+# body that returns None reads as a row nobody wrote, and a row that updated the
+# scenario itself would be a side effect the other rows could forget to make.
+
+
+def _nothing_is_replicated(_scenario: dict) -> dict:
     """A local database, so there is no primary and no copy to arrange."""
-    return None
+    return {}
 
 
-def _a_primary_already_holding_the_table(scenario: dict) -> None:
+def _a_primary_already_holding_the_table(scenario: dict) -> dict:
     """The primary holds what the models declare, and this machine holds nothing.
 
     The table is spelled the way the migration would spell it, so a copy that
@@ -311,18 +317,16 @@ def _a_primary_already_holding_the_table(scenario: dict) -> None:
     asyncio.run(
         _put_it_on_the_primary((f"CREATE TABLE {table} (id INTEGER NOT NULL, name TEXT NOT NULL)",))
     )
-    scenario["to_clean"].append(table)
-    scenario.update(
-        {
-            "primary": url,
-            "token": token,
-            "table": table,
-            "target": f"libsql:///{scenario['tmp'] / 'cold' / 'copy.db'}",
-        }
-    )
+    return {
+        "primary": url,
+        "token": token,
+        "table": table,
+        "to_clean": [table],
+        "target": f"libsql:///{scenario['tmp'] / 'cold' / 'copy.db'}",
+    }
 
 
-def _a_copy_holding_what_the_primary_never_got(scenario: dict) -> None:
+def _a_copy_holding_what_the_primary_never_got(scenario: dict) -> dict:
     """A commit made on this copy and never sent, which is the failure this is for.
 
     The copy is made and written through its own channel, which is then closed:
@@ -349,8 +353,7 @@ def _a_copy_holding_what_the_primary_never_got(scenario: dict) -> None:
         await channel.close()
 
     asyncio.run(_write_it_locally())
-    scenario["to_clean"].append(table)
-    scenario.update({"primary": url, "token": token, "table": table, "target": path})
+    return {"primary": url, "token": token, "table": table, "to_clean": [table], "target": path}
 
 
 # WHICH SETUP A SENTENCE ASKS FOR, read off what its row set. A fourth
@@ -401,8 +404,10 @@ def _the_models(scenario: dict) -> None:
 def _what_was_set_up(scenario: dict, sentence: str) -> None:
     scenario.update(WHAT_EACH_GIVEN_SETS[sentence])
     _WHETHER_ANYTHING_IS_MISSING[scenario["why_not"] != ""](scenario["why_not"])
-    _HOW_THE_COPY_AND_THE_PRIMARY_START[(scenario["primary_holds"] != "", scenario["local_only"])](
-        scenario
+    scenario.update(
+        _HOW_THE_COPY_AND_THE_PRIMARY_START[
+            (scenario["primary_holds"] != "", scenario["local_only"])
+        ](scenario)
     )
 
 
