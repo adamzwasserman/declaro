@@ -1,37 +1,36 @@
 """Bind `tests/bdd/features/session/session_open_channel.feature`.
 
 WHAT THE FEATURE ASKS. A copy is made where the path says, with the folder if
-there is not one. A cold open brings the primary's schema down. A primary that
-cannot be reached is a fault rather than a handle.
+there is not one. The open makes the main file and leaves the driver's three
+sidecars for the first push. A path this process cannot write is a fault rather
+than a handle.
 
-THESE RUN AGAINST THE REAL STAGING PRIMARY named by TEST_TURSO_URL, and the
-scenarios that do carry `@network`. A stand-in here would be standing in for the
-one thing that matters: `docs/design/provisioning` records a scenario that
-replaced the driver with a double, asserted the double had been asked for the
-path, and passed, while the real driver refused that exact path shape on the
-first run against it.
+NOTHING HERE TOUCHES THE NETWORK, AND THAT IS THE CARD RATHER THAN A CHOICE OF
+TEST. Measured 2026-10-10: the driver builds its sync half on the first push or
+pull, so this open reaches no primary. The primary and the token are strings it
+carries and does not use, so these scenarios hand it strings and need no
+credentials. The two scenarios that did need a primary moved to
+`turso/channel_push.feature` the same day.
 
-NOTHING IS LEFT ON THE PRIMARY. Each scenario that writes makes a table named
-after a fresh identifier and drops it afterwards, because the staging primary
-outlives this process and a table left there is a table the next run meets.
-
-WHY "A COPY IS THERE" IS READ OFF THE DISK. A channel that came back is not
-evidence of a file: the driver hands one back for a primary that does not exist.
-So the path is looked at.
+THE FOLDER THAT IS LOCKED IS UNLOCKED AGAIN AT THE END, by the fixture rather
+than by the scenario. A folder left at mode 000 defeats the cleanup that removes
+the temporary tree, and the failure lands on whichever test runs next.
 """
 
 from __future__ import annotations
 
+import ast
 import asyncio
+import inspect
 import os
 import pathlib
-import tempfile
-import uuid
+from collections.abc import Iterator
+from typing import Any
 
 import pytest
-from pytest_bdd import given, parsers, scenarios, then, when
+from pytest_bdd import given, scenarios, then, when
 
-from declaro_persistum.channel_push import channel_push
+from declaro_persistum import session_open_channel as the_door
 from declaro_persistum.session_open_channel import session_open_channel
 
 scenarios("../features/session/session_open_channel.feature")
@@ -39,18 +38,24 @@ scenarios("../features/session/session_open_channel.feature")
 
 THE_THREE_FACTS_IN_A_FAULT = frozenset({"kind", "what_went_wrong", "what_to_do_instead"})
 
-A_PRIMARY_THAT_DOES_NOT_EXIST = "https://nope.invalid"
-A_TOKEN_IT_WOULD_NOT_TAKE = "not-a-token"
+# THE DRIVER'S THREE SIDECARS, which arrive with the first push and not before.
+WHAT_THE_FIRST_PUSH_MAKES = ("-changes", "-info", "-wal")
 
-
-@pytest.fixture
-def scenario(tmp_path: pathlib.Path) -> dict:
-    return {"tmp": tmp_path}
+# WHAT A ROUND TRIP IS CALLED ON THE DRIVER'S OWN OBJECT. A door that names one
+# of these has gone to the primary, whatever it then does with the answer.
+WHAT_REACHES_THE_PRIMARY = frozenset({"push", "pull", "checkpoint"})
 
 
 def _the_staging_primary() -> tuple[str, str]:
     """The live primary this suite replicates from, or a failure naming what is
-    missing. A skip here would read as a tested backend."""
+    missing.
+
+    THE SCENARIOS MAKE NO ROUND TRIP AND STILL NAME A REAL PRIMARY, because that
+    is what turns the sidecar scenario into a check: a pull put back in this door
+    would land, bring the primary down, and make the three files that scenario
+    says are absent. Against a primary that does not exist it would fail instead
+    and leave the disk looking the same.
+    """
     url = os.environ.get("TEST_TURSO_URL", "")
     token = os.environ.get("TEST_TURSO_AUTH_TOKEN", "")
     missing = [
@@ -59,10 +64,19 @@ def _the_staging_primary() -> tuple[str, str]:
         if not value
     ]
     assert not missing, (
-        f"{', '.join(missing)} is not set in .env, and these scenarios run "
-        f"against the real primary. A skip would read as a tested backend."
+        f"{', '.join(missing)} is not set in .env. These scenarios make no round "
+        f"trip, and they name the real primary so that a pull put back in this "
+        f"door would show up as three files on the disk."
     )
     return url, token
+
+
+@pytest.fixture
+def scenario(tmp_path: pathlib.Path) -> Iterator[dict]:
+    held: dict[str, Any] = {"tmp": tmp_path, "locked": []}
+    yield held
+    for folder in held["locked"]:
+        folder.chmod(0o700)
 
 
 # --- what each scenario establishes ------------------------------------------
@@ -81,82 +95,25 @@ def _a_path_whose_folder_does_not_exist(scenario: dict) -> None:
     assert not scenario["folder"].exists()
 
 
-@given("a primary holding a table this path has never seen")
-def _a_primary_holding_a_table(scenario: dict) -> None:
-    """A table put on the primary through a channel of its own, then pushed.
+@given("a path needing a folder inside one this process may not write")
+def _a_path_needing_a_folder_it_cannot_make(scenario: dict) -> None:
+    """A folder at mode 000 with the database a level below it.
 
-    IT GOES UP THROUGH THE DOOR UNDER TEST'S OWN SIBLING, `fn channel_push`, so
-    the setup uses the package rather than the driver and a broken push shows up
-    as a scenario that cannot be set up.
+    The database goes a level down because the open makes the folder and writes
+    nothing else. A path directly inside the locked folder hands back a channel,
+    since the driver writes nothing until the first push.
     """
-    url, token = _the_staging_primary()
-    table = "cold_" + uuid.uuid4().hex[:10]
-
-    async def _put_it_there() -> None:
-        with tempfile.TemporaryDirectory() as made:
-            channel = await session_open_channel(str(pathlib.Path(made) / "a.db"), url, token)
-            assert not isinstance(channel, dict), f"the setup channel failed: {channel}"
-            cursor = channel.cursor()
-            await cursor.execute(f"CREATE TABLE {table} (id integer primary key)")
-            await cursor.execute(f"INSERT INTO {table} VALUES (1)")
-            await channel.commit()
-            assert await channel_push(channel) is None, "the setup push failed"
-
-    asyncio.run(_put_it_there())
-    scenario["table"] = table
-    scenario["path"] = str(scenario["tmp"] / "cold" / "replica.db")
+    folder = scenario["tmp"] / "locked"
+    folder.mkdir()
+    folder.chmod(0o000)
+    scenario["locked"].append(folder)
+    scenario["path"] = str(folder / "made-here" / "replica.db")
 
 
-@given("a primary that does not exist")
-def _a_primary_that_does_not_exist(scenario: dict) -> None:
-    scenario["path"] = str(scenario["tmp"] / "replica.db")
-    scenario["primary"] = A_PRIMARY_THAT_DOES_NOT_EXIST
-    scenario["token"] = A_TOKEN_IT_WOULD_NOT_TAKE
-
-
-@when(parsers.re(r"^a channel is opened (?:at that path|to it)$"))
+@when("a channel is opened at that path")
 def _a_channel_is_opened(scenario: dict) -> None:
-    primary = scenario.get("primary")
-    token = scenario.get("token")
-    url, real_token = {
-        True: lambda: (primary, token),
-        False: _the_staging_primary,
-    }[primary is not None]()
-
-    async def _opened() -> dict:
-        channel = await session_open_channel(scenario["path"], url, real_token)  # type: ignore[arg-type]
-        return {
-            "answer": channel,
-            "rows": await _READ_BACK[scenario.get("table") is not None](
-                channel, scenario.get("table", "")
-            ),
-        }
-
-    scenario.update(asyncio.run(_opened()))
-
-
-# A CHANNEL BELONGS TO THE LOOP THAT MADE IT, so a scenario that reads one has to
-# read it inside the same `asyncio.run` that opened it. Both rows are here, and
-# the row that reads nothing answers with an empty list rather than doing
-# nothing, so the pair produces the value the `Then` reads.
-
-
-async def _nothing_to_read_back(_channel: object, _table: str) -> list:
-    return []
-
-
-async def _read_the_table(channel: object, table: str) -> list:
-    """Read the table the primary had, then take it off the primary again."""
-    cursor = channel.cursor()  # type: ignore[attr-defined]
-    await cursor.execute(f"SELECT id FROM {table}")
-    held = await cursor.fetchall()
-    await cursor.execute(f"DROP TABLE {table}")
-    await channel.commit()  # type: ignore[attr-defined]
-    await channel_push(channel)  # type: ignore[arg-type]
-    return list(held)
-
-
-_READ_BACK = {False: _nothing_to_read_back, True: _read_the_table}
+    url, token = _the_staging_primary()
+    scenario["answer"] = asyncio.run(session_open_channel(scenario["path"], url, token))
 
 
 # --- what must be true afterwards --------------------------------------------
@@ -181,32 +138,30 @@ def _the_folder_was_made(scenario: dict) -> None:
     )
 
 
-@then("the table is readable without asking for anything else")
-def _the_table_is_readable(scenario: dict) -> None:
-    """A cold open that brought nothing down is a database with no schema, which
-    `docs/architecture.md:310` calls unusable rather than merely stale."""
-    assert not isinstance(scenario["answer"], dict), (
-        f"the channel did not open: {scenario['answer']}"
-    )
-    assert scenario["rows"] == [(1,)], (
-        f"the cold open left {scenario['table']} holding {scenario['rows']!r}, "
-        f"so the copy came back without the primary's schema on it"
+@then("the main file is there and the three the driver needs are not")
+def _the_main_file_and_nothing_else(scenario: dict) -> None:
+    """A path holding a main file alone is a copy nothing can read yet, which is
+    what anybody asking whether a copy is here has to know."""
+    main = pathlib.Path(scenario["path"])
+    early = [one for one in WHAT_THE_FIRST_PUSH_MAKES if main.with_name(main.name + one).exists()]
+
+    assert main.is_file(), f"the open made no file at {main}"
+    assert early == [], (
+        f"the open made {early} as well, so the first push is not what completes "
+        f"a copy and asking whether a copy is here can stop at the main file"
     )
 
 
-@then("a fault comes back naming the primary")
-def _a_fault_names_the_primary(scenario: dict) -> None:
+@then("a fault comes back naming the path")
+def _a_fault_names_the_path(scenario: dict) -> None:
     answer = scenario["answer"]
 
     assert isinstance(answer, dict) and set(answer) == THE_THREE_FACTS_IN_A_FAULT, (
-        f"a primary that does not exist answered {answer!r}. The driver hands "
-        f"back a connection for one, and every push on it raises about a "
-        f"NoneType, so a handle here is a database that loses everything at "
-        f"shutdown"
+        f"a path this process cannot write answered {answer!r}, and a caller "
+        f"holding that writes to a database that cannot be made"
     )
-    assert A_PRIMARY_THAT_DOES_NOT_EXIST in answer["what_went_wrong"], (
-        f"the fault does not name the primary that could not be reached: "
-        f"{answer['what_went_wrong']!r}"
+    assert scenario["path"] in answer["what_went_wrong"], (
+        f"the fault does not name the path it could not open: {answer['what_went_wrong']!r}"
     )
 
 
@@ -215,4 +170,24 @@ def _no_channel_is_handed_back(scenario: dict) -> None:
     assert not hasattr(scenario["answer"], "cursor"), (
         "a connection came back beside the fault, and a caller holding one "
         "writes to it believing it replicates"
+    )
+
+
+@then("the open made no round trip")
+def _the_open_made_no_round_trip(scenario: dict) -> None:
+    """Read off the door's own source, because a trip that was made and failed
+    leaves a disk that looks exactly like one that was never made."""
+    assert not isinstance(scenario["answer"], dict), (
+        f"the channel did not open: {scenario['answer']}"
+    )
+    called = {
+        getattr(node.func, "attr", "") or getattr(node.func, "id", "")
+        for node in ast.walk(ast.parse(inspect.getsource(the_door)))
+        if isinstance(node, ast.Call)
+    }
+    reaches = sorted(called & WHAT_REACHES_THE_PRIMARY)
+
+    assert reaches == [], (
+        f"this door calls {reaches} on the driver, so it spends a round trip to "
+        f"prove a channel that the open's own push proves anyway"
     )

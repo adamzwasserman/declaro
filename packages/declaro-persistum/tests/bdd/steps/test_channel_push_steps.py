@@ -31,6 +31,7 @@ import os
 import pathlib
 import tempfile
 import uuid
+from typing import Any
 
 import pytest
 from pytest_bdd import given, parsers, scenarios, then, when
@@ -95,11 +96,18 @@ async def _other_work(turns: list[int]) -> None:
 # WHAT EACH SENTENCE SETS UP: whether anything is written before the push, and
 # whether the primary is one that exists. Four sentences, one function over a
 # table, because four one-line steps are one step differing by a word.
-_WHAT_EACH_GIVEN_SETS: dict[str, dict[str, bool]] = {
-    "local commits the primary has not seen": {"writes": True, "unreachable": False},
-    "a channel with nothing waiting on it": {"writes": False, "unreachable": False},
-    "a channel the primary will not take": {"writes": False, "unreachable": True},
-    "a channel and other work waiting to run": {"writes": False, "unreachable": False},
+_WHAT_EACH_GIVEN_SETS: dict[str, dict[str, Any]] = {
+    "local commits the primary has not seen": {"writes": True, "how": "a real channel"},
+    "a channel with nothing waiting on it": {"writes": False, "how": "a real channel"},
+    "a channel the primary will not take": {"writes": False, "how": "a dead primary"},
+    "a channel and other work waiting to run": {"writes": False, "how": "a real channel"},
+    # MOVED HERE FROM `session_open_channel.feature` ON 2026-10-10, when that door
+    # stopped proving the channel with a pull. The push is the first call on a new
+    # channel, so it is the call that fills a copy with nothing on it.
+    "a primary holding a table this copy has never seen": {
+        "writes": False,
+        "how": "a copy with nothing on it",
+    },
 }
 
 
@@ -120,7 +128,7 @@ def _a_push_runs(scenario: dict) -> None:
         beside = asyncio.ensure_future(_other_work(turns))
         try:
             return {
-                **await _WHAT_THE_SCENARIO_PUSHES[scenario["unreachable"]](scenario),
+                **await _WHAT_THE_SCENARIO_PUSHES[scenario["how"]](scenario),
                 "turns": len(turns),
             }
         finally:
@@ -142,24 +150,59 @@ async def _push_on_a_real_channel(scenario: dict) -> dict:
 
 
 async def _push_on_an_unreachable_primary(scenario: dict) -> dict:
-    """A channel the driver hands back for a primary that is not there.
+    """A channel to a primary that is not there, opened through the door.
 
-    IT IS MADE BY THE DRIVER RATHER THAN BY THE DOOR, because the door refuses
-    this primary now, and the feature asks what a push does when it is handed
-    one anyway. That is the shape a caller holds if any other path ever hands
-    one over.
+    SINCE 2026-10-10 THE DOOR HANDS THIS BACK, because it stopped proving the
+    channel with a pull: the driver builds its sync half on the first push or
+    pull, so nothing at open can tell this channel from a live one. This push is
+    where a caller finds out, which is what the open relies on.
     """
-    import turso.aio.sync
-
-    channel = turso.aio.sync.connect(
-        str(scenario["tmp"] / "bad.db"), A_PRIMARY_THAT_DOES_NOT_EXIST, auth_token="x"
+    channel = await session_open_channel(
+        str(scenario["tmp"] / "bad.db"), A_PRIMARY_THAT_DOES_NOT_EXIST, "not-a-token"
+    )
+    assert not isinstance(channel, dict), (
+        f"the door refused a primary that does not exist: {channel}. It reaches "
+        f"no primary, so it has nothing to refuse one on, and the open relies on "
+        f"this push to find out"
     )
     return {"answer": await channel_push(channel), "written": [], "reached": []}
 
 
+async def _push_on_a_copy_with_nothing_on_it(scenario: dict) -> dict:
+    """A table put on the primary, then a push on a copy that has never pulled.
+
+    WHAT THE PUSH DOES HERE IS BRING THE PRIMARY DOWN, which reads backwards
+    until you know the driver builds its sync half on whichever call comes first,
+    and `bootstrap_if_empty` fills the copy as it does.
+    """
+    url, token = _the_staging_primary()
+    with tempfile.TemporaryDirectory() as made:
+        setting_up = await _a_channel(pathlib.Path(made), "setup.db")
+        cursor = setting_up.cursor()
+        await cursor.execute(f"CREATE TABLE {scenario['table']} (id integer primary key)")
+        await cursor.execute(f"INSERT INTO {scenario['table']} VALUES (1)")
+        await setting_up.commit()
+        assert await channel_push(setting_up) is None, "the setup push failed"
+
+        cold = await session_open_channel(str(scenario["tmp"] / "cold" / "replica.db"), url, token)
+        assert not isinstance(cold, dict), f"the cold channel did not open: {cold}"
+        answer = await channel_push(cold)
+        cursor = cold.cursor()
+        await cursor.execute(f"SELECT id FROM {scenario['table']}")
+        held = list(await cursor.fetchall())
+
+        # Take the table off the primary again, through the copy that made it.
+        cursor = setting_up.cursor()
+        await cursor.execute(f"DROP TABLE {scenario['table']}")
+        await setting_up.commit()
+        await channel_push(setting_up)
+        return {"answer": answer, "written": [], "reached": [], "on_the_cold_copy": held}
+
+
 _WHAT_THE_SCENARIO_PUSHES = {
-    False: _push_on_a_real_channel,
-    True: _push_on_an_unreachable_primary,
+    "a real channel": _push_on_a_real_channel,
+    "a dead primary": _push_on_an_unreachable_primary,
+    "a copy with nothing on it": _push_on_a_copy_with_nothing_on_it,
 }
 
 
@@ -256,4 +299,16 @@ def _the_other_work_ran(scenario: dict) -> None:
         f"and it asks for {HOW_MANY_TURNS_IT_MUST_GET}. The loop was held, so "
         f"every other request in the process waited for a sync it has nothing "
         f"to do with"
+    )
+
+
+@then("the table is readable on this copy without asking for anything else")
+def _the_table_is_readable_here(scenario: dict) -> None:
+    """A cold copy that brought nothing down is a database with no schema, which
+    `docs/architecture.md:310` calls unusable rather than merely stale."""
+    assert scenario["answer"] is None, f"the push came back with {scenario['answer']!r}"
+    assert scenario["on_the_cold_copy"] == [(1,)], (
+        f"the push left {scenario['table']} holding "
+        f"{scenario['on_the_cold_copy']!r} on a copy that had nothing on it, so "
+        f"a cold start reads an empty database as its live schema"
     )

@@ -321,6 +321,14 @@ _A_CHANNEL_TO_THE_PRIMARY = _asking(
 # MEASURED 2026-10-10, because the order only matters if a pull keeps what is
 # local: it does. A replica holding an unpushed CREATE TABLE still holds it after
 # a pull, and a push after that pull reaches the primary.
+#
+# IT IS ALSO THE FIRST CALL ON THE CHANNEL, SO IT DOES TWO MORE THINGS. The
+# driver builds its sync half on whichever call comes first, so this push is what
+# proves the channel reaches a primary at all: `boundary_out fn
+# session_open_channel` touches no network and proved nothing until 2026-10-10,
+# when it stopped spending a pull on a proof this call makes anyway. And on a
+# copy with nothing on it yet, `bootstrap_if_empty` fills the copy as this push
+# runs, measured at twenty-three tables with the pull after it bringing nothing.
 _SEND_WHAT_IS_LOCAL = _asking(
     fills="channel",
     ask=channel_push,
@@ -329,9 +337,17 @@ _SEND_WHAT_IS_LOCAL = _asking(
     awaited=True,
 )
 
-# A COLD COPY HOLDS NO ROWS UNTIL IT HAS PULLED ONCE, and the migration below
-# reads the live schema off this copy. Reading it before the pull reads an empty
-# database, and plans a migration that creates every table the primary has.
+# WHAT THIS PULL IS STILL FOR, AND IT IS NOT THE COLD COPY ANY MORE. The push
+# above fills a copy with nothing on it, so this pull brings down what the
+# primary gained from somebody else: several services share one primary here, and
+# a copy that was already on this machine is the one that can be behind. The
+# migration below reads the live schema off this copy, so a copy that is behind
+# plans a change the primary already has.
+#
+# IT RUNS ON EVERY REPLICATED OPEN AND A COLD ONE DOES NOT NEED IT, which is what
+# `reader fn copy_on_disk` was written to decide. Wiring that in needs the disk
+# asked before any connection opens, because `turso.aio.connect` makes the file,
+# and it needs a field on `Connecting` to carry the answer that far.
 _FILL_THE_COPY = _asking(
     fills="channel",
     ask=channel_pull,
