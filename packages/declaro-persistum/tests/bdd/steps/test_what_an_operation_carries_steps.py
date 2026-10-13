@@ -64,28 +64,40 @@ def _nothing_at_all(answered: Carrying) -> None:
     )
 
 
-# ONE FUNCTION OVER A TABLE. Three readings, each naming the one field its kind
-# fills, so the field is the row. `it carries values and nothing else` joined
-# them rather than being a fourth copy of the same assertion.
-THE_ONE_FIELD = {
-    "a new name": "renamed_to",
-    "a view": "view",
-    "values": "values",
+# ONE FUNCTION OVER A TABLE. Three readings, each naming what its kind fills, so
+# what is named is the row. `it carries values and nothing else` joined them
+# rather than being a fourth copy of the same assertion.
+#
+# THE RENAME NAMES THREE FIELDS SINCE 2026-10-12. A table rename on a database
+# with a primary is a create under the new name, a copy and a drop, because
+# `ALTER TABLE ... RENAME TO` reaches no primary, so the create reads the columns
+# and the rules.
+WHAT_A_SENTENCE_NAMES: dict[str, set[str]] = {
+    "a new name, columns and constraints": {"renamed_to", "columns", "constraints"},
+    "a view": {"view"},
+    "values": {"values"},
 }
 
 WHAT_IS_LOST_WITHOUT_IT = {
-    "renamed_to": "there is nothing to rename the table to",
-    "view": "the view itself has nowhere to travel",
+    "a new name, columns and constraints": (
+        "a rename on a replicated database has nothing to build the table from"
+    ),
+    "a view": "the view itself has nowhere to travel",
     "values": "the values have nowhere to travel",
 }
 
+_WHAT_A_KIND_MAY_NAME = parsers.re(
+    r"^it carries (?P<named>a new name, columns and constraints|a view|values),?"
+    r" and nothing else$"
+)
 
-@then(parsers.re(r"^it carries (?P<named>a new name|a view|values) and nothing else$"))
-def _only_that_field(answered: Carrying, named: str) -> None:
-    field = THE_ONE_FIELD[named]
-    assert _filled(answered) == {field}, (
+
+@then(_WHAT_A_KIND_MAY_NAME)
+def _only_those_fields(answered: Carrying, named: str) -> None:
+    wanted = WHAT_A_SENTENCE_NAMES[named]
+    assert _filled(answered) == wanted, (
         f"this kind fills {sorted(_filled(answered))} and the scenario says "
-        f"{field!r} alone, so {WHAT_IS_LOST_WITHOUT_IT[field]}"
+        f"{sorted(wanted)}, so {WHAT_IS_LOST_WITHOUT_IT[named]}"
     )
 
 

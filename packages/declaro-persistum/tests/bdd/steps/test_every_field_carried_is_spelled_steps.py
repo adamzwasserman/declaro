@@ -25,12 +25,14 @@ from declaro_persistum.spell_operation import spell_operation
 from declaro_persistum.what_an_operation_carries import what_an_operation_carries
 from tests.conftest import a_column, an_operation
 from tests.unit.test_every_field_carried_is_spelled import (
+    _WHETHER_IT_REPLICATES,
     HOW_EACH_KIND_SPELLS,
     WHAT_TO_LOOK_FOR,
     _everything_the_statements_say,
     _is_a_fault,
     _the_engines,
     _the_kinds,
+    _the_table_has_no_spelling,
 )
 
 scenarios("../features/gates/every_field_carried_is_spelled.feature")
@@ -107,8 +109,13 @@ def _one_change_was_built(scenario: dict, sentence: str) -> None:
 
 @when("it is spelled for each engine")
 def _the_one_was_spelled(scenario: dict) -> None:
+    """Spelled as a database with no primary, which is what these two sentences say.
+
+    The replicated spelling of a rename has scenarios of its own, in
+    `how_to_spell.feature` and `spell_operation.feature`.
+    """
     scenario["spelled"] = {
-        engine: spell_operation(scenario["built"], engine) for engine in _the_engines()
+        engine: spell_operation(scenario["built"], engine, False) for engine in _the_engines()
     }
 
 
@@ -139,7 +146,7 @@ def _every_claimed_field_is_spelled(scenario: dict) -> None:
             if claimed
             if not any(
                 WHAT_TO_LOOK_FOR[field] in _everything_the_statements_say(spelled)
-                for (said, _engine), spelled in scenario["spelled"].items()
+                for (said, _engine, _replicating), spelled in scenario["spelled"].items()
                 if said == kind
                 if not _is_a_fault(spelled)
             )
@@ -157,9 +164,10 @@ def _every_claimed_field_is_spelled(scenario: dict) -> None:
 @then("none of them is refused for want of a field")
 def _none_was_refused(scenario: dict) -> None:
     refused = {
-        f"{kind} on {engine}": spelled["what_went_wrong"]
-        for (kind, engine), spelled in scenario["spelled"].items()
+        f"{kind} on {engine}, replicating {replicating}": spelled["what_went_wrong"]
+        for (kind, engine, replicating), spelled in scenario["spelled"].items()
         if _is_a_fault(spelled)
+        if not _the_table_has_no_spelling(kind, engine, replicating)
     }
 
     assert refused == {}, (
@@ -217,7 +225,7 @@ def _whether_the_table_answers(kind: str) -> bool:
 
 @then("the writer answers for each one on each engine")
 def _the_writer_answers(scenario: dict) -> None:
-    wanted = len(scenario["kinds"]) * len(_the_engines())
+    wanted = len(scenario["kinds"]) * len(_the_engines()) * len(_WHETHER_IT_REPLICATES)
 
     assert len(scenario["spelled"]) == wanted, (
         f"the gate spelled {len(scenario['spelled'])} of {wanted} pairings, so "

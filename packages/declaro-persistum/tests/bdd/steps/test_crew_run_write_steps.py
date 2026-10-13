@@ -273,7 +273,7 @@ def _compiled(engine: str, declaration: dict) -> dict:
 
 
 def _spelled(engine: str, operation: dict) -> dict:
-    statements = spell_operation(operation, engine)
+    statements = spell_operation(operation, engine, False)
     assert isinstance(statements, list), f"the change could not be spelled: {statements}"
     return statements[0]
 

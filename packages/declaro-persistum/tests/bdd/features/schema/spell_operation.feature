@@ -53,6 +53,48 @@ Feature: spell_operation -- One schema change into the statements that carry it 
   Scenario: an operation this engine cannot express is refused
     When an operation no engine table covers is spelled
     Then a fault comes back naming the operation and the engine
+  # ============================================
+  # A change on a database that has a primary
+  # ============================================
+  #
+  # ADDED 2026-10-12. A statement that runs on the local copy is not a statement
+  # that reaches the primary, so this function is handed whether the database
+  # replicates and writes a different spelling when it does. Measured against a
+  # real Turso primary: a push carries create table, add column, drop column and
+  # ordinary rows, and carries neither RENAME COLUMN nor RENAME TO. Both run
+  # locally, report success and send nothing.
+  #
+  # THE REBUILD IS THE REASON THIS REACHES MORE THAN THE TWO RENAMES. SQLite and
+  # Turso alter and drop a column by rebuilding the table, and a rebuild ends
+  # with RENAME TO. Measured 2026-10-12: the push after one failed, the primary
+  # kept the temporary table and lost the real one, and the channel refused
+  # every push after that.
+
+  @precommit
+  Scenario: a renamed column on a replicated database is added, copied and dropped
+    When "a" is renamed to "b" on a replicated turso database
+    Then three statements come back, and none of them renames anything
+    And the first adds "b", the second copies "a" into it, and the third drops "a"
+
+  @precommit
+  Scenario: the same rename on a copy with no primary is one statement
+    When "a" is renamed to "b" on a turso database with no primary
+    Then one statement comes back, and it renames "a" to "b"
+
+  @precommit
+  Scenario: a renamed column whose declaration must hold something is refused
+    When "a" is renamed to "b" on a replicated turso database and "b" must hold something
+    Then it is refused, saying a column that must hold something cannot be added to a table with rows
+
+  @precommit
+  Scenario: a column altered on a replicated database is refused rather than rebuilt
+    When a column is altered on a replicated turso database
+    Then it is refused, saying the change cannot reach the primary
+
+  @precommit
+  Scenario: a column dropped on a replicated database is dropped and not rebuilt
+    When a column is dropped on a replicated turso database
+    Then one statement comes back, and it drops the column
 
   @precommit @sqlite
   Scenario: a declared check reaches the CREATE TABLE as a rule with a name

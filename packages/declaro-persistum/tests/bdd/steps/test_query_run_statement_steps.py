@@ -174,7 +174,7 @@ def _compiled(db: dict, declaration: dict) -> dict:
 
 def _spelled(db: dict, kind: str, table: str) -> dict:
     """The one statement this schema change spells on this database's engine."""
-    statements = spell_operation(_a_table_of(table, kind), db["engine"])
+    statements = spell_operation(_a_table_of(table, kind), db["engine"], False)
     assert isinstance(statements, list), f"the change could not be spelled: {statements}"
     return statements[0]
 

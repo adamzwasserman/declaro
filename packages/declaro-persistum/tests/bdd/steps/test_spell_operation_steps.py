@@ -187,7 +187,7 @@ def _spell_and_run(
     connection: sqlite3.Connection, operation: Operation, engine: Engine
 ) -> list[Statement]:
     """Spell one change and carry it out, so a broken statement fails here."""
-    spelled = spell_operation(operation, engine)
+    spelled = spell_operation(operation, engine, False)
     assert isinstance(spelled, list), f"the change could not be spelled: {spelled}"
     _run(connection, spelled)
     return spelled
@@ -254,7 +254,7 @@ def _committed(connection: sqlite3.Connection, spelled: list[Statement]) -> list
 
 def _carried_out(scenario: dict, operation: Operation) -> None:
     """Spell one change for SQLite and let the applier above carry it out."""
-    spelled = spell_operation(operation, "sqlite")
+    spelled = spell_operation(operation, "sqlite", False)
     scenario["answer"] = spelled
     assert isinstance(spelled, list), f"the change could not be spelled: {spelled}"
     scenario["before_schema"] = {
@@ -754,7 +754,7 @@ def _a_column_is_added(scenario: dict, name: str, declared: str, default: str, e
         [],
         [],
     )
-    scenario["answer"] = spell_operation(scenario["operation"], scenario["engine"])
+    scenario["answer"] = spell_operation(scenario["operation"], scenario["engine"], False)
     scenario.setdefault("answers", []).append(scenario["answer"])
 
 
@@ -767,7 +767,7 @@ def _an_operation_no_table_covers(scenario: dict) -> None:
     """
     scenario["operation"] = _operation("bulldoze_table", "invoices", None, [], [], [], [], [])
     scenario["engine"] = "sqlite"
-    scenario["answer"] = spell_operation(scenario["operation"], "sqlite")
+    scenario["answer"] = spell_operation(scenario["operation"], "sqlite", False)
 
 
 def _a_rule_comparing(column: str, operator: str, value: Value) -> Condition:
@@ -849,7 +849,7 @@ def _a_table_with_one_rule(scenario: dict, kind: str, column: str, value: str) -
         [],
         [],
     )
-    scenario["answer"] = spell_operation(scenario["operation"], "sqlite")
+    scenario["answer"] = spell_operation(scenario["operation"], "sqlite", False)
 
 
 @when("a table is created with a rule of a kind no clause covers")
@@ -866,7 +866,7 @@ def _a_rule_of_no_kind(scenario: dict) -> None:
         [],
         [],
     )
-    scenario["answer"] = spell_operation(scenario["operation"], "sqlite")
+    scenario["answer"] = spell_operation(scenario["operation"], "sqlite", False)
 
 
 @when('a table is created whose "status" starts at a value no engine can be told')
@@ -883,7 +883,7 @@ def _a_default_no_engine_takes(scenario: dict) -> None:
         [],
         [],
     )
-    scenario["answer"] = spell_operation(scenario["operation"], "sqlite")
+    scenario["answer"] = spell_operation(scenario["operation"], "sqlite", False)
 
 
 # WHAT A SENTENCE ABOUT ONE COLUMN'S RULE DECLARES. Each row is the rule the
@@ -1007,7 +1007,7 @@ def _a_view_operation_carrying_nothing(scenario: dict) -> None:
             destroys=False,
         ),
     )
-    scenario["answer"] = spell_operation(scenario["operation"], "sqlite")
+    scenario["answer"] = spell_operation(scenario["operation"], "sqlite", False)
 
 
 @then(parsers.re(r'the CREATE VIEW names "(?P<name>[^"]+)" and selects from "(?P<table>[^"]+)"$'))
@@ -1058,7 +1058,7 @@ def _a_status_is_changed(scenario: dict, value: str, change: str, engine: str | 
         [],
         [value],
     )
-    scenario["answer"] = spell_operation(operation, scenario["engine"])
+    scenario["answer"] = spell_operation(operation, scenario["engine"], False)
     ran: dict[bool, Callable[[], list[str]]] = {
         True: lambda: _what_the_engine_said(scenario["connection"], scenario["answer"]),
         False: lambda: [],
@@ -1370,6 +1370,7 @@ def _the_statement_writes_that_engines_boolean(scenario: dict) -> None:
             [],
         ),
         "sqlite",
+        False,
     )
     assert isinstance(elsewhere, list) and elsewhere[0]["text"] != text, (
         f"sqlite and {scenario['engine']} got the same spelling: {text}"
@@ -1890,3 +1891,145 @@ def _the_composite_primary_key_is_preserved(scenario: dict) -> None:
         if row[5] > 0
     ]
     assert len(keys) > 1, f"the rebuilt table has {keys} as its primary key"
+
+
+# --- a change on a database that has a primary -------------------------------
+#
+# WHAT THESE SCENARIOS EXIST FOR. Measured 2026-10-10 against a real Turso
+# primary: `ALTER TABLE ... RENAME COLUMN` and `ALTER TABLE ... RENAME TO` both
+# run on the local copy, report success and send nothing. So a replicated
+# database is handed a spelling of its own, and these read what comes back.
+#
+# ONE BUILDER AND ONE ASKING, BECAUSE THE FIVE SENTENCES DIFFER BY THE CHANGE
+# THEY NAME AND BY NOTHING ELSE. The change is the row and the asking is written
+# once.
+
+_A_RENAMED_COLUMN_MUST_HOLD_SOMETHING = a_constraint(
+    name="nn_b", kind="not_null", columns=["b"], rule=NARROWS_BY_NOTHING, value=None
+)
+
+
+def _a_change_on_a_replica(kind: str, constraints: list[Any]) -> Operation:
+    """One change to `people`, carrying the table as the models declare it.
+
+    A rename carries the columns because the arriving column's declared type has
+    to be written into the ADD COLUMN, and a target schema carries it under the
+    new name.
+    """
+    return cast(
+        Operation,
+        an_operation(
+            kind=kind,
+            table="people",
+            column="a",
+            columns=[_column("id", "integer"), _column("b", "text")],
+            indexes=[],
+            constraints=constraints,
+            copying=["id"],
+            values=[],
+            renamed_to="b",
+            view=None,
+            destroys=False,
+        ),
+    )
+
+
+# WHAT EACH SENTENCE ASKS FOR: the kind of change, the rules it carries, and
+# whether the database has a primary.
+_WHAT_EACH_SENTENCE_SPELLS: dict[str, tuple[str, list[Any], bool]] = {
+    '"a" is renamed to "b" on a replicated turso database': ("rename_column", [], True),
+    '"a" is renamed to "b" on a turso database with no primary': ("rename_column", [], False),
+    '"a" is renamed to "b" on a replicated turso database and "b" must hold something': (
+        "rename_column",
+        [_A_RENAMED_COLUMN_MUST_HOLD_SOMETHING],
+        True,
+    ),
+    "a column is altered on a replicated turso database": ("alter_column", [], True),
+    "a column is dropped on a replicated turso database": ("drop_column", [], True),
+}
+
+_ON_A_REPLICA = parsers.re(
+    r'^(?P<sentence>"a" is renamed to "b" on a replicated turso database'
+    r'|"a" is renamed to "b" on a turso database with no primary'
+    r'|"a" is renamed to "b" on a replicated turso database and "b" must hold something'
+    r"|a column is altered on a replicated turso database"
+    r"|a column is dropped on a replicated turso database)$"
+)
+
+
+@when(_ON_A_REPLICA, target_fixture="replicated")
+def _spelled_for_a_replica(sentence: str) -> object:
+    kind, constraints, replicating = _WHAT_EACH_SENTENCE_SPELLS[sentence]
+    return spell_operation(_a_change_on_a_replica(kind, constraints), "turso", replicating)
+
+
+@then("three statements come back, and none of them renames anything")
+def _three_and_no_rename(replicated: object) -> None:
+    assert isinstance(replicated, list), f"it was refused rather than spelled: {replicated}"
+    assert len(replicated) == 3, (
+        f"a move is an add, a copy and a drop, and this is {[one['text'] for one in replicated]}"
+    )
+    renaming = [one["text"] for one in replicated if "RENAME" in one["text"]]
+    assert renaming == [], (
+        f"these statements rename something: {renaming}. A rename runs on the "
+        f"local copy, reports success and reaches no primary, so the copy and "
+        f"the primary would part company with nothing to say so."
+    )
+
+
+@then('the first adds "b", the second copies "a" into it, and the third drops "a"')
+def _added_copied_and_dropped(replicated: object) -> None:
+    assert isinstance(replicated, list), replicated
+    added, copied, dropped = (one["text"] for one in replicated)
+
+    assert "ADD COLUMN" in added and '"b"' in added, f"the first does not add b: {added}"
+    assert "UPDATE" in copied and '"b"' in copied and '"a"' in copied, (
+        f"the second does not copy a into b: {copied}"
+    )
+    assert "DROP COLUMN" in dropped and '"a"' in dropped, f"the third does not drop a: {dropped}"
+
+
+@then('one statement comes back, and it renames "a" to "b"')
+def _one_rename(replicated: object) -> None:
+    assert isinstance(replicated, list) and len(replicated) == 1, replicated
+    said = replicated[0]["text"]
+
+    assert "RENAME COLUMN" in said and '"a"' in said and '"b"' in said, (
+        f"a database with no primary renames in place, and this says: {said}"
+    )
+
+
+@then("one statement comes back, and it drops the column")
+def _one_drop(replicated: object) -> None:
+    assert isinstance(replicated, list) and len(replicated) == 1, (
+        f"a drop replicates on its own, so it is not rebuilt around: "
+        f"{replicated if not isinstance(replicated, list) else [one['text'] for one in replicated]}"
+    )
+    said = replicated[0]["text"]
+
+    assert "DROP COLUMN" in said and '"a"' in said, f"it does not drop the column: {said}"
+
+
+# WHAT EACH REFUSAL HAS TO SAY, one row per sentence, so the two Thens that read
+# a refusal are one function over a table.
+_WHAT_A_REFUSAL_NAMES = {
+    "saying a column that must hold something cannot be added to a table with rows": (
+        "must hold something"
+    ),
+    "saying the change cannot reach the primary": "cannot reach the primary",
+}
+
+
+@then(
+    parsers.re(
+        r"^it is refused, (?P<sentence>saying a column that must hold something "
+        r"cannot be added to a table with rows|saying the change cannot reach the primary)$"
+    )
+)
+def _refused_saying(replicated: object, sentence: str) -> None:
+    assert isinstance(replicated, dict) and set(replicated) == A_FAULT, (
+        f"it was spelled rather than refused: {replicated}"
+    )
+    said = f"{replicated['what_went_wrong']} {replicated['what_to_do_instead']}"
+
+    assert _WHAT_A_REFUSAL_NAMES[sentence] in said, f"the refusal does not say so: {said!r}"

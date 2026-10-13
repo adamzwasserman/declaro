@@ -145,7 +145,8 @@ module declaro-persistum
                   applied: int } note "what a migration actually did"
 
   type Spelling = { statements: list<str>
-                    rebuilds: bool } note "how one engine writes one schema change: the statements it takes, and whether it gets there by rebuilding the table"
+                    rebuilds: bool
+                    commits_between: bool } note "how one engine writes one schema change: the statements it takes, whether it gets there by rebuilding the table, and whether each statement has to be committed on its own rather than wrapped in one transaction"
 
   set features = { "materialized_view", "check_constraint", "partial_index", "enum", "range_type" } note "the things the three engines disagree about"
   vocabulary Feature = { features } note "which engine capability is in question"
@@ -433,13 +434,13 @@ module declaro-persistum
 
   fn how_to_inspect : (engine: Engine) -> Inspecting note "reads the inspectors table and hands back the five questions this engine answers about itself" note "the tables question leaves out the tables the engine keeps for itself, because the models are not allowed to declare one and a live schema that holds one plans a drop for it: measured 2026-10-10, a replicated open refused every Turso primary over turso_cdc and sqlite_sequence, and a sqlite database with an autoincrement column refused the same way"
 
-  fn how_to_spell : (kind: OperationKind, engine: Engine) -> Spelling | Fault note "reads the generators table and hands back how this engine writes this change"
+  fn how_to_spell : (kind: OperationKind, engine: Engine, replicating: bool) -> Spelling | Fault note "reads the generators table and hands back how this engine writes this change" note "whether the database replicates is part of the question, because a statement that runs on the local copy is not a statement that reaches the primary: measured 2026-10-10 against a real Turso primary, a push carries create table, add column, drop column and ordinary rows, and carries neither ALTER TABLE RENAME COLUMN nor ALTER TABLE RENAME TO, each of which runs locally, reports success and sends nothing" note "so a rename on a replicated database is spelled add, copy and drop, each committed on its own: with all three in one transaction the push failed and left the literal string 'None' on the primary, and on a copy whose rename never replicated the next write to that table raised on its first push, reported success on its second, and never arrived"
 
   fn what_an_operation_carries : (kind: OperationKind) -> Carrying note "reads the operations table and hands back which fields this kind of change fills"
 
   fn how_to_compare : (operator: Operator, engine: Engine) -> Comparing | Fault note "reads the operators table and hands back how this engine writes this comparison"
 
-  fn spell_operation : (operation: Operation, engine: Engine) -> list<Statement> | Fault invokes how_to_spell, spell_view note "turns one schema change into the statements that carry it out"
+  fn spell_operation : (operation: Operation, engine: Engine, replicating: bool) -> list<Statement> | Fault invokes how_to_spell, spell_view note "turns one schema change into the statements that carry it out" note "a replicated database is handed a different spelling for the same change, so the answer this hands back is what reaches the primary rather than what runs on the copy"
 
   # --- what a question across models reaches -------------------------------
 

@@ -57,6 +57,7 @@ from declaro_persistum.difference import difference
 from declaro_persistum.engine_of import engine_of
 from declaro_persistum.how_to_inspect import how_to_inspect
 from declaro_persistum.how_to_migrate import how_to_migrate
+from declaro_persistum.how_to_spell import how_to_spell
 from declaro_persistum.how_to_write import how_to_write
 from declaro_persistum.lifecycle_install_handler import lifecycle_install_handler
 from declaro_persistum.lifecycle_register import lifecycle_register
@@ -639,6 +640,36 @@ HOW_FAR_BACK_A_FAILURE_GOES: dict[
     "per_operation": _run_each_on_its_own,
 }
 
+
+# WHEN A CHANGE HAS TO COMMIT AS IT GOES, THE WHOLE PLAN DOES. Measured
+# 2026-10-10: a rename on a replicated Turso is an add, a copy and a drop, and
+# all three inside one transaction failed the push and left the literal string
+# `'None'` on the primary. The same three in three transactions all arrived.
+# `fn how_to_spell` says which changes are like that, so the mode is the
+# engine's answer unless this plan holds one of them.
+_HOW_FAR_BACK_THIS_PLAN_GOES: dict[bool, Callable[[Connecting], MigrationMode]] = {
+    True: lambda _connecting: "per_operation",
+    False: lambda connecting: how_to_migrate(connecting["engine"]),
+}
+
+
+def _the_mode_this_plan_runs_in(
+    connecting: Connecting, operations: list[Operation]
+) -> MigrationMode:
+    """How far back a failure goes, for this plan on this database.
+
+    Asked of the plan and not of the engine alone, because a change whose
+    statements have to be committed one at a time cannot be wrapped in one
+    transaction with the rest, however far back this engine would otherwise roll.
+    """
+    asked = [
+        how_to_spell(one["kind"], connecting["engine"], _whether_it_replicates(connecting))
+        for one in operations
+    ]
+    committing = [one for one in asked if not _is_fault(one) if one["commits_between"]]  # type: ignore[typeddict-item]
+    return _HOW_FAR_BACK_THIS_PLAN_GOES[committing != []](connecting)
+
+
 # WHAT AN OPERATOR FINDS THE NEXT MORNING, said as what survived rather than as
 # the name of a mode.
 WHAT_A_STOPPED_MIGRATION_LEFT: dict[MigrationMode, str] = {
@@ -667,7 +698,9 @@ def _the_engine_stopped(
             f"{stopped['kind']} on {stopped['table']!r}. The engine said: "
             + str(cast("Fault", carried[0])["what_went_wrong"])
         ),
-        what_to_do_instead=WHAT_A_STOPPED_MIGRATION_LEFT[how_to_migrate(connecting["engine"])],
+        what_to_do_instead=WHAT_A_STOPPED_MIGRATION_LEFT[
+            _the_mode_this_plan_runs_in(connecting, operations)
+        ],
     )
 
 
@@ -695,9 +728,9 @@ async def _a_change_this_engine_cannot_write(
 async def _every_change_spelled_out(
     connecting: Connecting, operations: list[Operation], spelled: list[Any], _refused: list[Any]
 ) -> Connecting | Fault:
-    carried = await HOW_FAR_BACK_A_FAILURE_GOES[how_to_migrate(connecting["engine"])](
-        connecting, cast("list[list[Statement]]", spelled)
-    )
+    carried = await HOW_FAR_BACK_A_FAILURE_GOES[
+        _the_mode_this_plan_runs_in(connecting, operations)
+    ](connecting, cast("list[list[Statement]]", spelled))
     return _WHETHER_THE_ENGINE_TOOK_IT_ALL[carried[0] is not None](connecting, operations, carried)
 
 
@@ -707,9 +740,20 @@ _WHETHER_EVERY_CHANGE_HAS_A_SPELLING: dict[bool, Callable[..., Awaitable[Connect
 }
 
 
+def _whether_it_replicates(connecting: Connecting) -> bool:
+    """Whether this database has a primary, which is whether it holds a channel.
+
+    `fn replicates` asks the same question of a finished `Database`. The handle
+    is built before the migration is planned, and what both read is the channel,
+    so this reads it off the record being filled rather than waiting for one.
+    """
+    return connecting["channel"] is not NOTHING
+
+
 async def _carry_out_the_plan(connecting: Connecting) -> Connecting | Fault:
     operations = connecting["migration"]["plan"]["operations"]
-    spelled = [spell_operation(one, connecting["engine"]) for one in operations]
+    replicating = _whether_it_replicates(connecting)
+    spelled = [spell_operation(one, connecting["engine"], replicating) for one in operations]
     refused = [one for one in spelled if _is_fault(one)]
     return await _WHETHER_EVERY_CHANGE_HAS_A_SPELLING[refused != []](
         connecting, operations, spelled, refused

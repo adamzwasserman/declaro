@@ -933,6 +933,137 @@ def _rename_column(operation: Operation, engine: Engine) -> list[Statement] | Fa
     )
 
 
+# --- the same two changes, on a database that has a primary ------------------
+#
+# A RENAME RUNS ON THE LOCAL COPY AND SENDS NOTHING. Measured 2026-10-10 against
+# a real Turso primary: `ALTER TABLE ... RENAME COLUMN` and
+# `ALTER TABLE ... RENAME TO` both report success and reach no primary, so a
+# replica that renamed a column and a primary that did not go on serving two
+# different schemas with nothing to say so. Worse, the next write naming the new
+# column raised on its first push, reported success on its second, and never
+# arrived.
+#
+# SO BOTH ARE SPELLED WITH STATEMENTS THAT DO REPLICATE: an add, a copy and a
+# drop. `fn how_to_spell` says they are committed on their own, which is also
+# measured: all three in one transaction failed the push and left the literal
+# string 'None' on the primary.
+
+
+def _the_renamed_column(operation: Operation, engine: Engine) -> Column | Fault:
+    """The column a rename moves, under whichever of its two names it carries.
+
+    A RENAME DOES NOT CHANGE THE TYPE, so the column arriving under the new name
+    is the column that was there under the old one. A target schema carries it
+    under the new name and a live one under the old, and either settles the
+    definition, which is why the lookup takes both.
+    """
+    names = {str(operation["column"]), str(operation["renamed_to"])}
+    found = [column for column in operation["columns"] if column["name"] in names]
+    answer: dict[bool, Callable[[], Column | Fault]] = {
+        True: lambda: found[0],
+        False: lambda: _refused(
+            f"A rename on {operation['table']} moves {operation['column']!r} to "
+            f"{operation['renamed_to']!r}, and {engine} has a primary, so the "
+            f"column has to be added under its new name before the rows move "
+            f"across. The columns it was handed are "
+            f"{[column['name'] for column in operation['columns']]}, and neither "
+            f"name is among them.",
+            f"Send the operation again carrying the column under "
+            f"{operation['renamed_to']!r} or under {operation['column']!r}, so "
+            f"its declared type can be written into the ADD COLUMN.",
+        ),
+    }
+    return answer[found != []]()
+
+
+def _it_must_hold_something(
+    moved: Column, operation: Operation, engine: Engine
+) -> list[Statement] | Fault:
+    """A column declared NOT NULL cannot be added beside rows that have none."""
+    return _refused(
+        f"A rename on {operation['table']} moves {operation['column']!r} to "
+        f"{moved['name']!r}, which is declared to hold something. On {engine} "
+        f"with a primary the move is an ADD COLUMN, a copy and a DROP COLUMN, "
+        f"and a column that must hold something cannot be added to a table that "
+        f"already has rows.",
+        f"Give {moved['name']!r} a default in the model, or declare the move as "
+        f"a new column and a dropping line and fill it yourself.",
+    )
+
+
+def _added_filled_and_dropped(
+    moved: Column, operation: Operation, engine: Engine
+) -> list[Statement] | Fault:
+    """Add the column under its new name, copy the rows across, drop the old one."""
+    quote = QUOTE[engine]
+    table = quote(operation["table"])
+    was = quote(_word(operation, "column"))
+    definition = column_definition(moved, operation["constraints"], engine)
+    return _the_first_fault_or(
+        [definition],
+        lambda: [
+            _statement(f"ALTER TABLE {table} ADD COLUMN {definition}", []),
+            _statement(f"UPDATE {table} SET {quote(moved['name'])} = {was}", []),
+            _statement(f"ALTER TABLE {table} DROP COLUMN {was}", []),
+        ],
+    )
+
+
+_WHETHER_IT_MAY_ARRIVE_EMPTY: dict[
+    bool, Callable[[Column, Operation, Engine], list[Statement] | Fault]
+] = {
+    True: _added_filled_and_dropped,
+    False: _it_must_hold_something,
+}
+
+
+def _rename_column_by_copying(operation: Operation, engine: Engine) -> list[Statement] | Fault:
+    """Three statements and no rename, for a column on a database with a primary."""
+
+    def spelled() -> list[Statement] | Fault:
+        moved = _the_renamed_column(operation, engine)
+
+        def by_copying() -> list[Statement] | Fault:
+            arriving = cast(
+                Column, {**cast("dict[str, Any]", moved), "name": _word(operation, "to")}
+            )
+            must_hold = _its_own(arriving, operation["constraints"], "not_null")
+            return _WHETHER_IT_MAY_ARRIVE_EMPTY[must_hold == []](arriving, operation, engine)
+
+        return _the_first_fault_or([moved], by_copying)
+
+    return _needing(operation, engine, ("column", "to"), spelled)
+
+
+def _rename_table_by_copying(operation: Operation, engine: Engine) -> list[Statement] | Fault:
+    """A rebuild without the rename: make it under the new name, copy, drop the old.
+
+    THE SAME THREE MOVES AS A COLUMN, one level up. A rebuild would end by
+    renaming the temporary table into place, which is the statement that cannot
+    leave the machine, so the new name goes on the CREATE TABLE instead and
+    nothing is renamed at all.
+    """
+
+    def spelled() -> list[Statement] | Fault:
+        quote = QUOTE[engine]
+        was = quote(operation["table"])
+        now = quote(_word(operation, "to"))
+        body = _table_body(operation, engine)
+        carried = ", ".join(quote(column["name"]) for column in operation["columns"])
+        return _the_first_fault_or(
+            [body],
+            lambda: [
+                _statement(f"CREATE TABLE {now} ({body})", []),
+                _statement(f"INSERT INTO {now} ({carried}) SELECT {carried} FROM {was}", []),
+                _statement(f"DROP TABLE {was}", []),
+            ],
+        )
+
+    return _needing(
+        operation, engine, ("to",), lambda: _carrying(operation, engine, "columns", spelled)
+    )
+
+
 def _rename_table(operation: Operation, engine: Engine) -> list[Statement] | Fault:
     quote = QUOTE[engine]
     return _needing(
@@ -1108,18 +1239,55 @@ POSTGRESQL_SPELLING: dict[OperationKind, Speller] = SHARED | {
     "alter_column": _alter_column_directly,
 }
 
-SPELLING: dict[Engine, dict[OperationKind, Speller]] = {
-    "sqlite": SQLITE_SPELLING,
-    "postgresql": POSTGRESQL_SPELLING,
-    "turso": SQLITE_SPELLING,
+
+def _it_cannot_reach_the_primary(operation: Operation, engine: Engine) -> list[Statement] | Fault:
+    """A change this engine can only make locally, in the generators table's words.
+
+    `fn how_to_spell` refuses this pair before anything reaches here, so this row
+    exists to keep the table below complete rather than to be read. A table with
+    a hole in it is a table read with a fallback.
+    """
+    return cast(Fault, how_to_spell(operation["kind"], engine, True))
+
+
+# AND WHAT A REPLICATED TURSO WRITES INSTEAD OF ALL THREE. A drop replicates on
+# its own, so it is written plainly rather than rebuilt around. Both renames
+# become an add, a copy and a drop. An alter is refused, because Turso has no
+# ALTER COLUMN and its rebuild cannot leave the machine.
+TURSO_REPLICATED_SPELLING: dict[OperationKind, Speller] = SHARED | {
+    "drop_column": _drop_column_directly,
+    "alter_column": _it_cannot_reach_the_primary,
+    "rename_column": _rename_column_by_copying,
+    "rename_table": _rename_table_by_copying,
+}
+
+# WHETHER THE DATABASE HAS A PRIMARY PICKS THE TABLE, AND THE ENGINE PICKS THE
+# ROW. Neither SQLite nor PostgreSQL replicates, so each reads the same spellings
+# either way and still keeps a row, because a read with no row is a read with a
+# fallback.
+SPELLING: dict[bool, dict[Engine, dict[OperationKind, Speller]]] = {
+    False: {
+        "sqlite": SQLITE_SPELLING,
+        "postgresql": POSTGRESQL_SPELLING,
+        "turso": SQLITE_SPELLING,
+    },
+    True: {
+        "sqlite": SQLITE_SPELLING,
+        "postgresql": POSTGRESQL_SPELLING,
+        "turso": TURSO_REPLICATED_SPELLING,
+    },
 }
 
 
-def _refuse_the_engine(_operation: Operation, engine: Engine) -> list[Statement] | Fault:
+def _refuse_the_engine(
+    _operation: Operation, engine: Engine, _replicating: bool
+) -> list[Statement] | Fault:
     return _no_such_engine(engine)
 
 
-def _refuse_the_operation(operation: Operation, engine: Engine) -> list[Statement] | Fault:
+def _refuse_the_operation(
+    operation: Operation, engine: Engine, _replicating: bool
+) -> list[Statement] | Fault:
     return _refused(
         f"A {operation['kind']} on {operation['table']} was handed to {engine}, "
         f"and {engine} has no spelling for a {operation['kind']}.",
@@ -1128,13 +1296,13 @@ def _refuse_the_operation(operation: Operation, engine: Engine) -> list[Statemen
     )
 
 
-def _spell(operation: Operation, engine: Engine) -> list[Statement] | Fault:
-    return SPELLING[engine][operation["kind"]](operation, engine)
+def _spell(operation: Operation, engine: Engine, replicating: bool) -> list[Statement] | Fault:
+    return SPELLING[replicating][engine][operation["kind"]](operation, engine)
 
 
 # The engine is a word this package ships, the kind is a word the declaration
 # carries, and the four answers are all four combinations.
-ANSWER: dict[tuple[bool, bool], Speller] = {
+ANSWER: dict[tuple[bool, bool], Callable[[Operation, Engine, bool], list[Statement] | Fault]] = {
     (False, False): _refuse_the_engine,
     (False, True): _refuse_the_engine,
     (True, False): _refuse_the_operation,
@@ -1142,7 +1310,9 @@ ANSWER: dict[tuple[bool, bool], Speller] = {
 }
 
 
-def spell_operation(operation: Operation, engine: Engine) -> list[Statement] | Fault:
+def spell_operation(
+    operation: Operation, engine: Engine, replicating: bool
+) -> list[Statement] | Fault:
     """Turn one schema change into the statements that carry it out on one engine.
 
     Reads the tables above and nothing else. It opens no file, holds no
@@ -1155,9 +1325,15 @@ def spell_operation(operation: Operation, engine: Engine) -> list[Statement] | F
     so a kind of change added to the vocabulary and not to the table fails on
     the first attempt to spell it rather than being written as whatever this
     file happened to fall through to.
+
+    `replicating` SAYS WHETHER THE DATABASE HAS A PRIMARY, since 2026-10-12, and
+    a replicated database is handed a different spelling for the same change. A
+    statement that runs on the local copy is not a statement that reaches the
+    primary, so what comes back here is what reaches the primary rather than
+    what runs on the copy.
     """
-    written = how_to_spell(operation["kind"], engine)
-    return _OR_THE_REFUSAL[_is_a_refusal(written)](written, operation, engine)
+    written = how_to_spell(operation["kind"], engine, replicating)
+    return _OR_THE_REFUSAL[_is_a_refusal(written)](written, operation, engine, replicating)
 
 
 def _is_a_refusal(written: object) -> bool:
@@ -1165,14 +1341,18 @@ def _is_a_refusal(written: object) -> bool:
     return isinstance(written, dict) and "what_went_wrong" in written
 
 
-def _the_table_refused(written: object, _operation: Operation, _engine: Engine) -> Any:
+def _the_table_refused(
+    written: object, _operation: Operation, _engine: Engine, _replicating: bool
+) -> Any:
     """It leaves in the words the table wrote, unreworded."""
     return written
 
 
-def _spelled(_written: object, operation: Operation, engine: Engine) -> Any:
+def _spelled(_written: object, operation: Operation, engine: Engine, replicating: bool) -> Any:
     """The table has a rule, so the statements are written."""
-    return ANSWER[(engine in THE_ENGINES, operation["kind"] in THE_KINDS)](operation, engine)
+    return ANSWER[(engine in THE_ENGINES, operation["kind"] in THE_KINDS)](
+        operation, engine, replicating
+    )
 
 
 # Whether the generators table had a rule for this pair. Both rows are written

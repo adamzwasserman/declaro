@@ -14,9 +14,15 @@ Feature: what_an_operation_carries -- Which fields one kind of change fills
     Given drop_table
     Then it carries none of the fields
 
-  Scenario: renaming a table carries the name it is taking
+  # IT CARRIED THE NEW NAME AND NOTHING ELSE UNTIL 2026-10-12, and that was true
+  # of a rename and not of every database a rename runs on. Measured against a
+  # real Turso primary: `ALTER TABLE ... RENAME TO` runs on the local copy,
+  # reports success and reaches no primary. So a table rename on a replicated
+  # database is a CREATE TABLE under the new name, the rows copied across, and a
+  # DROP of the old one, and the create needs the columns and the rules.
+  Scenario: renaming a table carries the name it is taking, with its columns and its rules
     Given rename_table
-    Then it carries a new name and nothing else
+    Then it carries a new name, columns and constraints, and nothing else
 
   Scenario: filling an enum carries the values
     Given insert_enum_values

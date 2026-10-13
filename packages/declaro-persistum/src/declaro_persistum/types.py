@@ -443,6 +443,11 @@ class Spelling(TypedDict):
     statements: list[str]
     # SQLite alters a column by building a new table and copying into it.
     rebuilds: bool
+    # WHETHER EACH STATEMENT HAS TO BE COMMITTED ON ITS OWN. Measured 2026-10-10
+    # against a Turso primary: a rename spelled as an add, a copy and a drop in
+    # one transaction failed the push and left the literal string 'None' on the
+    # primary, while the same three in three transactions all arrived.
+    commits_between: bool
 
 
 class Comparing(TypedDict):

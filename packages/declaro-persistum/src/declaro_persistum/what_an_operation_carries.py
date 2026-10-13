@@ -50,12 +50,18 @@ CARRIES: dict[OperationKind, Carrying] = {
     "add_column": _filling(columns=True),
     "drop_column": _filling(columns=True),
     "alter_column": _filling(columns=True, constraints=True, indexes=True, copying=True),
-    # RENAMING NEEDS THE NEW NAME AND NOT THE COLUMN DEFINITIONS, and this row
-    # said the opposite until 2026-10-07. It claimed `columns` and denied
-    # `renamed_to`, so a change built from the row alone was refused by
-    # `fn spell_operation` for want of the field the row said it did not need.
-    "rename_column": _filling(renamed_to=True),
-    "rename_table": _filling(renamed_to=True),
+    # RENAMING NEEDS THE NEW NAME, and this row denied it until 2026-10-07. It
+    # claimed `columns` and denied `renamed_to`, so a change built from the row
+    # alone was refused by `fn spell_operation` for want of the field the row
+    # said it did not need.
+    #
+    # AND IT NEEDS THE COLUMNS AFTER ALL, SINCE 2026-10-12, because a rename on a
+    # database with a primary is not a rename. Measured 2026-10-10:
+    # `ALTER TABLE ... RENAME COLUMN` runs on the local copy and reaches no
+    # primary, so a replicated rename is spelled as an add, a copy and a drop,
+    # and the add has to write the arriving column's declared type.
+    "rename_column": _filling(renamed_to=True, columns=True),
+    "rename_table": _filling(renamed_to=True, columns=True, constraints=True),
     "create_index": _filling(indexes=True),
     "drop_index": _filling(indexes=True),
     "create_view": _filling(view=True),

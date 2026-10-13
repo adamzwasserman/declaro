@@ -241,7 +241,7 @@ def _an_insert(db: dict, table: str, row: dict) -> dict:
 
 def _spelled(db: dict, operation: dict) -> dict:
     """The one statement this schema change spells on this database's engine."""
-    statements = spell_operation(operation, db["engine"])
+    statements = spell_operation(operation, db["engine"], False)
     assert isinstance(statements, list), f"the change could not be spelled: {statements}"
     return statements[0]
 

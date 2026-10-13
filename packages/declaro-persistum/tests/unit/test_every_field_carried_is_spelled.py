@@ -35,6 +35,7 @@ import typing
 import pytest
 
 from declaro_persistum import types
+from declaro_persistum.how_to_spell import how_to_spell
 from declaro_persistum.spell_operation import spell_operation
 from declaro_persistum.what_an_operation_carries import what_an_operation_carries
 from tests.conftest import (
@@ -150,20 +151,40 @@ def _everything_the_statements_say(spelled: list[dict]) -> str:
     )
 
 
+# AND WITH A PRIMARY AND WITHOUT ONE, SINCE 2026-10-12. A statement that runs on
+# the local copy is not a statement that reaches the primary, so the same change
+# on the same engine has two spellings and a gate that asked for one of them
+# would leave the other unread. Measured 2026-10-10: a rename reaches no primary,
+# and 2026-10-12: nor does the rebuild an alter and a drop are spelled as.
+_WHETHER_IT_REPLICATES = (False, True)
+
 # EVERY KIND SPELLED FOR EVERY ENGINE, ONCE, WHEN THIS FILE LOADS. Collecting
 # this file is the edge, and a function that builds and spells is work hidden
 # where a reader of the tests below cannot see it.
-HOW_EACH_KIND_SPELLS: dict[tuple[str, str], object] = {
-    (kind, engine): spell_operation(
-        _a_change_of(kind, carrying=what_an_operation_carries(kind)), engine
+HOW_EACH_KIND_SPELLS: dict[tuple[str, str, bool], object] = {
+    (kind, engine, replicating): spell_operation(
+        _a_change_of(kind, carrying=what_an_operation_carries(kind)), engine, replicating
     )
     for kind in _the_kinds()
     for engine in _the_engines()
+    for replicating in _WHETHER_IT_REPLICATES
 }
 
 
 def _is_a_fault(answer: object) -> bool:
     return isinstance(answer, dict) and "what_went_wrong" in answer
+
+
+def _the_table_has_no_spelling(kind: str, engine: str, replicating: bool) -> bool:
+    """Whether the generators table refuses this pairing however it is carried.
+
+    A change an engine cannot carry to where it has to go is refused by
+    `fn how_to_spell` before any field is read, so it is not evidence that a row
+    denies a field the writer needs. The question is asked of that table rather
+    than answered by a list of kinds here, because a list of kinds here is the
+    defect this gate exists to catch, one level up.
+    """
+    return _is_a_fault(how_to_spell(kind, engine, replicating))  # type: ignore[arg-type]
 
 
 def test_every_field_the_table_claims_is_used_by_some_engine() -> None:
@@ -187,7 +208,7 @@ def test_every_field_the_table_claims_is_used_by_some_engine() -> None:
             if claimed
             if not any(
                 WHAT_TO_LOOK_FOR[field] in _everything_the_statements_say(spelled)  # type: ignore[arg-type]
-                for (said, _engine), spelled in HOW_EACH_KIND_SPELLS.items()
+                for (said, _engine, _replicating), spelled in HOW_EACH_KIND_SPELLS.items()
                 if said == kind
                 if not _is_a_fault(spelled)
             )
@@ -218,9 +239,10 @@ def test_a_change_carrying_what_the_table_claims_is_never_refused() -> None:
     was refused for want of the very field the row said it did not need.
     """
     refused = {
-        f"{kind} on {engine}": spelled["what_went_wrong"]  # type: ignore[index]
-        for (kind, engine), spelled in HOW_EACH_KIND_SPELLS.items()
+        f"{kind} on {engine}, replicating {replicating}": spelled["what_went_wrong"]  # type: ignore[index]
+        for (kind, engine, replicating), spelled in HOW_EACH_KIND_SPELLS.items()
         if _is_a_fault(spelled)
+        if not _the_table_has_no_spelling(kind, engine, replicating)
     }
 
     assert not refused, (
@@ -238,9 +260,11 @@ def test_the_gate_read_the_kinds_and_spelled_something() -> None:
 
     assert len(kinds) > 10, f"the declaration names {len(kinds)} kinds of change, which is too few"
     assert len(engines) == 3, f"the package has {len(engines)} engines and this gate expects three"
-    assert len(HOW_EACH_KIND_SPELLS) == len(kinds) * len(engines), (
-        f"the gate spelled {len(HOW_EACH_KIND_SPELLS)} of {len(kinds) * len(engines)} "
-        f"combinations, so something was skipped rather than checked"
+    wanted = len(kinds) * len(engines) * len(_WHETHER_IT_REPLICATES)
+
+    assert len(HOW_EACH_KIND_SPELLS) == wanted, (
+        f"the gate spelled {len(HOW_EACH_KIND_SPELLS)} of {wanted} combinations, "
+        f"so something was skipped rather than checked"
     )
     written = sum(
         len(spelled)
