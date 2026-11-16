@@ -74,6 +74,9 @@ module declaro-persistum
                   renamed_from: str | NOTHING
                   references: Reference | NOTHING } note "one column: what it is called, what it holds, what it was called before, and where it points"
 
+  type Field = { renamed_from: str | NOTHING
+                 references: Reference | NOTHING } note "the two facts about one column that its annotation cannot carry, said beside the column rather than at the top of the class, because a rename written anywhere else names that column a second time and two namings drift"
+
   type Index = { name: str
                  columns: list<str>
                  unique: bool } note "a declared promise about speed"
@@ -345,7 +348,7 @@ module declaro-persistum
 
   boundary_out fn crew_wait_for_work : (draining: Draining) -> NOTHING | Fault awaited side_effect reads_writes "crew" note "sleeps until a write arrives, the crew stops, or the idle limit runs out"
 
-  reader fn schema_read_declared : () -> Declared | Fault side_effect reads "models" note "asks the code which models and views it declares"
+  reader fn schema_read_declared : () -> Declared | Fault side_effect reads "models" note "asks the code which models and views it declares" note "it is also where whatever `field` built enters, because a host calls that in its own class body and the answer sits in the model this reads"
 
   reader fn schema_inspect : (connection: Connection, engine: Engine, inspecting: Inspecting) -> Schema | Fault awaited side_effect reads "database" note "asks a database the five questions and builds what it holds out of the answers"
 
@@ -410,6 +413,8 @@ module declaro-persistum
 
   # --- what the schema half reaches ---------------------------------------
 
+  fn field : (renamed_from: str | NOTHING, references: Reference | NOTHING) -> Field note "what a host says about one column that its annotation cannot" note "a host writes it as the column's assignment, so the answer has to be something Pydantic accepts there: it carries the pair in the field's extra and schema_read_declared reads it back, which is the only way Column.renamed_from and Column.references are ever anything but the named absence" note "without it a rename reads as a drop and an add, name_what_is_ambiguous stops the open, and nothing the host can write resolves it; the whole rename path was built and unreachable until this card existed" note "neither argument has a default, because a column that forgot to say where it points and a column that points nowhere are different facts and only the host knows which"
+
   fn refuse_owned_names : (declared: Declared) -> NOTHING | Fault note "refuses a model that claims a name the library or an engine owns"
 
   fn schema_from_declared : (declared: Declared) -> Schema | Fault note "builds the target schema from what the code declares, and from nothing else"
@@ -451,3 +456,23 @@ module declaro-persistum
   fn spell_view : (view: View, engine: Engine) -> Statement | Fault invokes compile_statement note "writes the SELECT a declared view stands for"
 
   fn mechanism_for : (freshness: Freshness, engine: Engine, capability: Capability) -> list<Operation> | Fault note "picks the mechanism that gives a materialized view the freshness asked for"
+
+  # EVERY WAY THE WORLD GETS IN, NAMED. This is a library, so nothing routes to
+  # it and no framework registers it; the world arrives when a host imports a
+  # name and calls it, or when the platform does. Four of these five are the
+  # doors. `field` is not a door: a host calls it while its own class body runs,
+  # long before a door is reached, and the answer sits in the model until
+  # `schema_read_declared` reads it. So nothing here invokes it and the import
+  # is what launches it.
+  #
+  # THEY ARE WRITTEN DOWN BECAUSE THE MAP CANNOT GUESS THEM, and the cost of not
+  # writing them is silence rather than a complaint. The explorer's check for a
+  # pure function nothing can start only runs on a module that declares a world
+  # arrival, so with no entry here it never ran at all and this file's clean
+  # report was a check that had been skipped. Measured 2026-11-16: declaring
+  # these five turns it on, and it passes.
+  entry "import:declaro_persistum.session_open" -> session_open
+  entry "import:declaro_persistum.query_ask" -> query_ask
+  entry "import:declaro_persistum.field" -> field
+  entry "signal:SIGTERM" -> lifecycle_stop
+  entry "crew:a drainer woke" -> lifecycle_turn

@@ -41,9 +41,16 @@ WHAT A COLUMN'S TYPE BECOMES IS A TABLE AND THE TABLE HAS NO FALLBACK ROW. An
 annotation with no row comes back as a refusal naming it and listing what this
 reads, because a type silently turned into text is a column nobody declared.
 
-WHAT IS NOT READ HERE, AND WHY IT IS NOT A HOLE. `Column.renamed_from` and
-`Column.references` are what `field()` declares, and `field()` has no card in
-the declaration yet. Both come back as the named absence rather than as a guess.
+WHERE A RENAME AND A FOREIGN KEY COME FROM, SINCE 2026-11-16. `Column.renamed_from`
+and `Column.references` are what `fn field` declares, beside the column rather
+than at the top of the class. A host that calls it gets both read back here; a
+host that does not gets the named absence rather than a guess.
+
+UNTIL THAT CARD EXISTED THIS WROTE THE ABSENCE EVERY TIME, which made the rename
+path unreachable. Seven modules read `Column.renamed_from`, and with nothing able
+to fill it a renamed column read as one column dropped and another added, so
+`fn name_what_is_ambiguous` stopped the open and nothing a host could write
+resolved it.
 """
 
 from __future__ import annotations
@@ -245,16 +252,40 @@ def _declared_on[Said](cls: type, attribute: str, nobody_said: Said) -> Said | A
     return ([nobody_said, *found])[len(found)]
 
 
-def _a_column(name: str, annotation: Any) -> Column | Fault:
-    """One column, with every field a `Column` names present."""
-    held = _read(annotation)
+# WHAT A HOST SAID BESIDE THE COLUMN, OR THAT IT SAID NOTHING. `fn field` puts
+# the two facts in the field's own extra, which is where Pydantic keeps what it
+# does not itself understand. A column declared without it has no extra at all,
+# and Pydantic spells that absence `None` rather than an empty map, so the two
+# cases are told apart here rather than guessed at further in.
+_WHATEVER_WAS_SAID: dict[bool, Callable[[Any], dict[str, Any]]] = {
+    True: lambda extra: extra,
+    False: lambda _extra: {},
+}
+
+
+def _said_beside(field: Any) -> dict[str, Any]:
+    """What `fn field` attached to this column, or an empty map where nothing did."""
+    extra = field.json_schema_extra
+    return _WHATEVER_WAS_SAID[isinstance(extra, dict)](extra)
+
+
+def _a_column(name: str, field: Any) -> Column | Fault:
+    """One column, with every field a `Column` names present.
+
+    THE ABSENCE IS RESOLVED HERE, AT THE EDGE, like every other absence in this
+    file. A host that said nothing about where a column came from gets the named
+    absence, which is a reading of what they wrote and not a value invented to
+    fill a hole.
+    """
+    held = _read(field.annotation)
+    said = _said_beside(field)
     return _the_first_fault_or(
         [held],
         lambda: Column(
             name=name,
             declared_type=held[0],
-            renamed_from=NOTHING,
-            references=NOTHING,
+            renamed_from=said.get("renamed_from", NOTHING),
+            references=said.get("references", NOTHING),
         ),
     )
 
@@ -287,7 +318,7 @@ def _must_hold_something(name: str, annotation: Any) -> list[Constraint]:
 
 def _the_model(cls: type, named: Any) -> Model | Fault:
     fields = list(cls.model_fields.items())  # type: ignore[attr-defined]
-    columns = [_a_column(name, field.annotation) for name, field in fields]
+    columns = [_a_column(name, field) for name, field in fields]
     required = [
         rule for name, field in fields for rule in _must_hold_something(name, field.annotation)
     ]

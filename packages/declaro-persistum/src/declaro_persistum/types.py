@@ -268,6 +268,18 @@ class Column(TypedDict):
     references: Reference | None
 
 
+class Field(TypedDict):
+    """The two facts about one column that its annotation cannot carry.
+
+    A host says either one beside the column, through `fn field`, rather than at
+    the top of the class. These are exactly the two fields of `Column` that no
+    Pydantic annotation can fill.
+    """
+
+    renamed_from: str | None
+    references: Reference | None
+
+
 class Index(TypedDict):
     name: str
     columns: list[str]
