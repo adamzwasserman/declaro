@@ -176,9 +176,22 @@ _WHAT_IS_OUT_OF_REACH: dict[bool, dict[Engine, frozenset[OperationKind]]] = {
 }
 
 
+# WHETHER THIS ENGINE WRITES THIS CHANGE ITS OWN WAY. Two rows: the engine has
+# its own spelling for this kind, or every engine writes it the same. Asking the
+# engine's table for a default reads as one answer with a spare, and it is two
+# answers; it also looks up the shared row on every call, including the calls
+# that had the engine's own.
+_WHETHER_THIS_ENGINE_HAS_ITS_OWN: dict[bool, Callable[[OperationKind, Engine, bool], Spelling]] = {
+    True: lambda kind, engine, replicating: _WHAT_IT_WRITES[replicating][engine][kind],
+    False: lambda kind, _engine, _replicating: _THE_SAME_EVERYWHERE[kind],
+}
+
+
 def _the_row(kind: OperationKind, engine: Engine, replicating: bool) -> Spelling | Fault:
     """The shared row, or this engine's own where it has one."""
-    return _WHAT_IT_WRITES[replicating][engine].get(kind, _THE_SAME_EVERYWHERE[kind])
+    return _WHETHER_THIS_ENGINE_HAS_ITS_OWN[kind in _WHAT_IT_WRITES[replicating][engine]](
+        kind, engine, replicating
+    )
 
 
 def _it_cannot_reach_the_primary(

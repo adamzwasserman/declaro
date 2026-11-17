@@ -9,11 +9,11 @@ Feature: grammar_of -- The writing says which way it was written
   # needed: the four look nothing alike. The word is gone from the door and this
   # card reads it off the text instead.
 
-  WHY THE SHAPE AND NOT THE WORDS. Two spellings can share a word. SQLAlchemy 1.x
-  has `filter` and so does Django, and any library may take the word tomorrow, so
-  a guess from keywords gets weaker with every spelling added. The shape cannot
-  collide: a chain hanging off `.objects.` is Django and nothing else, and `==`
-  inside the text can only be a statement built with operators.
+  # WHY THE SHAPE AND NOT THE WORDS. Two spellings can share a word. SQLAlchemy 1.x
+  # has `filter` and so does Django, and any library may take the word tomorrow, so
+  # a guess from keywords gets weaker with every spelling added. The shape cannot
+  # collide: a chain hanging off `.objects.` is Django and nothing else, and `==`
+  # inside the text can only be a statement built with operators.
 
   Scenario: the attribute between the model and the chain names the spelling
     When grammar_of reads Person.objects.filter(name="bob")

@@ -26,6 +26,20 @@ from typing import Any, Literal, TypedDict
 Engine = Literal["sqlite", "postgresql", "turso"]
 Shutdown = Literal["exit_immediately", "replicate_then_exit"]
 Grammar = Literal["pseudo_sql", "django", "prisma", "sqlalchemy"]
+
+# THE QUESTION AS THE CALLER TYPED IT, in one of the four spellings. It is a
+# plain string and it is named anyway, because `fn grammar_of` reads the spelling
+# off this text and a parameter typed `str` would say nothing about what the text
+# is for. Declared in `docs/design/persistum.hd` as `type Written = str`.
+Written = str
+
+# ONE SPELLING'S METHOD NAME FOR EACH FIELD, over a real parse. `filter` is
+# Django's word for the narrowing and `filter_by` is SQLAlchemy's. A spelling
+# that calls a field what this library calls it has no row, so a table holding
+# nothing means a spelling that renames nothing rather than a spelling nobody
+# wrote down. Declared as `type MethodNames = dict<str, str>`.
+MethodNames = dict[str, str]
+
 Direction = Literal["ascending", "descending"]
 Freshness = Literal["always current", "current when read", "refreshed when asked"]
 FaultKind = Literal["conflict", "refused", "budget_spent", "cut_short"]

@@ -70,6 +70,7 @@ from declaro_persistum.types import (
     Constraint,
     Declared,
     Fault,
+    Field,
     Model,
     View,
 )
@@ -257,14 +258,21 @@ def _declared_on[Said](cls: type, attribute: str, nobody_said: Said) -> Said | A
 # does not itself understand. A column declared without it has no extra at all,
 # and Pydantic spells that absence `None` rather than an empty map, so the two
 # cases are told apart here rather than guessed at further in.
-_WHATEVER_WAS_SAID: dict[bool, Callable[[Any], dict[str, Any]]] = {
-    True: lambda extra: extra,
-    False: lambda _extra: {},
+#
+# BOTH ROWS ANSWER WITH BOTH KEYS, which is why the reader below subscripts
+# rather than asking for a default. A row that answered `{}` would make the
+# caller supply what a missing key means, and a caller supplying that is the
+# same decision taken in the wrong place and taken twice.
+NOTHING_WAS_SAID: Field = {"renamed_from": NOTHING, "references": NOTHING}
+
+_WHATEVER_WAS_SAID: dict[bool, Callable[[Any], Field]] = {
+    True: lambda extra: {**NOTHING_WAS_SAID, **extra},
+    False: lambda _extra: NOTHING_WAS_SAID,
 }
 
 
-def _said_beside(field: Any) -> dict[str, Any]:
-    """What `fn field` attached to this column, or an empty map where nothing did."""
+def _said_beside(field: Any) -> Field:
+    """What `fn field` attached to this column, with both facts always present."""
     extra = field.json_schema_extra
     return _WHATEVER_WAS_SAID[isinstance(extra, dict)](extra)
 
@@ -272,10 +280,10 @@ def _said_beside(field: Any) -> dict[str, Any]:
 def _a_column(name: str, field: Any) -> Column | Fault:
     """One column, with every field a `Column` names present.
 
-    THE ABSENCE IS RESOLVED HERE, AT THE EDGE, like every other absence in this
-    file. A host that said nothing about where a column came from gets the named
-    absence, which is a reading of what they wrote and not a value invented to
-    fill a hole.
+    THE ABSENCE IS RESOLVED IN `_said_beside`, AT THE EDGE, like every other
+    absence in this file. A host that said nothing about where a column came
+    from gets the named absence, which is a reading of what they wrote rather
+    than a value invented here to fill a hole.
     """
     held = _read(field.annotation)
     said = _said_beside(field)
@@ -284,8 +292,8 @@ def _a_column(name: str, field: Any) -> Column | Fault:
         lambda: Column(
             name=name,
             declared_type=held[0],
-            renamed_from=said.get("renamed_from", NOTHING),
-            references=said.get("references", NOTHING),
+            renamed_from=said["renamed_from"],
+            references=said["references"],
         ),
     )
 

@@ -11,9 +11,9 @@ Feature: declaration_from_asked -- The parts become the one declaration
   # is what the fourteen scenarios of `declaration_from_phrasing.feature` and six
   # of `declaration_from_sqlalchemy.feature` were about. They are here now.
 
-  A DECLARATION CARRIES EVERY FIELD, HOWEVER FEW THE CALLER NAMED. Eleven fields,
-  and the ones nobody named are empty rather than missing, so nothing downstream
-  reads a field that may not be there.
+  # A DECLARATION CARRIES EVERY FIELD, HOWEVER FEW THE CALLER NAMED. Eleven fields,
+  # and the ones nobody named are empty rather than missing, so nothing downstream
+  # reads a field that may not be there.
 
   Scenario: the parts of a two-call question become a declaration
     When the parts of Person.objects.filter(name="bob").values("id", "name") arrive

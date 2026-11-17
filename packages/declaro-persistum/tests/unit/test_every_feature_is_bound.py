@@ -159,10 +159,15 @@ KNOWN_UNBOUND: dict[str, str] = {
     "schema_read_declared.feature": _NEEDS_A_DELETED_FUNCTION,
     "migration_report.feature": _DELETED_2026_09_23,
     "turso_pull.feature": _DELETED_2026_09_23,
-    "asked_from_written.feature": _THE_WRITING_IS_AHEAD_OF_THE_CODE,
-    "declaration_from_asked.feature": _THE_WRITING_IS_AHEAD_OF_THE_CODE,
-    "grammar_of.feature": _THE_WRITING_IS_AHEAD_OF_THE_CODE,
-    "methods_of.feature": _THE_WRITING_IS_AHEAD_OF_THE_CODE,
+    # asked_from_written.feature and declaration_from_asked.feature came off this
+    # list on 2026-11-16, with the two cards above them, when all four were
+    # written and bound. None of the four parsed until that day: each carried a
+    # paragraph of prose where Gherkin takes only a comment, and because nothing
+    # had ever read them the error had sat unseen since they were written.
+    # grammar_of.feature and methods_of.feature came off this list on 2026-11-16,
+    # when both cards were written and bound. Neither parsed until that day: each
+    # carried a paragraph of prose where Gherkin takes only a comment, and nothing
+    # had ever read them, so the error had sat unseen since they were written.
     "a_condition_is_data.feature": _A_RULE_ABOUT_THE_SOURCE,
     "a_failure_is_a_value.feature": _A_RULE_ABOUT_THE_SOURCE,
     "a_model_declares_and_does_nothing_else.feature": _A_RULE_ABOUT_THE_SOURCE,

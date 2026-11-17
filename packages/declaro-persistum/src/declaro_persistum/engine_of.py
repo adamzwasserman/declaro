@@ -118,11 +118,22 @@ _SCHEME_WHEN: dict[str, Callable[[str], str]] = {
 }
 
 
+# WHETHER ANY ENGINE ANSWERS TO THIS SCHEME. Two rows, because a scheme the
+# table names and a scheme nothing names are two answers and not one answer with
+# a spare. Asking the table for a default would also build the refusal on every
+# call, including the calls that found their engine, and a refusal nobody reads
+# is a sentence written about a database that opened.
+_WHETHER_A_SCHEME_NAMES_AN_ENGINE: dict[bool, Callable[[str], Engine | Fault]] = {
+    True: lambda scheme: _ENGINE_BY_SCHEME[scheme],
+    False: _refused,
+}
+
+
 def _what_the_scheme_names(target: str) -> Engine | Fault:
     """The engine a target's scheme names, or the refusal it earns."""
     head, separator, _rest = target.partition("://")
     scheme = _SCHEME_WHEN[separator](head)
-    return _ENGINE_BY_SCHEME.get(scheme, _refused(scheme))
+    return _WHETHER_A_SCHEME_NAMES_AN_ENGINE[scheme in _ENGINE_BY_SCHEME](scheme)
 
 
 # WHETHER THERE IS A TARGET AT ALL. An empty target and a bare path both read as

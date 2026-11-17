@@ -10,13 +10,13 @@ Feature: asked_from_written -- Read the writing, lift the parts out
   # real expression and the library never saw it. The four differed by their method
   # names alone, so they were one reader differing by a lookup.
 
-  THE WRITING IS TEXT. `Person.objects.filter(name="bob").values("id", "name")` is
-  what a caller types, punctuation and all, and this reads it. That is why four
-  spellings can differ in shape rather than only in keys.
+  # THE WRITING IS TEXT. `Person.objects.filter(name="bob").values("id", "name")` is
+  # what a caller types, punctuation and all, and this reads it. That is why four
+  # spellings can differ in shape rather than only in keys.
 
-  WHAT IT HANDS BACK IS PARTS, NOT A DECLARATION. `fn declaration_from_asked` turns
-  parts into a declaration, and it is the one place a missing part is told no. This
-  card reads, and nothing else.
+  # WHAT IT HANDS BACK IS PARTS, NOT A DECLARATION. `fn declaration_from_asked` turns
+  # parts into a declaration, and it is the one place a missing part is told no. This
+  # card reads, and nothing else.
 
   Scenario: a chain with two calls gives both parts
     Given the method names django uses

@@ -110,11 +110,13 @@ Feature: compile_statement -- A declaration and an engine in, a statement and it
 
   # ------------------------------------------------- the whole chain, end to end
 
-  Scenario: four grammars render to one statement
-    Given the same question written in pseudo-sql, django, prisma and sqlalchemy
-    When each is rendered for postgresql
-    Then the four statements are identical
-    And the four parameter sets are equal
+  # "four grammars render to one statement" was removed on 2026-11-16 with the
+  # four builders it asked about. `declaration_from_pseudo_sql` and its three
+  # siblings were written before the declaration and no card named them, so they
+  # went with everything else of that lineage. The declaration replaces all four
+  # with `fn declaration_from_asked`, reached through `fn grammar_of`, and the
+  # scenario comes back when that card has code, asking about one builder
+  # reading four spellings rather than about four builders agreeing.
 
   Scenario: a fifth grammar would add one path, not three
     When the steps between a grammar and a statement are counted

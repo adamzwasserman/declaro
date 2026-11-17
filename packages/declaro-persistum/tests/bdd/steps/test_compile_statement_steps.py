@@ -17,15 +17,16 @@ one. These steps call the function and read what comes back.
 
 WHAT IS NOT SATISFIED, and is failing rather than faked:
 
-`four grammars render to one statement` needs `declaration_from_pseudo_sql`,
-`declaration_from_django`, `declaration_from_prisma` and
-`declaration_from_sqlalchemy`, and none of the four is built. The Given calls
-them so the failure names the four that are missing.
+`four grammars render to one statement` was removed on 2026-11-16 along with
+the four builders it asked about. `declaration_from_pseudo_sql` and its three
+siblings were written before the declaration and no card named them, so they
+went with everything else of that lineage. The scenario comes back when
+`fn declaration_from_asked` has code, and it will ask whether one builder reads
+four spellings rather than whether four builders agree.
 
 `none of them takes an engine or names one` asks about the steps that run
-before rendering. Those steps are `refuse_undeclared_columns`, `join_between`
-and the four grammar builders, and none of them exists yet, so there is no
-signature to read.
+before rendering. Those steps were six and are now two,
+`refuse_undeclared_columns` and `join_between`, for the same reason.
 
 `nothing but the renderer builds a statement` asks about every module in the
 package. That is a gate over `src/`, not a result this function can return.
@@ -130,43 +131,6 @@ def _a_declaration_already_rendered(scenario: dict, engine: str) -> None:
     scenario["answer"] = _rendered(scenario["declaration"], engine)
 
 
-@given("the same question written in pseudo-sql, django, prisma and sqlalchemy")
-def _the_same_question_in_four_grammars(scenario: dict) -> None:
-    """One question -- every person called bob -- in each grammar's own words.
-
-    NOT FOUR DECLARATIONS WRITTEN BY HAND. Four dicts this file typed out would
-    be identical because this file typed them identically, and the scenario
-    asks whether four DIFFERENT builders agree. So each row below is the call
-    as that grammar's own caller writes it, and the four builders turn them
-    into the declarations the renderer then compiles.
-    """
-    from declaro_persistum.declaration_from_django import declaration_from_django
-    from declaro_persistum.declaration_from_prisma import declaration_from_prisma
-    from declaro_persistum.declaration_from_pseudo_sql import declaration_from_pseudo_sql
-    from declaro_persistum.declaration_from_sqlalchemy import declaration_from_sqlalchemy
-
-    # Each grammar spells the narrowing under its own word, and all four carry
-    # the asking word under `wanted`. The question underneath is the one question.
-    asked = {
-        declaration_from_pseudo_sql: {"model": "people", "wanted": "all", "where": {"name": "bob"}},
-        declaration_from_django: {"model": "people", "wanted": "all", "filter": {"name": "bob"}},
-        declaration_from_prisma: {
-            "model": "people",
-            "wanted": "all",
-            "where": {"name": "bob"},
-        },
-        declaration_from_sqlalchemy: {
-            "model": "people",
-            "wanted": "all",
-            "filter_by": {"name": "bob"},
-        },
-    }
-    scenario["declarations"] = [builder(written) for builder, written in asked.items()]
-
-
-# --- what a scenario does ----------------------------------------------------
-
-
 @when(parsers.re(r'it is rendered for "?(?P<engine>[a-z_]+)"?$'))
 def _it_is_rendered_for(scenario: dict, engine: str) -> None:
     scenario["engine"] = engine
@@ -188,13 +152,6 @@ _A_SECOND_TIME: dict[str, tuple[str, str]] = {
 def _it_is_rendered_a_second_time(scenario: dict, how: str) -> None:
     scenario["answers"] = [
         _rendered(scenario["declaration"], engine) for engine in _A_SECOND_TIME[how]
-    ]
-
-
-@when("each is rendered for postgresql")
-def _each_is_rendered_for_postgresql(scenario: dict) -> None:
-    scenario["answers"] = [
-        _rendered(declaration, "postgresql") for declaration in scenario["declarations"]
     ]
 
 
@@ -220,20 +177,23 @@ def _the_renderers_arguments_are_read(scenario: dict) -> None:
 
 @when("every step before rendering is read")
 def _every_step_before_rendering_is_read(scenario: dict) -> None:
-    """The six steps a question goes through before the renderer sees it.
+    """Every step a question goes through before the renderer sees it.
 
-    Four builders turn one grammar's phrasing into a declaration, one refuses a
-    column no model declares, and one works out a join from a foreign key.
+    One refuses a column no model declares, and one works out a join from a
+    foreign key.
+
+    IT WAS SIX UNTIL 2026-11-16, and the four that went were
+    `declaration_from_pseudo_sql` and its three siblings, which turned one
+    grammar's phrasing into a declaration. No card named them, so they were
+    deleted with everything else of that lineage. The declaration replaces all
+    four with `fn declaration_from_asked`, which has no code yet, so this list
+    grows by one rather than by four when it is written.
     """
     import importlib
 
     scenario["before_rendering"] = {
         name: getattr(importlib.import_module(f"declaro_persistum.{name}"), name)
         for name in [
-            "declaration_from_pseudo_sql",
-            "declaration_from_django",
-            "declaration_from_prisma",
-            "declaration_from_sqlalchemy",
             "refuse_undeclared_columns",
             "join_between",
         ]
@@ -539,10 +499,15 @@ def _no_earlier_step_takes_an_engine(scenario: dict) -> None:
     named = {name: words for name, words in naming.items() if words != []}
     assert named == {}, f"a step before rendering names an engine: {named}"
 
-    # And the answer each one gives is engine-free too: four grammars asked the
-    # same question compile to one statement, which they could not do if any of
-    # them had already spelled something an engine's way.
-    assert len(scenario["before_rendering"]) == 6, sorted(scenario["before_rendering"])
+    # THE COUNT IS ASSERTED SO THAT READING NOTHING FAILS. A step that found no
+    # module and a step that found no engine-naming module report the same thing
+    # otherwise.
+    #
+    # IT WAS SIX UNTIL 2026-11-16 and is two, because the four grammar builders
+    # were deleted that day: no card named them, and the declaration replaces all
+    # four with `fn declaration_from_asked`, which has no code yet. When that card
+    # is written this becomes three, not six.
+    assert len(scenario["before_rendering"]) == 2, sorted(scenario["before_rendering"])
 
 
 @then("what came back is a statement and its parameters")
@@ -578,29 +543,6 @@ def _the_declaration_is_the_only_thing_askable(scenario: dict) -> None:
         assert set(again) == {"text", "parameters"}, (
             f"the declaration could not be rendered a second time, for {engine}: {again}"
         )
-
-
-@then("the four statements are identical")
-def _the_four_statements_are_identical(scenario: dict) -> None:
-    texts = {answer["text"] for answer in scenario["answers"]}
-    assert len(texts) == 1, f"four spellings of one question gave {len(texts)} statements: {texts}"
-
-    # FOUR EMPTY ANSWERS ARE ALSO IDENTICAL. Each grammar spells the narrowing
-    # under its own word, so a builder that threw its word away would agree
-    # with the other three about nothing at all. The statement has to carry the
-    # narrowing before agreeing about it means anything.
-    (text,) = texts
-    assert "WHERE" in text, f"the narrowing reached none of the four: {text}"
-
-
-@then("the four parameter sets are equal")
-def _the_four_parameter_sets_are_equal(scenario: dict) -> None:
-    first, *rest = [answer["parameters"] for answer in scenario["answers"]]
-    differing = [parameters for parameters in rest if parameters != first]
-    assert differing == [], f"the four grammars bound different values: {first}, {differing}"
-    assert list(first.values()) == ["bob"], (
-        f"four equal-but-empty parameter sets agree about nothing: {first}"
-    )
 
 
 @then("a grammar reaches the engine through the declaration")

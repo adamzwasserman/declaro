@@ -112,7 +112,7 @@ The vocabulary is small and every word means one thing. Each grammar spells thes
 | the first, in a stated order | `first` |
 | a page of them | `page(size, number)`, or `limit` and `offset` |
 | them in an order | `ordered_by({"name": "ascending"})` |
-| only some columns | `values("id", "name")` |
+| only some columns | `select("id", "name")` |
 | no duplicates | `distinct` |
 | whether any exist at all | `exists`, which answers true or false and reads no rows |
 | the rows as your own model | `as_objects` |

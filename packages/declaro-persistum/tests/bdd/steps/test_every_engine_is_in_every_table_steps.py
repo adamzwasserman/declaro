@@ -25,7 +25,6 @@ from tests.unit.test_every_engine_is_in_every_table import (
     ENGINES,
     NAMES_OF_THE_TABLES,
     WHAT_EACH_TABLE_IS_KEYED_BY,
-    WHERE_A_LOOKUP_TAKES_A_FALLBACK,
     _every_lookup_with_a_fallback,
     _the_tables_in,
 )
@@ -135,10 +134,16 @@ def _the_fallback_is_named(scenario: dict) -> None:
     assert [named for _line, named in scenario["falling_back"]] == ["WHAT_EACH_ONE_DOES"], (
         f"a table read with `.get(key, 0)` was read as {scenario['falling_back']}"
     )
-    assert WHERE_A_LOOKUP_TAKES_A_FALLBACK, (
-        "the gate found no two-argument lookup anywhere in the package, and there "
-        "are several, so it is reading nothing"
-    )
+    # THE PLANTED MODULE IS NOW THE ONLY POSITIVE CONTROL, AND IT IS ENOUGH. The
+    # line above hands the scanner a module written to contain one fallback and
+    # asserts it reads exactly that one, so a scanner that reads nothing fails
+    # here. A second assertion used to demand that the live package contain a
+    # fallback too, on the ground that several did and so an empty answer meant a
+    # broken scan. On 2026-11-16 the last six were removed, in engine_of,
+    # lifecycle_register, how_to_spell, how_to_compare and schema_read_declared,
+    # and that assertion then failed for the one reason it was never meant to
+    # catch: the package is clean. A liveness check whose premise is a defect
+    # cannot survive the defect being fixed, so the plant carries it instead.
 
 
 @then("it finds them by shape rather than from a list somebody maintains")

@@ -45,10 +45,7 @@ from declaro_persistum.answer_from_rows import answer_from_rows
 from declaro_persistum.compile_statement import compile_statement
 from declaro_persistum.crew_deposit import crew_deposit
 from declaro_persistum.crew_release_ticket import crew_release_ticket
-from declaro_persistum.declaration_from_django import declaration_from_django
-from declaro_persistum.declaration_from_prisma import declaration_from_prisma
-from declaro_persistum.declaration_from_pseudo_sql import declaration_from_pseudo_sql
-from declaro_persistum.declaration_from_sqlalchemy import declaration_from_sqlalchemy
+from declaro_persistum.declaration_from_asked import declaration_from_asked
 from declaro_persistum.how_to_write import how_to_write
 from declaro_persistum.log_write import log_write
 from declaro_persistum.query_run_statement import query_run_statement
@@ -56,17 +53,21 @@ from declaro_persistum.query_run_together import query_run_together
 from declaro_persistum.refuse_some_columns_as_an_object import refuse_some_columns_as_an_object
 from declaro_persistum.refuse_undeclared_columns import refuse_undeclared_columns
 from declaro_persistum.travels_together import travels_together
-from declaro_persistum.types import Answering, Asked, Declaration, Fault, Writing
+from declaro_persistum.types import Answering, Asked, Declaration, Fault, Grammar, Writing
 
-# WHICH BUILDER READS WHICH GRAMMAR. Four rows and no fallback: a word with no
-# row is refused by name, because a call written in a spelling nobody built for
-# is a call whose meaning nothing here knows.
-BY_GRAMMAR: dict[str, Callable[[Asked], Declaration | Fault]] = {
-    "pseudo_sql": declaration_from_pseudo_sql,
-    "django": declaration_from_django,
-    "prisma": declaration_from_prisma,
-    "sqlalchemy": declaration_from_sqlalchemy,
-}
+# WHICH SPELLINGS REACH A BUILDER. Every one of them, and all four reach the same
+# one. The four modules that used to fill this table were written before the
+# declaration and no card named them, so they were deleted on 2026-11-16; the
+# declaration replaces all four with `fn declaration_from_asked`, reached through
+# `fn grammar_of`, `fn methods_of` and `fn asked_from_written`.
+#
+# IT IS STILL A TABLE, AND STILL KEYED BY SPELLING, because a word nobody
+# declared must still be refused by name rather than read as one of the four.
+# What changed is that the rows no longer differ: there is one builder, so a
+# fifth spelling is one more row here and no new module.
+BY_GRAMMAR: dict[str, Callable[[Asked], Declaration | Fault]] = dict.fromkeys(
+    get_args(Grammar), declaration_from_asked
+)
 
 
 def _is_fault(piece: object) -> bool:
@@ -103,8 +104,16 @@ def _the_declaration(asking: Answering) -> Declaration | Fault:
     return _UNDER_THE_TABLES_NAME[_is_fault(built)](built, asking)
 
 
-def _built_by_its_grammar(grammar: str, asked: Asked) -> Declaration | Fault:
-    return BY_GRAMMAR[grammar](asked)
+def _built_by_its_grammar(_grammar: str, asked: Asked) -> Declaration | Fault:
+    """One card builds the declaration now, whichever spelling the question came in.
+
+    IT TAKES NO SPELLING, WHICH IS THE WHOLE CHANGE. Until 2026-11-16 this
+    dispatched to one of four builders by a word the caller passed in. The
+    declaration replaced all four with `fn declaration_from_asked`, which reads
+    parts already under this library's own words, because `fn asked_from_written`
+    put them there. Nothing downstream of here can tell which spelling was used.
+    """
+    return declaration_from_asked(cast("dict[str, Any]", asked))
 
 
 def _built_by_nothing(grammar: str, _asked: Asked) -> Fault:

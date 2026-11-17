@@ -10,10 +10,10 @@ Feature: methods_of -- Which method name means which part, one row per spelling
   # a "grammar" was. Over a real parse, method names are all it ever was, so this
   # says that and nothing more.
 
-  EVERY SPELLING REACHES EVERY FIELD. A caller who picked Django's spelling has
-  not picked a smaller library. Django has no method of its own for an order, a
-  grouping, a having or a page, so those four are reached by the library's own
-  word in every spelling, and the table carries only where a spelling differs.
+  # EVERY SPELLING REACHES EVERY FIELD. A caller who picked Django's spelling has
+  # not picked a smaller library. Django has no method of its own for an order, a
+  # grouping, a having or a page, so those four are reached by the library's own
+  # word in every spelling, and the table carries only where a spelling differs.
 
   Scenario: the library's own spelling renames nothing
     When methods_of is asked for pseudo_sql
@@ -43,7 +43,13 @@ Feature: methods_of -- Which method name means which part, one row per spelling
     Then it raises naming the word, rather than answering an empty table
     And an empty table would have read every method as the library's own
 
-  Scenario: the four tables agree on which fields exist
+  # CORRECTED 2026-11-16. This scenario said "only fields a declaration has", and
+  # a table's keys are not declaration fields. They are this library's own method
+  # names, which is the only reading under which pseudo_sql and prisma hold no
+  # row, as the two scenarios above require. A declaration calls the narrowing
+  # `condition` and the columns `columns`; this library's methods for them are
+  # `where` and `select`, and Django's are `filter` and `values`.
+  Scenario: the four tables agree on which methods exist
     When every table is read together
-    Then each one names only fields a declaration has
-    And a field named in one is a field in all
+    Then each one renames only a method this library has
+    And a method renamed by one is renamed by all that rename anything

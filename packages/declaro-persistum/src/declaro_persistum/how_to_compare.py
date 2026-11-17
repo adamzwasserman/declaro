@@ -61,15 +61,24 @@ _WHAT_THIS_ENGINE_SAYS_INSTEAD: dict[Engine, dict[Operator, str]] = {
 }
 
 
+# WHETHER THIS ENGINE SAYS THIS COMPARISON ITS OWN WAY. Two rows: the engine has
+# its own word for ignoring case, or it uses the one every engine uses. Asking
+# the engine's table for a default reads as one answer with a spare, and it is
+# two answers; it also reads the shared word on every call, including the calls
+# that had the engine's own.
+_WHETHER_THIS_ENGINE_SAYS_IT_DIFFERENTLY: dict[bool, Callable[[Operator, Engine], str]] = {
+    True: lambda operator, engine: _WHAT_THIS_ENGINE_SAYS_INSTEAD[engine][operator],
+    False: lambda operator, _engine: _THE_SAME_EVERYWHERE[operator]["ignoring_case"],
+}
+
+
 def _the_row(operator: Operator, engine: Engine) -> Comparing | Fault:
     """The shared row, with this engine's own word where it has one."""
     return {
         **_THE_SAME_EVERYWHERE[operator],
-        **{
-            "ignoring_case": _WHAT_THIS_ENGINE_SAYS_INSTEAD[engine].get(
-                operator, _THE_SAME_EVERYWHERE[operator]["ignoring_case"]
-            )
-        },
+        "ignoring_case": _WHETHER_THIS_ENGINE_SAYS_IT_DIFFERENTLY[
+            operator in _WHAT_THIS_ENGINE_SAYS_INSTEAD[engine]
+        ](operator, engine),
     }
 
 

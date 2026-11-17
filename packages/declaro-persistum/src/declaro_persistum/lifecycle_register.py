@@ -43,6 +43,7 @@ this function never reads that field.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import cast
 
 from declaro_persistum.types import NOTHING, Database, Fault, Shutdown
 
@@ -90,7 +91,21 @@ def _no_word_for_that(asked_for: object) -> Callable[[Database], Fault]:
     return refuse
 
 
+# WHETHER THERE IS A WORD FOR WHAT THIS HANDLE ASKED. `Shutdown` names two words
+# and `WHAT_TO_DO_WITH_IT` answers both, so this row is never taken by a handle
+# this package built. It is taken by one that arrived carrying something else,
+# which is a caller reaching past the door, and that earns a refusal rather than
+# a default. Asking the table for one would also write the refusal on every
+# register, including every one that worked.
+_WHETHER_THERE_IS_A_WORD_FOR_IT: dict[
+    bool, Callable[[object], Callable[[Database], None | Fault]]
+] = {
+    True: lambda asked_for: WHAT_TO_DO_WITH_IT[cast("Shutdown", asked_for)],
+    False: _no_word_for_that,
+}
+
+
 def lifecycle_register(db: Database) -> None | Fault:
     """Put this database on the shutdown list, or leave it off, as it asked."""
     asked_for = db["shutdown"]
-    return WHAT_TO_DO_WITH_IT.get(asked_for, _no_word_for_that(asked_for))(db)
+    return _WHETHER_THERE_IS_A_WORD_FOR_IT[asked_for in WHAT_TO_DO_WITH_IT](asked_for)(db)
